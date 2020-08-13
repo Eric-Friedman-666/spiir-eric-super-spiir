@@ -471,7 +471,7 @@ class FinalSink(object):
         else:
             self.gracedb_offline_annote = False
         if GraceDb:
-            self.gracedb_client = GraceDb(gracedb_service_url)
+            self.gracedb_client = GraceDb(gracedb_service_url, reload_certificate=True)
 
         # keep a record of segments and is snapshotted
         # our segments is determined by if incoming buf is GAP
