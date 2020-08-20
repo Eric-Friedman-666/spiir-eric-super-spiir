@@ -667,16 +667,20 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
         data        = gst_pad_get_element_private(pad);
         set_offset_per_nanosecond(data, postcoh->offset_per_nanosecond);
         set_channels(data, postcoh->channels);
-        // FIXME: need to consider non-standard ifo indexing, like HV, need
-        // testing
+        // [THA]: Non-standard IFO indexing (e.g. VH) works because `get_icombo`
+        // doesn't care about the ordering of IFOs
         strncpy(state->all_ifos + IFO_LEN * i, data->ifo_name,
                 sizeof(char) * IFO_LEN);
     }
     state->all_ifos[IFO_LEN * nifo] = '\0';
-    state->ifo_combo_idx            = get_icombo(state->all_ifos);
+    // [THA]: This is the only place that ifo_combo_idx is used. Perhaps remove
+    // it later to save space?
+    state->ifo_combo_idx = get_icombo(state->all_ifos);
+    // [THA]: sizeof() only works for arrays that we've statically created, so
+    // we use strlen() to get the length of the combination name
     /* overwrite all_ifos to be the same with the combo in the IFOComboMap */
     strncpy(state->all_ifos, IFOComboMap[state->ifo_combo_idx].name,
-            sizeof(IFOComboMap[state->ifo_combo_idx].name));
+            strlen(IFOComboMap[state->ifo_combo_idx].name));
     state->all_ifos[IFO_LEN * nifo] = '\0';
 
     /* initialize input_ifo_mapping, snglsnr matrix, and peak_list */

@@ -223,6 +223,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     int isingle, nifo;
     for (; intable < intable_end; intable++) {
         icombo = get_icombo(intable->ifos);
+        // The combination of IFOs is invalid
         if (icombo < 0) {
             LIGOTimeGPS ligo_time;
             XLALINT8NSToGPS(&ligo_time, GST_BUFFER_TIMESTAMP(inbuf));
@@ -245,7 +246,12 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
             outtable++;
         } else {
             /* increment livetime if participating nifo >= 2 */
-            if (icombo > 2) {
+            // If icombo is a power of two, then there is only one participating
+            // IFO, thus we can use the property of `(x & (x-1)) != 0` to
+            // determine if we have more than one IFO participating
+            //
+            // Note that this is inverted because icombo is sum(1 << index) - 1
+            if ((icombo + 1) & icombo) {
                 nifo = strlen(intable->ifos) / IFO_LEN;
                 /* add single detector stats */
                 get_write_ifo_mapping(IFOComboMap[icombo].name, nifo,

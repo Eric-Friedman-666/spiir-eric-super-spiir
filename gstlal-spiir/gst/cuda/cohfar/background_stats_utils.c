@@ -39,38 +39,34 @@
 #define EPSILON        1e-6
 
 int scan_trigger_ifos(int icombo, PostcohInspiralTable *trigger) {
-    int cur_ifo = 0, one_ifo_size = sizeof(char) * IFO_LEN;
+    int nifo = 0, one_ifo_size = sizeof(char) * IFO_LEN;
     char final_ifos[MAX_ALLIFO_LEN];
     gboolean pass_test = TRUE;
-    if ((icombo == 6 || icombo == 3 || icombo == 4)) { // H1L1, H1V1 or H1L1V1
-        if (trigger->snglsnr_H > EPSILON) {
-            strncpy(final_ifos + IFO_LEN * cur_ifo, "H1", one_ifo_size);
-            cur_ifo++;
-        } else
-            pass_test = FALSE;
-    }
-
-    if ((icombo == 6 || icombo == 3 || icombo == 5)) { // H1L1, L1V1 or H1L1V1
-        if (trigger->snglsnr_L > EPSILON) {
-            strncpy(final_ifos + IFO_LEN * cur_ifo, "L1", one_ifo_size);
-            cur_ifo++;
-        } else
-            pass_test = FALSE;
-    }
-
-    if ((icombo == 6 || icombo == 4 || icombo == 5)) { // H1V1, L1V1 or H1L1V1
-        if (trigger->snglsnr_V > EPSILON) {
-            strncpy(final_ifos + IFO_LEN * cur_ifo, "V1", one_ifo_size);
-            cur_ifo++;
-        } else
-            pass_test = FALSE;
+    // [THA]: Because icombo is sum(1 << index) - 1, we should add one to it
+    // so that we don't need to add one in the loop.
+    ++icombo;
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        // [THA]: We can determine if the IFO at IFOMap[i] is in the icombo by
+        // checking if that power of two exists in the combo
+        if (icombo & (1 << i)) {
+            // [THA]: This is a check that the data from this IFO is actually
+            // valid. If it's not valid, the number will be very *very* small
+            if (*(&trigger->snglsnr_H + i) > EPSILON) {
+                strncpy(final_ifos + IFO_LEN * nifo, IFOMap[i].name,
+                        one_ifo_size);
+                nifo++;
+            } else {
+                pass_test = FALSE;
+            }
+        }
     }
     if (pass_test != TRUE) {
-        strncpy(trigger->ifos, final_ifos, cur_ifo * sizeof(char) * IFO_LEN);
-        trigger->ifos[IFO_LEN * cur_ifo] = '\0';
+        strncpy(trigger->ifos, final_ifos, nifo * one_ifo_size);
+        trigger->ifos[IFO_LEN * nifo] = '\0';
         return get_icombo(trigger->ifos);
-    } else
-        return icombo;
+    } else {
+        return icombo - 1;
+    }
 }
 
 int get_icombo(char *ifos) {

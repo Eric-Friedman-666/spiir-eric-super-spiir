@@ -13,13 +13,16 @@ typedef struct _IFOType {
 } IFOType;
 
 static const IFOType IFOMap[MAX_NIFO] = {
-    { "H1", 0 },
-    { "L1", 1 },
-    { "V1", 2 },
+    { "H1", 0 }, // 1 << 0 = 1
+    { "L1", 1 }, // 1 << 1 = 2
+    { "V1", 2 }, // 1 << 2 = 4
 };
 #define MAX_IFO_COMBOS 7 // 2^3-1
+// A combination is sum(1 << index) - 1
+// This gives us some nice mathematical properties that we can use to check
+// if an IFO exists in a given ComboMap
 static const IFOType IFOComboMap[MAX_IFO_COMBOS] = {
-    { "H1", 0 },   { "L1", 1 },   { "V1", 2 },     { "H1L1", 3 },
+    { "H1", 0 },   { "L1", 1 },   { "H1L1", 2 },   { "V1", 3 },
     { "H1V1", 4 }, { "L1V1", 5 }, { "H1L1V1", 6 },
 };
 /* function given a random ifo, output the index in the IFOComboMap list,
