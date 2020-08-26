@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>
+ * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>,
+ *               2020 Tom Almeida <tom@tommoa.me>,
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -48,7 +49,7 @@ Bins2D *bins2D_create_long(double cmin_x,
                            double cmax_y,
                            int nbin_y);
 
-TriggerStats **trigger_stats_create(int ncombo);
+TriggerStats **trigger_stats_create(int icombo);
 
 int bins1D_get_idx(double val, Bins1D *bins);
 

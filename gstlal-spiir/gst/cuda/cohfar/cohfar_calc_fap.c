@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>
+ * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>,
+ *               2020 Tom Almeida <tom@tommoa.me>,
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -44,13 +45,21 @@ static void parse_opts(int argc,
     *ptype                    = g_strdup("all");
     *update_pdf               = 0;
     int option_index          = 0;
-    struct option long_opts[] = { { "input", required_argument, 0, 'i' },
-                                  { "input-format", required_argument, 0, 'f' },
-                                  { "output", required_argument, 0, 'o' },
-                                  { "ifos", required_argument, 0, 'd' },
-                                  { "type", required_argument, 0, 'u' },
-                                  { "update-pdf", no_argument, 0, 'p' },
-                                  { 0, 0, 0, 0 } };
+    struct option long_opts[] = {
+        // A comma separated list of files to use for input.
+        { "input", required_argument, 0, 'i' },
+        // The format of the input files. One of "data" or "stats".
+        { "input-format", required_argument, 0, 'f' },
+        // The name of the file to output.
+        { "output", required_argument, 0, 'o' },
+        // The IFOs to use.
+        { "ifos", required_argument, 0, 'd' },
+        // The type of stat. One of "background", "zerolag", "signal" or "all".
+        { "type", required_argument, 0, 'u' },
+        // Should we update the PDF?
+        { "update-pdf", no_argument, 0, 'p' },
+        { 0, 0, 0, 0 }
+    };
     int opt;
     while (
       (opt = getopt_long(argc, argv, "i:f:o:d:u:p:", long_opts, &option_index))
@@ -131,19 +140,18 @@ void cohfar_get_stats_from_file(gchar **in_fnames,
                                 TriggerStatsXML *stats_out,
                                 int *hist_trials) {
     gchar **ifname;
-    int icombo;
+    int ifo;
     for (ifname = in_fnames; *ifname; ifname++) {
 #ifdef __DEBUG__
         printf("%s\n", *ifname);
 #endif
         trigger_stats_xml_from_xml(stats_in, hist_trials, *ifname);
-        for (icombo = 0; icombo < stats_in->ncombo; icombo++) {
-            trigger_stats_feature_rate_add(
-              stats_out->multistats[icombo]->feature,
-              stats_in->multistats[icombo]->feature,
-              stats_out->multistats[icombo]);
+        for (ifo = 0; ifo <= __builtin_popcount(stats_in->icombo + 1); ifo++) {
+            trigger_stats_feature_rate_add(stats_out->multistats[ifo]->feature,
+                                           stats_in->multistats[ifo]->feature,
+                                           stats_out->multistats[ifo]);
             trigger_stats_livetime_add(stats_out->multistats,
-                                       stats_in->multistats, icombo);
+                                       stats_in->multistats, ifo);
         }
     }
 }
@@ -157,7 +165,7 @@ static int get_type(gchar **ptype) {
 
 static int process_stats_full(
   gchar **in_fnames, int nifo, gchar **pifos, gchar **pout, int *update_pdf) {
-    int icombo, ncombo = get_ncombo(nifo), hist_trials;
+    int ifo, hist_trials;
     TriggerStatsXML *zlstats_in =
       trigger_stats_xml_create(*pifos, STATS_XML_TYPE_ZEROLAG);
     TriggerStatsXML *zlstats_out =
@@ -180,24 +188,21 @@ static int process_stats_full(
     cohfar_get_stats_from_file(in_fnames, bgstats_in, bgstats_out,
                                &hist_trials);
     if (*update_pdf == 1) {
-        for (icombo = 0; icombo < ncombo; icombo++) {
+        for (ifo = 0; ifo < nifo; ifo++) {
             trigger_stats_feature_rate_to_pdf(
-              sgstats_out->multistats[icombo]->feature);
-            trigger_stats_feature_to_rank(
-              sgstats_out->multistats[icombo]->feature,
-              sgstats_out->multistats[icombo]->rank);
+              sgstats_out->multistats[ifo]->feature);
+            trigger_stats_feature_to_rank(sgstats_out->multistats[ifo]->feature,
+                                          sgstats_out->multistats[ifo]->rank);
 
             trigger_stats_feature_rate_to_pdf(
-              zlstats_out->multistats[icombo]->feature);
-            trigger_stats_feature_to_rank(
-              zlstats_out->multistats[icombo]->feature,
-              zlstats_out->multistats[icombo]->rank);
+              zlstats_out->multistats[ifo]->feature);
+            trigger_stats_feature_to_rank(zlstats_out->multistats[ifo]->feature,
+                                          zlstats_out->multistats[ifo]->rank);
 
             trigger_stats_feature_rate_to_pdf(
-              bgstats_out->multistats[icombo]->feature);
-            trigger_stats_feature_to_rank(
-              bgstats_out->multistats[icombo]->feature,
-              bgstats_out->multistats[icombo]->rank);
+              bgstats_out->multistats[ifo]->feature);
+            trigger_stats_feature_to_rank(bgstats_out->multistats[ifo]->feature,
+                                          bgstats_out->multistats[ifo]->rank);
         }
     }
 
@@ -234,18 +239,17 @@ static int process_stats_single(gchar **in_fnames,
                                 gchar **pout,
                                 int type,
                                 int *update_pdf) {
-    int icombo, ncombo = get_ncombo(nifo), hist_trials;
+    int ifo, hist_trials;
 
     TriggerStatsXML *stats_in  = trigger_stats_xml_create(*pifos, type);
     TriggerStatsXML *stats_out = trigger_stats_xml_create(*pifos, type);
     cohfar_get_stats_from_file(in_fnames, stats_in, stats_out, &hist_trials);
     if (*update_pdf == 1) {
-        for (icombo = 0; icombo < ncombo; icombo++) {
+        for (ifo = 0; ifo < nifo; ifo++) {
             trigger_stats_feature_rate_to_pdf(
-              stats_out->multistats[icombo]->feature);
-            trigger_stats_feature_to_rank(
-              stats_out->multistats[icombo]->feature,
-              stats_out->multistats[icombo]->rank);
+              stats_out->multistats[ifo]->feature);
+            trigger_stats_feature_to_rank(stats_out->multistats[ifo]->feature,
+                                          stats_out->multistats[ifo]->rank);
         }
     }
     xmlTextWriterPtr stats_writer = NULL;
@@ -288,24 +292,18 @@ int main(int argc, char *argv[]) {
           trigger_stats_xml_create(*pifos, STATS_XML_TYPE_BACKGROUND);
         TriggerStatsXML *bgstats_out =
           trigger_stats_xml_create(*pifos, STATS_XML_TYPE_BACKGROUND);
-        int ncombo = get_ncombo(nifo);
         // FIXME: hardcoded to only update the last stats
         trigger_stats_feature_rate_update_all(
-          data_dim1, data_dim2, bgstats_out->multistats[ncombo - 1]->feature,
-          bgstats_out->multistats[ncombo - 1]);
+          data_dim1, data_dim2, bgstats_out->multistats[nifo]->feature,
+          bgstats_out->multistats[nifo]);
         trigger_stats_feature_rate_to_pdf(
-          bgstats_out->multistats[ncombo - 1]->feature);
-        trigger_stats_feature_to_rank(
-          bgstats_out->multistats[ncombo - 1]->feature,
-          bgstats_out->multistats[ncombo - 1]->rank);
+          bgstats_out->multistats[nifo]->feature);
+        trigger_stats_feature_to_rank(bgstats_out->multistats[nifo]->feature,
+                                      bgstats_out->multistats[nifo]->rank);
         if (data_dim1) {
             free(data_dim1);
             free(data_dim2);
         }
-
-        // trigger_stats_pdf_from_data(data_dim1, data_dim2,
-        // stats_out[ncombo-1]->rate->lgsnr_bins,
-        // stats_out[ncombo-1]->rate->lgchisq_bins, stats_out[ncombo-1]->pdf);
     } else if (g_strcmp0(*pfmt, "stats") == 0) {
         if (type == STATS_XML_TYPE_ALL) {
             rc = process_stats_full(in_fnames, nifo, pifos, pout, update_pdf);

@@ -293,9 +293,9 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
                 fprintf(stderr, "icombo not found, cohfar_assignfar\n");
                 exit(0);
             }
-            cur_stats = element->bgstats_1w->multistats[element->ncombo - 1];
+            cur_stats = element->bgstats_1w->multistats[element->nifo];
             if (icombo > -1 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
-                update_trigger_fars(table, element->ncombo - 1, element);
+                update_trigger_fars(table, element->nifo, element);
             }
         }
     }
@@ -344,7 +344,7 @@ static void cohfar_assignfar_set_property(GObject *object,
     case PROP_IFOS:
         element->ifos   = g_value_dup_string(value);
         element->nifo   = strlen(element->ifos) / IFO_LEN;
-        element->ncombo = get_ncombo(element->nifo);
+        element->icombo = get_icombo(element->ifos);
         element->bgstats_1w =
           trigger_stats_xml_create(element->ifos, STATS_XML_TYPE_BACKGROUND);
         element->bgstats_1d =

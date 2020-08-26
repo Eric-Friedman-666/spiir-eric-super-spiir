@@ -54,7 +54,7 @@ typedef struct {
 
     char *ifos;
     int nifo;
-    int ncombo; // ifo combination
+    int icombo; // ifo combination
     int hist_trials;
     TriggerStatsXML *bgstats_2h;
     TriggerStatsXML *bgstats_1d;
