@@ -21,7 +21,7 @@ Produce a fits file from binary sky map file
 """
 
 import struct
-from lalinference.io import fits
+from ligo.skymap.io import fits
 import numpy as np
 import scipy as sp
 import pdb
@@ -128,12 +128,12 @@ nifo = len(instruments) / 2  # ifo e.g. H1, L1, len is 2
 
 # read cohsnr^2, and nullsnr^2 for each sky direction
 f = open(input_fname, 'rb')
-for chunk in iter(lambda: f.read(4), ''):
+for chunk in iter(lambda: f.read(4), b''):
     allread_skymap.append(struct.unpack('f', chunk)[0])
 f.close()
 
 # load cohsnrsq, and nullsnrsq
-npix = len(allread_skymap) / 2
+npix = int(len(allread_skymap) / 2)
 cohsnrsq_skymap = allread_skymap[0:npix]
 nullsnrsq_skymap = allread_skymap[npix:]
 
@@ -143,11 +143,11 @@ nullsnrsq_skymap = allread_skymap[npix:]
 xmldoc = utils.load_filename(opts.cuda_postcoh_detrsp_fname,
                              contenthandler=DefaultContentHandler,
                              verbose=opts.verbose)
-detrsp_start_time = long(
+detrsp_start_time = int(
     param_from_xmldoc(xmldoc, pipe_macro.DETRSP_XML_PARAM_NAME_GPS_START))
-gps_step = long(
+gps_step = int(
     param_from_xmldoc(xmldoc, pipe_macro.DETRSP_XML_PARAM_NAME_GPS_STEP))
-event_time = long(opts.event_time)
+event_time = int(opts.event_time)
 igps = find_closest_gps(event_time, detrsp_start_time, gps_step)
 Det_name = "Det_map_gps_%d" % igps
 Det_array = array_from_xmldoc(xmldoc, Det_name)

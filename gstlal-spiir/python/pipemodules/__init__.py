@@ -22,15 +22,33 @@ import pygtk
 
 pygtk.require("2.0")
 import gobject
+try:
+    gobject.threads_init()
+except AttributeError:
+    # according to the PyGobject documentation, threads_init isn't needed for
+    # modern versions, and after a certain point it seems to have been removed.
+    # So if we get an attribute error, presumably we are using one of those
+    # later versions and so can just eat it
+    pass
 
-gobject.threads_init()
-import pygst
+# This is somewhat unsatisfactory conditional version check. If we're running
+# under Python 3, then we won't be able to import pygst (because pygst is for
+# gstreamer-0.10, but gstreamer 0.10 does not support Python 3). Then,
+# subsequently, we won't be able to import anything below that except for the
+# very basics.
+# Thankfully, the only thing we actually need for gstlal_postcoh_skymap2fits is
+# gstlal.pipemodules.pipe_macro, so we can (for now) gate the other imports
+# behind a Python version check
+import sys
+if sys.version_info[0] == 2:
+    import pygst
+    
+    pygst.require('0.10')
+    import gst
 
-pygst.require('0.10')
-import gst
+    from gstlal import pipeio
+    from gstlal import pipeparts
 
-from gstlal import pipeio
-from gstlal import pipeparts
 from gstlal.pipemodules import pipe_macro
 #
 # SPIIR many instruments, many template banks
@@ -157,7 +175,7 @@ def mkcohfar_accumbackground(pipeline,
     if output_name is not None:
         properties["output_name"] = output_name
 
-    print "source type %d" % source_type
+    print("source type %d" % source_type)
     if "name" in properties:
         elem = gst.element_factory_make("cohfar_accumbackground",
                                         properties.pop("name"))
