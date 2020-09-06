@@ -4,84 +4,78 @@ from glue.ligolw import ilwd
 from glue.ligolw import dbtables
 from lal import LIGOTimeGPS
 from xml.sax.xmlreader import AttributesImpl
+from itertools import chain
 # so they can be inserted into a database
 dbtables.ligolwtypes.ToPyType["ilwd:char"] = unicode
 
 PostcohInspiralID = ilwd.get_ilwdchar_class(u"postcoh", u"event_id")
 
+import postcohtable
+
 
 # need to be consistent with the table defined in postcohinspiral_table.h
 class PostcohInspiralTable(table.Table):
     tableName = "postcoh"
-    validcolumns = {
-        "process_id": "ilwd:char",
-        "event_id": "ilwd:char",
-        "end_time": "int_4s",
-        "end_time_ns": "int_4s",
-        "end_time_L": "int_4s",
-        "end_time_ns_L": "int_4s",
-        "end_time_H": "int_4s",
-        "end_time_ns_H": "int_4s",
-        "end_time_V": "int_4s",
-        "end_time_ns_V": "int_4s",
-        "snglsnr_L": "real_4",
-        "snglsnr_H": "real_4",
-        "snglsnr_V": "real_4",
-        "coaphase_L": "real_4",
-        "coaphase_H": "real_4",
-        "coaphase_V": "real_4",
-        "chisq_L": "real_4",
-        "chisq_H": "real_4",
-        "chisq_V": "real_4",
-        "is_background": "int_4s",
-        "livetime": "int_4s",
-        "ifos": "lstring",
-        "pivotal_ifo": "lstring",
-        "tmplt_idx": "int_4s",
-        "bankid": "int_4s",
-        "pix_idx": "int_4s",
-        "cohsnr": "real_4",
-        "nullsnr": "real_4",
-        "cmbchisq": "real_4",
-        "spearman_pval": "real_4",
-        "fap": "real_4",
-        "far_h": "real_4",
-        "far_l": "real_4",
-        "far_v": "real_4",
-        "far_h_1w": "real_4",
-        "far_l_1w": "real_4",
-        "far_v_1w": "real_4",
-        "far_h_1d": "real_4",
-        "far_l_1d": "real_4",
-        "far_v_1d": "real_4",
-        "far_h_2h": "real_4",
-        "far_l_2h": "real_4",
-        "far_v_2h": "real_4",
-        "far": "real_4",
-        "far_2h": "real_4",
-        "far_1d": "real_4",
-        "far_1w": "real_4",
-        "skymap_fname": "lstring",
-        "template_duration": "real_8",
-        "mass1": "real_4",
-        "mass2": "real_4",
-        "mchirp": "real_4",
-        "mtotal": "real_4",
-        "spin1x": "real_4",
-        "spin1y": "real_4",
-        "spin1z": "real_4",
-        "spin2x": "real_4",
-        "spin2y": "real_4",
-        "spin2z": "real_4",
-        "eta": "real_4",
-        "f_final": "real_4",
-        "ra": "real_8",
-        "dec": "real_8",
-        "deff_L": "real_8",
-        "deff_H": "real_8",
-        "deff_V": "real_8",
-        "rank": "real_8"
-    }
+    validcolumns = dict(
+        chain(
+            [
+                ("process_id", "ilwd:char"),
+                ("event_id", "ilwd:char"),
+                ("end_time", "int_4s"),
+                ("end_time_ns", "int_4s"),
+                ("is_background", "int_4s"),
+                ("livetime", "int_4s"),
+                ("ifos", "lstring"),
+                ("pivotal_ifo", "lstring"),
+                ("tmplt_idx", "int_4s"),
+                ("bankid", "int_4s"),
+                ("pix_idx", "int_4s"),
+                ("cohsnr", "real_4"),
+                ("nullsnr", "real_4"),
+                ("cmbchisq", "real_4"),
+                ("spearman_pval", "real_4"),
+                ("fap", "real_4"),
+                ("far", "real_4"),
+                ("far_2h", "real_4"),
+                ("far_1d", "real_4"),
+                ("far_1w", "real_4"),
+                ("skymap_fname", "lstring"),
+                ("template_duration", "real_8"),
+                ("mass1", "real_4"),
+                ("mass2", "real_4"),
+                ("mchirp", "real_4"),
+                ("mtotal", "real_4"),
+                ("spin1x", "real_4"),
+                ("spin1y", "real_4"),
+                ("spin1z", "real_4"),
+                ("spin2x", "real_4"),
+                ("spin2y", "real_4"),
+                ("spin2z", "real_4"),
+                ("eta", "real_4"),
+                ("f_final", "real_4"),
+                ("ra", "real_8"),
+                ("dec", "real_8"),
+                ("rank", "real_8"),
+            ],
+            list(("deff_" + name, "real_8") for name in postcohtable.ifo_map),
+            list(("far_sngl_" + name, "real_4")
+                 for name in postcohtable.ifo_map),
+            list(("far_2h_sngl_" + name, "real_4")
+                 for name in postcohtable.ifo_map),
+            list(("far_1d_sngl_" + name, "real_4")
+                 for name in postcohtable.ifo_map),
+            list(("far_1w_sngl_" + name, "real_4")
+                 for name in postcohtable.ifo_map),
+            list(("snglsnr_" + name, "real_4")
+                 for name in postcohtable.ifo_map),
+            list(("coaphase_" + name, "real_4")
+                 for name in postcohtable.ifo_map),
+            list(("chisq_" + name, "real_4") for name in postcohtable.ifo_map),
+            list(("end_time_sngl_" + name, "int_4s")
+                 for name in postcohtable.ifo_map),
+            list(("end_time_ns_sngl_" + name, "int_4s")
+                 for name in postcohtable.ifo_map),
+        ))
     constraints = "PRIMARY KEY (event_id)"
     next_id = PostcohInspiralID(0)
 

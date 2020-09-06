@@ -52,7 +52,7 @@ int scan_trigger_ifos(int icombo, PostcohInspiralTable *trigger) {
         if (icombo & (1 << i)) {
             // [THA]: This is a check that the data from this IFO is actually
             // valid. If it's not valid, the number will be very *very* small
-            if (*(&trigger->snglsnr_H + i) > EPSILON) {
+            if (trigger->snglsnr[i] > EPSILON) {
                 strncpy(final_ifos + IFO_LEN * nifo, IFOMap[i].name,
                         one_ifo_size);
                 nifo++;

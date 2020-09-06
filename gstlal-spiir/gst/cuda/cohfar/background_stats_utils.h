@@ -32,6 +32,7 @@
 #include <LIGOLwHeader.h>
 #include <cohfar/background_stats.h>
 #include <glib.h>
+#include <postcohtable.h>
 
 Bins1D *bins1D_create_long(double cmin, double cmax, int nbin);
 
@@ -53,10 +54,20 @@ TriggerStats **trigger_stats_create(int icombo);
 
 int bins1D_get_idx(double val, Bins1D *bins);
 
-void trigger_stats_feature_rates_update(double snr,
-                                        double chisq,
-                                        FeatureStats *feature,
-                                        TriggerStats *cur_stats);
+void trigger_stats_feature_rate_update(double snr,
+                                       double chisq,
+                                       FeatureStats *feature,
+                                       TriggerStats *cur_stats);
+
+double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
+
+int scan_trigger_ifos(int icombo, PostcohInspiralTable *trigger);
+
+void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
+
+void trigger_stats_xml_reset(TriggerStatsXML *stats);
+
+void signal_stats_init(TriggerStatsXML *sgstats, int source_type);
 
 void trigger_stats_feature_rates_add(FeatureStats *feature1,
                                      FeatureStats *feature2,

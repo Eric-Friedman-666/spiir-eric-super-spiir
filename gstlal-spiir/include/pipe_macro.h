@@ -6,17 +6,20 @@
 #define MAX_IFO_LEN 4
 #endif
 
-#define MAX_NIFO 3
 typedef struct _IFOType {
     const char *name;
     int index;
 } IFOType;
 
-static const IFOType IFOMap[MAX_NIFO] = {
-    { "H1", 0 }, // 1 << 0 = 1
-    { "L1", 1 }, // 1 << 1 = 2
-    { "V1", 2 }, // 1 << 2 = 4
-};
+#define MAX_NIFO 3
+#ifdef __cplusplus
+constexpr
+#endif
+  static const IFOType IFOMap[MAX_NIFO] = {
+      { "H1", 0 }, // 1 << 0 = 1
+      { "L1", 1 }, // 1 << 1 = 2
+      { "V1", 2 }, // 1 << 2 = 4
+  };
 #define MAX_IFO_COMBOS 7 // 2^3-1
 // A combination is sum(1 << index) - 1
 // This gives us some nice mathematical properties that we can use to check
@@ -79,7 +82,6 @@ int get_icombo(char *ifos);
 #define STATS_XML_WRITE_END   3
 #define STATS_XML_WRITE_FULL  4
 
-#define MAX(a, b)        (a > b ? a : b)
 #define PNOISE_MIN_LIMIT -30
 #define PSIG_MIN_LIMIT   -30
 #define LR_MIN_LIMIT     -30

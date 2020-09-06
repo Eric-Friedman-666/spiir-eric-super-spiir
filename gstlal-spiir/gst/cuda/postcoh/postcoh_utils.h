@@ -15,6 +15,8 @@ void cuda_device_print(int deviceCount);
 
 PeakList *create_peak_list(PostcohState *state, cudaStream_t stream);
 
+void get_write_ifo_mapping(char *ifo_combo, int nifo, int *write_ifo_mapping);
+
 void cuda_postcoh_map_from_xml(char *fname,
                                PostcohState *state,
                                cudaStream_t stream);

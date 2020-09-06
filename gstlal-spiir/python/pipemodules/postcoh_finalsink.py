@@ -471,7 +471,8 @@ class FinalSink(object):
         else:
             self.gracedb_offline_annote = False
         if GraceDb:
-            self.gracedb_client = GraceDb(gracedb_service_url, reload_certificate=True)
+            self.gracedb_client = GraceDb(gracedb_service_url,
+                                          reload_certificate=True)
 
         # keep a record of segments and is snapshotted
         # our segments is determined by if incoming buf is GAP
@@ -557,29 +558,20 @@ class FinalSink(object):
         # single far veto for high-significance trigger
         # add an upper limit for the chisq for uploaded event compared to the last line, hardcoded to have uploaded event with chisq < 3
         ifo_active = [
-            self.candidate.chisq_H != 0 and self.candidate.chisq_H < 3,
-            self.candidate.chisq_L != 0 and self.candidate.chisq_L < 3,
-            self.candidate.chisq_V != 0 and self.candidate.chisq_V < 3
+            chisq != 0 and chisq < 3 for chisq in self.candidate.chisq
         ]
         ifo_fars_ok = [
-            self.candidate.far_h < self.singlefar_veto_thresh
-            and self.candidate.far_h > 0.,
-            self.candidate.far_l < self.singlefar_veto_thresh
-            and self.candidate.far_l > 0.,
-            self.candidate.far_v < self.singlefar_veto_thresh
-            and self.candidate.far_v > 0.
-        ]
-        ifo_chisqs = [
-            self.candidate.chisq_H, self.candidate.chisq_L,
-            self.candidate.chisq_V
+            far < self.singlefar_veto_thresh and far > 0.
+            for far in self.candidate.far_sngl
         ]
         if self.candidate.far < self.superevent_thresh:
             return sum([
                 i for (i, v) in zip(ifo_fars_ok, ifo_active) if v
             ]) >= 2 and all(
                 (lambda x:
-                 [i1 / i2 < self.chisq_ratio_thresh for i1 in x for i2 in x])(
-                     [i for (i, v) in zip(ifo_chisqs, ifo_active) if v]))
+                 [i1 / i2 < self.chisq_ratio_thresh for i1 in x for i2 in x])([
+                     i for (i, v) in zip(self.candidate.chisq, ifo_active) if v
+                 ]))
 
     # TODO: Refactor/rewrite appsink_new_buffer() and cluster()
     def appsink_new_buffer(self, elem):
@@ -736,12 +728,11 @@ class FinalSink(object):
     def __set_far(self, candidate):
         candidate.far = (max(candidate.far_2h, candidate.far_1d,
                              candidate.far_1w)) * self.far_factor
-        candidate.far_h = (max(candidate.far_h_2h, candidate.far_h_1d,
-                               candidate.far_h_1w)) * self.far_factor
-        candidate.far_l = (max(candidate.far_l_2h, candidate.far_l_1d,
-                               candidate.far_l_1w)) * self.far_factor
-        candidate.far_v = (max(candidate.far_v_2h, candidate.far_v_1d,
-                               candidate.far_v_1w)) * self.far_factor
+        candidate.far_sngl = [
+            (max(fars) * self.far_factor)
+            for fars in zip(candidate.far_2h_sngl, candidate.far_1d_sngl,
+                            candidate.far_1w_sngl)
+        ]
 
     # def __lookback_far(self, candidate):
     # FIXME: hard-code to check event that's < 5e-7

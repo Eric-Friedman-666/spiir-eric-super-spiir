@@ -24,6 +24,7 @@
  * ============================================================================
  */
 
+#include <string.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
 #define PY_SSIZE_T_CLEAN
@@ -31,6 +32,7 @@
 #include <lal/TimeSeries.h>
 #include <lal/Units.h>
 #include <numpy/ndarrayobject.h>
+#include <pipe_macro.h>
 #include <postcohtable.h>
 #include <structmember.h>
 
@@ -49,6 +51,15 @@
 typedef struct {
     PyObject_HEAD PostcohInspiralTable row;
     COMPLEX8TimeSeries *snr;
+    PyObject *end_time_sngl;
+    PyObject *snglsnr;
+    PyObject *coaphase;
+    PyObject *chisq;
+    PyObject *far_sngl;
+    PyObject *far_1w_sngl;
+    PyObject *far_1d_sngl;
+    PyObject *far_2h_sngl;
+    PyObject *deff;
 } gstlal_GSTLALPostcohInspiral;
 
 // static PyObject *row_event_id_type = NULL;
@@ -58,49 +69,14 @@ typedef struct {
  * Member access
  */
 
-static struct PyMemberDef members[] = {
+static PyMemberDef members[] = {
+    // Not dependent on the number of detectors
     { "end_time", T_INT,
       offsetof(gstlal_GSTLALPostcohInspiral, row.end_time.gpsSeconds), 0,
       "end_time" },
     { "end_time_ns", T_INT,
       offsetof(gstlal_GSTLALPostcohInspiral, row.end_time.gpsNanoSeconds), 0,
       "end_time_ns" },
-    { "end_time_L", T_INT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_L.gpsSeconds), 0,
-      "end_time_L" },
-    { "end_time_ns_L", T_INT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_L.gpsNanoSeconds), 0,
-      "end_time_ns_L" },
-    { "end_time_H", T_INT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_H.gpsSeconds), 0,
-      "end_time_H" },
-    { "end_time_ns_H", T_INT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_H.gpsNanoSeconds), 0,
-      "end_time_ns_H" },
-    { "end_time_V", T_INT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_V.gpsSeconds), 0,
-      "end_time_V" },
-    { "end_time_ns_V", T_INT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_V.gpsNanoSeconds), 0,
-      "end_time_ns_V" },
-    { "snglsnr_L", T_FLOAT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr_L), 0, "snglsnr_L" },
-    { "snglsnr_H", T_FLOAT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr_H), 0, "snglsnr_H" },
-    { "snglsnr_V", T_FLOAT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr_V), 0, "snglsnr_V" },
-    { "coaphase_L", T_FLOAT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase_L), 0, "coaphase_L" },
-    { "coaphase_H", T_FLOAT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase_H), 0, "coaphase_H" },
-    { "coaphase_V", T_FLOAT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase_V), 0, "coaphase_V" },
-    { "chisq_L", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.chisq_L),
-      0, "chisq_L" },
-    { "chisq_H", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.chisq_H),
-      0, "chisq_H" },
-    { "chisq_V", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.chisq_V),
-      0, "chisq_V" },
     { "is_background", T_INT,
       offsetof(gstlal_GSTLALPostcohInspiral, row.is_background), 0,
       "is_background" },
@@ -131,30 +107,6 @@ static struct PyMemberDef members[] = {
       "far_1w" },
     { "far", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far), 0,
       "far" },
-    { "far_h", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_h), 0,
-      "far_h" },
-    { "far_l", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_l), 0,
-      "far_l" },
-    { "far_v", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_v), 0,
-      "far_v" },
-    { "far_h_1w", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_h_1w),
-      0, "far_h_1w" },
-    { "far_l_1w", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_l_1w),
-      0, "far_l_1w" },
-    { "far_v_1w", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_v_1w),
-      0, "far_v_1w" },
-    { "far_h_1d", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_h_1d),
-      0, "far_h_1d" },
-    { "far_l_1d", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_l_1d),
-      0, "far_l_1d" },
-    { "far_v_1d", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_v_1d),
-      0, "far_v_1d" },
-    { "far_h_2h", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_h_2h),
-      0, "far_h_2h" },
-    { "far_l_2h", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_l_2h),
-      0, "far_l_2h" },
-    { "far_v_2h", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.far_v_2h),
-      0, "far_v_2h" },
     { "rank", T_DOUBLE, offsetof(gstlal_GSTLALPostcohInspiral, row.rank), 0,
       "rank" },
     { "template_duration", T_DOUBLE,
@@ -185,12 +137,6 @@ static struct PyMemberDef members[] = {
     { "ra", T_DOUBLE, offsetof(gstlal_GSTLALPostcohInspiral, row.ra), 0, "ra" },
     { "dec", T_DOUBLE, offsetof(gstlal_GSTLALPostcohInspiral, row.dec), 0,
       "dec" },
-    { "deff_L", T_DOUBLE, offsetof(gstlal_GSTLALPostcohInspiral, row.deff_L), 0,
-      "deff_L" },
-    { "deff_H", T_DOUBLE, offsetof(gstlal_GSTLALPostcohInspiral, row.deff_H), 0,
-      "deff_H" },
-    { "deff_V", T_DOUBLE, offsetof(gstlal_GSTLALPostcohInspiral, row.deff_V), 0,
-      "deff_V" },
     { "f_final", T_FLOAT, offsetof(gstlal_GSTLALPostcohInspiral, row.f_final),
       0, "f_final" },
     { "_process_id", T_LONG,
@@ -198,9 +144,28 @@ static struct PyMemberDef members[] = {
       "process_id (long)" },
     { "_event_id", T_LONG, offsetof(gstlal_GSTLALPostcohInspiral, row.event_id),
       0, "event_id (long)" },
-    {
-      NULL,
-    }
+
+    // Things that are done single detector are ndarrays
+    { "end_time_sngl", T_OBJECT_EX,
+      offsetof(gstlal_GSTLALPostcohInspiral, end_time_sngl), 0,
+      "end_time_sngl" },
+    { "snglsnr", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, snglsnr),
+      0, "snglsnr" },
+    { "coaphase", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, coaphase),
+      0, "coaphase" },
+    { "chisq", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, chisq), 0,
+      "chisq" },
+    { "far_sngl", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, far_sngl),
+      0, "far_sngl" },
+    { "far_1w_sngl", T_OBJECT_EX,
+      offsetof(gstlal_GSTLALPostcohInspiral, far_1w_sngl), 0, "far_1w_sngl" },
+    { "far_1d_sngl", T_OBJECT_EX,
+      offsetof(gstlal_GSTLALPostcohInspiral, far_1d_sngl), 0, "far_1d_sngl" },
+    { "far_2h_sngl", T_OBJECT_EX,
+      offsetof(gstlal_GSTLALPostcohInspiral, far_2h_sngl), 0, "far_2h_sngl" },
+    { "deff", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, deff), 0,
+      "deff" },
+    { NULL },
 };
 
 struct pylal_inline_string_description {
@@ -210,7 +175,7 @@ struct pylal_inline_string_description {
 
 static PyObject *pylal_inline_string_get(PyObject *obj, void *data) {
     const struct pylal_inline_string_description *desc = data;
-    char *s = (void *)obj + desc->offset;
+    char *s = (char *)obj + desc->offset;
 
     if ((ssize_t)strlen(s) >= desc->length) {
         /* something's wrong, obj probably isn't a valid address */
@@ -222,7 +187,7 @@ static PyObject *pylal_inline_string_get(PyObject *obj, void *data) {
 static int pylal_inline_string_set(PyObject *obj, PyObject *val, void *data) {
     const struct pylal_inline_string_description *desc = data;
     char *v                                            = PyString_AsString(val);
-    char *s = (void *)obj + desc->offset;
+    char *s = (char *)obj + desc->offset;
 
     if (!v) return -1;
     if ((ssize_t)strlen(v) >= desc->length) {
@@ -238,7 +203,7 @@ static int pylal_inline_string_set(PyObject *obj, PyObject *val, void *data) {
 
 static PyObject *snr_component_get(PyObject *obj, void *data) {
     COMPLEX8TimeSeries *snr = ((gstlal_GSTLALPostcohInspiral *)obj)->snr;
-    const char *name        = data;
+    const char *name        = (const char *)data;
 
     if (!snr) {
         PyErr_SetString(PyExc_ValueError, "no snr time series available");
@@ -274,7 +239,8 @@ static PyObject *snr_component_get(PyObject *obj, void *data) {
     return NULL;
 }
 
-static struct PyGetSetDef getset[] = {
+#define SINGLE 11
+static struct PyGetSetDef getset[SINGLE + 10 * MAX_NIFO + 1] = {
     { "ifos", pylal_inline_string_get, pylal_inline_string_set, "ifos",
       &(struct pylal_inline_string_description) {
         offsetof(gstlal_GSTLALPostcohInspiral, row.ifos), MAX_ALLIFO_LEN } },
@@ -301,10 +267,214 @@ static struct PyGetSetDef getset[] = {
       "_snr_data_length" },
     { "_snr_data", snr_component_get, NULL, ".snr.data", "_snr_data" },
 
-    {
-      NULL,
-    }
+    { NULL }
 };
+
+struct lal_array {
+    Py_ssize_t offset;
+    Py_ssize_t index;
+};
+
+static PyObject *pylal_double_array_get(PyObject *obj, void *data) {
+    const struct lal_array *desc = data;
+    double *d = (double *)((char *)obj + desc->offset) + desc->index;
+    if (!d) {
+        PyErr_Format(PyExc_ValueError, "float doesn't exist!");
+        return NULL;
+    }
+    return PyFloat_FromDouble(*d);
+}
+
+static int pylal_double_array_set(PyObject *obj, PyObject *val, void *data) {
+    const struct lal_array *desc = data;
+    double v                     = PyFloat_AsDouble(val);
+    double *d = (double *)((char *)obj + desc->offset) + desc->index;
+    if (!d) {
+        PyErr_Format(PyExc_ValueError, "float doesn't exist!");
+        return -1;
+    }
+    *d = v;
+    return 0;
+}
+
+static PyObject *pylal_float_array_get(PyObject *obj, void *data) {
+    const struct lal_array *desc = data;
+    float *f = (float *)((char *)obj + desc->offset) + desc->index;
+    if (!f) {
+        PyErr_Format(PyExc_ValueError, "float doesn't exist!");
+        return NULL;
+    }
+    return PyFloat_FromDouble((double)*f);
+}
+
+static int pylal_float_array_set(PyObject *obj, PyObject *val, void *data) {
+    const struct lal_array *desc = data;
+    double v                     = PyFloat_AsDouble(val);
+    float *f = (float *)((char *)obj + desc->offset) + desc->index;
+    if (!f) {
+        PyErr_Format(PyExc_ValueError, "float doesn't exist!");
+        return -1;
+    }
+    *f = (float)v;
+    return 0;
+}
+
+static PyObject *pylal_int_array_get(PyObject *obj, void *data) {
+    const struct lal_array *desc = data;
+    int *i = (int *)((char *)obj + desc->offset) + desc->index;
+    if (!i) {
+        PyErr_Format(PyExc_ValueError, "int doesn't exist!");
+        return NULL;
+    }
+    return PyInt_FromLong((long)*i);
+}
+
+static int pylal_int_array_set(PyObject *obj, PyObject *val, void *data) {
+    const struct lal_array *desc = data;
+    int v                        = (int)PyInt_AsLong(val);
+    int *i = (int *)((char *)obj + desc->offset) + desc->index;
+    if (!i) {
+        PyErr_Format(PyExc_ValueError, "float doesn't exist!");
+        return -1;
+    }
+    *i = (int)v;
+    return 0;
+}
+
+void prepare_getset() {
+    int offset = SINGLE;
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        char *var  = "chisq_";
+        char *name = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        struct lal_array *data =
+          (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.chisq);
+        data->index  = i;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        PyGetSetDef def  = { name, pylal_float_array_get, pylal_float_array_set,
+                            name, data };
+        getset[offset++] = def;
+
+        var          = "snglsnr_";
+        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data         = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr);
+        data->index  = i;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+
+        var          = "coaphase_";
+        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data         = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase);
+        data->index  = i;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+
+        var          = "far_sngl_";
+        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data         = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_sngl);
+        data->index  = i;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+
+        var          = "far_1d_sngl_";
+        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data         = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1d_sngl);
+        data->index  = i;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+
+        var          = "far_1w_sngl_";
+        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data         = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1w_sngl);
+        data->index  = i;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+
+        var          = "far_2h_sngl_";
+        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data         = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_2h_sngl);
+        data->index  = i;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+
+        var          = "deff_";
+        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data         = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.deff);
+        data->index  = i;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.get          = pylal_double_array_get;
+        def.set          = pylal_double_array_set;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+
+        var  = "end_time_sngl_";
+        name = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset =
+          offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl);
+        data->index = i * 2;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.get          = pylal_int_array_get;
+        def.set          = pylal_int_array_set;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+
+        var  = "end_time_ns_sngl_";
+        name = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        data = (struct lal_array *)malloc(sizeof(struct lal_array));
+        data->offset =
+          offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl);
+        data->index = i * 2 + 1;
+        strcpy(name, var);
+        strcat(name, IFOMap[i].name);
+        def.name         = name;
+        def.get          = pylal_int_array_get;
+        def.set          = pylal_int_array_set;
+        def.doc          = name;
+        def.closure      = data;
+        getset[offset++] = def;
+    }
+    PyGetSetDef def = { NULL };
+    getset[offset]  = def;
+}
 
 // static Py_ssize_t getreadbuffer(PyObject *self, Py_ssize_t segment, void
 // **ptrptr)
@@ -339,10 +509,10 @@ static struct PyGetSetDef getset[] = {
  */
 
 static PyObject *__new__(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    gstlal_GSTLALPostcohInspiral *new =
+    gstlal_GSTLALPostcohInspiral *ret =
       (gstlal_GSTLALPostcohInspiral *)PyType_GenericNew(type, args, kwds);
 
-    if (!new) return NULL;
+    if (!ret) return NULL;
 
     /* link the event_id pointer in the row table structure
      * to the event_id structure */
@@ -352,13 +522,22 @@ static PyObject *__new__(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     // new->event_id_i = 0;
 
     /* done */
-    return (PyObject *)new;
+    return (PyObject *)ret;
 }
 
 static void __del__(PyObject *self) {
-    if (((gstlal_GSTLALPostcohInspiral *)self)->snr)
-        XLALDestroyCOMPLEX8TimeSeries(
-          ((gstlal_GSTLALPostcohInspiral *)self)->snr);
+    gstlal_GSTLALPostcohInspiral *typed_self =
+      (gstlal_GSTLALPostcohInspiral *)self;
+    if (typed_self->snr) XLALDestroyCOMPLEX8TimeSeries(typed_self->snr);
+    Py_DECREF(typed_self->end_time_sngl);
+    Py_DECREF(typed_self->snglsnr);
+    Py_DECREF(typed_self->coaphase);
+    Py_DECREF(typed_self->chisq);
+    Py_DECREF(typed_self->far_sngl);
+    Py_DECREF(typed_self->far_1w_sngl);
+    Py_DECREF(typed_self->far_1d_sngl);
+    Py_DECREF(typed_self->far_2h_sngl);
+    Py_DECREF(typed_self->deff);
     Py_TYPE(self)->tp_free(self);
 }
 
@@ -366,6 +545,8 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
     const char *data;
     Py_ssize_t length;
     PyObject *result;
+    npy_intp dims[1]          = { MAX_NIFO };
+    npy_intp end_time_dims[2] = { 2, MAX_NIFO };
 
     if (!PyArg_ParseTuple(args, "s#", (const char **)&data, &length))
         return NULL;
@@ -397,6 +578,36 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
          * gstlal_GSTLALPostcohInspiral item*/
         ((gstlal_GSTLALPostcohInspiral *)item)->row =
           (PostcohInspiralTable)*gstlal_postcohinspiral;
+
+        // Set the single-detector arrays
+        ((gstlal_GSTLALPostcohInspiral *)item)->end_time_sngl =
+          PyArray_SimpleNewFromData(1, end_time_dims, NPY_INT,
+                                    gstlal_postcohinspiral->end_time_sngl);
+        ((gstlal_GSTLALPostcohInspiral *)item)->snglsnr =
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
+                                    gstlal_postcohinspiral->snglsnr);
+        ((gstlal_GSTLALPostcohInspiral *)item)->coaphase =
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
+                                    gstlal_postcohinspiral->coaphase);
+        ((gstlal_GSTLALPostcohInspiral *)item)->chisq =
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
+                                    gstlal_postcohinspiral->chisq);
+        ((gstlal_GSTLALPostcohInspiral *)item)->far_sngl =
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
+                                    gstlal_postcohinspiral->far_sngl);
+        ((gstlal_GSTLALPostcohInspiral *)item)->far_1w_sngl =
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
+                                    gstlal_postcohinspiral->far_1w_sngl);
+        ((gstlal_GSTLALPostcohInspiral *)item)->far_1d_sngl =
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
+                                    gstlal_postcohinspiral->far_1d_sngl);
+        ((gstlal_GSTLALPostcohInspiral *)item)->far_2h_sngl =
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
+                                    gstlal_postcohinspiral->far_2h_sngl);
+        ((gstlal_GSTLALPostcohInspiral *)item)->deff =
+          PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE,
+                                    gstlal_postcohinspiral->deff);
+
         /* duplicate the SNR time series if we have length? */
         if (gstlal_postcohinspiral->snr_length) {
             const size_t nbytes = sizeof(gstlal_postcohinspiral->snr[0])
@@ -479,7 +690,19 @@ PyMODINIT_FUNC init_postcohtable(void) {
     PyObject *module = Py_InitModule3(
       MODULE_NAME, NULL, "Wrapper for LAL's PostcohInspiralTable type.");
 
+    prepare_getset();
     import_array();
+
+    PyObject *ifo_map = PyList_New(MAX_NIFO);
+    Py_INCREF(ifo_map);
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        PyObject *str =
+          PyString_FromStringAndSize(IFOMap[i].name, strlen(IFOMap[i].name));
+        assert(str);
+        Py_INCREF(str);
+        PyList_SetItem(ifo_map, i, str);
+    }
+    PyModule_AddObject(module, "ifo_map", ifo_map);
 
     /* Cached ID types */
     // process_id_type = pylal_get_ilwdchar_class("process", "process_id");

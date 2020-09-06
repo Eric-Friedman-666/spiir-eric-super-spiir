@@ -88,29 +88,15 @@ typedef struct _PeakList {
     int *tmplt_idx;
     int *pix_idx;
     int *pix_idx_bg; // background Ntoff needs this, do not remove
-    int *ntoff_H;
-    int *ntoff_L;
-    int *ntoff_V;
+    int *ntoff[MAX_NIFO];
 
-    float *snglsnr_H;
-    float *snglsnr_L;
-    float *snglsnr_V;
-    float *coaphase_H;
-    float *coaphase_L;
-    float *coaphase_V;
-    float *chisq_H;
-    float *chisq_L;
-    float *chisq_V;
+    float *snglsnr[MAX_NIFO];
+    float *coaphase[MAX_NIFO];
+    float *chisq[MAX_NIFO];
 
-    float *snglsnr_bg_H;
-    float *snglsnr_bg_L;
-    float *snglsnr_bg_V;
-    float *coaphase_bg_H;
-    float *coaphase_bg_L;
-    float *coaphase_bg_V;
-    float *chisq_bg_H;
-    float *chisq_bg_L;
-    float *chisq_bg_V;
+    float *snglsnr_bg[MAX_NIFO];
+    float *coaphase_bg[MAX_NIFO];
+    float *chisq_bg[MAX_NIFO];
 
     float *cohsnr;
     float *nullsnr;
@@ -124,35 +110,25 @@ typedef struct _PeakList {
     float *nullsnr_skymap;
 
     /* structure on GPU device */
+    // [THA]: It is important to note that pointers on the host device are not
+    // exposed to the GPU device. For this reason, we can't allocate d_ntoff,
+    // d_snglsnr, etc. here on the stack with sized arrays. Instead, we need
+    // to malloc is when PeakList is built.
     int *d_npeak;
     int *d_peak_pos;
     int *d_len_idx;
     int *d_tmplt_idx;
     int *d_pix_idx;
     int *d_pix_idx_bg; // background Ntoff needs this, do not remove
-    int *d_ntoff_H;
-    int *d_ntoff_L;
-    int *d_ntoff_V;
+    int **d_ntoff; // size (MAX_NIFO)
 
-    float *d_snglsnr_H;
-    float *d_snglsnr_L;
-    float *d_snglsnr_V;
-    float *d_coaphase_H;
-    float *d_coaphase_L;
-    float *d_coaphase_V;
-    float *d_chisq_H;
-    float *d_chisq_L;
-    float *d_chisq_V;
+    float **d_snglsnr; // size (MAX_NIFO)
+    float **d_coaphase; // size (MAX_NIFO)
+    float **d_chisq; // size (MAX_NIFO)
 
-    float *d_snglsnr_bg_H;
-    float *d_snglsnr_bg_L;
-    float *d_snglsnr_bg_V;
-    float *d_coaphase_bg_H;
-    float *d_coaphase_bg_L;
-    float *d_coaphase_bg_V;
-    float *d_chisq_bg_H;
-    float *d_chisq_bg_L;
-    float *d_chisq_bg_V;
+    float **d_snglsnr_bg; // size (MAX_NIFO)
+    float **d_coaphase_bg; // size (MAX_NIFO)
+    float **d_chisq_bg; // size (MAX_NIFO)
 
     float *d_cohsnr;
     float *d_nullsnr;

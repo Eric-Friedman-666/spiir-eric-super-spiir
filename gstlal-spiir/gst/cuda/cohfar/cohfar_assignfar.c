@@ -133,72 +133,30 @@ static void update_trigger_fars(PostcohInspiralTable *table,
                                              cur_stats->rank->rank_map);
     table->rank = MAX(MAX(rank_1w, rank_1d), rank_2h);
 
-    /* FIXME: currently hardcoded for single detectors FAR */
-    cur_stats = element->bgstats_1w->multistats[0];
-    far       = BOUND(FLT_MIN, gen_fap_from_feature((double)table->snglsnr_H,
-                                              (double)table->chisq_H, cur_stats)
-                           * cur_stats->nevent
-                           / (cur_stats->livetime * hist_trials));
-    table->far_h_1w = far;
-
-    cur_stats = element->bgstats_1w->multistats[1];
-    far       = BOUND(FLT_MIN, gen_fap_from_feature((double)table->snglsnr_L,
-                                              (double)table->chisq_L, cur_stats)
-                           * cur_stats->nevent
-                           / (cur_stats->livetime * hist_trials));
-    table->far_l_1w = far;
-
-    cur_stats = element->bgstats_1w->multistats[2];
-    far       = BOUND(FLT_MIN, gen_fap_from_feature((double)table->snglsnr_V,
-                                              (double)table->chisq_V, cur_stats)
-                           * cur_stats->nevent
-                           / (cur_stats->livetime * hist_trials));
-    table->far_v_1w = far;
-
-    cur_stats = element->bgstats_1d->multistats[0];
-    far       = BOUND(FLT_MIN, gen_fap_from_feature((double)table->snglsnr_H,
-                                              (double)table->chisq_H, cur_stats)
-                           * cur_stats->nevent
-                           / (cur_stats->livetime * hist_trials));
-    table->far_h_1d = far;
-
-    cur_stats = element->bgstats_1d->multistats[1];
-    far       = BOUND(FLT_MIN, gen_fap_from_feature((double)table->snglsnr_L,
-                                              (double)table->chisq_L, cur_stats)
-                           * cur_stats->nevent
-                           / (cur_stats->livetime * hist_trials));
-    table->far_l_1d = far;
-
-    cur_stats = element->bgstats_1d->multistats[2];
-    far       = BOUND(FLT_MIN, gen_fap_from_feature((double)table->snglsnr_V,
-                                              (double)table->chisq_V, cur_stats)
-                           * cur_stats->nevent
-                           / (cur_stats->livetime * hist_trials));
-    table->far_v_1d = far;
-
-    cur_stats = element->bgstats_2h->multistats[0];
-    if (cur_stats->livetime > 0) {
-        far = BOUND(
-          FLT_MIN, gen_fap_from_feature((double)table->snglsnr_H,
-                                        (double)table->chisq_H, cur_stats)
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        cur_stats = element->bgstats_1w->multistats[i];
+        far       = BOUND(
+          FLT_MIN, gen_fap_from_feature((double)table->snglsnr[i],
+                                        (double)table->chisq[i], cur_stats)
                      * cur_stats->nevent / (cur_stats->livetime * hist_trials));
-        table->far_h_2h = far;
-    }
-    cur_stats = element->bgstats_2h->multistats[1];
-    if (cur_stats->livetime > 0) {
-        far = BOUND(
-          FLT_MIN, gen_fap_from_feature((double)table->snglsnr_L,
-                                        (double)table->chisq_L, cur_stats)
+        table->far_1w_sngl[i] = far;
+
+        cur_stats = element->bgstats_1d->multistats[i];
+        far       = BOUND(
+          FLT_MIN, gen_fap_from_feature((double)table->snglsnr[i],
+                                        (double)table->chisq[i], cur_stats)
                      * cur_stats->nevent / (cur_stats->livetime * hist_trials));
-        table->far_l_2h = far;
-    }
-    cur_stats = element->bgstats_2h->multistats[2];
-    if (cur_stats->livetime > 0) {
-        far = BOUND(
-          FLT_MIN, gen_fap_from_feature((double)table->snglsnr_V,
-                                        (double)table->chisq_V, cur_stats)
-                     * cur_stats->nevent / (cur_stats->livetime * hist_trials));
-        table->far_v_2h = far;
+        table->far_1d_sngl[i] = far;
+
+        cur_stats = element->bgstats_2h->multistats[i];
+        if (cur_stats->livetime > 0) {
+            far                   = BOUND(FLT_MIN,
+                        gen_fap_from_feature((double)table->snglsnr[i],
+                                             (double)table->chisq[i], cur_stats)
+                          * cur_stats->nevent
+                          / (cur_stats->livetime * hist_trials));
+            table->far_2h_sngl[i] = far;
+        }
     }
 }
 

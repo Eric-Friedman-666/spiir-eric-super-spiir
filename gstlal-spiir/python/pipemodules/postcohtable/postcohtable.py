@@ -21,7 +21,9 @@ from glue.ligolw import lsctables
 import lal
 from . import _postcohtable
 
-__all__ = ["GSTLALPostcohInspiral"]
+__all__ = ["GSTLALPostcohInspiral", "ifo_map"]
+
+ifo_map = _postcohtable.ifo_map
 
 
 class GSTLALPostcohInspiral(_postcohtable.GSTLALPostcohInspiral):

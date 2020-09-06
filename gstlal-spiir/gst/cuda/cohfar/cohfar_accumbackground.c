@@ -120,8 +120,8 @@ static void update_stats_icombo(PostcohInspiralTable *intable,
         for (ifo = 0, index = 0; ifo < MAX_NIFO; ifo++) {
             if ((stats->icombo + 1) & (1 << ifo)) {
                 trigger_stats_feature_rate_update(
-                  (double)((&intable->snglsnr_H)[ifo]),
-                  (double)((&intable->chisq_H)[ifo]),
+                  (double)(intable->snglsnr[ifo]),
+                  (double)(intable->chisq[ifo]),
                   stats->multistats[index]->feature, stats->multistats[index]);
                 ++index;
             }
