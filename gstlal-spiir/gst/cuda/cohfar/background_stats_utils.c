@@ -1032,61 +1032,61 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_rate[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
                     stats->feature_xmlname->str, IFOComboMap[combo].name,
                     CHISQ_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgchisq_rate[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
                     stats->feature_xmlname->str, IFOComboMap[combo].name,
                     SNR_CHISQ_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_lgchisq_rate[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
                     stats->feature_xmlname->str, IFOComboMap[combo].name,
                     SNR_CHISQ_PDF_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_lgchisq_pdf[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
                     stats->rank_xmlname->str, IFOComboMap[combo].name,
                     RANK_MAP_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_rank_map[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_nevent:param",
                     stats->feature_xmlname->str, IFOComboMap[combo].name);
             xns[pos_xns].processPtr = readParam;
             xns[pos_xns].data       = &(param_nevent[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_livetime:param",
                     stats->feature_xmlname->str, IFOComboMap[combo].name);
             xns[pos_xns].processPtr = readParam;
             xns[pos_xns].data       = &(param_livetime[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
                     stats->rank_xmlname->str, IFOComboMap[combo].name,
                     RANK_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_rank_rate[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
                     stats->rank_xmlname->str, IFOComboMap[combo].name,
                     RANK_PDF_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_rank_pdf[index]);
 
-            pos_xns += (1+nifo);
+            pos_xns += nodes;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
                     stats->rank_xmlname->str, IFOComboMap[combo].name,
                     RANK_FAP_SUFFIX);
@@ -1098,7 +1098,7 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
 
     XmlParam *param_hist_trials = (XmlParam *)malloc(sizeof(XmlParam) * 1);
 
-    pos_xns            = nelem * (1+nifo);
+    pos_xns            = nelem * nodes;
     GString *hist_name = g_string_new(NULL);
     g_string_printf(hist_name, "%s:hist_trials:param",
                     stats->feature_xmlname->str);
@@ -1123,7 +1123,7 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     g_assert(array_lgsnr_rate[0].dim[0] == nbin_x);
     g_assert(array_lgchisq_rate[0].dim[0] == nbin_y);
 
-    for (index = 0; index < nifo; index++) {
+    for (index = 0; index < nodes; index++) {
         TriggerStats *cur_stats = multistats[index];
         FeatureStats *feature   = cur_stats->feature;
         RankingStats *rank      = cur_stats->rank;
@@ -1167,7 +1167,7 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     /*
      * free the allocated memory for xml reading
      */
-    for (index = 0; index < nifo; index++) {
+    for (index = 0; index < nodes; index++) {
         free(array_lgsnr_rate[index].data);
         free(array_lgchisq_rate[index].data);
         free(array_lgsnr_lgchisq_rate[index].data);
