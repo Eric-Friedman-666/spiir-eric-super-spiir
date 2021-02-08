@@ -1021,7 +1021,10 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     // where we actually should be in the 'xns' array.
     int pos_xns, index;
     for (combo = 0, index = 0; combo < icombo + 1; combo++) {
-        if (combo == icombo || ( ((combo + 1) & (icombo + 1)) && __builtin_popcount(combo + 1) == 1 ) ) {
+        if (combo == icombo // all active ifos, OR
+            || ( ((combo + 1) & (icombo + 1)) //           (ifo active, AND
+               && __builtin_popcount(combo + 1) == 1 ) ) // single ifo only)
+        {
             pos_xns = index;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
                     stats->feature_xmlname->str, IFOComboMap[combo].name,
