@@ -188,7 +188,9 @@ static int process_stats_full(
     cohfar_get_stats_from_file(in_fnames, bgstats_in, bgstats_out,
                                &hist_trials);
     if (*update_pdf == 1) {
-        for (ifo = 0; ifo < nifo; ifo++) {
+		// nifo+1 : single detectors and detector combination
+		// e.g. H1L1V1: H1, L1, V1, H1L1V1
+        for (ifo = 0; ifo < nifo+1; ifo++) {
             trigger_stats_feature_rate_to_pdf(
               sgstats_out->multistats[ifo]->feature);
             trigger_stats_feature_to_rank(sgstats_out->multistats[ifo]->feature,
@@ -245,7 +247,9 @@ static int process_stats_single(gchar **in_fnames,
     TriggerStatsXML *stats_out = trigger_stats_xml_create(*pifos, type);
     cohfar_get_stats_from_file(in_fnames, stats_in, stats_out, &hist_trials);
     if (*update_pdf == 1) {
-        for (ifo = 0; ifo < nifo; ifo++) {
+		// nifo+1 : single detectors and detector combination
+		// e.g. H1L1V1: H1, L1, V1, H1L1V1
+        for (ifo = 0; ifo < nifo+1; ifo++) {
             trigger_stats_feature_rate_to_pdf(
               stats_out->multistats[ifo]->feature);
             trigger_stats_feature_to_rank(stats_out->multistats[ifo]->feature,
