@@ -233,7 +233,10 @@ struct _CudaPostcoh {
     gint exe_size;
     gint one_take_len;
     gint one_take_size;
+    gint snglsnr_cpy_len;
+    gint snglsnr_cpy_size;
     gint preserved_len;
+	gint head_len;
     float max_dt;
     gboolean set_starttime;
     gboolean is_all_aligned;
