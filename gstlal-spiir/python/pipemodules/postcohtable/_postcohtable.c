@@ -306,24 +306,24 @@ static PyObject *snr_component_get_helper(COMPLEX8TimeSeries *snr,
     // A helper function that extract and return an attribute from snr, whose
     // type is COMPLEX8TimeSeries, by name.
 
-    if (!strcmp(name, "name")) {
+    if (!strcmp(name, "name_")) {
         return PyString_FromString(snr->name);
-    } else if (!strcmp(name, "epoch_gpsSeconds")) {
+    } else if (!strcmp(name, "epoch_gpsSeconds_")) {
         return PyInt_FromLong(snr->epoch.gpsSeconds);
-    } else if (!strcmp(name, "epoch_gpsNanoSeconds")) {
+    } else if (!strcmp(name, "epoch_gpsNanoSeconds_")) {
         return PyInt_FromLong(snr->epoch.gpsNanoSeconds);
-    } else if (!strcmp(name, "f0")) {
+    } else if (!strcmp(name, "f0_")) {
         return PyFloat_FromDouble(snr->f0);
-    } else if (!strcmp(name, "deltaT")) {
+    } else if (!strcmp(name, "deltaT_")) {
         return PyFloat_FromDouble(snr->deltaT);
-    } else if (!strcmp(name, "sampleUnits")) {
+    } else if (!strcmp(name, "sampleUnits_")) {
         char *s          = XLALUnitToString(&snr->sampleUnits);
         PyObject *result = PyString_FromString(s);
         XLALFree(s);
         return result;
-    } else if (!strcmp(name, "data_length")) {
+    } else if (!strcmp(name, "data_length_")) {
         return PyInt_FromLong(snr->data->length);
-    } else if (!strcmp(name, "data")) {
+    } else if (!strcmp(name, "data_")) {
         npy_intp dims[] = { snr->data->length };
         PyObject *array =
           PyArray_SimpleNewFromData(1, dims, NPY_CFLOAT, snr->data->data);
@@ -630,8 +630,8 @@ void prepare_getset() {
         name = (char *)malloc(strlen(head) + strlen(IFOMap[i].name) + strlen(var) + 1);
         closure = (struct Closure_for_snr_series *)malloc(sizeof(struct Closure_for_snr_series));
         strcpy(name, head);
-        strcat(name, IFOMap[i].name);
         strcat(name, var);
+        strcat(name, IFOMap[i].name);
         closure->index = i;
         closure->closure_str = var;
         def.name         = name;

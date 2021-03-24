@@ -1339,11 +1339,8 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
                 // Get epoch 
                 // FIXME: This epoch might not be correct
-                LIGOTimeGPS *epoch;
-                epoch = malloc(
-                  sizeof(LIGOTimeGPS)); // TODO: check the source code to make
-                                        // sure that the epoch will be deleted.
-                XLALINT8NSToGPS(epoch, ts);
+                LIGOTimeGPS epoch;
+                XLALINT8NSToGPS(&epoch, ts);
 
                 // Allocate the memory
                 // f0 = 0 
@@ -1351,7 +1348,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 // sampleUnits = &lalDimensionlessUnit
                 // length = state->autochisq_len
                 output->snr_series[i] = XLALCreateCOMPLEX8TimeSeries(
-                  "snr", epoch, 0., 1. / postcoh->rate, &lalDimensionlessUnit,
+                  "snr", &epoch, 0., 1. / postcoh->rate, &lalDimensionlessUnit,
                   state->autochisq_len);
 
                 // Milestone 1:
@@ -1451,9 +1448,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
               output->nullsnr, output->cmbchisq);
 
             XLALINT8NSToGPS(&output->epoch, ts);
-            output->deltaT = 1. / postcoh->rate;
             /* set the snr length to 0, FIXME: dump snr series of single ifo */
-            output->snr_length = 0;
             output++;
             write_entries++;
         }
@@ -1509,8 +1504,6 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
                     /* do not dump snr for background */
                     XLALINT8NSToGPS(&output->epoch, ts);
-                    output->deltaT     = 0;
-                    output->snr_length = 0;
                     output++;
                     write_entries++;
                 }
