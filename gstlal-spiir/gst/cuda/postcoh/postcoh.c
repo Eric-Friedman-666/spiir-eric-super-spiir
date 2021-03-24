@@ -1454,7 +1454,6 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
               output->nullsnr, output->cmbchisq);
 
             XLALINT8NSToGPS(&output->epoch, ts);
-            /* set the snr length to 0, FIXME: dump snr series of single ifo */
             output++;
             write_entries++;
         }
@@ -1853,7 +1852,8 @@ static void cuda_postcoh_process(GstCollectPads *pads,
               state->snglsnr_start_load, snglsnr_cpy_len,
               state->snglsnr_len, state->ntmplt, postcoh->stream);
 
-            cudaStreamSynchronize(postcoh->stream);
+            cudaStreamSynchronize(postcoh->stream);A
+			state->snr_list[cur_ifo] = one_take_snr;
         }
         cur_ifo = 0;
         for (int iifo = 0; iifo < state->nifo; ++iifo)
