@@ -48,6 +48,7 @@ except ImportError:
 
 from glue import iterutils
 from glue import segments
+from glue import gpstime
 from glue.ligolw import ligolw
 from glue.ligolw import dbtables
 from glue.ligolw import ilwd
@@ -56,6 +57,7 @@ from glue.ligolw import lsctables
 from glue.ligolw import array as ligolw_array
 from glue.ligolw import param as ligolw_param
 from glue.ligolw import utils as ligolw_utils
+from glue.ligolw import param as ligolw_param
 
 from glue.ligolw.utils import ligolw_sqlite
 from glue.ligolw.utils import ligolw_add
@@ -577,7 +579,7 @@ class FinalSink(object):
                 logging.info("buf gap at %d" % buf.timestamp)
                 return
             buf_timestamp = LIGOTimeGPS(0, buf.timestamp)
-            newevents = postcohtable.GSTLALPostcohInspiral.from_buffer(buf)
+            newevents = postcohtable.PostcohInspiralWrapper.from_buffer(buf)
             self.need_candidate_check = False
 
             if len(newevents) == 0:
@@ -617,7 +619,11 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
             if self.cluster_window == 0:
-                self.postcoh_table.extend(newevents)
+                # self.postcoh_table.extend(newevents)
+                for event in newevents:
+                    event.delete_all_snr_series()
+                    self.postcoh_table.append(event)
+
                 del self.cur_event_table[:]
 
             # NOTE: only consider clustered trigger for uploading to gracedb
@@ -630,10 +636,16 @@ class FinalSink(object):
                 if self.need_candidate_check:
                     self.nevent_clustered += 1
                     self.__set_far(self.candidate)
+
+                    # NOTE:I have comment this line for testing
+                    #      Plese uncomment it when the testing is done.
+                    # if self.gracedb_far_threshold and self.__pass_test(
+                    #         self.candidate):
+
+                    self.__do_gracedb_alert(self.candidate)
+                    self.candidate.delete_all_snr_series()
                     self.postcoh_table.append(self.candidate)
-                    if self.gracedb_far_threshold and self.__pass_test(
-                            self.candidate):
-                        self.__do_gracedb_alert(self.candidate)
+
                     if self.need_online_perform:
                         self.onperformer.update_eye_candy(self.candidate)
                     self.candidate = None
@@ -791,7 +803,7 @@ class FinalSink(object):
         # if it is not one order of magnitude more significant than the last trigger
         # or if it not more significant the last submitted trigger
         # FIXME: what if there are two adjacent significant events
-        if ((abs(float(trigger.end) - last_time) < 50
+        if ((abs(float(trigger.end) - last_time) < 50 and last_far > 0 # NOTE: last_far > 0 is for testing
              and abs(trigger.far / last_far) > 0.5)) or (
                  abs(float(trigger.end) - float(last_submitted_time)) < 100
                  and trigger.far > last_submitted_far * 0.5):
@@ -830,7 +842,7 @@ class FinalSink(object):
 
         self.coincs_document.assemble_tables(trigger)
         xmldoc = self.coincs_document.xmldoc
-        filename = "%s_%s_%d_%d.xml" % (trigger.ifos, trigger.end_time,
+        filename = "%s/%s_%s_%d_%d.xml" % (self.path, trigger.ifos, trigger.end_time,
                                         trigger.bankid, trigger.tmplt_idx)
         #
         # construct message and send to gracedb.
@@ -1167,7 +1179,7 @@ class CoincsDocFromPostcoh(object):
         #row.snr = trigger.cohsnr
         network_snr2 = 0
         for ifo in re.findall('..', trigger.ifos):
-            network_snr2 += (getattr(trigger, "snglsnr_%s" % ifo[0]))**2
+            network_snr2 += (getattr(trigger, "snglsnr_%s" % ifo))**2
         network_snr = numpy.sqrt(
             network_snr2)  ##network_snr = sqrt(H**2 + L**2 + V**2)
         row.snr = network_snr
@@ -1180,7 +1192,25 @@ class CoincsDocFromPostcoh(object):
         self.assemble_coinc_map_table(trigger)
         self.assemble_time_slide_table(trigger)
 
-        postcoh_table.append(trigger)
+        # Append snr_series data into XML document
+        for ifo in re.findall('..', trigger.ifos):
+            snr_time_series = lal.CreateCOMPLEX8TimeSeries(
+                name=getattr(trigger, "snr_series_name_" + ifo),
+                epoch=0,  #TODO: fixed this
+                f0=getattr(trigger, "snr_series_f0_" + ifo),
+                deltaT=getattr(trigger, "snr_series_deltaT_" + ifo),
+                sampleUnits=getattr(trigger,
+                                    "snr_series_sampleUnits_" + ifo ),
+                length=getattr(trigger,
+                               "snr_series_data_length_" + ifo ))
+            snr_time_series.data.data = getattr(
+                trigger, "snr_series_data_" + ifo)
+            snr_time_series_element = lal.series.build_COMPLEX8TimeSeries(
+                snr_time_series)
+            # Add event_id into the snr_time_series_element
+            snr_time_series_element.appendChild(
+                ligolw_param.Param.from_pyvalue(u"event_id", "event_id_test"))
+            self.xmldoc.childNodes[-1].appendChild(snr_time_series_element)
 
     def assemble_coinc_map_table(self, trigger):
 
@@ -1239,16 +1269,16 @@ class CoincsDocFromPostcoh(object):
             row.ifo = ifo
             row.search = self.url
             row.channel = self.channel_dict[ifo]
-            row.end_time = getattr(trigger, "end_time_%s" % ifo[0])
-            row.end_time_ns = getattr(trigger, "end_time_ns_%s" % ifo[0])
+            row.end_time = getattr(trigger, "end_time_sngl_%s" % ifo)
+            row.end_time_ns = getattr(trigger, "end_time_ns_sngl_%s" % ifo)
             row.end_time_gmst = 0
             row.impulse_time = 0
             row.impulse_time_ns = 0
             row.template_duration = trigger.template_duration
             row.event_duration = 0
             row.amplitude = 0
-            row.eff_distance = getattr(trigger, "deff_%s" % ifo[0])
-            row.coa_phase = getattr(trigger, "coaphase_%s" % ifo[0])
+            row.eff_distance = getattr(trigger, "deff_%s" % ifo)
+            row.coa_phase = getattr(trigger, "coaphase_%s" % ifo)
             row.mass1 = trigger.mass1
             row.mass2 = trigger.mass2
             row.mchirp = trigger.mchirp
@@ -1273,8 +1303,8 @@ class CoincsDocFromPostcoh(object):
             row.alpha6 = 0
             row.beta = 0
             row.f_final = trigger.f_final
-            row.snr = getattr(trigger, "snglsnr_%s" % ifo[0])
-            row.chisq = getattr(trigger, "chisq_%s" % ifo[0])
+            row.snr = getattr(trigger, "snglsnr_%s" % ifo)
+            row.chisq = getattr(trigger, "chisq_%s" % ifo)
             row.chisq_dof = 4
             row.bank_chisq = 0
             row.bank_chisq_dof = 0

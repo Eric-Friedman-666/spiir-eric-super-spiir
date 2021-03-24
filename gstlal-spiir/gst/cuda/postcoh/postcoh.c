@@ -26,6 +26,8 @@
 #include <gst/gst.h>
 #include <lal/Date.h>
 #include <lal/LIGOMetadataTables.h>
+#include <lal/Units.h>
+#include <lal/TimeSeries.h>
 #include <math.h>
 #include <pipe_macro.h> // for get_icombo, IFOComboMap
 #include <postcoh/postcoh.h>
@@ -1269,7 +1271,7 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
 static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                                            GstBuffer *outbuf) {
     PostcohState *state = postcoh->state;
-
+   
     PostcohInspiralTable *output =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
     int iifo = 0, jifo = 0, nifo = state->nifo;
@@ -1332,6 +1334,33 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 output->snglsnr[i]  = pklist->snglsnr[i][peak_cur];
                 output->coaphase[i] = pklist->coaphase[i][peak_cur];
                 output->chisq[i]    = pklist->chisq[i][peak_cur];
+
+                // TODO: Add new snr_series data here
+
+                // Get epoch 
+                // FIXME: This epoch might not be correct
+                LIGOTimeGPS *epoch;
+                epoch = malloc(
+                  sizeof(LIGOTimeGPS)); // TODO: check the source code to make
+                                        // sure that the epoch will be deleted.
+                XLALINT8NSToGPS(epoch, ts);
+
+                // Allocate the memory
+                // f0 = 0 
+                // deltaT = 1. / postcoh->rate   
+                // sampleUnits = &lalDimensionlessUnit
+                // length = state->autochisq_len
+                output->snr_series[i] = XLALCreateCOMPLEX8TimeSeries(
+                  "snr", epoch, 0., 1. / postcoh->rate, &lalDimensionlessUnit,
+                  state->autochisq_len);
+
+                // Milestone 1:
+                // Put some zeros into snr_series for testing purpose
+                for (int j = 0; j < output->snr_series[i]->data->length; j++) {
+                    output->snr_series[i]->data->data[j] = 0;
+                }
+                // TODO: Milestone 2:
+                // Put needed snr data into snr_series
             }
 
             for (jifo = 0; jifo < nifo; jifo++) {
