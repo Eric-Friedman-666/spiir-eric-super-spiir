@@ -174,6 +174,7 @@ struct lal_array {
     Py_ssize_t index;
 };
 
+
 static PyObject *pylal_double_array_get(PyObject *obj, void *data) {
     const struct lal_array *desc = data;
     double *d = (double *)((char *)obj + desc->offset) + desc->index;
@@ -551,7 +552,7 @@ void prepare_getset() {
         def.closure      = closure;
         getset[offset++] = def;
 
-        var  = "epoch_gpsNanoSeconds";
+        var  = "epoch_gpsNanoSeconds_";
         name = (char *)malloc(strlen(head) + strlen(IFOMap[i].name) + strlen(var) + 1);
         closure = (struct Closure_for_snr_series *)malloc(sizeof(struct Closure_for_snr_series));
         strcpy(name, head);

@@ -1193,23 +1193,27 @@ class CoincsDocFromPostcoh(object):
         self.assemble_time_slide_table(trigger)
 
         # Append snr_series data into XML document
-        for ifo in re.findall('..', trigger.ifos):
+        for iifo, ifo in enumerate(re.findall('..', trigger.ifos)):
+            epoch_second = getattr(trigger,
+                                   "snr_series_epoch_gpsSeconds_" + ifo)
+            epoch_nanoSeconds = getattr(
+                trigger, "snr_series_epoch_gpsNanoSeconds_" + ifo)
+            epoch = LIGOTimeGPS(epoch_second, epoch_nanoSeconds)
             snr_time_series = lal.CreateCOMPLEX8TimeSeries(
                 name=getattr(trigger, "snr_series_name_" + ifo),
-                epoch=0,  #TODO: fixed this
+                epoch=epoch,
                 f0=getattr(trigger, "snr_series_f0_" + ifo),
                 deltaT=getattr(trigger, "snr_series_deltaT_" + ifo),
-                sampleUnits=getattr(trigger,
-                                    "snr_series_sampleUnits_" + ifo ),
-                length=getattr(trigger,
-                               "snr_series_data_length_" + ifo ))
+                sampleUnits=getattr(trigger, "snr_series_sampleUnits_" + ifo),
+                length=getattr(trigger, "snr_series_data_length_" + ifo))
             snr_time_series.data.data = getattr(
                 trigger, "snr_series_data_" + ifo)
             snr_time_series_element = lal.series.build_COMPLEX8TimeSeries(
                 snr_time_series)
             # Add event_id into the snr_time_series_element
             snr_time_series_element.appendChild(
-                ligolw_param.Param.from_pyvalue(u"event_id", "event_id_test"))
+                ligolw_param.Param.from_pyvalue(
+                    u"event_id", "sngl_inspiral:event_id:%d" % iifo))
             self.xmldoc.childNodes[-1].appendChild(snr_time_series_element)
 
     def assemble_coinc_map_table(self, trigger):

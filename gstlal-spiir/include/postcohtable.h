@@ -76,7 +76,6 @@ typedef struct tagPostcohInspiralTable {
     REAL8 deff[MAX_NIFO];
     REAL8 rank;
     REAL4 f_final;
-    LIGOTimeGPS epoch;
     COMPLEX8TimeSeries *snr_series[MAX_NIFO]; // snr series data around peak
 } PostcohInspiralTable;
 #endif /* __POSTCOH_TABLE_H */
