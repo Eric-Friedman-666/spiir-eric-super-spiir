@@ -1371,8 +1371,8 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 // the first data sample
                 COMPLEX8 *curr_snglsnr =
                   state->snr_list[jifo]
-                  + pklist->len_idx[ipeak] * state->ntmplt
-                  + pklist->tmplt_idx[ipeak];
+                  + pklist->len_idx[peak_cur] * state->ntmplt
+                  + pklist->tmplt_idx[peak_cur];
 
                 /* FIXME: speedup. Load snglsnr data into snr_series->data->data */
                 for (int j = 0; j < output->snr_series[write_ifo]->data->length;
