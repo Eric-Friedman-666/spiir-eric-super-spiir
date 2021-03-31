@@ -1164,7 +1164,7 @@ class CoincsDocFromPostcoh(object):
         #row.snr = trigger.cohsnr
         network_snr2 = 0
         for ifo in re.findall('..', trigger.ifos):
-            network_snr2 += (getattr(trigger, "snglsnr_%s" % ifo[0]))**2
+            network_snr2 += (getattr(trigger, "snglsnr_%s" % ifo))**2
         network_snr = numpy.sqrt(
             network_snr2)  ##network_snr = sqrt(H**2 + L**2 + V**2)
         row.snr = network_snr
@@ -1236,16 +1236,16 @@ class CoincsDocFromPostcoh(object):
             row.ifo = ifo
             row.search = self.url
             row.channel = self.channel_dict[ifo]
-            row.end_time = getattr(trigger, "end_time_%s" % ifo[0])
-            row.end_time_ns = getattr(trigger, "end_time_ns_%s" % ifo[0])
+            row.end_time = getattr(trigger, "end_time_sngl_%s" % ifo)
+            row.end_time_ns = getattr(trigger, "end_time_ns_sngl_%s" % ifo)
             row.end_time_gmst = 0
             row.impulse_time = 0
             row.impulse_time_ns = 0
             row.template_duration = trigger.template_duration
             row.event_duration = 0
             row.amplitude = 0
-            row.eff_distance = getattr(trigger, "deff_%s" % ifo[0])
-            row.coa_phase = getattr(trigger, "coaphase_%s" % ifo[0])
+            row.eff_distance = getattr(trigger, "deff_%s" % ifo)
+            row.coa_phase = getattr(trigger, "coaphase_%s" % ifo)
             row.mass1 = trigger.mass1
             row.mass2 = trigger.mass2
             row.mchirp = trigger.mchirp
@@ -1270,8 +1270,8 @@ class CoincsDocFromPostcoh(object):
             row.alpha6 = 0
             row.beta = 0
             row.f_final = trigger.f_final
-            row.snr = getattr(trigger, "snglsnr_%s" % ifo[0])
-            row.chisq = getattr(trigger, "chisq_%s" % ifo[0])
+            row.snr = getattr(trigger, "snglsnr_%s" % ifo)
+            row.chisq = getattr(trigger, "chisq_%s" % ifo)
             row.chisq_dof = 4
             row.bank_chisq = 0
             row.bank_chisq_dof = 0
