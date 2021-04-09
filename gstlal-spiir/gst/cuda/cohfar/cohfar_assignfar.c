@@ -158,6 +158,9 @@ static void update_trigger_fars(PostcohInspiralTable *table,
             table->far_2h_sngl[ifo_id] = far;
         }
     }
+    GST_DEBUG_OBJECT(
+      element, "this long-scale far %f, mid-scale far %f, short-scale far %f",
+      table->far_1w, table->far_1d, table->far_2h);
 }
 
 /*
@@ -316,13 +319,17 @@ static void cohfar_assignfar_set_property(GObject *object,
         /* must make sure ifos have been loaded */
         g_assert(element->ifos != NULL);
         element->input_fnames = g_strsplit(g_value_dup_string(value), ",", -1);
-        gchar *ifname;
-        for (ifname = element->input_fnames; *ifname;
-             ifname++, element->ninput++)
-            ;
-        if (element->ninput != 3) printf("ninput %d\n", element->ninput);
-        /* FIXME: only allow three inputs to set fars */
-        // g_assert(element->ninput == 3);
+        element->ninput       = g_strv_length(element->input_fnames);
+        if (element->ninput != 3) {
+            fprintf(stderr,
+                    "Number of input files for zerolag FAR assignment is not 3 "
+                    "but %d,"
+                    " your cohfar-assignfar-input-fname option %s might not "
+                    "provide the right place"
+                    " for the input files. exiting \n",
+                    element->ninput, g_value_dup_string(value));
+            exit(0);
+        }
         break;
 
     case PROP_SILENT_TIME: element->silent_time = g_value_get_int(value); break;

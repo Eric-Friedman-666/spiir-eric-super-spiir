@@ -103,24 +103,31 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
 static gboolean cohfar_accumbackground_sink_event(GstPad *pad, GstEvent *event);
 static void cohfar_accumbackground_dispose(GObject *object);
 
+// TODO: Consider rename. trigger_stats_update_stats(stats, intable, table_ifos)
+//        intable is ambiguous, it could stand for inspiral or input
 static void update_stats_enabled_ifos(PostcohInspiralTable *intable,
+                                ifo_set_type table_ifos,
                                 TriggerStatsXML *stats) {
-    int num_stats = trigger_stats_num_stats(stats->enabled_ifos);
-
     if (!ifo_set__is_empty(stats->enabled_ifos)) {
+        int num_stats = trigger_stats_num_stats(stats->enabled_ifos);
         // update the multi-IFO background at the last bin.
         trigger_stats_feature_rate_update(
           (double)(intable->cohsnr), (double)intable->cmbchisq,
-          stats->multistats[num_stats - 1]->feature, stats->multistats[num_stats - 1]);
+          stats->multistats[num_stats - 1]->feature,
+          stats->multistats[num_stats - 1]);
 
         /* add single detector stats */
         // update single-IFO background according the single-IFO decomposition
         for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
+            /* check ifo in stats, e.g. stats: LVK */
             if (ifo_set__contains(stats->enabled_ifos, ifo_id)) {
-                trigger_stats_feature_rate_update(
-                  (double)(intable->snglsnr[ifo_id]),
-                  (double)(intable->chisq[ifo_id]),
-                  stats->multistats[stats_idx]->feature, stats->multistats[stats_idx]);
+                /* check ifo in table, e.g. table: LK */
+                if (ifo_set__contains(table_ifos, ifo_id)) {
+                    trigger_stats_feature_rate_update(
+                      (double)(intable->snglsnr[ifo_id]),
+                      (double)(intable->chisq[ifo_id]),
+                      stats->multistats[stats_idx]->feature, stats->multistats[stats_idx]);
+                }
                 ++stats_idx;
             }
         }
@@ -217,9 +224,9 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     PostcohInspiralTable *outtable =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
     for (; intable < intable_end; intable++) {
-        ifo_set_type enabled_ifos = get_ifo_set(intable->ifos);
+        ifo_set_type table_ifos = get_ifo_set(intable->ifos);
         // The combination of IFOs is invalid
-        if (ifo_set__is_empty(enabled_ifos)) {
+        if (ifo_set__is_empty(table_ifos)) {
             LIGOTimeGPS ligo_time;
             XLALINT8NSToGPS(&ligo_time, GST_BUFFER_TIMESTAMP(inbuf));
             fprintf(stderr,
@@ -230,27 +237,33 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
         }
         if (intable->is_background == FLAG_BACKGROUND) {
             update_stats_enabled_ifos(
-              intable,
+              intable, table_ifos,
               bgstats); // update the last combination and single IFO stats
         } else if (intable->is_background
                    == FLAG_FOREGROUND) { /* coherent trigger entry */
             update_stats_enabled_ifos(
-              intable,
+              intable, table_ifos,
               zlstats); // update the last combination and single IFO stats
             memcpy(outtable, intable, sizeof(PostcohInspiralTable));
             outtable++;
         } else {
-            /* increment livetime if participating nifo >= 2 */
-            int nifo = ifo_set__count(enabled_ifos);
+            int nifo = ifo_set__count(table_ifos);
             if (nifo > 1) {
-                /* add single detector stats */
-                get_write_ifo_mapping(ifo_set__get_string(enabled_ifos), nifo,
-                                      element->write_ifo_mapping);
-
-                int num_stats = trigger_stats_num_stats(enabled_ifos);
-                for (int i = 0; i < num_stats; i++) {
-                    trigger_stats_livetime_inc(bgstats->multistats, i);
-                    trigger_stats_livetime_inc(zlstats->multistats, i);
+                trigger_stats_livetime_inc(bgstats->multistats, 
+                          trigger_stats_num_stats(bgstats->enabled_ifos) - 1);
+                trigger_stats_livetime_inc(zlstats->multistats, 
+                          trigger_stats_num_stats(zlstats->enabled_ifos) - 1);
+                
+                // update single-IFO background according the single-IFO
+                // decomposition
+                for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
+                    if (ifo_set__contains(bgstats->enabled_ifos, ifo_id)) {
+                      if (ifo_set__contains(table_ifos, ifo_id)) {
+                          trigger_stats_livetime_inc(bgstats->multistats, stats_idx);
+                          trigger_stats_livetime_inc(zlstats->multistats, stats_idx);
+                      }
+                      stats_idx++;
+                    }
                 }
             }
             memcpy(outtable, intable, sizeof(PostcohInspiralTable));
@@ -586,11 +599,12 @@ static void
 
     g_object_class_install_property(
       gobject_class, PROP_SNAPSHOT_INTERVAL,
-      g_param_spec_int(
-        "snapshot-interval", "snapshot interval",
-        "(-1) never update; (0) snapshot at the end; (N) snapshot background "
-        "statistics xml file every N seconds.",
-        -1, G_MAXINT, 86400, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      g_param_spec_int("snapshot-interval", "snapshot interval",
+                       "(-1) never update; (0) snapshot at the end; (N) "
+                       "snapshot background "
+                       "statistics xml file every N seconds.",
+                       -1, G_MAXINT, 86400,
+                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 /*
  * init()
