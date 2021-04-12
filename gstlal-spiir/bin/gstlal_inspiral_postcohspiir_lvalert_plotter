@@ -22,6 +22,7 @@
 
 import sys, os
 import logging
+
 os.environ["MPLCONFIGDIR"] = "/tmp"
 import copy
 import time
@@ -142,6 +143,23 @@ def call_fits_skymap_func(out_cohsnr_fits,
     proc_out, proc_err = proc.communicate()
     if verbose:
         print >> sys.stderr, "skymap2fits return code", proc.returncode
+    return proc.returncode
+
+
+def call_plot_snr_series_fun(filename, verbose=False):
+    cmd = []
+    cmd.append("gstlal_insprial_postcohspiir_plot_snr_series")
+    if verbose:
+        cmd.append("--verbose")
+    cmd.append(filename)
+    if verbose:
+        print(cmd)
+    proc = subprocess.Popen(cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+    proc_out, proc_err = proc.communicate()
+    if verbose:
+        print >> sys.stderr, "plot_snr_series return code", proc.returncode
     return proc.returncode
 
 
@@ -300,6 +318,26 @@ else:
         % (msg, str(cuda_postcoh_output_skymap)),
         filename=None,
         tag_name="sky_loc")
+
+#
+# Upload snr_series chart
+#
+snr_series_png_filename = '.'.join(trigger_fname.split('.')[:-1])
+returncode = call_plot_snr_series_fun(trigger_fname, verbose=options.verbose)
+if returncode == 0:
+    if options.verbose:
+        print("Uploading %s for %s, %s " % snr_series_png_filename, gid, msg)
+    gracedb.writeLog(gid,
+                     "%s snr_series" % event_ifos,
+                     filename=snr_series_png_filename,
+                     filecontents=open(snr_series_png_filename).read(),
+                     tag_name="snr series")
+else:
+    msg += " can not plot snr_series chart to png"
+    gracedb.writeLog(gid,
+                     "upload snr_series chart for %s failed" % gid,
+                     filename=None,
+                     tag_name='snr series')
 
 #
 # set up the background stats files in path folder

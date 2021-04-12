@@ -1,0 +1,158 @@
+#! /usr/bin/env python
+#
+# Copyright (C) 2016 Qi Chu, Yin Zhong
+#
+# This program is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation; either version 2 of the License, or (at your
+# option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+# Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+import os
+import numpy as np
+import scipy
+import math
+import csv
+import logging
+from optparse import OptionParser
+import matplotlib
+
+matplotlib.use('Agg')
+from matplotlib import pyplot as plt
+from matplotlib import rc
+from matplotlib import colors
+
+rc('text', usetex=True)
+
+from glue.ligolw import ligolw, lsctables, array, param, utils, types, table
+from gstlal.pipemodules.postcohtable.postcoh_table_def import PostcohInspiralTable
+from gstlal.pipemodules import pipe_macro
+from lal import series as lalseries
+import pdb
+
+Attributes = ligolw.sax.xmlreader.AttributesImp
+ALPHA = 0.8
+
+matplotlib.rcParams.update({
+    "font.size": 10.0,
+    "axes.titlesize": 10.0,
+    "axes.labelsize": 10.0,
+    "xtick.labelsize": 10.0,
+    "ytick.labelsize": 10.0,
+    "legend.fontsize": 10.0,
+    "figure.dpi": 100,
+    "savefig.dpi": 100,
+    "text.usetex": True
+})
+
+
+class DefaultContentHandler(ligolw.LIGOLWContentHandler):
+    pass
+
+
+array.use_in(DefaultContentHandler)
+param.use_in(DefaultContentHandler)
+lsctables.use_in(DefaultContentHandler)
+table.use_in(DefaultContentHandler)
+
+
+def append_missing_options(missing_options, options, option):
+    if getattr(options, option) is None:
+        missing_options.append("--%s" % option.replace("_", "-"))
+
+
+def parse_command_line():
+    parser = OptionParser(usage="%prog [options] [file ...]",
+                          description="%prog to plot snr_series data")
+    # parser.add_option("--output",
+    #                   default=None,
+    #                   metavar="FILENAME",
+    #                   help="Set the output file name")
+    parser.add_option("-v",
+                      "--verbose",
+                      defult=False,
+                      action="store_true",
+                      help="Be verbose")
+    options, filenames = parser.parse_args()
+    if filenames is None:
+        raise ValueError, "missing input file name."
+    if len(filenames) > 1:
+        raise ValueError, "too many arguments"
+    filename = filenames[0]
+
+    # missing_options = []
+    # append_missing_options(missing_options, options, "output")
+    # if missing_options:
+    #     raise ValueError, "missing required option(s) %s" % ", ".join(
+    #         sorted(missing_options))
+    return options, filename
+
+
+options, filename = parse_command_line()
+xmldoc = utils.load_filename(filename,
+                             contenthandler=DefaultContentHandler,
+                             verbose=options.verbose)
+
+# Get ifos from XML document
+process_table = table.get_table(xmldoc, name='process')
+ifo_column = process_table.getColumnByName(name='ifos')
+ifos = ifo_column[0]
+ifos = ifos.split(',')
+#print(ifos)
+
+snr_series_elements_list = xmldoc.getElements(
+    lambda e: (e.tagName == 'LIGO_LW') and (e.hasAttribute('Name')) and
+    (e.Name == 'COMPLEX8TimeSeries'))
+snr_series_list = [
+    lalseries.parse_COMPLEX8TimeSeries(e) for e in snr_series_elements_list
+]
+start_time = min([s.epoch for s in snr_series_list])
+# print(start_time)
+# plt.figure(figsize=(10,12), dpi=80)
+fig, ax = plt.subplots(1, 1)
+
+for i, snr_series in enumerate(snr_series_list):
+    ifo = ifos[i]
+    # print(ifo)
+    zero_pad = 0
+    time = np.linspace(
+        float(snr_series.epoch) - zero_pad * snr_series.deltaT,
+        float(snr_series.epoch) +
+        (snr_series.data.length + zero_pad - 1) * snr_series.deltaT,
+        snr_series.data.length + zero_pad * 2)
+    # print(time)
+    snr = np.sqrt(snr_series.data.data.real**2 + snr_series.data.data.imag**2)
+    peaktime = time[snr.argmax()]
+    # print(peaktime,snr.max())
+
+    plt.plot(time - start_time,
+             snr,
+             color=colors.TABLEAU_COLORS.values()[i %
+                                                  len(colors.TABLEAU_COLORS)],
+             alpha=ALPHA,
+             label='%s SNR' % ifo)
+    plt.scatter(
+        peaktime - start_time,
+        snr.max(),
+        color=colors.TABLEAU_COLORS.values()[i % len(colors.TABLEAU_COLORS)],
+        label='%s max SNR %s at time %s ' % (ifo, snr.max(), peaktime))
+
+plt.grid()
+plt.ylabel('SNR')
+plt.xlabel('Time starts at ' + str(start_time))
+plt.legend(bbox_to_anchor=(0., 1.02, 1., .102),
+           loc='lower left',
+           ncol=1,
+           mode="expand",
+           borderaxespad=0.,
+           handletextpad=0.1)
+output_filename = '.'.join(filename.split('.')[:-1])
+fig.savefig(output_filename, bbox_inches='tight', dpi=120)
