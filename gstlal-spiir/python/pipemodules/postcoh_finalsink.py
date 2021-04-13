@@ -1192,6 +1192,8 @@ class CoincsDocFromPostcoh(object):
         self.assemble_coinc_map_table(trigger)
         self.assemble_time_slide_table(trigger)
 
+        postcoh_table.append(trigger)
+
         # Append snr_series data into XML document
         for iifo, ifo in enumerate(re.findall('..', trigger.ifos)):
             epoch_second = getattr(trigger,
