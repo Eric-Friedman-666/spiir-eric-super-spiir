@@ -70,10 +70,13 @@ import pdb
 
 # The following snippet is taken from http://gstreamer.freedesktop.org/wiki/FAQ#Mypygstprogramismysteriouslycoredumping.2Chowtofixthis.3F
 import pygtk
+
 pygtk.require("2.0")
 import gobject
+
 gobject.threads_init()
 import pygst
+
 pygst.require("0.10")
 import gst
 from gstlal import bottle
@@ -461,9 +464,8 @@ def parse_command_line():
         "--cuda-postcoh-parti-ifos",
         metavar="name",
         default="H1L1",
-        help="IFOs that will not be used in coherent search. E.g. V1K1"
-    )
- 
+        help="IFOs that will not be used in coherent search. E.g. V1K1")
+
     # gpu acceleartion support
     parser.add_option("--gpu-acc",
                       action="store_true",

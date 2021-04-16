@@ -1,0 +1,26 @@
+
+check pep8 standards:
+  image: python:2.7
+  before_script:
+    - /usr/local/bin/python -m pip install --upgrade pip
+    - pip install yapf
+
+  script:
+    - yapf --recursive --diff --style="pep8" gstlal-spiir
+  only:
+    - merge_requests
+
+check clang standards:
+  image: ubuntu
+  before_script:
+    - apt-get update && apt-get install -y clang-format-6.0 git-core
+  script:
+        - echo `which clang-format-6.0`
+        - ln -s `which clang-format-6.0` /usr/bin/clang-format
+        - cd gstlal-spiir
+        - linter_errors=$(git-clang-format-6.0 --commit "HEAD~1" -q --diff | grep -v --color=never "no modified files to format" || true)
+        - echo "$linter_errors"
+        - if [ ! -z "$linter_errors" ]; then echo "Detected clang formatting issues; please fix"; exit 1; else echo "Clang formatting is correct"; exit 0; fi
+  only:
+    - merge_requests
+

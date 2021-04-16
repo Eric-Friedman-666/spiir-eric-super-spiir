@@ -114,6 +114,7 @@ parser = OptionParser(description=__doc__,
 opts, args = parser.parse_args()
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger('Postcoh_skymap')
 

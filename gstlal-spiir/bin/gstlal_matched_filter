@@ -22,6 +22,7 @@ from gstlal.spiirbank.cbc_template_iir import matched_filt
 import pdb
 
 import matplotlib
+
 matplotlib.use('Agg')
 from matplotlib import pyplot
 

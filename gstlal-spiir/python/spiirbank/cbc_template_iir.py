@@ -57,7 +57,8 @@ class XMLContentHandler(ligolw.LIGOLWContentHandler):
 ValidApproximantsFD = set(("SpinTaylorT4", "SEOBNRv4_ROM"))
 
 # copied from gstlal-inspiral/ templates.py
-gstlal_IMR_approximants = set(('EOBNRv2', 'IMRPhenomC', 'SEOBNRv4_ROM', 'SEOBNRv2_ROM_DoubleSpin'))
+gstlal_IMR_approximants = set(
+    ('EOBNRv2', 'IMRPhenomC', 'SEOBNRv4_ROM', 'SEOBNRv2_ROM_DoubleSpin'))
 
 
 def condition_imr_template(approximant, data, epoch_time, sample_rate_max,
@@ -1079,25 +1080,29 @@ class Bank(object):
                 # get the padded length, so SPIIR approximated waveform u_rev_pad
                 # the original cut template h_pad, and the original one will be
                 # padded to the same length
-                pad_length = ceil_pow_2(len(data_full) + autocorrelation_length)
+                pad_length = ceil_pow_2(
+                    len(data_full) + autocorrelation_length)
                 nround = 1
 
                 # Collate various requirements
                 spiir_match_min = max(initial_overlap_min,
-                                      b0_optimized_overlap_min, final_overlap_min)
-                n_filters_min = max(filters_min,
-                                    filters_per_loglen_min * numpy.log2(len(data)))
+                                      b0_optimized_overlap_min,
+                                      final_overlap_min)
+                n_filters_min = max(
+                    filters_min,
+                    filters_per_loglen_min * numpy.log2(len(data)))
                 n_filters_max = None
                 if filters_per_loglen_max is not None:
-                    n_filters_max = filters_per_loglen_max * numpy.log2(len(data))
+                    n_filters_max = filters_per_loglen_max * numpy.log2(
+                        len(data))
                     if filters_max is not None:
                         n_filters_max = min(filters_max, n_filters_max)
                 else:
                     n_filters_max = filters_max
                 if verbose:
                     logging.info(
-                        "spiir_match_min %s, n_filters_min %s, n_filters_max %s" %
-                        (spiir_match_min, n_filters_min, n_filters_max))
+                        "spiir_match_min %s, n_filters_min %s, n_filters_max %s"
+                        % (spiir_match_min, n_filters_min, n_filters_max))
 
                 if remote_log:
                     remote_log_df.loc[tmp, 'spiir_match_min'] = spiir_match_min
@@ -1114,7 +1119,8 @@ class Bank(object):
                 h_pad_comp[:len(h_pad)] = h_pad
                 h_pad_fft = numpy.fft.fft(h_pad_comp) / fs
 
-                this_sigmasq = abs((h_pad_fft * h_pad_fft.conjugate()).sum() * df)
+                this_sigmasq = abs(
+                    (h_pad_fft * h_pad_fft.conjugate()).sum() * df)
 
                 # normalize the cut waveform so its inner-product is 2
                 norm_h = abs(numpy.dot(h_pad, numpy.conj(h_pad)))
@@ -1144,13 +1150,11 @@ class Bank(object):
 
                     n_filters = len(delay)
                     if verbose:
-                        logging.info("number of rounds %d, epsilon_a %s, epsilon %f, epsilon_b %s, spiir overlap with"
-                                     " template %f, number of filters %d" % (nround,
-                                                                             epsilon_a,
-                                                                             epsilon,
-                                                                             epsilon_b,
-                                                                             spiir_match,
-                                                                             n_filters))
+                        logging.info(
+                            "number of rounds %d, epsilon_a %s, epsilon %f, epsilon_b %s, spiir overlap with"
+                            " template %f, number of filters %d" %
+                            (nround, epsilon_a, epsilon, epsilon_b,
+                             spiir_match, n_filters))
 
                     if remote_log:
                         remote_log_df.loc[tmp, 'nround'] = nround
@@ -1218,11 +1222,13 @@ class Bank(object):
                             epsilon = numpy.sqrt(epsilon_b *
                                                  epsilon)  # geometric mean
                         elif epsilon_max > 0 and epsilon < epsilon_max:
-                            epsilon = min(epsilon * epsilon_factor, epsilon_max)
+                            epsilon = min(epsilon * epsilon_factor,
+                                          epsilon_max)
                         elif epsilon_max > 0:
                             if verbose:
                                 logging.info(
-                                    "failed to meet requirements (epsilon_max)")
+                                    "failed to meet requirements (epsilon_max)"
+                                )
                             break
                         else:
                             epsilon = epsilon * epsilon_factor
@@ -1232,11 +1238,13 @@ class Bank(object):
                             epsilon = numpy.sqrt(epsilon_a *
                                                  epsilon)  # geometric mean
                         elif epsilon > epsilon_min:
-                            epsilon = max(epsilon / epsilon_factor, epsilon_min)
+                            epsilon = max(epsilon / epsilon_factor,
+                                          epsilon_min)
                         else:
                             if verbose:
                                 logging.info(
-                                    "failed to meet requirements (epsilon_min)")
+                                    "failed to meet requirements (epsilon_min)"
+                                )
                             break
                     else:
                         break
@@ -1276,7 +1284,8 @@ class Bank(object):
                 h_full_pad = pad_data(data_full, pad_length)
 
                 # normalize the cut waveform so its inner-product is 2
-                norm_h_full = abs(numpy.dot(h_full_pad, numpy.conj(h_full_pad)))
+                norm_h_full = abs(numpy.dot(h_full_pad,
+                                            numpy.conj(h_full_pad)))
                 h_full_pad *= cmath.sqrt(2 / norm_h)
 
                 self.autocorrelation_bank[tmp, :] = \
@@ -1297,30 +1306,35 @@ class Bank(object):
                            epsilon_start, original_filters, original_match))
 
                 if remote_log:
-                    remote_log_df.loc[tmp, 'len_sngl_inspiral_table'] = len(self.sngl_inspiral_table)
+                    remote_log_df.loc[tmp, 'len_sngl_inspiral_table'] = len(
+                        self.sngl_inspiral_table)
                     remote_log_df.loc[tmp, 'mass1'] = row.mass1
                     remote_log_df.loc[tmp, 'mass2'] = row.mass2
                     remote_log_df.loc[tmp, 'epsilon'] = epsilon
                     remote_log_df.loc[tmp, 'n_filters'] = n_filters
                     remote_log_df.loc[tmp, 'spiir_match'] = spiir_match
                     remote_log_df.loc[tmp, 'epsilon_start'] = epsilon_start
-                    remote_log_df.loc[tmp, 'original_filters'] = original_filters
+                    remote_log_df.loc[tmp,
+                                      'original_filters'] = original_filters
                     remote_log_df.loc[tmp, 'original_match'] = original_match
 
                 # get the filter frequencies
-                fs = -1. * numpy.angle(a1) / 2 / numpy.pi  # Normalised freqeuncy
+                fs = -1. * numpy.angle(
+                    a1) / 2 / numpy.pi  # Normalised freqeuncy
                 a1dict = {}
                 b0dict = {}
                 delaydict = {}
 
                 if downsample:
                     min_M = 1
-                    max_M = int(2**numpy.floor(numpy.log2(sampleRate / flower)))
+                    max_M = int(2**numpy.floor(numpy.log2(sampleRate /
+                                                          flower)))
                     # iterate over the frequencies and put them in the right downsampled bin
                     for i, f in enumerate(fs):
                         M = int(
-                            max(min_M, 2**-numpy.ceil(numpy.log2(
-                                f * 2.0 * padding))))  # Decimation factor
+                            max(min_M,
+                                2**-numpy.ceil(numpy.log2(
+                                    f * 2.0 * padding))))  # Decimation factor
                         M = max(min_M, M)
 
                         if M > max_M:
@@ -1330,7 +1344,8 @@ class Bank(object):
                         newdelay = numpy.ceil((delay[i] + 1) / (float(M)))
                         b0dict.setdefault(sampleRate / M, []).append(
                             b0[i] * M**0.5 * a1[i]**(newdelay * M - delay[i]))
-                        delaydict.setdefault(sampleRate / M, []).append(newdelay)
+                        delaydict.setdefault(sampleRate / M,
+                                             []).append(newdelay)
                     #logging.info("sampleRate %4.0d, filter %3.0d, M %2.0d, f %10.9f, delay %d, newdelay %d" %
                     # (sampleRate, i, M, f, delay[i], newdelay))
                 else:
@@ -1385,7 +1400,6 @@ class Bank(object):
                                  if_exists='append',
                                  index=False)
             del remote_log_df
-
 
     def downsample_bank(self, flower=15, padding=1.3, verbose=True):
         Amat = {}
@@ -1672,5 +1686,3 @@ def get_maxrate_from_xml(filename,
         ]
 
     return max(sample_rates)
-
-

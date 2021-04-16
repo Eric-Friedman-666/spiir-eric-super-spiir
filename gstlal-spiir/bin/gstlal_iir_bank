@@ -42,6 +42,7 @@ from optparse import OptionParser
 from glue.ligolw import ligolw
 from glue.ligolw import array
 from glue.ligolw import param
+
 array.use_in(ligolw.LIGOLWContentHandler)
 param.use_in(ligolw.LIGOLWContentHandler)
 

@@ -19,6 +19,7 @@ except IndexError:
 
 # The following snippet is taken from http://gstreamer.freedesktop.org/wiki/FAQ#Mypygstprogramismysteriouslycoredumping.2Chowtofixthis.3F
 import pygtk
+
 pygtk.require("2.0")
 import gobject
 try:
@@ -112,11 +113,12 @@ def mkcudamultiratespiir(pipeline,
                                **properties)
     return elem
 
-def mktrigger_jointer(pipeline,
-		head):
+
+def mktrigger_jointer(pipeline, head):
     elem = gst.element_factory_make("trigger_jointer")
     pipeline.add(elem)
     return elem
+
 
 def mkcudapostcoh(pipeline,
                   snr,

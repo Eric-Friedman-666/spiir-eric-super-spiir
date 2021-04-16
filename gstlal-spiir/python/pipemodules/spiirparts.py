@@ -26,10 +26,13 @@
 
 # The following snippet is taken from http://gstreamer.freedesktop.org/wiki/FAQ#Mypygstprogramismysteriouslycoredumping.2Chowtofixthis.3F
 import pygtk
+
 pygtk.require("2.0")
 import gobject
+
 gobject.threads_init()
 import pygst
+
 pygst.require('0.10')
 import gst
 
@@ -669,7 +672,6 @@ def mkPostcohSPIIROnline(pipeline,
                 snr = pipeparts.mkprogressreport(
                     pipeline, snr, "progress_done_gpu_filtering_%s" % suffix)
 
-
             if nxydump_segment is not None:
                 snr = pipeparts.mktee(pipeline, snr)
                 pipeparts.mknxydumpsink(
@@ -701,17 +703,17 @@ def mkPostcohSPIIROnline(pipeline,
                 else:
                     snr.link_pads(None, postcoh, instrument)
             else:
-                # 
-                # create the jointer plugin and attach this SNR plugin to the jointer 
+                #
+                # create the jointer plugin and attach this SNR plugin to the jointer
                 # the postcoh plugin will be linked to the jointer later
                 #
                 if not is_jointer_created:
                     if verbose:
-                        print("creating jointer and attach %s SNR series to this jointer" % instrument)
-                    this_name = "snr_%s" % instrument 
-                    jointer = pipemodules.mktrigger_jointer(
-                        pipeline,
-                        snr)
+                        print(
+                            "creating jointer and attach %s SNR series to this jointer"
+                            % instrument)
+                    this_name = "snr_%s" % instrument
+                    jointer = pipemodules.mktrigger_jointer(pipeline, snr)
                     is_jointer_created = True
                 snr.link_pads(None, jointer, this_name)
 
@@ -756,6 +758,7 @@ def mkPostcohSPIIROnline(pipeline,
 
         triggersrcs.append(postcoh)
     return triggersrcs
+
 
 #
 # the assembly of a pipeline that will process archived data

@@ -21,14 +21,17 @@ import bisect
 import cgi
 import cgitb
 import os
+
 os.environ["MPLCONFIGDIR"] = "/tmp"
 import sys
 import matplotlib
+
 matplotlib.use('Agg')
 from matplotlib import figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib.pyplot as plt
 import numpy
+
 cgitb.enable()
 form = cgi.FieldStorage()
 import lal

@@ -73,6 +73,7 @@ def ncx2pdf(x, k, l):
 import re
 from glue.ligolw import ligolw, lsctables, array, param, utils, types
 from gstlal.pipemodules import pipe_macro
+
 Attributes = ligolw.sax.xmlreader.AttributesImpl
 
 
