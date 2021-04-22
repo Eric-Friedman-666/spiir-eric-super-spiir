@@ -57,7 +57,6 @@ from glue.ligolw import lsctables
 from glue.ligolw import array as ligolw_array
 from glue.ligolw import param as ligolw_param
 from glue.ligolw import utils as ligolw_utils
-from glue.ligolw import param as ligolw_param
 
 from glue.ligolw.utils import ligolw_sqlite
 from glue.ligolw.utils import ligolw_add
@@ -79,7 +78,7 @@ lsctables.LIGOTimeGPS = LIGOTimeGPS
 #
 # =============================================================================
 #
-#						 glue.ligolw Content Handlers
+#                         glue.ligolw Content Handlers
 #
 # =============================================================================
 #
@@ -637,12 +636,10 @@ class FinalSink(object):
                     self.nevent_clustered += 1
                     self.__set_far(self.candidate)
 
-                    # NOTE:I have comment this line for testing
-                    #      Plese uncomment it when the testing is done.
-                    # if self.gracedb_far_threshold and self.__pass_test(
-                    #         self.candidate):
+                     if self.gracedb_far_threshold and self.__pass_test(
+                             self.candidate):
+                        self.__do_gracedb_alert(self.candidate)
 
-                    self.__do_gracedb_alert(self.candidate)
                     self.candidate.delete_all_snr_series()
                     self.postcoh_table.append(self.candidate)
 
@@ -752,13 +749,13 @@ class FinalSink(object):
     # def __lookback_far(self, candidate):
     # FIXME: hard-code to check event that's < 5e-7
     # if candidate.far > 5e-7:
-    #	 return
+    #     return
     # else:
-    #	 count_events = sum((lookback_event.far < 1e-4) for lookback_event in self.lookback_event_table)
-    #	 if count_events > 1:
-    #		 # FAR estimation is not valide for this period, increase the FAR
-    #		 # FIXME: should derive FAR from count_events
-    #		  candidate.far = 9.99e-6
+    #     count_events = sum((lookback_event.far < 1e-4) for lookback_event in self.lookback_event_table)
+    #     if count_events > 1:
+    #         # FAR estimation is not valide for this period, increase the FAR
+    #         # FIXME: should derive FAR from count_events
+    #          candidate.far = 9.99e-6
 
     # all_snr_H = self.lookback_event_table.getColumnByName('snglsnr_H')
     # all_snr_L = self.lookback_event_table.getColumnByName('snglsnr_L')
@@ -770,7 +767,7 @@ class FinalSink(object):
     # count_better_L = sum((snr > candidate.snglsnr_L && chisq < candidate.chisq_L) for (snr, chisq) in zip(all_snr_L, allchisq_L))
     # count_better_V = sum((snr > candidate.snglsnr_V && chisq < candidate.chisq_V) for (snr, chisq) in zip(all_snr_V, allchisq_V))
     # if count_better_H > 0 or count_better_L > 0 or count_better_V > 0:
-    #	 candidate.far = 9.99e-6
+    #     candidate.far = 9.99e-6
 
     def __need_trigger_control(self, trigger):
         # do trigger control
@@ -1194,30 +1191,6 @@ class CoincsDocFromPostcoh(object):
 
         postcoh_table.append(trigger)
 
-        # Append snr_series data into XML document
-        for iifo, ifo in enumerate(re.findall('..', trigger.ifos)):
-            epoch_second = getattr(trigger,
-                                   "snr_series_epoch_gpsSeconds_" + ifo)
-            epoch_nanoSeconds = getattr(
-                trigger, "snr_series_epoch_gpsNanoSeconds_" + ifo)
-            epoch = LIGOTimeGPS(epoch_second, epoch_nanoSeconds)
-            snr_time_series = lal.CreateCOMPLEX8TimeSeries(
-                name=getattr(trigger, "snr_series_name_" + ifo),
-                epoch=epoch,
-                f0=getattr(trigger, "snr_series_f0_" + ifo),
-                deltaT=getattr(trigger, "snr_series_deltaT_" + ifo),
-                sampleUnits=getattr(trigger, "snr_series_sampleUnits_" + ifo),
-                length=getattr(trigger, "snr_series_data_length_" + ifo))
-            snr_time_series.data.data = getattr(
-                trigger, "snr_series_data_" + ifo)
-            snr_time_series_element = lal.series.build_COMPLEX8TimeSeries(
-                snr_time_series)
-            # Add event_id into the snr_time_series_element
-            snr_time_series_element.appendChild(
-                ligolw_param.Param.from_pyvalue(
-                    u"event_id", "sngl_inspiral:event_id:%d" % iifo))
-            self.xmldoc.childNodes[-1].appendChild(snr_time_series_element)
-
     def assemble_coinc_map_table(self, trigger):
 
         coinc_map_table = lsctables.CoincMapTable.get_table(self.xmldoc)
@@ -1267,8 +1240,7 @@ class CoincsDocFromPostcoh(object):
                 pass
 
         # FIXME: hard-coded ifo len == 2
-        iifo = 0
-        for ifo in re.findall('..', trigger.ifos):
+        for iifo, ifo in enumerate(re.findall('..', trigger.ifos)):
             row = sngl_inspiral_table.RowType()
             # Setting the individual row
             row.process_id = self.process.process_id
@@ -1336,7 +1308,29 @@ class CoincsDocFromPostcoh(object):
             row.spin2z = trigger.spin2z
             row.event_id = "sngl_inspiral:event_id:%d" % iifo
             sngl_inspiral_table.append(row)
-            iifo += 1
+
+            # Append snr_series data into XML document
+            epoch_second = getattr(trigger,
+                                   "snr_series_epoch_gpsSeconds_" + ifo)
+            epoch_nanoSeconds = getattr(
+                trigger, "snr_series_epoch_gpsNanoSeconds_" + ifo)
+            epoch = LIGOTimeGPS(epoch_second, epoch_nanoSeconds)
+            snr_time_series = lal.CreateCOMPLEX8TimeSeries(
+                name=getattr(trigger, "snr_series_name_" + ifo),
+                epoch=epoch,
+                f0=getattr(trigger, "snr_series_f0_" + ifo),
+                deltaT=getattr(trigger, "snr_series_deltaT_" + ifo),
+                sampleUnits=getattr(trigger, "snr_series_sampleUnits_" + ifo),
+                length=getattr(trigger, "snr_series_data_length_" + ifo))
+            snr_time_series.data.data = getattr(
+                trigger, "snr_series_data_" + ifo)
+            snr_time_series_element = lal.series.build_COMPLEX8TimeSeries(
+                snr_time_series)
+            # Add event_id into the snr_time_series_element
+            snr_time_series_element.appendChild(
+                ligolw_param.Param.build(
+                    u"event_id", u"ilwd:char", row.event_id))
+            self.xmldoc.childNodes[-1].appendChild(snr_time_series_element)
 
 
 def call_plot_fits_func(pngname,
