@@ -733,6 +733,8 @@ class FinalSink(object):
             for fars in zip(candidate.far_2h_sngl, candidate.far_1d_sngl,
                             candidate.far_1w_sngl)
         ]
+        for i, ifo in enumerate(pipe_macro.IFO_MAP):
+            setattr(candidate, "far_sngl_%s" % ifo, candidate.far_sngl[i])
 
     # def __lookback_far(self, candidate):
     # FIXME: hard-code to check event that's < 5e-7
