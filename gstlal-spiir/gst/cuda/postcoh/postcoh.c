@@ -1137,12 +1137,34 @@ static int cuda_postcoh_select_background(PeakList *pklist,
                                           int hist_trials,
                                           int max_npeak,
                                           float cohsnr_thresh) {
-    int ipeak, npeak, peak_cur, itrial, background_cur, left_backgrounds = 0;
+    int ipeak, npeak, peak_cur, itrial, background_cur, removed_bg, left_backgrounds = 0;
+    removed_bg = 0;
     npeak = pklist->npeak[0];
+    //printf("npeak: %d, max_npeak:%d\n", npeak, max_npeak);
     for (ipeak = 0; ipeak < npeak; ipeak++) {
         peak_cur = pklist->peak_pos[ipeak];
+        //printf("is a signal?: snr_h: %f chisq_h: %f \n snr_l: %f chisq_l: %f, peak_cur: %d, check ifo: %d \n", pklist->snglsnr[0][peak_cur], pklist->chisq[0][peak_cur],
+        //        pklist->snglsnr[1][peak_cur], pklist->chisq[1][peak_cur], peak_cur, write_ifo);
+    //if (pklist->snglsnr[0][peak_cur] > 5 && pklist->snglsnr[1][peak_cur] > 5 &&
+    //      pklist->chisq[0][peak_cur] < 3 && pklist->chisq[1][peak_cur] < 3) {
+	if (sqrt(pklist->cohsnr[peak_cur])>8){
+	printf("removed background: snr_h: %f chisq_h: %f \n snr_l: %f chisq_l: %f, check ifo: %d cohsnr: %f cohsnr_bg: %f \n", pklist->snglsnr[0][peak_cur], pklist->chisq[0][peak_cur],
+                pklist->snglsnr[1][peak_cur], pklist->chisq[1][peak_cur], write_ifo, pklist->cohsnr[peak_cur], pklist->cohsnr_bg[peak_cur]);
+        printf("check backgrounds: fg H: %f bg H: %f \n ",pklist->snglsnr[0][peak_cur], pklist->snglsnr_bg[0][peak_cur]);
+	//if the peak fits the 'signal' critera, mark bg as invalid:
+        printf("marking bg as invalid: %f\n", pklist->cohsnr_bg[peak_cur]);
+        for (itrial=0; itrial<hist_trials; itrial++){
+		background_cur = itrial * max_npeak + peak_cur;
+		//printf("cohsnr_bg: %f \n", pklist->cohsnr_bg[background_cur]);
+		pklist->cohsnr_bg[background_cur] = -1;
+	}
+        removed_bg++;
+      	printf("in remove loop, removed bgs now %d\n", removed_bg);
+	}
+    else {
         for (itrial = 1; itrial <= hist_trials; itrial++) {
             background_cur = (itrial - 1) * max_npeak + peak_cur;
+	    //printf("bg_cur: %d, value: %f\n", background_cur, sqrt(pklist->cohsnr_bg[background_cur]));
             // FIXME: consider a different threshold for 3-detector
             //			if (sqrt(pklist->cohsnr_bg[background_cur]) >
             // cohsnr_thresh
@@ -1153,6 +1175,9 @@ static int cuda_postcoh_select_background(PeakList *pklist,
                 GST_LOG("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
                         ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
                         pklist->snglsnr[write_ifo][peak_cur]);
+		printf("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
+                        ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
+                        pklist->snglsnr[write_ifo][peak_cur]);
             } else {
                 GST_LOG(
                   "no mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
@@ -1161,6 +1186,7 @@ static int cuda_postcoh_select_background(PeakList *pklist,
                 pklist->cohsnr_bg[background_cur] = -1;
             }
         }
+	}
     }
     return left_backgrounds;
 }
@@ -1192,12 +1218,11 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
             left_entries += cuda_postcoh_select_background(
               pklist, state->write_ifo_mapping[iifo], state->hist_trials,
               state->max_npeak, cohsnr_thresh);
-
+	printf("left_entries from select_bg: %d\n", left_entries);
         /*
          * mark the rest of peak positions to be -1 to identify invalid
          * background
          */
-
         for (ipeak = 0; ipeak < state->max_npeak; ipeak++)
             cluster_peak_pos[ipeak] = -1;
         memcpy(cluster_peak_pos, peak_pos, sizeof(int) * npeak);
@@ -1408,12 +1433,19 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
         /* NOTE: here needs to be max_npeak for bg, npeak for zerolag. */
         for (ipeak = 0; ipeak < state->max_npeak; ipeak++) {
+	    // also signal condition here?
+	    //peak_cur = peak_pos[ipeak];
+            //len_cur  = pklist->len_idx[peak_cur];
+	    //if (pklist->snglsnr[0][peak_cur] > 5 && pklist->snglsnr[1][peak_cur] > 5 &&
+            //pklist->chisq[0][peak_cur] < 3 && pklist->chisq[1][peak_cur] < 3) {
+	    //printf("removed bg in postcoh table to buf");
+	//} 
+	//else 
             for (itrial = 1; itrial <= hist_trials; itrial++) {
                 peak_cur = peak_pos[ipeak];
                 len_cur  = pklist->len_idx[peak_cur];
                 /* check if cohsnr pass the valid test */
                 peak_cur_bg = (itrial - 1) * max_npeak + peak_cur;
-
                 if (peak_cur >= 0 && pklist->cohsnr_bg[peak_cur_bg] > 0) {
                     // output->end_time = end_time[ipeak];
                     output->is_background = FLAG_BACKGROUND;
@@ -1464,7 +1496,8 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                     write_entries++;
                 }
             }
-        }
+ //       }
+	}
 
         GST_LOG_OBJECT(postcoh,
                        "write to output, ifo %d, npeak %d, %d total entries",
@@ -1517,9 +1550,10 @@ static GstFlowReturn cuda_postcoh_new_buffer_and_push(CudaPostcoh *postcoh,
     int write_entries = 0;
     if (left_entries >= 1)
         write_entries = cuda_postcoh_write_table_to_buf(postcoh, outbuf);
-
+    printf("left_entries to add: %d\n", left_entries);
+    printf("write_entries after write_table_to_buf: %d\n", write_entries);
     /* make sure output entries equals estimation */
-    g_assert(write_entries == left_entries);
+    //g_assert(write_entries == left_entries);
 
     GST_LOG_OBJECT(srcpad,
                    "Processed of (%d entries) with timestamp %" GST_TIME_FORMAT
