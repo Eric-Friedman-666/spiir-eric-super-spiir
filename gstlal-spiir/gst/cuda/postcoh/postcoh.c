@@ -1147,7 +1147,7 @@ static int cuda_postcoh_select_background(PeakList *pklist,
         //        pklist->snglsnr[1][peak_cur], pklist->chisq[1][peak_cur], peak_cur, write_ifo);
     //if (pklist->snglsnr[0][peak_cur] > 5 && pklist->snglsnr[1][peak_cur] > 5 &&
     //      pklist->chisq[0][peak_cur] < 3 && pklist->chisq[1][peak_cur] < 3) {
-	if (sqrt(pklist->cohsnr[peak_cur])>8){
+	if (sqrt(pklist->cohsnr[peak_cur])>8 && pklist->chisq[0][peak_cur] < 3 && pklist->chisq[1][peak_cur] < 3){
 	printf("removed background: snr_h: %f chisq_h: %f \n snr_l: %f chisq_l: %f, check ifo: %d cohsnr: %f cohsnr_bg: %f \n", pklist->snglsnr[0][peak_cur], pklist->chisq[0][peak_cur],
                 pklist->snglsnr[1][peak_cur], pklist->chisq[1][peak_cur], write_ifo, pklist->cohsnr[peak_cur], pklist->cohsnr_bg[peak_cur]);
         printf("check backgrounds: fg H: %f bg H: %f \n ",pklist->snglsnr[0][peak_cur], pklist->snglsnr_bg[0][peak_cur]);
