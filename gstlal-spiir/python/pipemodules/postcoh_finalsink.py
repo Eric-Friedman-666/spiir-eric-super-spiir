@@ -451,6 +451,7 @@ class FinalSink(object):
 			return sum([i for (i,v) in zip(ifo_fars_ok,ifo_active) if v])>=2 and all((lambda x: [i1/i2 < self.chisq_ratio_thresh for i1 in x for i2 in x])([i for (i,v) in zip(ifo_chisqs,ifo_active) if v]))
 
 
+	# TODO: Refactor/rewrite appsink_new_buffer() and cluster()
 	def appsink_new_buffer(self, elem):
 		with self.lock:
 			buf = elem.emit("pull-buffer")
@@ -486,23 +487,19 @@ class FinalSink(object):
 				self.t_start = buf_timestamp
 				self.is_first_buf = False
 
-			headevent_endtime = buf_timestamp + self.negative_latency
+			# The maximum (upper) bound of any cluster we are willing to process
+			# We assume we have all buffers from before the start of this buffer
+			# Event end times are offset by negative latency if running early warning
+			max_cluster_boundary = buf_timestamp + self.negative_latency
 			if self.is_first_event and nevent > 0:
-				self.cluster_boundary = headevent_endtime + self.cluster_window
+				self.cluster_boundary = max_cluster_boundary + self.cluster_window
 				self.is_first_event = False
-
-			# extend newevents to cur_event_table
-			self.cur_event_table.extend(newevents)
-
-			if self.cluster_window == 0:
-				self.postcoh_table.extend(newevents)
-				del self.cur_event_table[:]
 
 			# NOTE: only consider clustered trigger for uploading to gracedb 
 			# check if the newevents is over boundary
-			# this loop will exit when the cluster_boundary is incremented to be > the headevent_endtime, see diagram in self.cluster()
+			# this loop will exit when the cluster_boundary is incremented to be > the max_cluster_boundary, see diagram in self.cluster()
 
-			while self.cluster_window > 0 and self.cluster_boundary and headevent_endtime > self.cluster_boundary:
+			while self.cluster_window > 0 and self.cluster_boundary and max_cluster_boundary > self.cluster_boundary:
 				self.cluster(self.cluster_window)
 
 				if self.need_candidate_check:
@@ -515,6 +512,15 @@ class FinalSink(object):
 						self.onperformer.update_eye_candy(self.candidate)
 					self.candidate = None
 					self.need_candidate_check = False
+
+			# extend newevents to cur_event_table
+			# Has to be done after processing pre-existing events, because this
+			# buffer may contain events with end time before the buffer start
+			self.cur_event_table.extend(newevents)
+
+			if self.cluster_window == 0:
+				self.postcoh_table.extend(newevents)
+				del self.cur_event_table[:]
 
 			# dump zerolag candidates when interval is reached
 			self.snapshot_duration = buf_timestamp - self.t_snapshot_start
@@ -533,67 +539,53 @@ class FinalSink(object):
 				self.fapupdater.update_fap_stats(buf_timestamp)
 				self.t_fapupdater_start = buf_timestamp
 
-
-	def __select_head_event(self):
-		# last event should have the smallest timestamp
-		#assert len(self.cur_event_table) != 0
-		if len(self.cur_event_table) == 0:
-			return None
-
-		head_event = self.cur_event_table[0]
-		for row in self.cur_event_table:
-			if row.end < head_event.end:
-				head_event = row	
-		return head_event
-
 	def cluster(self, cluster_window):
 		# send candidate to be gracedb checked only when:
 		# timestamp small ->->->-> large
-		#                     |headevent_endtime
+		#                     |max_cluster_boundary
 		#          ___________(cur_table)
 		#                |boundary
 		#           |candidate to be gracedb checked = end time of the peak of cur_table < boundary
 		#                  |candidate remain = end time of the peak of cur_table > boundary
 		# afterwards:
-		#                     |headevent_endtime
+		#                     |max_cluster_boundary
 		#                 ____(cur_table cleaned)
 		#                           |boundary incremented
 
-		# always choose the head event to test its end against boundary
-		if self.candidate is None:
-			self.candidate = self.__select_head_event()
+		# This may be a rare source of nondeterminism, as we may consider different events equal
+		def is_better_event(lhs, rhs):
+			# If both end and cohsnr are equal, lhs is not considered better (because it is the same)
+			if rhs is None: return True
+			if lhs.cohsnr == rhs.cohsnr:
+				return lhs.end < rhs.end
+			return lhs.cohsnr > rhs.cohsnr
 
-		# make sure the candidate is within the boundary
-		if self.candidate is None or self.candidate.end > self.cluster_boundary:
-			self.cluster_boundary = self.cluster_boundary + cluster_window
-			self.candidate = None # so we can reselect a candidate next time
-			return
-		# the first event in cur_event_table
-		# FIXME: SPEEDUP
-		peak_event = self.__select_head_event()
+		peak_event = None
 		# find the max cohsnr event within the boundary of cur_event_table
 		# FIXME: SPEEDUP
-		for row in self.cur_event_table:
-			if row.end <= self.cluster_boundary and row.cohsnr > peak_event.cohsnr:
+		for row in filter(lambda row: row.end <= self.cluster_boundary, self.cur_event_table):
+			if peak_event is None or is_better_event(row, peak_event):
 				peak_event = row
 
 		# cur_table is empty and we do have a candidate, so need to check the candidate
 		if peak_event is None:
 			# no event within the boundary, candidate is the peak, update boundary
 			self.cluster_boundary = self.cluster_boundary + cluster_window
-			self.need_candidate_check = True
+			self.need_candidate_check = self.candidate is not None
 			return
 
-		if peak_event.end <= self.cluster_boundary and peak_event.cohsnr > self.candidate.cohsnr:
+		if is_better_event(peak_event, self.candidate):
 			# if peak_event.cohsnr > candidate.cohsnr, slide window so the centre 
 			# becomes the peak_event
 			self.candidate = peak_event
 			iterutils.inplace_filter(lambda row: row.end > self.cluster_boundary, self.cur_event_table)
 			# update boundary
+			# Note: cluster boundary does not necessarily align with buffer boundary
 			self.cluster_boundary = self.candidate.end + cluster_window
 			self.need_candidate_check = False
-		else: 
-			# if peak_event.cohsnr < candidate.cohsnr, pop out candidate for gracedb uploading
+		else:
+			# FIXME: This seems to assume buffer length >= cluster_window
+			# if peak_event.cohsnr <= candidate.cohsnr, pop out candidate for gracedb uploading
 			iterutils.inplace_filter(lambda row: row.end > self.cluster_boundary, self.cur_event_table)
 			# update boundary
 			self.cluster_boundary = self.cluster_boundary + cluster_window
