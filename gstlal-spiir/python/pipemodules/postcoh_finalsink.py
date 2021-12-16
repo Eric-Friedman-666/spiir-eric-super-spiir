@@ -555,7 +555,6 @@ class FinalSink(object):
 		# This may be a rare source of nondeterminism, as we may consider different events equal
 		def is_better_event(lhs, rhs):
 			# If both end and cohsnr are equal, lhs is not considered better (because it is the same)
-			if rhs is None: return True
 			if lhs.cohsnr == rhs.cohsnr:
 				return lhs.end < rhs.end
 			return lhs.cohsnr > rhs.cohsnr
@@ -574,8 +573,8 @@ class FinalSink(object):
 			self.need_candidate_check = self.candidate is not None
 			return
 
-		if is_better_event(peak_event, self.candidate):
-			# if peak_event.cohsnr > candidate.cohsnr, slide window so the centre 
+		if self.candidate is None or is_better_event(peak_event, self.candidate):
+			# slide window so the centre 
 			# becomes the peak_event
 			self.candidate = peak_event
 			iterutils.inplace_filter(lambda row: row.end > self.cluster_boundary, self.cur_event_table)
@@ -585,7 +584,7 @@ class FinalSink(object):
 			self.need_candidate_check = False
 		else:
 			# FIXME: This seems to assume buffer length >= cluster_window
-			# if peak_event.cohsnr <= candidate.cohsnr, pop out candidate for gracedb uploading
+			# pop out candidate for gracedb uploading
 			iterutils.inplace_filter(lambda row: row.end > self.cluster_boundary, self.cur_event_table)
 			# update boundary
 			self.cluster_boundary = self.cluster_boundary + cluster_window
