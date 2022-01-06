@@ -310,11 +310,11 @@ static int make_workspace(GSTLALWhiten *element)
 	}
 
 	/*
-	 * build FFT plans
+	 * build FFT plans using an FFTW measure level of 0 (FFTW_ESTIMATE) to ensure deterministic behaviour
 	 */
 
-	fwdplan = XLALCreateForwardREAL8FFTPlan(fft_length(element), 1);
-	revplan = XLALCreateReverseREAL8FFTPlan(fft_length(element), 1);
+	fwdplan = XLALCreateForwardREAL8FFTPlan(fft_length(element), 0);
+	revplan = XLALCreateReverseREAL8FFTPlan(fft_length(element), 0);
 	if(!fwdplan || !revplan) {
 		GST_ERROR_OBJECT(element, "failure creating FFT plans: %s", XLALErrorString(XLALGetBaseErrno()));
 		goto error;

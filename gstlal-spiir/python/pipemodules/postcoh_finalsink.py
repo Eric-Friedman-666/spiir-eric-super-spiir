@@ -226,7 +226,7 @@ class FAPUpdater(object):
 			print >> sys.stderr, "remove files failed, rm_fnames %s" % ', '.join(self.rm_fnames)
 			return None
 
-		ls_fnames = os.listdir(str(self.path))
+		ls_fnames = sorted(os.listdir(str(self.path)))
 		grep_fnames = [fname for fname in ls_fnames if keyword in fname]
 		# remove file names that contain "next" which are temporary files
 		valid_fnames = [one_fname for one_fname in grep_fnames if not re.search("next", one_fname)]

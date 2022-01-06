@@ -199,7 +199,9 @@ __global__ void cuda_iir_filter_kernel_coarse
 	// There are numTemplate blocks launched, each block has at least numFilters threads,
 	// and block size is a multiple of WARPSIZE
 
+	// Compute which warp and which lane in that warp the thread is in
 	int tLane = threadIdx.x & (WARPSIZE - 1);
+	int tWarp = threadIdx.x >> LOGWARPSIZE;
 
 	float fltrOutptReal;
 	float fltrOutptImag;
@@ -208,6 +210,15 @@ __global__ void cuda_iir_filter_kernel_coarse
 
 	COMPLEX_F a1, b0;
 	COMPLEX_F previousSnr;
+
+	// Shared memory for partial reduction results
+	// Note this assumes that the number of warps is at most the warp size.
+	// This is (currently) a safe assumption as CUDA fixes the warp size at 32
+	// and number of threads per block at at most 1024 = 32^2. Otherwise we
+	// would have to do more than two warp reductions.
+	// See https://developer.nvidia.com/blog/faster-parallel-reductions-kepler/
+	static __shared__ float partialSumsReal[WARPSIZE];
+	static __shared__ float partialSumsImag[WARPSIZE];
 
 	a1.re = 0.0f;
 	a1.im = 0.0f;
@@ -249,9 +260,33 @@ __global__ void cuda_iir_filter_kernel_coarse
 
 		if (tLane == 0)
 		{
-			atomicAdd(cudaSnr + (2 * blockIdx.x + 0) * mem_len + filt_len - 1 + i, fltrOutptReal);
-			atomicAdd(cudaSnr + (2 * blockIdx.x + 1) * mem_len + filt_len - 1 + i, fltrOutptImag);
+			// Store the per-warp partial sum in shared memory
+			partialSumsReal[tWarp] = fltrOutptReal;
+			partialSumsImag[tWarp] = fltrOutptImag;
 		}
+
+		// Wait for all partial sums to be done
+		__syncthreads();
+
+		// Warp-reduce partial sums to get final sum
+		if (tWarp == 0) {
+			// Load each partial sum (if that warp existed) into a lane-local value in warp 0
+			float sum_real = (threadIdx.x < blockDim.x >> LOGWARPSIZE) ? partialSumsReal[tLane] : 0;
+			float sum_imag = (threadIdx.x < blockDim.x >> LOGWARPSIZE) ? partialSumsImag[tLane] : 0;
+
+			for (int off = WARPSIZE >> 1; off > 0; off = off >> 1) {
+				sum_real += __shfl_down(sum_real, off);
+				sum_imag += __shfl_down(sum_imag, off);
+			}
+
+			if (threadIdx.x == 0) {
+				cudaSnr[(2 * blockIdx.x + 0) * mem_len + filt_len - 1 + i] = sum_real;
+				cudaSnr[(2 * blockIdx.x + 1) * mem_len + filt_len - 1 + i] = sum_imag;
+			}
+		}
+
+		// Don't let other threads mutate shared memory until we are done with it
+		__syncthreads();
 	}
 
 	if (threadIdx.x < numFilters)
