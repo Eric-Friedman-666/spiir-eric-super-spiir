@@ -82,7 +82,7 @@ class CoincTestFixture(PipelineTestFixture):
 class TestTripleCoinc(CoincTestFixture):
 
 	def setUp(self):
-		self.ifos = ('H1','L1','V1')
+		self.ifos = ('H1','L1','V1', 'K1')
 		super(TestTripleCoinc, self).setUp()
 
 	def runTest(self):

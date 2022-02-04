@@ -35,6 +35,7 @@
 		<Column Type="ilwd:char" Name="time_slide:time_slide_id"/>
 		<Column Type="ilwd:char" Name="time_slide:process_id"/>
 		<Column Type="real_8" Name="time_slide:offset"/>
+		<!-- KAGRA -->
 		<Stream Name="time_slide:table" Type="Local" Delimiter=",">
 			"V1","time_slide:time_slide_id:0","process:process_id:0",6.23456,
 			"H1","time_slide:time_slide_id:0","process:process_id:0",0,

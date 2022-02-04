@@ -43,7 +43,7 @@ sg_freq=(70 235 849 1615 2000 2477 3067)
 sg_q=(3 9 100)
 
 # Burst injections need a zero lag time slide id to work with
-if [ ! -f "HLV_ZERO_LAG.xml" ]; then
+if [ ! -f "HLV_ZERO_LAG.xml" ]; then #KAGRA
 	ligolw_tisi -i H1=0:0:0 -i L1=0:0:0 -i V1=0:0:0 > HLV_ZERO_LAG.xml
 fi
 

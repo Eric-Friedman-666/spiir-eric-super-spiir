@@ -1,7 +1,7 @@
 export GPSSTART=871147552
 export GPSEND=876357464
 
-for ifo in H1 V1 L1
+for ifo in H1 V1 L1 K1
 do
     lalapps_sire \
         --injection-file hlv-injections_all_1-871149786-4838400.xml \
@@ -12,7 +12,7 @@ do
         --summary-file ${ifo}-SIRE_FOUND_SUMMARY_FIRST-871147552-4838400.txt \
         --data-type all_data \
     	--verbose \
-    	H1L1V1-ALL-COMBINED*-LLOID.xml.gz
+    	H1L1V1K1-ALL-COMBINED*-LLOID.xml.gz
 
     ls -1 ${ifo}*FOUND*xml ${ifo}*MISSED*xml | lalapps_path2cache > foundmissed.cache
 

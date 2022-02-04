@@ -92,7 +92,7 @@ def calc_expected_snr(inj):
 
 		# FIXME If there are overlapping PSD files for both double and single
 		# ifo times, then use the double coinc files. Will need fixing when Virgo
-		# comes online.
+		# comes online. #KAGRA
 		if len(cachelist.sieve(ifos='H1L1')) > 0:
 			cachelist = cachelist.sieve(ifos='H1L1')
 

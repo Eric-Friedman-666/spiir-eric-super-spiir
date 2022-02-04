@@ -267,7 +267,7 @@ class GstlalWebSummary(object):
 		out = {}
 		for ifo in self.ifos:
 			# FIXME a hack to deal with 16 Hz sample rate for LIGO
-			# statevector and 1 Hz for Virgo
+			# statevector and 1 Hz for Virgo #KAGRA
 			# FIXME this should go in gstlal proper.
 			if ifo != "V1":
 				fac = 16.
@@ -280,7 +280,7 @@ class GstlalWebSummary(object):
 		out = 0.
 		for ifo in self.ifos:
 			# FIXME a hack to deal with 16 Hz sample rate for LIGO
-			# statevector and 1 Hz for Virgo
+			# statevector and 1 Hz for Virgo #KAGRA
 			# FIXME this should go in gstlal proper.
 			if ifo != "V1":
 				fac = 16.
@@ -383,7 +383,7 @@ class GstlalWebSummary(object):
 		off_y = numpy.log10(numpy.array([max(found[k][0][2],1) for k in sorted(found)]))
 		gap_y = numpy.log10(numpy.array([max(found[k][0][3],1) for k in sorted(found)]))
 		# FIXME Hack to adjust for high sample rate L1 and H1 state vector
-		if ifo != "V1":
+		if ifo != "V1": #KAGRA
 			on_y -= numpy.log10(16)
 			off_y -= numpy.log10(16)
 			gap_y -= numpy.log10(16)
@@ -469,7 +469,7 @@ class GstlalWebSummary(object):
 				lt = livetimedata[0,1]
 				discont = discontdata[0,1]
 				# FIXME Hack to adjust for high sample rate L1 and H1 state vector
-				if "V1" not in ifo:
+				if "V1" not in ifo: #KAGRA
 					dt /= 16
 					lt /= 16
 					discont /= 16

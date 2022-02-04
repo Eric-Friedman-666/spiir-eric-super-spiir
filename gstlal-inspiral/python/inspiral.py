@@ -141,7 +141,7 @@ def message_new_checkpoint(src, timestamp = None):
 	return message
 
 
-def state_vector_on_off_dict_from_bit_lists(on_bit_list, off_bit_list, state_vector_on_off_dict = {"H1" : [0x7, 0x160], "L1" : [0x7, 0x160], "V1" : [0x67, 0x100]}):
+def state_vector_on_off_dict_from_bit_lists(on_bit_list, off_bit_list, state_vector_on_off_dict = {"H1" : [0x7, 0x160], "L1" : [0x7, 0x160], "V1" : [0x67, 0x100], "K1" : [0x67, 0x100]}):
 	"""
 	"""
 
@@ -619,7 +619,7 @@ class Data(object):
 			# livetime
 			buf_timestamp = LIGOTimeGPS(0, buf.pts)
 			buf_seg = segments.segment(buf_timestamp, buf_timestamp + LIGOTimeGPS(0, buf.duration))
-			if instrument != "V1":	# ignore V1 segments.  FIXME:  remove after O2 (and outdent contents of conditional)
+			if instrument != "V1":	# ignore V1 segments.  FIXME:  remove after O2 (and outdent contents of conditional) #KAGRA
 				self.coincs_document.add_to_search_summary_outseg(buf_seg)
 				self.seglistdicts["triggersegments"][instrument] |= segments.segmentlist((buf_seg,))
 
@@ -633,7 +633,7 @@ class Data(object):
 			assert all(event.end >= buf_timestamp for event in events)
 
 			# Find max SNR sngles
-			if events and events[0].ifo != "V1":	# but not V1.  FIXME:  remove after O2
+			if events and events[0].ifo != "V1":	# but not V1.  FIXME:  remove after O2 #KAGRA
 				max_snr_event = max(events, key = lambda t: t.snr)
 				self.ifo_snr_history[max_snr_event.ifo].append((float(max_snr_event.end), max_snr_event.snr))
 
@@ -737,7 +737,7 @@ class Data(object):
 			# necessary for this test to be super precisely
 			# defined.
 			for event in itertools.chain(self.stream_thinca.add_events(self.coincs_document.xmldoc, self.coincs_document.process_id, events, buf_timestamp, fapfar = self.fapfar), self.stream_thinca.last_coincs.single_sngl_inspirals() if self.stream_thinca.last_coincs else ()):
-				if event.ifo == "V1": continue	# skip Virgo.	FIXME:  remove after O2
+				if event.ifo == "V1": continue	# skip Virgo.	FIXME:  remove after O2 #KAGRA
 				if len(self.seglistdicts["whitehtsegments"].keys_at(event.end)) > 1:
 					self.coinc_params_distributions.add_background(self.coinc_params_distributions.coinc_params((event,), None, mode = "counting"))
 			self.coincs_document.commit()
@@ -767,7 +767,7 @@ class Data(object):
 				for coinc_event_id, coinc_event in self.stream_thinca.last_coincs.coinc_event_index.items():
 					if coinc_event.likelihood is not None and coinc_event.time_slide_id in self.stream_thinca.last_coincs.zero_lag_time_slide_ids:
 						instruments = frozenset(self.stream_thinca.last_coincs.coinc_inspiral_index[coinc_event_id].instruments)
-						instruments -= frozenset(("V1",)) # never claim Virgo participated or was on.	FIXME:  remove after O2
+						instruments -= frozenset(("V1",)) # never claim Virgo participated or was on.	FIXME:  remove after O2 #KAGRA
 						self.zero_lag_ranking_stats.zero_lag_likelihood_rates[instruments][coinc_event.likelihood,] += 1
 
 			# do GraceDB alerts
@@ -838,7 +838,7 @@ class Data(object):
 		# above in appsink_new_buffer() we skip singles collected
 		# during times when only one instrument was one.
 		for event in self.stream_thinca.flush(self.coincs_document.xmldoc, self.coincs_document.process_id, fapfar = self.fapfar):
-			if event.ifo == "V1": continue	# skip Virgo.	FIXME:  remove after O2
+			if event.ifo == "V1": continue	# skip Virgo.	FIXME:  remove after O2 #KAGRA
 			if len(self.seglistdicts["whitehtsegments"].keys_at(event.end)) > 1:
 				self.coinc_params_distributions.add_background(self.coinc_params_distributions.coinc_params((event,), None, mode = "counting"))
 		self.coincs_document.commit()
@@ -867,7 +867,7 @@ class Data(object):
 			for coinc_event_id, coinc_event in self.stream_thinca.last_coincs.coinc_event_index.items():
 				if coinc_event.likelihood is not None and coinc_event.time_slide_id in self.stream_thinca.last_coincs.zero_lag_time_slide_ids:
 					instruments = frozenset(self.stream_thinca.last_coincs.coinc_inspiral_index[coinc_event_id].instruments)
-					instruments -= frozenset(("V1",)) # never claim Virgo participated or was on.	FIXME:  remove after O2
+					instruments -= frozenset(("V1",)) # never claim Virgo participated or was on.	FIXME:  remove after O2 #KAGRA
 					self.zero_lag_ranking_stats.zero_lag_likelihood_rates[instruments][coinc_event.likelihood,] += 1
 
 		# do GraceDB alerts
@@ -942,7 +942,7 @@ class Data(object):
 			# columns (attributes should all be
 			# populated).  FIXME:  ugly.
 			sngl_inspiral_table = lsctables.SnglInspiralTable.get_table(xmldoc)
-			for standard_column in ("process_id", "ifo", "search", "channel", "end_time", "end_time_ns", "end_time_gmst", "impulse_time", "impulse_time_ns", "template_duration", "event_duration", "amplitude", "eff_distance", "coa_phase", "mass1", "mass2", "mchirp", "mtotal", "eta", "kappa", "chi", "tau0", "tau2", "tau3", "tau4", "tau5", "ttotal", "psi0", "psi3", "alpha", "alpha1", "alpha2", "alpha3", "alpha4", "alpha5", "alpha6", "beta", "f_final", "snr", "chisq", "chisq_dof", "bank_chisq", "bank_chisq_dof", "cont_chisq", "cont_chisq_dof", "sigmasq", "rsqveto_duration", "Gamma0", "Gamma1", "Gamma2", "Gamma3", "Gamma4", "Gamma5", "Gamma6", "Gamma7", "Gamma8", "Gamma9", "spin1x", "spin1y", "spin1z", "spin2x", "spin2y", "spin2z", "event_id"):
+			for standard_column in ("process_id", "ifo", "search", "channel", "end_time", "end_time_ns", "end_time_gmst", "impulse_time", "impulse_time_ns", "template_duration", "event_duration", "amplitude", "eff_distance", "coa_phase", "mass1", "mass2", "mchirp", "mtotal", "eta", "kappa", "chi", "tau0", "tau2", "tau3", "tau4", "tau5", "ttotal", "psi0", "psi3", "alpha", "alpha1", "alpha2", "alpha3", "alpha4", "alpha5", "alpha6", "alpha7", "beta", "f_final", "snr", "chisq", "chisq_dof", "bank_chisq", "bank_chisq_dof", "cont_chisq", "cont_chisq_dof", "sigmasq", "rsqveto_duration", "Gamma0", "Gamma1", "Gamma2", "Gamma3", "Gamma4", "Gamma5", "Gamma6", "Gamma7", "Gamma8", "Gamma9", "spin1x", "spin1y", "spin1z", "spin2x", "spin2y", "spin2z", "event_id"):
 				try:
 					sngl_inspiral_table.appendColumn(standard_column)
 				except ValueError:

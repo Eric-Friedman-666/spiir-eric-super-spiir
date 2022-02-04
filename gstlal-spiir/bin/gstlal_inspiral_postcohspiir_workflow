@@ -60,7 +60,7 @@ This program makes a dag to run gstlal_inspiral_postcohspiir_online in offline m
 __author__ = 'Chad Hanna <chad.hanna@ligo.org> Qi Chu <qi.chu@ligo.org>'
 
 # This IFO_MAP be reflect the same order of ifos of the IFO_COMBO_MAP in background_stats_utils.c
-IFO_MAP = ["H1", "L1", "V1"]
+IFO_MAP = ["H1", "L1", "V1", "K1"]
 
 ##############################################################################
 # import standard modules and append the lalapps name to the python path

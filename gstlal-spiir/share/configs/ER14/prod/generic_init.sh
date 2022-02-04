@@ -68,7 +68,7 @@ ifplayground=0
 #  --request-data=${mytag} 
 ######################################################
 #
-if (( ${iflive} == 1 )); then
+if (( ${iflive} == 1 )); then #KAGRA
 	mytag="Live_H1_L1_V1"
 else
 	mytag="O2Replay_H1_L1_V1"

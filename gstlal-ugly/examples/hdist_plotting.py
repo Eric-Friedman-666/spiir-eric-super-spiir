@@ -163,7 +163,7 @@ def parse_args():
     parser.add_option("--f-max",action="store",type="float",\
         default=800.0, metavar="F_MAX",help="End Frequency")
     parser.add_option("--ifos",action="store",\
-        default="H1,H2,L1,V1", metavar="IFOS",help="Comma-separated list of ifos")
+        default="H1,H2,L1,V1,K1", metavar="IFOS",help="Comma-separated list of ifos")
     parser.add_option("--history-files", metavar="FNAME", default="", help="load history from comma-separated list of .npz files")
     parser.add_option("--figure-path", metavar="FNAME", help="file to which to save plots")
     parser.add_option("--primary-ifo",\
@@ -274,8 +274,12 @@ def update_plot(lock, ifos, figure_path, times, h_dist, theta, phi):
                 network = cached_detector["LHO_4k"]
             elif ifo == "L1":
                 network = cached_detector["LLO_4k"]
+            elif ifo == "V1":
+                network = cached_detector["VIRGO"]
+            elif ifo == "K1":
+                network = cached_detector["KAGRA"]
             else:
-                network = cached_detector["VIRGO"]            
+                pass # TODO throw error
             
             with lock:
                 tmp_ifo_times = np.array(times[ifo])  # FIXME: can't slice deques! Do something smarter.
@@ -359,8 +363,8 @@ def make_pipline(opts, fig, lines, times, h_dist, lock):
 
     pipe = gst.Pipeline("NDSTest") 
   
-    d_name = {"H1": "LHO_Data", "H2": "LHO_Data", "L1": "LLO_Data", "V1": "VIRGO_Data"}
-    channels = {"H1": "FAKE-STRAIN", "H2": "FAKE-STRAIN", "L1": "FAKE-STRAIN", "V1": "FAKE_h_16384Hz_4R"}
+    d_name = {"H1": "LHO_Data", "H2": "LHO_Data", "L1": "LLO_Data", "V1": "VIRGO_Data", "K1": "KAGRA_Data"}
+    channels = {"H1": "FAKE-STRAIN", "H2": "FAKE-STRAIN", "L1": "FAKE-STRAIN", "V1": "FAKE_h_16384Hz_4R", "K1": "FAKE-STRAIN"}
     for ifo in opts.ifos:
         src = mkelem("gds_lvshmsrc", {'shm-name': d_name[ifo]})
         dmx = mkelem("framecpp_channeldemux", {'do-file-checksum':True, 'skip_bad_files': True})
@@ -372,7 +376,7 @@ def make_pipline(opts, fig, lines, times, h_dist, lock):
         qu2 = mkelem("queue", {'max-size-buffers':0, 'max-size-bytes':0, 'max-size-time':gst.SECOND * 60 })
         ts_check=mkelem("lal_checktimestamps")
         art2 = mkelem("audiorate", {'skip-to-first': True, 'silent': True})
-        if ifo == "V1":
+        if ifo == "V1": #KAGRA
             stv = mkelem("lal_statevector", {'required-on': 12, 'required-off': ~12 & 0xffffffff})
             pipeparts.src_deferred_link(dmx, "%s:%s" % (ifo, "FAKE_Hrec_Flag_Quality"), qu2.get_pad("sink"))
         else:
@@ -419,7 +423,7 @@ def run_pipeline(pipeline):
 
 opts, args = parse_args()
 
-color_dict = {"H1": "red", "H2": "blue", "L1": "green", "V1": "magenta"}
+color_dict = {"H1": "red", "H2": "blue", "L1": "green", "V1": "magenta"} #KAGRA
 
 # Set up storage for the history of (time, horizon distance) plus the plot's line collections
 times = {}

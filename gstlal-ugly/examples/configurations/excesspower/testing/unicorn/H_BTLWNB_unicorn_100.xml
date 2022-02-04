@@ -10,7 +10,8 @@
 			"H2","time_slide:time_slide_id:0","process:process_id:0",0,
 			"V1","time_slide:time_slide_id:0","process:process_id:0",0,
 			"H1","time_slide:time_slide_id:0","process:process_id:0",0,
-			"L1","time_slide:time_slide_id:0","process:process_id:0",0
+			"L1","time_slide:time_slide_id:0","process:process_id:0",0,
+			"K1","time_slide:time_slide_id:0","process:process_id:0",0
 		</Stream>
 	</Table>
 	<Table Name="sim_burst:table">

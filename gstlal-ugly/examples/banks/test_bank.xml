@@ -70,6 +70,7 @@
       <Column Name="sngl_inspiralgroup:sngl_inspiral:alpha4" Type="real_4"/>
       <Column Name="sngl_inspiralgroup:sngl_inspiral:alpha5" Type="real_4"/>
       <Column Name="sngl_inspiralgroup:sngl_inspiral:alpha6" Type="real_4"/>
+      <Column Name="sngl_inspiralgroup:sngl_inspiral:alpha7" Type="real_4"/>
       <Column Name="sngl_inspiralgroup:sngl_inspiral:beta" Type="real_4"/>
       <Column Name="sngl_inspiralgroup:sngl_inspiral:f_final" Type="real_4"/>
       <Column Name="sngl_inspiralgroup:sngl_inspiral:snr" Type="real_4"/>

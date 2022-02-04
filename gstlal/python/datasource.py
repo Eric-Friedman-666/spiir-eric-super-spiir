@@ -137,7 +137,8 @@ state_vector_on_off_dict = {
 	"H1" : [0x7, 0x160], 
 	"H2" : [0x7, 0x160],
 	"L1" : [0x7, 0x160],
-	"V1" : [0x67, 0x100]
+	"V1" : [0x67, 0x100],
+	"K1" : [0x67, 0x100], #KAGRA
 }
 
 
@@ -147,7 +148,8 @@ dq_vector_on_off_dict = {
 	"H1" : [0x7, 0x0],
 	"H2" : [0x7, 0x0],
 	"L1" : [0x7, 0x0],
-	"V1" : [0x7, 0x0]
+	"V1" : [0x7, 0x0],
+	"K1" : [0x7, 0x0], #KAGRA
 }
 
 def state_vector_on_off_dict_from_bit_lists(on_bit_list, off_bit_list, state_vector_on_off_dict = state_vector_on_off_dict):
@@ -242,6 +244,7 @@ framexmit_ports = {
 		"H1": ("224.3.2.1", 7096),
 		"L1": ("224.3.2.2", 7097),
 		"V1": ("224.3.2.3", 7098),
+		"K1": ("224.3.2.3", 7099), #KAGRA
 	}
 }
 
@@ -325,7 +328,7 @@ class GWDataSourceInfo(object):
 		""" 
 
 		## A list of possible, valid data sources ("frames", "framexmit", "lvshm", "nds", "white", "silence", "AdvVirgo", "LIGO", "AdvLIGO")
-		self.data_sources = set(("frames", "framexmit", "lvshm", "nds", "white", "silence", "AdvVirgo", "LIGO", "AdvLIGO"))
+		self.data_sources = set(("frames", "framexmit", "lvshm", "nds", "white", "silence", "AdvVirgo", "LIGO", "AdvLIGO")) ## Do I add Kagra here?, LIGO = L1, AdvLIGO = H1?
 		self.live_sources = set(("framexmit", "lvshm"))
 		assert self.live_sources <= self.data_sources
 
@@ -347,8 +350,8 @@ class GWDataSourceInfo(object):
 		self.channel_dict = channel_dict_from_channel_list(options.channel_name)
 		self.state_channel_type = None
 
-		## A dictionary for shared memory partition, e.g., {"H1": "LHO_Data", "H2": "LHO_Data", "L1": "LLO_Data", "V1": "VIRGO_Data"}
-		self.shm_part_dict = {"H1": "LHO_Data", "H2": "LHO_Data", "L1": "LLO_Data", "V1": "VIRGO_Data"}
+		## A dictionary for shared memory partition, e.g., {"H1": "LHO_Data", "H2": "LHO_Data", "L1": "LLO_Data", "V1": "VIRGO_Data", "K1": "KAGRA_Data"}
+		self.shm_part_dict = {"H1": "LHO_Data", "H2": "LHO_Data", "L1": "LLO_Data", "V1": "VIRGO_Data", "K1": "KAGRA_Data"}
 		if options.shared_memory_partition is not None:
 			self.shm_part_dict.update( channel_dict_from_channel_list(options.shared_memory_partition) )
 
@@ -410,8 +413,8 @@ class GWDataSourceInfo(object):
 #		self.state_channel_dict = { "H1": "LLD-DQ_VECTOR", "H2": "LLD-DQ_VECTOR","L1": "LLD-DQ_VECTOR", "V1": "LLD-DQ_VECTOR" }
 #		self.dq_channel_dict = { "H1": "DMT-DQ_VECTOR", "H2": "DMT-DQ_VECTOR","L1": "DMT-DQ_VECTOR", "V1": None }
 
-		self.state_channel_dict = { "H1": None, "H2": "LLD-DQ_VECTOR","L1": None, "V1": None }
-		self.dq_channel_dict = { "H1": None, "H2": "DMT-DQ_VECTOR","L1": None, "V1": None }
+		self.state_channel_dict = { "H1": None, "H2": "LLD-DQ_VECTOR","L1": None, "V1": None, "K1": None } # KAGRA
+		self.dq_channel_dict = { "H1": None, "H2": "DMT-DQ_VECTOR","L1": None, "V1": None, "K1": None }
 
 		if options.state_channel_name is not None:
 			state_channel_dict_from_options = channel_dict_from_channel_list( options.state_channel_name )
@@ -736,7 +739,7 @@ def mkbasicsrc(pipeline, gw_data_source_info, instrument, nxydump_segment = None
 	elif gw_data_source_info.data_source == "frames":
 		if instrument == "V1":
 			#FIXME Hack because virgo often just uses "V" in the file names rather than "V1".  We need to sieve on "V"
-			src = pipeparts.mklalcachesrc(pipeline, location = gw_data_source_info.frame_cache, cache_src_regex = "V")
+			src = pipeparts.mklalcachesrc(pipeline, location = gw_data_source_info.frame_cache, cache_src_regex = "V") # TODO KAGRA maybe
 		else:
 			src = pipeparts.mklalcachesrc(pipeline, location = gw_data_source_info.frame_cache, cache_src_regex = instrument[0], cache_dsc_regex = instrument)
 

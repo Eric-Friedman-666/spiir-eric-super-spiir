@@ -66,7 +66,7 @@ def parse_command_line():
 		description = __doc__
 	)
 	parser.add_option("--default-duration", metavar = "seconds", type = "float", default = 1.0, help = "Set the default burst event duration in seconds for injections without explicit durations (default = 1).")
-	parser.add_option("--instruments", metavar = "name[,name,...]", default = "H1,H2,L1,V1", help = "Set the instruments to veto (default = \"H1,H2,L1,V1\").")
+	parser.add_option("--instruments", metavar = "name[,name,...]", default = "H1,H2,L1,V1,K1", help = "Set the instruments to veto (default = \"H1,H2,L1,V1\").")
 	parser.add_option("--output", metavar = "filename", help = "Set the output filename (default = write to stdout).  If the filename ends in \".gz\" it will be gzip-compressed.")
 	parser.add_option("--padding", metavar = "seconds", type = "float", default = 0.05, help = "Set the additional padding in seconds to veto before and after each injection (default = 0.05).")
 	parser.add_option("--vetoes-name", metavar = "name", default = "vetoes", help = "Set the name of the vetoes segment lists in the output document (default = \"vetoes\").")

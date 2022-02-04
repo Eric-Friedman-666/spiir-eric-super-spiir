@@ -252,7 +252,7 @@ background_ln_likelihood_ratios, zerolag_ln_likelihood_ratios = load_search_resu
 #
 
 # SNR and Chisquared
-for instrument in ("H1","L1","V1"):
+for instrument in ("H1","L1","V1", "K1"):
 	for snr_chi_type in ("background_pdf", "injection_pdf", "zero_lag_pdf", "LR"):
 		fig = plotfar.plot_snr_chi_pdf(coinc_params_distributions, instrument, snr_chi_type, options.max_snr)
 		if fig is None:
@@ -265,7 +265,7 @@ for instrument in ("H1","L1","V1"):
 
 # Trigger and event rates
 fig = plotfar.plot_rates(coinc_params_distributions, ranking_data)
-plotname = inspiral_pipe.T050017_filename("H1L1V1", "GSTLAL_INSPIRAL_PLOT_BACKGROUND_%s_RATES" % options.user_tag, int(seglists.extent_all()[0]), int(seglists.extent_all()[1]), options.output_format, path = options.output_dir)
+plotname = inspiral_pipe.T050017_filename("H1L1V1K1", "GSTLAL_INSPIRAL_PLOT_BACKGROUND_%s_RATES" % options.user_tag, int(seglists.extent_all()[0]), int(seglists.extent_all()[1]), options.output_format, path = options.output_dir)
 if options.verbose:
 	print >>sys.stderr, "writing %s" % plotname
 fig.savefig(plotname)

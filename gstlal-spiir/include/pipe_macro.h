@@ -14,7 +14,7 @@ typedef struct _IFOType {
 #define H1_IFO_ID 0
 #define L1_IFO_ID 1
 #define V1_IFO_ID 2
-#define MAX_NIFO 3
+#define MAX_NIFO  4
 #ifdef __cplusplus
 constexpr
 #endif
@@ -22,14 +22,17 @@ constexpr
       { "H1", 0 }, // 1 << 0 = 1
       { "L1", 1 }, // 1 << 1 = 2
       { "V1", 2 }, // 1 << 2 = 4
+      { "K1", 3 }, // 1 << 2 = 8
   };
-#define MAX_IFO_COMBOS 7 // 2^3-1
+#define MAX_IFO_COMBOS 15 // 2^4-1
 // A combination is sum(1 << index) - 1
 // This gives us some nice mathematical properties that we can use to check
 // if an IFO exists in a given ComboMap
 static const IFOType IFOComboMap[MAX_IFO_COMBOS] = {
-    { "H1", 0 },   { "L1", 1 },   { "H1L1", 2 },   { "V1", 3 },
-    { "H1V1", 4 }, { "L1V1", 5 }, { "H1L1V1", 6 },
+    { "H1", 0 },      { "L1", 1 },      { "H1L1", 2 },      { "V1", 3 },
+    { "H1V1", 4 },    { "L1V1", 5 },    { "H1L1V1", 6 },    { "K1", 7 },
+    { "H1K1", 8 },    { "L1K1", 9 },    { "H1L1K1", 10 },   { "V1K1", 11 },
+    { "H1V1K1", 12 }, { "L1V1K1", 13 }, { "H1L1V1K1", 14 },
 };
 /* function given a random ifo, output the index in the IFOComboMap list,
  * implemented in background_stats_utils.c */

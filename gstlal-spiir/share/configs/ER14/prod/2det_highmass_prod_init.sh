@@ -68,7 +68,7 @@ ifplayground=0
 #  --request-data=${mytag} 
 ######################################################
 #
-if (( ${iflive} == 1 )); then
+if (( ${iflive} == 1 )); then #KAGRA
 	mytag="Live_H1_L1_V1"
 else
 	mytag="O2Replay_H1_L1_V1"
@@ -125,7 +125,7 @@ fi
 # Horizon distances given a 1.4+ 1.4 source
 # in the gen_pipeline.sh: ifo_horizons=H1:${dhH},L1:${dhL},V1:${dhV} 
 ######################################################
-if (( ${iflive} == 0 )); then # O2replay psd
+if (( ${iflive} == 0 )); then # O2replay psd #KAGRA
     dhL=100
     dhH=52
     dhV=26
@@ -167,7 +167,7 @@ searchtypeL=`echo "${SearchType}" | tr '[:upper:]' '[:lower:]'`
 #       limited by GPU memory and CPU performance
 ######################################################
 
-if (( ${ndet} == 2 )); then
+if (( ${ndet} == 2 )); then #KAGRA
 	bpj=6
 	mkdir -p H1L1_skymap
 else
@@ -211,7 +211,7 @@ log_dir=/usr1/${user}
 ######################################################
 DataDir=/dev/shm
 mydatasrc="lvshm"
-if (( ${iflive} == 0 )); then # run on o2replay
+if (( ${iflive} == 0 )); then # run on o2replay #KAGRA
     if (( ${ndet} ==2)); then
 	mymem="H1=R1LHO_Data --shared-memory-partition=L1=R1LLO_Data --shared-memory-block-size 500000 --shared-memory-assumed-duration 1"
     else
@@ -235,7 +235,7 @@ fi
 mynodename="postcohspiir"
 onbits=290
 
-if (( ${iflive} == 1 )); then
+if (( ${iflive} == 1 )); then #KAGRA
     if (( ${ndet} == 2)); then
         mychannel="H1=GDS-GATED_STRAIN --channel-name L1=GDS-GATED_STRAIN"
         mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0"
@@ -322,7 +322,7 @@ tcluster=1
 ######################################################
 
 map_dir=${myrundir} 
-if (( ${ndet} ==2)); then
+if (( ${ndet} ==2)); then #KAGRA
     mymap=H1L1_detrsp_map.xml
     mymap_prob=H1L1_prob_map.xml
 else
@@ -370,8 +370,9 @@ for (( i=0; i<${njob}; i++ )); do
 	for bank in $(seq -f "%04g" $(( ${start}+${bpj}*${i} )) $(( ${start}+${bpj}*($i) )) ); do
 	    H1bank=${bankdir}/iir_H1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
 	    L1bank=${bankdir}/iir_L1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz            
-	    V1bank=${bankdir}/iir_V1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz            
-	    if ((${ndet} == 2)); then
+	    V1bank=${bankdir}/iir_V1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz   
+		K1bank=${bankdir}/iir_K1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz            
+	    if ((${ndet} == 2)); then #KAGRA
 		echo -n " macroiirbank=\"H1:${H1bank},L1:${L1bank}"
 	    else
 		echo -n " macroiirbank=\"H1:${H1bank},L1:${L1bank},V1:${V1bank}"
@@ -386,7 +387,8 @@ for (( i=0; i<${njob}; i++ )); do
 	    H1bank=${bankdir}/iir_H1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
 	    L1bank=${bankdir}/iir_L1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
 	    V1bank=${bankdir}/iir_V1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
-	    if ((${ndet} == 2)); then
+		K1bank=${bankdir}/iir_K1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
+	    if ((${ndet} == 2)); then #KAGRA
 		echo -n " --iir-bank H1:${H1bank},L1:${L1bank}"
 	    else
 		echo -n " --iir-bank H1:${H1bank},L1:${L1bank},V1:${V1bank}"

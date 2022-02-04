@@ -36,7 +36,7 @@ SIGNAL_XML_FEATURE_NAME = "signal_feature"
 SIGNAL_XML_RANK_NAME = "signal_rank"
 
 # This IFO_MAP should reflect the same order of ifos in include/pipe_macro.h
-IFO_MAP = ["H1", "L1", "V1"]
+IFO_MAP = ["H1", "L1", "V1", "K1"]
 
 import itertools
 import re

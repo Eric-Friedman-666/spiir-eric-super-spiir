@@ -72,7 +72,7 @@ def parse_command_line():
 	
 
 def plot_snrchisq(snr_chisq_dict, coinc_param_distributions, plot_type):
-	for i, ifo in enumerate(['H1', 'L1', 'V1']):
+	for i, ifo in enumerate(['H1', 'L1', 'V1', 'K1']):
 		snrm, chisqm = snr_chisq_dict[ifo]
 		if snrm is None:
 			continue
@@ -106,7 +106,7 @@ xmldoc = lvalert_helper.get_coinc_xmldoc(gracedb, gid)
 coinc_inspiral_row = lsctables.CoincInspiralTable.get_table(xmldoc)[0]
 sngl_inspiral_table = lsctables.SnglInspiralTable.get_table(xmldoc)
 coinc_table = lsctables.CoincTable.get_table(xmldoc)[0]
-snr_chisq_dict = dict(((ifo,(None,None)) for ifo in ['H1','L1', 'V1']))
+snr_chisq_dict = dict(((ifo,(None,None)) for ifo in ['H1','L1', 'V1', 'K1']))
 for r in sngl_inspiral_table:
 	snr_chisq_dict[r.ifo] = (r.snr, r.chisq)
 try:

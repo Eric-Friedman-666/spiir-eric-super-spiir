@@ -93,6 +93,10 @@ int analysis_identify_detector(const char* s)
     {
          return LAL_LLO_4K_DETECTOR;
     }
+    else if (strcmp(c, "K1") == 0)
+    {
+        return LAL_KAGRA_DETECTOR;
+    }
     else 
     {
         return -1;
@@ -109,11 +113,12 @@ analysis* analysis_example(void)
     double duration = 1; // seconds of data available
     RandomParams* rng = XLALCreateRandomParams(0);
 
-    a->n_detectors = 3;
+    a->n_detectors = 4;
 
     a->detectors[0] = LAL_LHO_4K_DETECTOR;
     a->detectors[1] = LAL_LLO_4K_DETECTOR;
     a->detectors[2] = LAL_VIRGO_DETECTOR;
+    a->detectors[3] = LAL_KAGRA_DETECTOR;
     
     a->rate = 512; // Hz
     

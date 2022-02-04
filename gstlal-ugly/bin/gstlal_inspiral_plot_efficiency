@@ -65,7 +65,7 @@ __version__ = "git id %s" % git_version.id
 __date__ = git_version.date
 
 def compute_horizon_interpolator(psd_files, verbose = False):
-	sites = ('H1', 'L1', 'V1')
+	sites = ('H1', 'L1', 'V1', 'K1')
 	horizons = dict( (s, []) for s in sites)
 	times = dict( (s, []) for s in sites)
 	for f in psd_files:

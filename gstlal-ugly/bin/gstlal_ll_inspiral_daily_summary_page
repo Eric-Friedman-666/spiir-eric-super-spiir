@@ -41,7 +41,7 @@ analysis_segment = segments.segment(LIGOTimeGPS(now() - 86400 - 28800), LIGOTime
 triggerSNR = rate.BinnedArray(rate.NDBins((rate.IrregularBins((0.8, 50)), rate.LinearBins(float(analysis_segment[0]), float(analysis_segment[1]), 480), rate.LinearBins(5.5,25,500))))
 triggerIFAR = rate.BinnedArray(rate.NDBins((rate.IrregularBins((0.8, 50)), rate.LinearBins(float(analysis_segment[0]), float(analysis_segment[1]), 480), rate.LogarithmicBins(1,1e15,500))))
 
-out = open('H1L1V1-LLOID_DAILY_SUMMARY-%d-%d.html' % (int(analysis_segment[0]), int(abs(analysis_segment))), "w")
+out = open('H1L1V1-LLOID_DAILY_SUMMARY-%d-%d.html' % (int(analysis_segment[0]), int(abs(analysis_segment))), "w") #KAGRA
 print >> out, "<html>"
 print >> out, """
 <head>

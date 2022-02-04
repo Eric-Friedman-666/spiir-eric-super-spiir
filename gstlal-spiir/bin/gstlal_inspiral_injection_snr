@@ -98,7 +98,7 @@ def parse_command_line():
 
 def calc_expected_snr(premerger_cut, inj):
     # FIXME:  don't hard-code detectors
-    snr = dict.fromkeys(("H1", "L1", "V1"), 0.0)
+    snr = dict.fromkeys(("H1", "L1", "V1", "K1"), 0.0)
 
     injtime = inj.time_geocent
 
@@ -247,5 +247,6 @@ for idx, inj in enumerate(sim_inspiral_table):
     inj.alpha4 = snr[idx]["H1"]
     inj.alpha5 = snr[idx]["L1"]
     inj.alpha6 = snr[idx]["V1"]
+    inj.alpha7 = snr[idx]["K1"]
 
 ligolw_utils.write_filename(new_xmldoc, options.output, verbose=True)

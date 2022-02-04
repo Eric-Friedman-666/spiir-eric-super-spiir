@@ -16,7 +16,7 @@ inj = coincparamsdistributions.injection_rates
 
 wn = rate.gaussian_window(5, 5, sigma = 8)
 
-for i, ifo in enumerate(['H1','H2','L1', 'V1']):
+for i, ifo in enumerate(['H1','H2','L1', 'V1', 'K1']):
 	for name, obj in (("background", counts), ("injections", inj)):
 		pylab.figure(i)
 		H1 = obj[ifo+"_snr_chi"].array

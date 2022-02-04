@@ -99,7 +99,7 @@ fdict = ast.literal_eval(gracedb.files(gid).read().strip())
 xmldoc, checksum = utils.load_fileobj(gracedb.get(fdict['coinc.xml']), contenthandler = ligolw.LIGOLWContentHandler)
 sngl_inspiral_table = lsctables.table.get_table(xmldoc, lsctables.SnglInspiralTable.tableName)
 params = lsctables.table.get_table(xmldoc, lsctables.ProcessParamsTable.tableName)
-snr_chisq_dict = dict(((ifo,(None,None)) for ifo in ['H1','L1', 'V1']))
+snr_chisq_dict = dict(((ifo,(None,None)) for ifo in ['H1','L1', 'V1', 'K1']))
 for r in sngl_inspiral_table:
 	snr_chisq_dict[r.ifo] = (r.snr, r.chisq)
 for r in params:
@@ -121,7 +121,7 @@ else:
 bgcol = (224/255.,224/255.,224/255.)
 
 likely = copy.deepcopy(inj)
-for i, ifo in enumerate(['H1','L1', 'V1']):
+for i, ifo in enumerate(['H1','L1', 'V1', 'K1']):
 	snrm, chisqm = snr_chisq_dict[ifo]
 	print >>f, "<h1>%s SNR / CHISQ stats</h1>" % ifo
 	print >>f, "<div>"

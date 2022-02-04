@@ -68,7 +68,7 @@ for missedFile in ifo_missed:
 				#snr_l1.append(snr_row.l1_snr)
 				#snr_v1.append(snr_row.v1_snr)
 
-				#print values as strings in a wiki table format
+				#print values as strings in a wiki table format #KAGRA
 				if (ifo=='H1' and row.eff_dist_h <= 250.0) or (ifo=='L1' and row.eff_dist_l <= 250.0) or (ifo=='V1' and row.eff_dist_v <= 250.0):
 					print '||<#00FFFF>', i, '||<#00FFFF>', ifo, '||<#00FFFF>', row.geocent_end_time,'||<#00FFFF>',row.mass1,'||<#00FFFF>', row.mass2, '||<#00FFFF>', row.mchirp, '||<#00FFFF>', row.eta, '||<#00FFFF>', row.distance, '||<#00FFFF>', row.spin1z, '||<#00FFFF>', row.spin2z, '||<#00FFFF>', (row.mass1 * row.spin1z)/(row.mass1 + row.mass2), '||<#00FFFF>', row.eff_dist_h, '||<#00FFFF>', row.eff_dist_l, '||<#00FFFF>', row.eff_dist_v, '||<#00FFFF>', row.f_lower, '||<#00FFFF>', row.f_final, '||<#00FFFF>', snr_row.h1_snr, '||<#00FFFF>', snr_row.l1_snr, '||<#00FFFF>', snr_row.v1_snr, '||' 
 				else:

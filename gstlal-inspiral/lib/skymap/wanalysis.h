@@ -11,7 +11,7 @@
 typedef struct
 {
 
-    // Number of detectors <= XLALSKYMAP_N
+    // Number of detectors <= XLALSKYMAP_N # KAGRA where is this defined?
 
     size_t n_detectors;
     
