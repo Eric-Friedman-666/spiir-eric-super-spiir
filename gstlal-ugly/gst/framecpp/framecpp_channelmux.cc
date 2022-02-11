@@ -294,8 +294,8 @@ static GstFlowReturn build_and_push_frame_file(GstFrameCPPChannelMux *mux, GstCl
 					frame->RefDetectProc().append(FrameCPP::GetDetector(FrameCPP::DETECTOR_LOCATION_L1, gpstime));
 				if(!strcmp(instrument, "V1"))
 					frame->RefDetectProc().append(FrameCPP::GetDetector(FrameCPP::DETECTOR_LOCATION_V1, gpstime));
-				if (!strcmp(instrument, "K1"))
-					frame->RefDetectProc().append(FrameCPP::GetDetector(FrameCPP::DETECTOR_LOCATION_K1, gpstime));
+				// if (!strcmp(instrument, "K1"))
+				// 	frame->RefDetectProc().append(FrameCPP::GetDetector(FrameCPP::DETECTOR_LOCATION_K1, gpstime));
 				else
 					GST_WARNING_OBJECT(mux, "not adding FrDetector for unknown instrument '%s'", instrument);
 			}

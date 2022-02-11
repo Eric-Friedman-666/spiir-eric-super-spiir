@@ -712,9 +712,9 @@ def mkPostcohSPIIROnline(pipeline,
                         print(
                             "creating jointer and attach %s SNR series to this jointer"
                             % instrument)
-                    this_name = "snr_%s" % instrument
                     jointer = pipemodules.mktrigger_jointer(pipeline, snr)
                     is_jointer_created = True
+                this_name = "snr_%s" % instrument
                 snr.link_pads(None, jointer, this_name)
 
         # FIXME: hard-coded to do compression
