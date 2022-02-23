@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -28,53 +28,56 @@
 #ifndef __BACKGROUND_STATS_UTILS_H__
 #define __BACKGROUND_STATS_UTILS_H__
 
-#include <glib.h>
-#include <cohfar/background_stats.h>
 #include <LIGOLwHeader.h>
+#include <cohfar/background_stats.h>
+#include <glib.h>
 
-	
-Bins1D *
-bins1D_create_long(double cmin, double cmax, int nbin);
+Bins1D *bins1D_create_long(double cmin, double cmax, int nbin);
 
-Bins2D *
-bins2D_create(double cmin_x, double cmax_x, int nbin_x, double cmin_y, double cmax_y, int nbin_y);
+Bins2D *bins2D_create(double cmin_x,
+                      double cmax_x,
+                      int nbin_x,
+                      double cmin_y,
+                      double cmax_y,
+                      int nbin_y);
 
-Bins2D *
-bins2D_create_long(double cmin_x, double cmax_x, int nbin_x, double cmin_y, double cmax_y, int nbin_y);
+Bins2D *bins2D_create_long(double cmin_x,
+                           double cmax_x,
+                           int nbin_x,
+                           double cmin_y,
+                           double cmax_y,
+                           int nbin_y);
 
-TriggerStats **
-trigger_stats_create(int ncombo);
+TriggerStats **trigger_stats_create(int ncombo);
 
-int
-bins1D_get_idx(double val, Bins1D *bins);
+int bins1D_get_idx(double val, Bins1D *bins);
 
-void
-trigger_stats_feature_rates_update(double snr, double chisq, FeatureStats *feature, TriggerStats *cur_stats);
- 
-void
-trigger_stats_feature_rates_add(FeatureStats *feature1, FeatureStats *feature2, TriggerStats *cur_stats);
- 
+void trigger_stats_feature_rates_update(double snr,
+                                        double chisq,
+                                        FeatureStats *feature,
+                                        TriggerStats *cur_stats);
 
-void
-trigger_stats_feature_rates_to_pdf(FeatureStats *feature);
+void trigger_stats_feature_rates_add(FeatureStats *feature1,
+                                     FeatureStats *feature2,
+                                     TriggerStats *cur_stats);
 
+void trigger_stats_feature_rates_to_pdf(FeatureStats *feature);
 
-double
-bins2D_get_val(double snr, double chisq, Bins2D *bins);
+double bins2D_get_val(double snr, double chisq, Bins2D *bins);
 
-gboolean
-trigger_stats_xml_from_xml(TriggerStatsXML *stats, int *hist_trials, const char *filename);
+gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
+                                    int *hist_trials,
+                                    const char *filename);
 
-gboolean
-trigger_stats_xml_dump(TriggerStatsXML *stats, int hist_trials, const char *filename, int write_status, xmlTextWriterPtr *pwriter);
+gboolean trigger_stats_xml_dump(TriggerStatsXML *stats,
+                                int hist_trials,
+                                const char *filename,
+                                int write_status,
+                                xmlTextWriterPtr *pwriter);
 
-TriggerStatsXML *
-trigger_stats_xml_create(char *ifos, int stats_type);
+TriggerStatsXML *trigger_stats_xml_create(char *ifos, int stats_type);
 
-void
-trigger_stats_xml_destroy(TriggerStatsXML * stats);
+void trigger_stats_xml_destroy(TriggerStatsXML *stats);
 
-float
-gen_fap_from_feature(double snr, double chisq, TriggerStats *stats);
+float gen_fap_from_feature(double snr, double chisq, TriggerStats *stats);
 #endif /* __BACKGROUND_STATS_UTILS_H__ */
-

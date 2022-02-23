@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2014 Qi Chu <qi.chu@ligo.org>
  *
  * This library is free software; you can redistribute it and/or
@@ -17,7 +17,6 @@
  * Boston, MA 02111-1307, USA.
  */
 
-
 /*
 # This file also includes some utilities to handle the table.
 # Compare it with lalinspiral/ src/ LIGOLwXMLInspiralRead.c
@@ -31,4 +30,3 @@
 
 void postcohtable_init(XmlTable *table);
 #endif /* __POSTCOH_TABLE_UTILS_H__ */
-

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -25,68 +25,63 @@
  * 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-
 #ifndef __COHFAR_ACCUMBACKGROUND_H__
 #define __COHFAR_ACCUMBACKGROUND_H__
 
-#include <glib.h>
-#include <gst/gst.h>
-#include <gst/base/gstbasetransform.h>
-#include <postcohtable.h>
 #include <cohfar/background_stats.h>
+#include <glib.h>
+#include <gst/base/gstbasetransform.h>
+#include <gst/gst.h>
+#include <libxml/xmlwriter.h>
+#include <postcohtable.h>
 
 G_BEGIN_DECLS
-#define COHFAR_ACCUMBACKGROUND_TYPE \
-	(cohfar_accumbackground_get_type())
-#define COHFAR_ACCUMBACKGROUND(obj) \
-	(G_TYPE_CHECK_INSTANCE_CAST((obj), COHFAR_ACCUMBACKGROUND_TYPE, CohfarAccumbackground))
-#define COHFAR_ACCUMBACKGROUND_CLASS(klass) \
-	(G_TYPE_CHECK_CLASS_CAST((klass), COHFAR_ACCUMBACKGROUND_TYPE, CohfarAccumbackgroundClass))
-#define GST_IS_COHFAR_ACCUMBACKGROUND(obj) \
-	(G_TYPE_CHECK_INSTANCE_TYPE((obj), COHFAR_ACCUMBACKGROUND_TYPE))
-#define GST_IS_COHFAR_ACCUMBACKGROUND_CLASS(klass) \
-	(G_type_CHECK_CLASS_TYPE((klass), COHFAR_ACCUMBACKGROUND_TYPE))
-
+#define COHFAR_ACCUMBACKGROUND_TYPE (cohfar_accumbackground_get_type())
+#define COHFAR_ACCUMBACKGROUND(obj)                                            \
+    (G_TYPE_CHECK_INSTANCE_CAST((obj), COHFAR_ACCUMBACKGROUND_TYPE,            \
+                                CohfarAccumbackground))
+#define COHFAR_ACCUMBACKGROUND_CLASS(klass)                                    \
+    (G_TYPE_CHECK_CLASS_CAST((klass), COHFAR_ACCUMBACKGROUND_TYPE,             \
+                             CohfarAccumbackgroundClass))
+#define GST_IS_COHFAR_ACCUMBACKGROUND(obj)                                     \
+    (G_TYPE_CHECK_INSTANCE_TYPE((obj), COHFAR_ACCUMBACKGROUND_TYPE))
+#define GST_IS_COHFAR_ACCUMBACKGROUND_CLASS(klass)                             \
+    (G_type_CHECK_CLASS_TYPE((klass), COHFAR_ACCUMBACKGROUND_TYPE))
 
 typedef struct {
-	GstElementClass parent_class;
+    GstElementClass parent_class;
 } CohfarAccumbackgroundClass;
 
-
 typedef struct {
-	GstElement element;
+    GstElement element;
 
-	GstPad *sinkpad, *srcpad;
+    GstPad *sinkpad, *srcpad;
 
-	char *ifos;
-	int nifo;
-	int ncombo; // ifo combination
-	int write_ifo_mapping[MAX_NIFO];
-	TriggerStatsXML *bgstats;
-	TriggerStatsXML *zlstats;
-	TriggerStatsXML *sgstats;
-	int source_type; // BNS, NSBH, or BBH
+    char *ifos;
+    int nifo;
+    int ncombo; // ifo combination
+    int write_ifo_mapping[MAX_NIFO];
+    TriggerStatsXML *bgstats;
+    TriggerStatsXML *zlstats;
+    TriggerStatsXML *sgstats;
+    int source_type; // BNS, NSBH, or BBH
     xmlTextWriterPtr stats_writer;
 
+    int snapshot_interval;
+    int hist_trials;
+    gchar *history_fname;
+    gchar *output_prefix;
+    gchar *output_name;
 
-	int snapshot_interval;
-	int hist_trials;
-	gchar *history_fname;
-	gchar *output_prefix;
-	gchar *output_name;
-
-	/*
-	 * timestamp book-keeping
-	 */
-	GstClockTime t_end;
-	GstClockTime t_roll_start;
+    /*
+     * timestamp book-keeping
+     */
+    GstClockTime t_end;
+    GstClockTime t_roll_start;
 } CohfarAccumbackground;
-
 
 GType cohfar_accumbackground_get_type(void);
 
-
 G_END_DECLS
 
-
-#endif	/* __COHFAR_ACCUMBACKGROUND_H__ */
+#endif /* __COHFAR_ACCUMBACKGROUND_H__ */
