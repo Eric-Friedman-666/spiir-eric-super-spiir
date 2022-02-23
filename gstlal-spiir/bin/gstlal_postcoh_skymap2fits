@@ -16,10 +16,6 @@
 #
 # This program is modified by Manoj Kovalam, under the supervision of Qi Chu.
 # This program uses a new ranking statistic for Probability density, developed by Alan and Linqing Wen.
-
-
-
-
 """
 Produce a fits file from binary sky map file
 """
@@ -34,76 +30,91 @@ from optparse import Option, OptionParser
 from glue.ligolw import ligolw, array, param, utils
 from gstlal.pipemodules import pipe_macro
 
+
 # FIXME:  require calling code to provide the content handler
 class DefaultContentHandler(ligolw.LIGOLWContentHandler):
-	pass
+    pass
+
+
 array.use_in(DefaultContentHandler)
 param.use_in(DefaultContentHandler)
- 
+
+
 def find_closest_gps(event_time, start, gps_step):
-	gps_len = 86400 /gps_step;
-	days_from_start = np.floor((event_time - start)/86400.)
-	time_in_one_day = event_time - ( start + days_from_start * 86400)
-	idx = int( round( time_in_one_day/float(gps_step))) % gps_len
-	return idx*gps_step
+    gps_len = 86400 / gps_step
+    days_from_start = np.floor((event_time - start) / 86400.)
+    time_in_one_day = event_time - (start + days_from_start * 86400)
+    idx = int(round(time_in_one_day / float(gps_step))) % gps_len
+    return idx * gps_step
 
 
-def param_from_xmldoc(xmldoc, param_name, verbose = False):
-	for root in (elem for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName) if elem.hasAttribute(u"Name") and elem.Name == pipe_macro.DETRSP_XML_ID_NAME):
-		result = param.get_param(root, param_name).pcdata
-	try:
-		return result
-	except:
-		raise ValueError("no %s param in the doc" % param_name)
+def param_from_xmldoc(xmldoc, param_name, verbose=False):
+    for root in (
+            elem
+            for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName)
+            if elem.hasAttribute(u"Name")
+            and elem.Name == pipe_macro.DETRSP_XML_ID_NAME):
+        result = param.get_param(root, param_name).pcdata
+    try:
+        return result
+    except:
+        raise ValueError("no %s param in the doc" % param_name)
 
 
-def array_from_xmldoc(xmldoc, array_name, verbose = False):
-	for root in (elem for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName) if elem.hasAttribute(u"Name") and elem.Name == pipe_macro.DETRSP_XML_ID_NAME):
-		result = array.get_array(root, array_name).array 
-	try:
-		return result
-	except:
-		raise ValueError("no %s array in the doc" % array_name)
+def array_from_xmldoc(xmldoc, array_name, verbose=False):
+    for root in (
+            elem
+            for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName)
+            if elem.hasAttribute(u"Name")
+            and elem.Name == pipe_macro.DETRSP_XML_ID_NAME):
+        result = array.get_array(root, array_name).array
+    try:
+        return result
+    except:
+        raise ValueError("no %s array in the doc" % array_name)
 
 
 def logsumexpo(a):
 
-	a_max = np.amax(a)
-	if a_max.ndim > 0:
-        	a_max[~np.isfinite(a_max)] = 0
-	elif not np.isfinite(a_max):
-        	a_max = 0
-	tmp = np.exp(a - a_max)
-	with np.errstate(divide='ignore'):
-	        s = np.sum(tmp)
-		out = np.log(s)
-	a_max = np.squeeze(a_max)
-	out += a_max
-	return out
+    a_max = np.amax(a)
+    if a_max.ndim > 0:
+        a_max[~np.isfinite(a_max)] = 0
+    elif not np.isfinite(a_max):
+        a_max = 0
+    tmp = np.exp(a - a_max)
+    with np.errstate(divide='ignore'):
+        s = np.sum(tmp)
+        out = np.log(s)
+    a_max = np.squeeze(a_max)
+    out += a_max
+    return out
 
 
-parser = OptionParser(
-  description = __doc__,
-  usage = '%prog [opts] [INPUT]',
-  option_list = [
-	  Option("--output-cohsnr", "-c", 
-		  help="Coherent SNR output filename"),
-	  Option("--output-prob", "-p", 
-		  help="Probability density output filename"),
-	  Option("--event-time", "-t",
-		  help="Event GPS time"),
-	  Option("--cuda-postcoh-detrsp-fname", "-m",
-		  help="Detector response map used for postcoh"),
-	  Option("--verbose", "-v", action = "store_true",
-		  help="Be verbose"),
-	  Option("--event-id", "-e",
-		  help="Postcoh event ID")]
-
-)
+parser = OptionParser(description=__doc__,
+                      usage='%prog [opts] [INPUT]',
+                      option_list=[
+                          Option("--output-cohsnr",
+                                 "-c",
+                                 help="Coherent SNR output filename"),
+                          Option("--output-prob",
+                                 "-p",
+                                 help="Probability density output filename"),
+                          Option("--event-time", "-t", help="Event GPS time"),
+                          Option(
+                              "--cuda-postcoh-detrsp-fname",
+                              "-m",
+                              help="Detector response map used for postcoh"),
+                          Option("--verbose",
+                                 "-v",
+                                 action="store_true",
+                                 help="Be verbose"),
+                          Option("--event-id", "-e", help="Postcoh event ID")
+                      ])
 
 opts, args = parser.parse_args()
 
 import logging
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger('Postcoh_skymap')
 
@@ -113,25 +124,29 @@ allread_skymap = []
 input_fname = args[0]
 
 instruments = input_fname.split('/')[-1].split('_')[0]
-nifo = len(instruments)/2 # ifo e.g. H1, L1, len is 2
+nifo = len(instruments) / 2  # ifo e.g. H1, L1, len is 2
 
 # read cohsnr^2, and nullsnr^2 for each sky direction
 f = open(input_fname, 'rb')
 for chunk in iter(lambda: f.read(4), ''):
-	allread_skymap.append(struct.unpack('f', chunk)[0])
+    allread_skymap.append(struct.unpack('f', chunk)[0])
 f.close()
 
 # load cohsnrsq, and nullsnrsq
-npix = len(allread_skymap)/2
+npix = len(allread_skymap) / 2
 cohsnrsq_skymap = allread_skymap[0:npix]
 nullsnrsq_skymap = allread_skymap[npix:]
 
 # get detector response Det(G*G) for each sky direction
 
 # Load document
-xmldoc = utils.load_filename(opts.cuda_postcoh_detrsp_fname, contenthandler = DefaultContentHandler, verbose = opts.verbose)
-detrsp_start_time = long(param_from_xmldoc(xmldoc, pipe_macro.DETRSP_XML_PARAM_NAME_GPS_START))
-gps_step = long(param_from_xmldoc(xmldoc, pipe_macro.DETRSP_XML_PARAM_NAME_GPS_STEP))
+xmldoc = utils.load_filename(opts.cuda_postcoh_detrsp_fname,
+                             contenthandler=DefaultContentHandler,
+                             verbose=opts.verbose)
+detrsp_start_time = long(
+    param_from_xmldoc(xmldoc, pipe_macro.DETRSP_XML_PARAM_NAME_GPS_START))
+gps_step = long(
+    param_from_xmldoc(xmldoc, pipe_macro.DETRSP_XML_PARAM_NAME_GPS_STEP))
 event_time = long(opts.event_time)
 igps = find_closest_gps(event_time, detrsp_start_time, gps_step)
 Det_name = "Det_map_gps_%d" % igps
@@ -143,9 +158,10 @@ log_den_probability = np.zeros(npix)
 ndof = 2
 #
 for i in range(npix):
-        prob_null = 1 - sp.special.gammainc(ndof/2.0, nullsnrsq_skymap[i]/2)
-        log_prob_null = np.log(prob_null)
-        log_prob[i] = np.log(4*(np.pi**2)/Det_array[i]) + (cohsnrsq_skymap[i]/8) + log_prob_null
+    prob_null = 1 - sp.special.gammainc(ndof / 2.0, nullsnrsq_skymap[i] / 2)
+    log_prob_null = np.log(prob_null)
+    log_prob[i] = np.log(4 * (np.pi**2) / Det_array[i]) + (cohsnrsq_skymap[i] /
+                                                           8) + log_prob_null
 # Normalizing using a stable function. Exp shoots up to large values.
 log_den_probability = log_prob - logsumexpo(log_prob)
 
@@ -155,12 +171,20 @@ den_probability = np.exp(log_den_probability)
 
 cohsnr = np.sqrt(cohsnrsq_skymap)
 # Write cohsnr and prob skymaps to fits format.
-fits.write_sky_map(opts.output_cohsnr, cohsnr,
-			objid = str(opts.event_id), gps_time=event_time,
-			creator = 'postcoh', runtime = 0, 
-			instruments = instruments, nest = True)
+fits.write_sky_map(opts.output_cohsnr,
+                   cohsnr,
+                   objid=str(opts.event_id),
+                   gps_time=event_time,
+                   creator='postcoh',
+                   runtime=0,
+                   instruments=instruments,
+                   nest=True)
 
-fits.write_sky_map(opts.output_prob, den_probability,
-                        objid = str(opts.event_id), gps_time=event_time,
-                        creator = 'postcoh', runtime = 0,
-                        instruments = instruments, nest = True)
+fits.write_sky_map(opts.output_prob,
+                   den_probability,
+                   objid=str(opts.event_id),
+                   gps_time=event_time,
+                   creator='postcoh',
+                   runtime=0,
+                   instruments=instruments,
+                   nest=True)

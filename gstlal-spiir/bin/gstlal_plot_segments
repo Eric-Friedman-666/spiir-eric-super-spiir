@@ -20,24 +20,24 @@
 ## @file
 # A program to produce a variety of plots from a gstlal inspiral analysis, e.g. IFAR plots, missed found, etc.
 
-
 import bisect
 import itertools
 import math
 import matplotlib
 import matplotlib.figure
+
 matplotlib.rcParams.update({
-	"font.size": 12.0,
-	"axes.titlesize": 12.0,
-	"axes.labelsize": 12.0,
-	"xtick.labelsize": 12.0,
-	"ytick.labelsize": 12.0,
-	"legend.fontsize": 10.0,
-	"figure.dpi": 300,
-	"savefig.dpi": 300,
-	"text.usetex": True,
-	"path.simplify": True,
-	"font.family": "serif"
+    "font.size": 12.0,
+    "axes.titlesize": 12.0,
+    "axes.labelsize": 12.0,
+    "xtick.labelsize": 12.0,
+    "ytick.labelsize": 12.0,
+    "legend.fontsize": 10.0,
+    "figure.dpi": 300,
+    "savefig.dpi": 300,
+    "text.usetex": True,
+    "path.simplify": True,
+    "font.family": "serif"
 })
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import numpy
@@ -62,20 +62,19 @@ from gstlal import gviz_api
 from gstlal.workflow import webpage
 import pdb
 
+
 class DefaultContentHandler(ligolw.LIGOLWContentHandler):
     pass
+
+
 param.use_in(DefaultContentHandler)
 lsctables.use_in(DefaultContentHandler)
-
-
-
 
 golden_ratio = (1. + math.sqrt(5.)) / 2.
 
 __author__ = "Kipp Cannon <kipp.cannon@ligo.org>, Chad Hanna <channa@ligo.caltech.edu>"
 __version__ = "git id %s" % "FIXME"
 __date__ = "FIXME"
-
 
 #
 # =============================================================================
@@ -87,61 +86,120 @@ __date__ = "FIXME"
 
 
 def parse_command_line():
-	parser = OptionParser(
-		version = "Name: %%prog\n%s" % "" # FIXME
-	)
-	parser.add_option("-f", "--format", metavar = "{\"png\",\"pdf\",\"svg\",\"eps\",...}", action = "append", default = [], help = "Set the output image format.  Can be given multiple times (default = \"png\").")
-	parser.add_option("--shrink-data-segments", metavar = "float", type = float, help = "Shrink data segments by this much (on each side). e.g. specifying 2 will shrink each datasegment by 4 seconds")
-	parser.add_option("--extend-veto-segments", metavar = "float", type = float, help = "Pad segments by this number of seconds (on both sides)")
-	parser.add_option("--segments-name", metavar = "name", default = "statevectorsegments", help = "Set the name of the segments that were analyzed (default = \"statevectorsegments\").")
-	parser.add_option("--segments-file", metavar = "filename", default = "segments.xml.gz", help = "Set the filename of the segments that were analyzed (default = \"segments.xml.gz\").")
-	parser.add_option("--vetoes-name", metavar = "name", default = None, help = "Set the name of the veto segments (default = \"vetoes\").")
+    parser = OptionParser(version="Name: %%prog\n%s" % ""  # FIXME
+                          )
+    parser.add_option(
+        "-f",
+        "--format",
+        metavar="{\"png\",\"pdf\",\"svg\",\"eps\",...}",
+        action="append",
+        default=[],
+        help=
+        "Set the output image format.  Can be given multiple times (default = \"png\")."
+    )
+    parser.add_option(
+        "--shrink-data-segments",
+        metavar="float",
+        type=float,
+        help=
+        "Shrink data segments by this much (on each side). e.g. specifying 2 will shrink each datasegment by 4 seconds"
+    )
+    parser.add_option(
+        "--extend-veto-segments",
+        metavar="float",
+        type=float,
+        help="Pad segments by this number of seconds (on both sides)")
+    parser.add_option(
+        "--segments-name",
+        metavar="name",
+        default="statevectorsegments",
+        help=
+        "Set the name of the segments that were analyzed (default = \"statevectorsegments\")."
+    )
+    parser.add_option(
+        "--segments-file",
+        metavar="filename",
+        default="segments.xml.gz",
+        help=
+        "Set the filename of the segments that were analyzed (default = \"segments.xml.gz\")."
+    )
+    parser.add_option(
+        "--vetoes-name",
+        metavar="name",
+        default=None,
+        help="Set the name of the veto segments (default = \"vetoes\").")
 
-	parser.add_option("--vetoes-file", metavar = "filename", default = None, help = "Set the name of the veto segments (default = \"vetoes.xml.gz\").")
-	parser.add_option("--webserver-dir", help = "Set the directory for the webserver.  Required.  Example /archive/home/channa/public_html/highmass_months_23-24_summary_page")
-	parser.add_option("--output-dir", help = "Set the directory for the output.  Required.  Example plots")
-	parser.add_option("-v", "--verbose", action = "store_true", help = "Be verbose.")
-	options, filenames = parser.parse_args()
- 	return options, filenames
+    parser.add_option(
+        "--vetoes-file",
+        metavar="filename",
+        default=None,
+        help="Set the name of the veto segments (default = \"vetoes.xml.gz\")."
+    )
+    parser.add_option(
+        "--webserver-dir",
+        help=
+        "Set the directory for the webserver.  Required.  Example /archive/home/channa/public_html/highmass_months_23-24_summary_page"
+    )
+    parser.add_option(
+        "--output-dir",
+        help="Set the directory for the output.  Required.  Example plots")
+    parser.add_option("-v",
+                      "--verbose",
+                      action="store_true",
+                      help="Be verbose.")
+    options, filenames = parser.parse_args()
+    return options, filenames
+
 
 options, filenames = parse_command_line()
 
 # retrieve the distinct on and participating instruments
 
 # get the segment lists
-segments_xmldoc = utils.load_filename(options.segments_file, contenthandler = DefaultContentHandler, verbose = options.verbose)
-seglists = ligolw_segments.segmenttable_get_by_name(segments_xmldoc, options.segments_name).coalesce()
+segments_xmldoc = utils.load_filename(options.segments_file,
+                                      contenthandler=DefaultContentHandler,
+                                      verbose=options.verbose)
+seglists = ligolw_segments.segmenttable_get_by_name(
+    segments_xmldoc, options.segments_name).coalesce()
 if options.shrink_data_segments is not None:
-	# Make sure all segments are at least long enough to be
-	# contracted (e.g. if a segment is 32 seconds long but
-	# the user is going to contract it by 17 seconds, then
-	# the end time of the segment would come before the
-	# start time of the segment. This is bad)
-	for seglist in seglists.values():
-		iterutils.inplace_filter(lambda s: abs(s) > 2*options.shrink_data_segments, seglist)
-	seglists.contract(options.shrink_data_segments)
+    # Make sure all segments are at least long enough to be
+    # contracted (e.g. if a segment is 32 seconds long but
+    # the user is going to contract it by 17 seconds, then
+    # the end time of the segment would come before the
+    # start time of the segment. This is bad)
+    for seglist in seglists.values():
+        iterutils.inplace_filter(
+            lambda s: abs(s) > 2 * options.shrink_data_segments, seglist)
+    seglists.contract(options.shrink_data_segments)
 instruments = set(seglists)
 
 # get the veto lists
 vetoes_name = options.vetoes_name
 if vetoes_name is not None:
-	vetoes_xmldoc = utils.load_filename(options.vetoes_file, contenthandler = DefaultContentHandler, verbose = options.verbose)
-	veto_segments = ligolw_segments.segmenttable_get_by_name(vetoes_xmldoc, vetoes_name).coalesce()
-	if options.extend_veto_segments is not None:
-		veto_segments.protract(options.extend_veto_segments)
+    vetoes_xmldoc = utils.load_filename(options.vetoes_file,
+                                        contenthandler=DefaultContentHandler,
+                                        verbose=options.verbose)
+    veto_segments = ligolw_segments.segmenttable_get_by_name(
+        vetoes_xmldoc, vetoes_name).coalesce()
+    if options.extend_veto_segments is not None:
+        veto_segments.protract(options.extend_veto_segments)
 else:
-	veto_segments = segments.segmentlistdict()
+    veto_segments = segments.segmentlistdict()
 seglists -= veto_segments
 
 data = []
 for ifo, one_seg_list in seglists.items():
-	for seg in one_seg_list:
-		data.append(["%s: %s" % (str(ifo), str(options.segments_name)), "", "%.2f-%.2f" % (float(seg[0]), float(seg[1])), float(seg[0])*1000 + 315964800000 - 17000, float(seg[1])*1000 + 315964800000 - 17000])
+    for seg in one_seg_list:
+        data.append([
+            "%s: %s" % (str(ifo), str(options.segments_name)), "",
+            "%.2f-%.2f" % (float(seg[0]), float(seg[1])),
+            float(seg[0]) * 1000 + 315964800000 - 17000,
+            float(seg[1]) * 1000 + 315964800000 - 17000
+        ])
 
 f = open("%s/segments.json" % options.output_dir, "w")
 f.write(repr(data))
 f.close()
-
 
 #
 # set up the webpage
@@ -151,15 +209,27 @@ nav = webpage.tabs()
 #
 # add the sections to the nav bar and the nav bar to the page
 #
-nav+=[webpage.elem("li", [webpage.elem("div", [time.strftime("%Y-%m-%d %H:%M")], "")])]
-nav+=[webpage.elem("li", [webpage.elem("div", [os.path.abspath(options.segments_file)], "")])]
-thispage+=nav
-thispage+=webpage.elem("br",[])
+nav += [
+    webpage.elem("li",
+                 [webpage.elem("div", [time.strftime("%Y-%m-%d %H:%M")], "")])
+]
+nav += [
+    webpage.elem(
+        "li",
+        [webpage.elem("div", [os.path.abspath(options.segments_file)], "")])
+]
+thispage += nav
+thispage += webpage.elem("br", [])
 
-summary = webpage.tab("Segments", "Segments information", "Segments information", ["segments_div_wrapper"])
+summary = webpage.tab("Segments", "Segments information",
+                      "Segments information", ["segments_div_wrapper"])
 summary_seg = webpage.section("Segments")
-thispage.header_content.append(webpage.googleTimelineFromJson(os.path.join(options.output_dir, 'segments.json'), "segments_div"))
-summary_seg += [webpage.elem("div", [], "id=segments_div width=200% height=500")]
+thispage.header_content.append(
+    webpage.googleTimelineFromJson(
+        os.path.join(options.output_dir, 'segments.json'), "segments_div"))
+summary_seg += [
+    webpage.elem("div", [], "id=segments_div width=200% height=500")
+]
 
 summary_div = summary([summary_seg])
 
@@ -168,17 +238,16 @@ thispage += [summary_div]
 # write the result
 #
 
-
 try:
-	os.makedirs(options.webserver_dir)
+    os.makedirs(options.webserver_dir)
 except OSError:
-	pass
+    pass
 
 f = open("%s/index.html" % options.webserver_dir, "w")
-thispage.write(f, write_gstlal_css = False)
+thispage.write(f, write_gstlal_css=False)
 f.close()
 
-shutil.copytree(options.output_dir, os.path.join(options.webserver_dir, os.path.split(options.output_dir)[1]))
-
-
-
+shutil.copytree(
+    options.output_dir,
+    os.path.join(options.webserver_dir,
+                 os.path.split(options.output_dir)[1]))

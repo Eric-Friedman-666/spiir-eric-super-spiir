@@ -25,7 +25,6 @@
 ### Takes an injection xml and a cache of reference PSDs and calculated characteristic SNRs. The values
 ### will be written to the alpha1 and alpha2 columns in the sim_inspiral table.
 ###
-
 """
 This program calculates characteristic SNRs given an injection xml and a cache of reference PSDs.
 """
@@ -50,112 +49,142 @@ import lalsimulation
 from functools import partial
 import multiprocessing
 
+
 def parse_command_line():
-	parser = OptionParser(description = __doc__)
-	parser.add_option("--reference-psd-cache", metavar = "filename", help = "Set the reference psd cache file.")
-	parser.add_option("--injection-file", metavar = "filename", help = "Set the injection xml file.")
-	parser.add_option("--output", metavar = "filename", help = "Set the output xml file.")
-	parser.add_option("--flow", metavar = "value", type = "float", help = "Set the low frequency for waveform generation and SNR integral.")
-	parser.add_option("--npool", metavar = "value", type = "int", default = 2, help = "Set value for pool. Number of parallel sub-processes")
-	parser.add_option("--premerger-cut", metavar = "value", type = "int", default = 0, help = "Set template truncation cut off. Defaults to full bandwidth.")
+    parser = OptionParser(description=__doc__)
+    parser.add_option("--reference-psd-cache",
+                      metavar="filename",
+                      help="Set the reference psd cache file.")
+    parser.add_option("--injection-file",
+                      metavar="filename",
+                      help="Set the injection xml file.")
+    parser.add_option("--output",
+                      metavar="filename",
+                      help="Set the output xml file.")
+    parser.add_option(
+        "--flow",
+        metavar="value",
+        type="float",
+        help="Set the low frequency for waveform generation and SNR integral.")
+    parser.add_option(
+        "--npool",
+        metavar="value",
+        type="int",
+        default=2,
+        help="Set value for pool. Number of parallel sub-processes")
+    parser.add_option(
+        "--premerger-cut",
+        metavar="value",
+        type="int",
+        default=0,
+        help="Set template truncation cut off. Defaults to full bandwidth.")
 
-	options, filenames = parser.parse_args()
+    options, filenames = parser.parse_args()
 
-	if options.reference_psd_cache is None:
-		raise ValueError("Must specify --reference-psd-cache")
+    if options.reference_psd_cache is None:
+        raise ValueError("Must specify --reference-psd-cache")
 
-	if options.injection_file is None:
-		raise ValueError("Must specify --injection-file")
+    if options.injection_file is None:
+        raise ValueError("Must specify --injection-file")
 
-	if options.flow is None:
-		raise ValueError("Must specify --flow")
+    if options.flow is None:
+        raise ValueError("Must specify --flow")
 
-	if options.output is None:
-		options.output = options.injection_file
+    if options.output is None:
+        options.output = options.injection_file
 
-	return options, filenames
+    return options, filenames
 
 
 def calc_expected_snr(premerger_cut, inj):
-	# FIXME:  don't hard-code detectors
-	snr = dict.fromkeys(("H1", "L1", "V1"), 0.0)
+    # FIXME:  don't hard-code detectors
+    snr = dict.fromkeys(("H1", "L1", "V1"), 0.0)
 
-	injtime = inj.time_geocent
+    injtime = inj.time_geocent
 
-	# Determine which PSD files have GPS times covering the injection time.
-	psds = dict((seg, psd) for seg, psd in allPSDs.items() if injtime in seg)
+    # Determine which PSD files have GPS times covering the injection time.
+    psds = dict((seg, psd) for seg, psd in allPSDs.items() if injtime in seg)
 
-	if len(psds) < 1:
-		# We know no PSD covers the injection.
-		return snr
-	elif len(psds) == 1:
-		# Only one PSD covers the injection time.
-		seg, chosenPSD = psds.popitem()
-	else:
-		# More than one PSD covers the injection time.  Find the
-		# one whose segment is closest to being centred on the
-		# injection.  Compute segment centre using overflow-safe
-		# arithmetic.
-		seg, chosenPSD = min(psds.items(), key = lambda (seg, psd): abs(seg[0] + abs(seg) / 2. - injtime))
+    if len(psds) < 1:
+        # We know no PSD covers the injection.
+        return snr
+    elif len(psds) == 1:
+        # Only one PSD covers the injection time.
+        seg, chosenPSD = psds.popitem()
+    else:
+        # More than one PSD covers the injection time.  Find the
+        # one whose segment is closest to being centred on the
+        # injection.  Compute segment centre using overflow-safe
+        # arithmetic.
+        seg, chosenPSD = min(psds.items(),
+                             key=lambda
+                             (seg, psd): abs(seg[0] + abs(seg) / 2. - injtime))
 
-	# FIXME have better scheme for calculating the needed sample_rate
-	sample_rate = 16384.0
-	approximant = lalsimulation.GetApproximantFromString(str(inj.waveform))
-	if approximant == lalsimulation.NR_hdf5:
-		LALparams = lal.CreateDict()
-		lalsimulation.SimInspiralWaveformParamsInsertNumRelData(LALparams, str(inj.numrel_data))
-		f_min = inj.f_lower
-	else:
-		LALparams = None
-		f_min = options.flow
-        
-	h_plus, h_cross = lalsimulation.SimInspiralTD(
-		m1 = inj.mass1*lal.MSUN_SI,
-		m2 = inj.mass2*lal.MSUN_SI,
-		S1x = inj.spin1x,
-		S1y = inj.spin1y,
-		S1z = inj.spin1z,
-		S2x = inj.spin2x,
-		S2y = inj.spin2y,
-		S2z = inj.spin2z,
-		distance = inj.distance*1e6*lal.PC_SI,
-		inclination = inj.inclination,
-		phiRef = inj.coa_phase,
-		longAscNodes = 0.0,
-		eccentricity = 0.0,
-		meanPerAno = 0.0,
-		deltaT = 1.0 / sample_rate,
-		f_min = f_min,
-		f_ref = 0.0,
-		LALparams = LALparams,
-		approximant = approximant
-	)
+    # FIXME have better scheme for calculating the needed sample_rate
+    sample_rate = 16384.0
+    approximant = lalsimulation.GetApproximantFromString(str(inj.waveform))
+    if approximant == lalsimulation.NR_hdf5:
+        LALparams = lal.CreateDict()
+        lalsimulation.SimInspiralWaveformParamsInsertNumRelData(
+            LALparams, str(inj.numrel_data))
+        f_min = inj.f_lower
+    else:
+        LALparams = None
+        f_min = options.flow
 
-	h_plus.epoch += injtime
-	h_cross.epoch += injtime
+    h_plus, h_cross = lalsimulation.SimInspiralTD(m1=inj.mass1 * lal.MSUN_SI,
+                                                  m2=inj.mass2 * lal.MSUN_SI,
+                                                  S1x=inj.spin1x,
+                                                  S1y=inj.spin1y,
+                                                  S1z=inj.spin1z,
+                                                  S2x=inj.spin2x,
+                                                  S2y=inj.spin2y,
+                                                  S2z=inj.spin2z,
+                                                  distance=inj.distance * 1e6 *
+                                                  lal.PC_SI,
+                                                  inclination=inj.inclination,
+                                                  phiRef=inj.coa_phase,
+                                                  longAscNodes=0.0,
+                                                  eccentricity=0.0,
+                                                  meanPerAno=0.0,
+                                                  deltaT=1.0 / sample_rate,
+                                                  f_min=f_min,
+                                                  f_ref=0.0,
+                                                  LALparams=LALparams,
+                                                  approximant=approximant)
 
-	# Compute strain in each detector. If one detector wasn't on, snr will be set to zero.
-	for instrument in snr:
-		if instrument not in chosenPSD:
-			continue
-		h = lalsimulation.SimDetectorStrainREAL8TimeSeries(h_plus, h_cross, inj.longitude, inj.latitude, inj.polarization, lalsimulation.DetectorPrefixToLALDetector(instrument))
+    h_plus.epoch += injtime
+    h_cross.epoch += injtime
 
-		#print 'Samples: ',len(h.data.data)
-		#print 'Length: ',len(h.data.data)/sample_rate
-		#print 'Length_struct: ',h.data.length
+    # Compute strain in each detector. If one detector wasn't on, snr will be set to zero.
+    for instrument in snr:
+        if instrument not in chosenPSD:
+            continue
+        h = lalsimulation.SimDetectorStrainREAL8TimeSeries(
+            h_plus, h_cross, inj.longitude, inj.latitude, inj.polarization,
+            lalsimulation.DetectorPrefixToLALDetector(instrument))
 
-		new_length = len(h.data.data) - premerger_cut*int(sample_rate)
-		h_n = lal.CreateREAL8TimeSeries(h.name, h.epoch, h.f0, h.deltaT, h.sampleUnits, new_length)
-		h_n.data.data = h.data.data[:new_length]
+        #print 'Samples: ',len(h.data.data)
+        #print 'Length: ',len(h.data.data)/sample_rate
+        #print 'Length_struct: ',h.data.length
 
-		snr[instrument] = lalsimulation.MeasureSNR(h_n, chosenPSD[instrument], options.flow, 0.85 * (sample_rate / 2.))
+        new_length = len(h.data.data) - premerger_cut * int(sample_rate)
+        h_n = lal.CreateREAL8TimeSeries(h.name, h.epoch, h.f0, h.deltaT,
+                                        h.sampleUnits, new_length)
+        h_n.data.data = h.data.data[:new_length]
 
-	#print premerger_cut
-	return snr
+        snr[instrument] = lalsimulation.MeasureSNR(h_n, chosenPSD[instrument],
+                                                   options.flow,
+                                                   0.85 * (sample_rate / 2.))
+
+    #print premerger_cut
+    return snr
+
 
 @lsctables.use_in
 class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
-	pass
+    pass
+
 
 ###################################
 #
@@ -166,20 +195,25 @@ class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
 options, filenames = parse_command_line()
 
 # Now we need to read in from the sim_inspiral table
-xmldoc = ligolw_utils.load_filename(options.injection_file, verbose = True, contenthandler = LIGOLWContentHandler)
+xmldoc = ligolw_utils.load_filename(options.injection_file,
+                                    verbose=True,
+                                    contenthandler=LIGOLWContentHandler)
 
 new_xmldoc = copy.deepcopy(xmldoc)
 xmldoc.unlink()
 sim_inspiral_table = lsctables.SimInspiralTable.get_table(new_xmldoc)
 if sim_inspiral_table:
-	inj_segment = segments.segment(min(inj.time_geocent for inj in sim_inspiral_table), max(inj.time_geocent for inj in sim_inspiral_table))
+    inj_segment = segments.segment(
+        min(inj.time_geocent for inj in sim_inspiral_table),
+        max(inj.time_geocent for inj in sim_inspiral_table))
 else:
-	inj_segment = None
+    inj_segment = None
 
 # Load all PSDs so that they don't need to be loaded for every injection.
 # First, read in the PSDs
-reference_psd_files = [CacheEntry(line) for line in open(options.reference_psd_cache)]
-
+reference_psd_files = [
+    CacheEntry(line) for line in open(options.reference_psd_cache)
+]
 
 #allPSDs = dict(
 #	(cacheentry.segment, read_psd_xmldoc(ligolw_utils.load_url(cacheentry.url, verbose = True, contenthandler = PSDContentHandler)))
@@ -189,27 +223,29 @@ reference_psd_files = [CacheEntry(line) for line in open(options.reference_psd_c
 # Load all PSDs so that they don't need to be loaded for every injection.
 allPSDs = {}
 for cacheentry in reference_psd_files:
-	seg = cacheentry.segment
-	psdxmldoc = ligolw_utils.load_url(cacheentry.path, verbose = True, contenthandler = PSDContentHandler)
-	PSDs = read_psd_xmldoc(psdxmldoc)
-	allPSDs[seg] = PSDs
-
+    seg = cacheentry.segment
+    psdxmldoc = ligolw_utils.load_url(cacheentry.path,
+                                      verbose=True,
+                                      contenthandler=PSDContentHandler)
+    PSDs = read_psd_xmldoc(psdxmldoc)
+    allPSDs[seg] = PSDs
 
 pool = multiprocessing.Pool(options.npool)
 snr = []
 
 snr_func = partial(calc_expected_snr, options.premerger_cut)
 #print pool.map(calc_expected_snr,[inj for idx, inj in enumerate(sim_inspiral_table)])
-for simsnr in pool.map(snr_func,[inj for idx, inj in enumerate(sim_inspiral_table)]):
-	snr.append(simsnr)
+for simsnr in pool.map(snr_func,
+                       [inj for idx, inj in enumerate(sim_inspiral_table)]):
+    snr.append(simsnr)
 pool.close()
 pool.join()
 
 # FIXME:  get proper columns
 # FIXME:  broken for KAGRA
 for idx, inj in enumerate(sim_inspiral_table):
-	inj.alpha4 = snr[idx]["H1"]
-	inj.alpha5 = snr[idx]["L1"]
-	inj.alpha6 = snr[idx]["V1"]
+    inj.alpha4 = snr[idx]["H1"]
+    inj.alpha5 = snr[idx]["L1"]
+    inj.alpha6 = snr[idx]["V1"]
 
-ligolw_utils.write_filename(new_xmldoc,options.output,verbose = True)
+ligolw_utils.write_filename(new_xmldoc, options.output, verbose=True)

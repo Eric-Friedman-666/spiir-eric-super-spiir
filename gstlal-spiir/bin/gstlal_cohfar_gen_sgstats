@@ -22,7 +22,6 @@
 ### ------
 ###
 ###
-
 """
 This program calculates characteristic SNRs given an injection xml and a cache of reference PSDs.
 """
@@ -34,20 +33,43 @@ import numpy
 from optparse import OptionParser
 from gstlal.pipemodules import stats
 
+
 def parse_command_line():
-	parser = OptionParser(description = __doc__)
-	parser.add_option("--output", metavar = "filename", help = "Set the output filename.")
-	parser.add_option("--ifos", metavar = "name", help = "set the ifos to plot pdf and cdf")
-	parser.add_option("--ncx2-dof", default = 2, type = "int", help = "set degree of freedom for non-central chi-square distribution.")
-	parser.add_option("--ncx2-mean-factor", default = 0.045, type = "float", help = "set mean factor that will be multiplied to the given coherent SNR value for non-central chi-square distribution.")
-	parser.add_option("-v", "--verbose", action = "store_true", help = "Be verbose (optional).")
- 
-	options, tmp = parser.parse_args()
+    parser = OptionParser(description=__doc__)
+    parser.add_option("--output",
+                      metavar="filename",
+                      help="Set the output filename.")
+    parser.add_option("--ifos",
+                      metavar="name",
+                      help="set the ifos to plot pdf and cdf")
+    parser.add_option(
+        "--ncx2-dof",
+        default=2,
+        type="int",
+        help="set degree of freedom for non-central chi-square distribution.")
+    parser.add_option(
+        "--ncx2-mean-factor",
+        default=0.045,
+        type="float",
+        help=
+        "set mean factor that will be multiplied to the given coherent SNR value for non-central chi-square distribution."
+    )
+    parser.add_option("-v",
+                      "--verbose",
+                      action="store_true",
+                      help="Be verbose (optional).")
 
-	if options.output is None or options.ifos is None:
-		raise ValueError("Must specify --output and --ifos")
+    options, tmp = parser.parse_args()
 
-	return options, 
+    if options.output is None or options.ifos is None:
+        raise ValueError("Must specify --output and --ifos")
+
+    return options,
+
 
 options, = parse_command_line()
-stats.signal_stats_to_xml(options.output, options.ifos, ncx2_dof = options.ncx2_dof, ncx2_mean_factor = options.ncx2_mean_factor, verbose = options.verbose)
+stats.signal_stats_to_xml(options.output,
+                          options.ifos,
+                          ncx2_dof=options.ncx2_dof,
+                          ncx2_mean_factor=options.ncx2_mean_factor,
+                          verbose=options.verbose)
