@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -25,64 +25,57 @@
  * 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-
 #ifndef __COHFAR_ASSIGNFAR_H__
 #define __COHFAR_ASSIGNFAR_H__
 
-#include <glib.h>
-#include <gst/gst.h>
-#include <gst/base/gstbasetransform.h>
-
 #include <cohfar/background_stats.h>
+#include <glib.h>
+#include <gst/base/gstbasetransform.h>
+#include <gst/gst.h>
 
 G_BEGIN_DECLS
-#define COHFAR_ASSIGNFAR_TYPE \
-	(cohfar_assignfar_get_type())
-#define COHFAR_ASSIGNFAR(obj) \
-	(G_TYPE_CHECK_INSTANCE_CAST((obj), COHFAR_ASSIGNFAR_TYPE, CohfarAssignfar))
-#define COHFAR_ASSIGNFAR_CLASS(klass) \
-	(G_TYPE_CHECK_CLASS_CAST((klass), COHFAR_ASSIGNFAR_TYPE, CohfarAssignfarClass))
-#define GST_IS_COHFAR_ASSIGNFAR(obj) \
-	(G_TYPE_CHECK_INSTANCE_TYPE((obj), COHFAR_ASSIGNFAR_TYPE))
-#define GST_IS_COHFAR_ASSIGNFAR_CLASS(klass) \
-	(G_type_CHECK_CLASS_TYPE((klass), COHFAR_ASSIGNFAR_TYPE))
-
+#define COHFAR_ASSIGNFAR_TYPE (cohfar_assignfar_get_type())
+#define COHFAR_ASSIGNFAR(obj)                                                  \
+    (G_TYPE_CHECK_INSTANCE_CAST((obj), COHFAR_ASSIGNFAR_TYPE, CohfarAssignfar))
+#define COHFAR_ASSIGNFAR_CLASS(klass)                                          \
+    (G_TYPE_CHECK_CLASS_CAST((klass), COHFAR_ASSIGNFAR_TYPE,                   \
+                             CohfarAssignfarClass))
+#define GST_IS_COHFAR_ASSIGNFAR(obj)                                           \
+    (G_TYPE_CHECK_INSTANCE_TYPE((obj), COHFAR_ASSIGNFAR_TYPE))
+#define GST_IS_COHFAR_ASSIGNFAR_CLASS(klass)                                   \
+    (G_type_CHECK_CLASS_TYPE((klass), COHFAR_ASSIGNFAR_TYPE))
 
 typedef struct {
-	GstBaseTransformClass parent_class;
+    GstBaseTransformClass parent_class;
 } CohfarAssignfarClass;
 
-
 typedef struct {
-	GstBaseTransform element;
+    GstBaseTransform element;
 
-	char *ifos;
-	int nifo;
-	int ncombo; // ifo combination
-	int hist_trials;
-	TriggerStatsXML *bgstats_2h;
-	TriggerStatsXML *bgstats_1d;
-	TriggerStatsXML *bgstats_1w;
+    char *ifos;
+    int nifo;
+    int ncombo; // ifo combination
+    int hist_trials;
+    TriggerStatsXML *bgstats_2h;
+    TriggerStatsXML *bgstats_1d;
+    TriggerStatsXML *bgstats_1w;
 
-	int silent_time;
-	gboolean pass_silent_time;
-	int refresh_interval;
-	gchar **input_fnames;
-	int ninput;
+    int silent_time;
+    gboolean pass_silent_time;
+    int refresh_interval;
+    gchar **input_fnames;
+    int ninput;
 
-	/*
-	 * timestamp book-keeping
-	 */
+    /*
+     * timestamp book-keeping
+     */
 
-	GstClockTime t_start;
-	GstClockTime t_roll_start;
+    GstClockTime t_start;
+    GstClockTime t_roll_start;
 } CohfarAssignfar;
-
 
 GType cohfar_assignfar_get_type(void);
 
-
 G_END_DECLS
 
-
-#endif	/* __COHFAR_ASSIGNFAR_H__ */
+#endif /* __COHFAR_ASSIGNFAR_H__ */

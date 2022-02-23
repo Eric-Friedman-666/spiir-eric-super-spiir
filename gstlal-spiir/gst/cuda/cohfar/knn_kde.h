@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2017 Teresa, Xingjiang Zhu, Qi Chu <qi.chu@ligo.org>
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
  * "Software"), to deal in the Software without restriction, including
@@ -25,11 +25,11 @@
  * 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <gsl/gsl_vector.h>
 #include <gsl/gsl_matrix.h>
 #include <gsl/gsl_sort_double.h>
+#include <gsl/gsl_vector.h>
 
-
-void
-knn_kde(gsl_vector *tin_x, gsl_vector *tin_y, gsl_matrix_long *histogram, gsl_matrix *pdf);
-
+void knn_kde(gsl_vector *tin_x,
+             gsl_vector *tin_y,
+             gsl_matrix_long *histogram,
+             gsl_matrix *pdf);

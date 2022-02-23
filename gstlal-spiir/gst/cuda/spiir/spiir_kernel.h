@@ -16,7 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-
 /*
  * ============================================================================
  *
@@ -25,12 +24,10 @@
  * ============================================================================
  */
 
-
 #include <spiir/spiir.h>
 #define BANK_INIT_SUCCESS 1
-#define BANK_INIT_FAILED -1
+#define BANK_INIT_FAILED  -1
 #define BANK_FREE_SUCCESS 1
-
 
 #define NB_MAX 32
 
@@ -65,19 +62,21 @@ unsigned iir_channels(const GSTLALIIRBankCuda *element);
 
 guint64 get_available_samples(GSTLALIIRBankCuda *element);
 
-void set_metadata(GSTLALIIRBankCuda *element, GstBuffer *buf, guint64 outsamples, gboolean gap);
-
+void set_metadata(GSTLALIIRBankCuda *element,
+                  GstBuffer *buf,
+                  guint64 outsamples,
+                  gboolean gap);
 
 /*
- * transform double precision input samples to double precision output samples using GPU
+ * transform double precision input samples to double precision output samples
+ * using GPU
  */
 
 GstFlowReturn filter_d(GSTLALIIRBankCuda *element, GstBuffer *outbuf);
 
 /*
- * transform single precision input samples to single precision output samples using GPU
+ * transform single precision input samples to single precision output samples
+ * using GPU
  */
 
-
 GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf);
-

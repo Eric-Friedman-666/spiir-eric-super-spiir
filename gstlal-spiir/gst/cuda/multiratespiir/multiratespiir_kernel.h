@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2014 Qi Chu
  *
  * This library is free software; you can redistribute it and/or
@@ -22,12 +22,15 @@
 
 #include <multiratespiir/multiratespiir.h>
 #include <multiratespiir/multiratespiir_utils.h>
-gint
-multi_downsample (SpiirState **spstate, float *in_multidown, 
-		gint num_in_multidown, guint num_depths, cudaStream_t stream);
+gint multi_downsample(SpiirState **spstate,
+                      float *in_multidown,
+                      gint num_in_multidown,
+                      guint num_depths,
+                      cudaStream_t stream);
 
-gint
-spiirup (SpiirState **spstate, gint num_in_multiup, guint num_depths, float *out, cudaStream_t stream);
+gint spiirup(SpiirState **spstate,
+             gint num_in_multiup,
+             guint num_depths,
+             float *out,
+             cudaStream_t stream);
 #endif
-
-
