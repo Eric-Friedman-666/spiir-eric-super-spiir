@@ -15,7 +15,6 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-
 #
 # =============================================================================
 #
@@ -23,8 +22,6 @@
 #
 # =============================================================================
 #
-
-
 """
 This module is a wrapper of the _spiir module, supplementing the C
 code in that module with additional features that are more easily
@@ -32,12 +29,9 @@ implemented in Python.  It is recommended that you import this module
 rather than importing _spiir directly.
 """
 
-
 import math
 
 import lal
 from ._spiir_decomp import *
 
-
 __author__ = "Qi Chu <qi.chu@ligo.org>"
-

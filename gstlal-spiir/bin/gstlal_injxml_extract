@@ -26,7 +26,6 @@
 #	+ `--output` [filename]: Set the filename in which to save the inj xml(required).
 #	+ `--verbose`: Be verbose.
 
-
 import sys
 import scipy
 import numpy
@@ -36,30 +35,54 @@ import pdb
 from glue.ligolw import ligolw, lsctables, array, param, utils
 from glue import iterutils
 
+
 class DefaultContentHandler(ligolw.LIGOLWContentHandler):
     pass
+
+
 array.use_in(DefaultContentHandler)
 param.use_in(DefaultContentHandler)
 lsctables.use_in(DefaultContentHandler)
 
-
-parser = OptionParser(description = __doc__)
-parser.add_option("--injxml", metavar = "filename", help = "Set the name of the LIGO light-weight XML file from which to load the inj bank (required).")
-parser.add_option("--extract-method", metavar = "index|mchirp", default = "index", help = "Set the extract method")
-parser.add_option("--extract-range", metavar = "gpsstart:gpsend", default = None, help = "Set the extract range")
-parser.add_option("--output", metavar = "filename", help = "Set the filename in which to save the inj (required).")
-parser.add_option("-v", "--verbose", action = "store_true", help = "Be verbose (optional).")
+parser = OptionParser(description=__doc__)
+parser.add_option(
+    "--injxml",
+    metavar="filename",
+    help=
+    "Set the name of the LIGO light-weight XML file from which to load the inj bank (required)."
+)
+parser.add_option("--extract-method",
+                  metavar="index|mchirp",
+                  default="index",
+                  help="Set the extract method")
+parser.add_option("--extract-range",
+                  metavar="gpsstart:gpsend",
+                  default=None,
+                  help="Set the extract range")
+parser.add_option("--output",
+                  metavar="filename",
+                  help="Set the filename in which to save the inj (required).")
+parser.add_option("-v",
+                  "--verbose",
+                  action="store_true",
+                  help="Be verbose (optional).")
 
 options, filenames = parser.parse_args()
 
 required_options = ("injxml", "output")
 
-missing_options = [option for option in required_options if getattr(options, option) is None]
+missing_options = [
+    option for option in required_options if getattr(options, option) is None
+]
 if missing_options:
-	raise ValueError, "missing required option(s) %s" % ", ".join("--%s" % option.replace("_", "-") for option in sorted(missing_options))
+    raise ValueError, "missing required option(s) %s" % ", ".join(
+        "--%s" % option.replace("_", "-")
+        for option in sorted(missing_options))
 
 # load the sngl_inspiral table
-inj_xmldoc = utils.load_filename(options.injxml, contenthandler = DefaultContentHandler, verbose = options.verbose)
+inj_xmldoc = utils.load_filename(options.injxml,
+                                 contenthandler=DefaultContentHandler,
+                                 verbose=options.verbose)
 
 # Get sim inspiral table
 sim_inspiral_table = lsctables.SimInspiralTable.get_table(inj_xmldoc)
@@ -74,20 +97,23 @@ new_sim_table = lsctables.New(lsctables.SimInspiralTable)
 if options.extract_method == "gpstime":
     # select the entries
     if options.extract_range is None:
-		raise ValueError, "do nothing"
+        raise ValueError, "do nothing"
     else:
         # sim_inspiral_table index start from 0, the input index start from 1
         extract_start = int(options.extract_range.split(":")[0]) - 1
         extract_end = int(options.extract_range.split(":")[1]) - 1
-    
+
     if options.verbose:
-        print "the entries we select is [%d, %d)" % (extract_start, extract_end)
-    
-    iterutils.inplace_filter(lambda row: row.h_end_time >= extract_start and row.h_end_time < extract_end, sim_inspiral_table)
-    
+        print "the entries we select is [%d, %d)" % (extract_start,
+                                                     extract_end)
+
+    iterutils.inplace_filter(
+        lambda row: row.h_end_time >= extract_start and row.h_end_time <
+        extract_end, sim_inspiral_table)
+
     for row_id in range(0, len(sim_inspiral_table)):
         new_sim_table.append(sim_inspiral_table[row_id])
-    
+
 # append the new sim_inspiral table to the new LIGO_LW
 lw.appendChild(new_sim_table)
 
@@ -95,5 +121,7 @@ lw.appendChild(new_sim_table)
 xmldoc.appendChild(lw)
 
 # Write to file
-utils.write_filename(xmldoc, options.output, gz = options.output.endswith('.gz'), verbose = options.verbose)
-
+utils.write_filename(xmldoc,
+                     options.output,
+                     gz=options.output.endswith('.gz'),
+                     verbose=options.verbose)

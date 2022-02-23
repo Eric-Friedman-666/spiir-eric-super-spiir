@@ -30,183 +30,297 @@ import os
 import time
 import subprocess
 from gstlal.workflow import utils as workflow_utils
+
+
 def parse_command_line():
-	parser = OptionParser(
-		description = __doc__
-	)
+    parser = OptionParser(description=__doc__)
 
-	parser.add_option("--pipeline-output-zerolag", metavar = "000/zerolag.xml.gz,001/zerolag.xml.gz", default = None, help = "Pipeline output names (required)")
-	parser.add_option("--pipeline-output-background", metavar = "000/000_marginalized_1w.xml.gz,001/001_marginalized_1w.xml.gz", default = None, help = "Pipeline output background names (required)")
-	parser.add_option("--usertag", metavar = "inj0|others", default = None, help = "Output usertag (required)")
-	parser.add_option("--outpath", metavar = "dirname", default = None, help = "Output path of plots (required)")
-	parser.add_option("--common-start", metavar = int, default = None, help = "Set the common start of all the files (required).")
-	parser.add_option("--common-duration", metavar = int, default = None, help = "Set the common duration of all the files (required).")
-	
-	parser.add_option("--segments-name", metavar = "name", default = "postcohprocessed", help = "Set the name of the segment name (optional).")
-	parser.add_option("--injxml", metavar = "filename", default = None, help = "Set the name of the inj xml name. (optional)")
-	parser.add_option("--segmentxml", metavar = "filename", default = None, help = "Set the name of the segment xml name (required).")
-	
-	parser.add_option("--ifos", metavar = "H1L1V1", help = "Set the name of the inj xml name (required).")
-	parser.add_option("-t", "--tmp-space", metavar = "path", help = "Path to a directory suitable for use as a work area while manipulating the database file.  The database file will be worked on in this directory, and then moved to the final location when complete.  This option is intended to improve performance when running in a networked environment, where there might be a local disk with higher bandwidth than is available to the filesystem on which the final output will reside.")
-	parser.add_option("-v", "--verbose", action = "store_true", help = "Be verbose.")
-	
-	options, tmp = parser.parse_args()
+    parser.add_option("--pipeline-output-zerolag",
+                      metavar="000/zerolag.xml.gz,001/zerolag.xml.gz",
+                      default=None,
+                      help="Pipeline output names (required)")
+    parser.add_option(
+        "--pipeline-output-background",
+        metavar="000/000_marginalized_1w.xml.gz,001/001_marginalized_1w.xml.gz",
+        default=None,
+        help="Pipeline output background names (required)")
+    parser.add_option("--usertag",
+                      metavar="inj0|others",
+                      default=None,
+                      help="Output usertag (required)")
+    parser.add_option("--outpath",
+                      metavar="dirname",
+                      default=None,
+                      help="Output path of plots (required)")
+    parser.add_option("--common-start",
+                      metavar=int,
+                      default=None,
+                      help="Set the common start of all the files (required).")
+    parser.add_option(
+        "--common-duration",
+        metavar=int,
+        default=None,
+        help="Set the common duration of all the files (required).")
 
-	required_options = ["pipeline_output_zerolag", "usertag", "outpath", "common_start", "common_duration", "ifos"]
-	missing_options = []
-	missing_options += ["--%s" % option.replace("_", "-") for option in required_options if getattr(options, option) is None]
-	if missing_options:
-		raise ValueError, "missing required option(s) %s" % ", ".join(sorted(missing_options))
+    parser.add_option("--segments-name",
+                      metavar="name",
+                      default="postcohprocessed",
+                      help="Set the name of the segment name (optional).")
+    parser.add_option("--injxml",
+                      metavar="filename",
+                      default=None,
+                      help="Set the name of the inj xml name. (optional)")
+    parser.add_option("--segmentxml",
+                      metavar="filename",
+                      default=None,
+                      help="Set the name of the segment xml name (required).")
 
+    parser.add_option("--ifos",
+                      metavar="H1L1V1",
+                      help="Set the name of the inj xml name (required).")
+    parser.add_option(
+        "-t",
+        "--tmp-space",
+        metavar="path",
+        help=
+        "Path to a directory suitable for use as a work area while manipulating the database file.  The database file will be worked on in this directory, and then moved to the final location when complete.  This option is intended to improve performance when running in a networked environment, where there might be a local disk with higher bandwidth than is available to the filesystem on which the final output will reside."
+    )
+    parser.add_option("-v",
+                      "--verbose",
+                      action="store_true",
+                      help="Be verbose.")
 
-	return options
+    options, tmp = parser.parse_args()
 
-def call_calcfap(fout, fin, ifos, walltime, update_pdf = True, verbose = False):
-	cmd = []
-	cmd += ["gstlal_cohfar_calc_fap"]
-	cmd += ["--input", fin]
-	cmd += ["--input-format", "stats"]
-	cmd += ["--output", fout]
-	cmd += ["--ifos", ifos]
-	if update_pdf:
-		cmd += ["--update-pdf"]
-	if verbose:
-		print cmd
-	proc = subprocess.Popen(cmd)
-	return proc
+    required_options = [
+        "pipeline_output_zerolag", "usertag", "outpath", "common_start",
+        "common_duration", "ifos"
+    ]
+    missing_options = []
+    missing_options += [
+        "--%s" % option.replace("_", "-") for option in required_options
+        if getattr(options, option) is None
+    ]
+    if missing_options:
+        raise ValueError, "missing required option(s) %s" % ", ".join(
+            sorted(missing_options))
 
-def call_injfind(xml, window = '0.9', verbose = False):
-	cmd = []
-	cmd += ["ligolw_inspinjfind_postcoh"]
-	cmd += ["--time-window", window]
-	cmd.append(xml)
-	if verbose:
-		cmd += ["--verbose"]
-		print cmd
-	proc = subprocess.Popen(cmd)
-	proc.wait()
-
-
-def call_extract_injxml(extractxml, injxml, start, end, verbose = False):
-	cmd = []
-	cmd += ["gstlal_injxml_extract"]
-	cmd += ["--injxml", injxml]
-	cmd += ["--extract-method", "gpstime"]
-	cmd += ["--extract-range", "%d:%d" % (start, end)]
-	cmd += ["--output", extractxml]
-	if verbose:
-		print cmd
-	proc = subprocess.Popen(cmd)
-	proc.wait()
-
-def call_sqlite2xml(outxml, sqlite_file, tmpspace, verbose = False):
-
-	cmd = []
-	cmd += ["ligolw_sqlite_postcoh"]
-	cmd += ["--database", sqlite_file]
-	cmd += ["--tmp-space", tmpspace]
-	cmd += ["--extract", outxml]
-	if verbose:
-		cmd += ["--verbose"]
-		print cmd
-	proc = subprocess.Popen(cmd)
-	proc.wait()
-
-def call_plotsummary_inj(output_dir, ifos, sqlite_file, usertag, segmentsname = "postcohprocessed", verbose = False):
-
-	cmd = []
-	cmd += ["gstlal_inspiral_postcohspiir_plotsummary"]
-	cmd += ["--ifos", ifos]
-	cmd += ["--inj-database", sqlite_file]
-	cmd += ["--segments-name", segmentsname]
-	cmd += ["--inj-user-tag", usertag]
-	cmd += ["--output-dir", output_dir]
-	if verbose:
-		cmd += ["--verbose"]
-		print cmd
-	proc = subprocess.Popen(cmd)
-	proc.wait()
+    return options
 
 
-def call_plotsummary_noninj(output_dir, ifos, sqlite_file, usertag, njob = 1, stats = None, segmentsname = "postcohprocessed", verbose = False):
+def call_calcfap(fout, fin, ifos, walltime, update_pdf=True, verbose=False):
+    cmd = []
+    cmd += ["gstlal_cohfar_calc_fap"]
+    cmd += ["--input", fin]
+    cmd += ["--input-format", "stats"]
+    cmd += ["--output", fout]
+    cmd += ["--ifos", ifos]
+    if update_pdf:
+        cmd += ["--update-pdf"]
+    if verbose:
+        print cmd
+    proc = subprocess.Popen(cmd)
+    return proc
 
-	cmd = []
-	cmd += ["gstlal_inspiral_postcohspiir_plotsummary"]
-	cmd += ["--ifos", ifos]
-	cmd += ["--noninj-database", sqlite_file]
-	cmd += ["--segments-name", segmentsname]
-	cmd += ["--noninj-user-tag", usertag]
-	cmd += ["--output-dir", output_dir]
-	cmd += ["--njob", str(njob)]
-	if stats:
-		cmd += ["--background-xml", stats]
-	if verbose:
-		cmd += ["--verbose"]
-		print cmd
-	proc = subprocess.Popen(cmd)
-	proc.wait()
 
-def call_xml2sqlite(outsqlite, injxml = None, segmentxml = None, zerolagxml = None, tmpspace = None, verbose = False):
+def call_injfind(xml, window='0.9', verbose=False):
+    cmd = []
+    cmd += ["ligolw_inspinjfind_postcoh"]
+    cmd += ["--time-window", window]
+    cmd.append(xml)
+    if verbose:
+        cmd += ["--verbose"]
+        print cmd
+    proc = subprocess.Popen(cmd)
+    proc.wait()
 
-	cmd = []
-	cmd += ["ligolw_sqlite_postcoh"]
-	cmd += ["--database", outsqlite]
-	cmd += ["--replace"]
-	if tmpspace:
-		cmd += ["--tmp-space", tmpspace]
-	if injxml:
-		cmd.append(injxml)
-	if segmentxml:
-		cmd.append(segmentxml)
-	for one_zerolag in zerolagxml:
-		cmd.append(one_zerolag)
-	if verbose:
-		cmd += ["--verbose"]
-		print cmd
-	proc = subprocess.Popen(cmd)
-	proc.wait()
 
-def get_outname(output_path, ifos, start, duration, suffix, injxml = None):
-	if injxml:
-		outname = "%s/%s_%d_%d_inj.%s" % (output_path, ifos, start, duration, suffix)
-	else:
-		outname = "%s/%s_%d_%d.%s" % (output_path, ifos, start, duration, suffix)
-	return outname
+def call_extract_injxml(extractxml, injxml, start, end, verbose=False):
+    cmd = []
+    cmd += ["gstlal_injxml_extract"]
+    cmd += ["--injxml", injxml]
+    cmd += ["--extract-method", "gpstime"]
+    cmd += ["--extract-range", "%d:%d" % (start, end)]
+    cmd += ["--output", extractxml]
+    if verbose:
+        print cmd
+    proc = subprocess.Popen(cmd)
+    proc.wait()
+
+
+def call_sqlite2xml(outxml, sqlite_file, tmpspace, verbose=False):
+
+    cmd = []
+    cmd += ["ligolw_sqlite_postcoh"]
+    cmd += ["--database", sqlite_file]
+    cmd += ["--tmp-space", tmpspace]
+    cmd += ["--extract", outxml]
+    if verbose:
+        cmd += ["--verbose"]
+        print cmd
+    proc = subprocess.Popen(cmd)
+    proc.wait()
+
+
+def call_plotsummary_inj(output_dir,
+                         ifos,
+                         sqlite_file,
+                         usertag,
+                         segmentsname="postcohprocessed",
+                         verbose=False):
+
+    cmd = []
+    cmd += ["gstlal_inspiral_postcohspiir_plotsummary"]
+    cmd += ["--ifos", ifos]
+    cmd += ["--inj-database", sqlite_file]
+    cmd += ["--segments-name", segmentsname]
+    cmd += ["--inj-user-tag", usertag]
+    cmd += ["--output-dir", output_dir]
+    if verbose:
+        cmd += ["--verbose"]
+        print cmd
+    proc = subprocess.Popen(cmd)
+    proc.wait()
+
+
+def call_plotsummary_noninj(output_dir,
+                            ifos,
+                            sqlite_file,
+                            usertag,
+                            njob=1,
+                            stats=None,
+                            segmentsname="postcohprocessed",
+                            verbose=False):
+
+    cmd = []
+    cmd += ["gstlal_inspiral_postcohspiir_plotsummary"]
+    cmd += ["--ifos", ifos]
+    cmd += ["--noninj-database", sqlite_file]
+    cmd += ["--segments-name", segmentsname]
+    cmd += ["--noninj-user-tag", usertag]
+    cmd += ["--output-dir", output_dir]
+    cmd += ["--njob", str(njob)]
+    if stats:
+        cmd += ["--background-xml", stats]
+    if verbose:
+        cmd += ["--verbose"]
+        print cmd
+    proc = subprocess.Popen(cmd)
+    proc.wait()
+
+
+def call_xml2sqlite(outsqlite,
+                    injxml=None,
+                    segmentxml=None,
+                    zerolagxml=None,
+                    tmpspace=None,
+                    verbose=False):
+
+    cmd = []
+    cmd += ["ligolw_sqlite_postcoh"]
+    cmd += ["--database", outsqlite]
+    cmd += ["--replace"]
+    if tmpspace:
+        cmd += ["--tmp-space", tmpspace]
+    if injxml:
+        cmd.append(injxml)
+    if segmentxml:
+        cmd.append(segmentxml)
+    for one_zerolag in zerolagxml:
+        cmd.append(one_zerolag)
+    if verbose:
+        cmd += ["--verbose"]
+        print cmd
+    proc = subprocess.Popen(cmd)
+    proc.wait()
+
+
+def get_outname(output_path, ifos, start, duration, suffix, injxml=None):
+    if injxml:
+        outname = "%s/%s_%d_%d_inj.%s" % (output_path, ifos, start, duration,
+                                          suffix)
+    else:
+        outname = "%s/%s_%d_%d.%s" % (output_path, ifos, start, duration,
+                                      suffix)
+    return outname
+
+
 options = parse_command_line()
 
 common_start = int(options.common_start)
 common_duration = int(options.common_duration)
 outinjxml = None
 if options.injxml:
-	outinjxml = "%s_%d_%d.xml" % (os.path.split(options.injxml)[-1].split('.')[0], common_start, common_duration)
-	common_end = common_start + common_duration
-	call_extract_injxml(outinjxml, options.injxml, common_start, common_end, verbose = options.verbose)
-		
+    outinjxml = "%s_%d_%d.xml" % (os.path.split(
+        options.injxml)[-1].split('.')[0], common_start, common_duration)
+    common_end = common_start + common_duration
+    call_extract_injxml(outinjxml,
+                        options.injxml,
+                        common_start,
+                        common_end,
+                        verbose=options.verbose)
+
 # combine zerolags, one segment file, and injection to a sqlite
 zerolag_xml_list = options.pipeline_output_zerolag.split(',')
-outsqlite = get_outname(options.outpath, options.ifos, common_start, common_duration, "sqlite", injxml = outinjxml)
-call_xml2sqlite(outsqlite, injxml = outinjxml, segmentxml = options.segmentxml, zerolagxml = zerolag_xml_list, tmpspace = options.tmp_space, verbose = options.verbose)
-	
-outxml = get_outname(options.outpath, options.ifos, common_start, common_duration, "xml.gz", injxml = outinjxml)
+outsqlite = get_outname(options.outpath,
+                        options.ifos,
+                        common_start,
+                        common_duration,
+                        "sqlite",
+                        injxml=outinjxml)
+call_xml2sqlite(outsqlite,
+                injxml=outinjxml,
+                segmentxml=options.segmentxml,
+                zerolagxml=zerolag_xml_list,
+                tmpspace=options.tmp_space,
+                verbose=options.verbose)
+
+outxml = get_outname(options.outpath,
+                     options.ifos,
+                     common_start,
+                     common_duration,
+                     "xml.gz",
+                     injxml=outinjxml)
 # extract sqlite to xml
-call_sqlite2xml(outxml, outsqlite, options.tmp_space, verbose = options.verbose)
-		
+call_sqlite2xml(outxml, outsqlite, options.tmp_space, verbose=options.verbose)
+
 # combine background stats
 if options.pipeline_output_background:
-	outstats = get_outname(options.outpath, "margi", common_start, common_duration, "xml.gz")
-	proc = call_calcfap(outstats, options.pipeline_output_background, options.ifos, common_duration, verbose = options.verbose)
-	proc.wait()
+    outstats = get_outname(options.outpath, "margi", common_start,
+                           common_duration, "xml.gz")
+    proc = call_calcfap(outstats,
+                        options.pipeline_output_background,
+                        options.ifos,
+                        common_duration,
+                        verbose=options.verbose)
+    proc.wait()
 
 if options.injxml:
-	# find injections
-	call_injfind(outxml, verbose = options.verbose)
-		
+    # find injections
+    call_injfind(outxml, verbose=options.verbose)
+
 # convert xml to sqlite
-call_xml2sqlite(outsqlite, injxml = None, segmentxml = None, zerolagxml = [outxml], tmpspace = options.tmp_space, verbose = options.verbose)
-	
+call_xml2sqlite(outsqlite,
+                injxml=None,
+                segmentxml=None,
+                zerolagxml=[outxml],
+                tmpspace=options.tmp_space,
+                verbose=options.verbose)
+
 # plot summary
 if options.injxml:
-	call_plotsummary_inj(options.outpath, options.ifos, outsqlite, options.usertag, segmentsname = options.segments_name, verbose = options.verbose)
+    call_plotsummary_inj(options.outpath,
+                         options.ifos,
+                         outsqlite,
+                         options.usertag,
+                         segmentsname=options.segments_name,
+                         verbose=options.verbose)
 else:
-	call_plotsummary_noninj(options.outpath, options.ifos, outsqlite, options.usertag, njob = len(zerolag_xml_list), stats = outstats, segmentsname = options.segments_name, verbose = options.verbose)
-
+    call_plotsummary_noninj(options.outpath,
+                            options.ifos,
+                            outsqlite,
+                            options.usertag,
+                            njob=len(zerolag_xml_list),
+                            stats=outstats,
+                            segmentsname=options.segments_name,
+                            verbose=options.verbose)

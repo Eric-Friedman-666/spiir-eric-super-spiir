@@ -24,11 +24,12 @@ import csv
 import logging
 from optparse import OptionParser
 import matplotlib
+
 matplotlib.use('Agg')
 from matplotlib import pyplot
 from matplotlib import rc
 
-rc('text', usetex = True)
+rc('text', usetex=True)
 
 from glue.ligolw import ligolw, lsctables, array, param, utils, types
 from gstlal.pipemodules.postcohtable.postcoh_table_def import PostcohInspiralTable
@@ -37,91 +38,148 @@ import pdb
 
 Attributes = ligolw.sax.xmlreader.AttributesImpl
 
+
 # FIXME:  require calling code to provide the content handler
 class DefaultContentHandler(ligolw.LIGOLWContentHandler):
-	pass
+    pass
+
+
 array.use_in(DefaultContentHandler)
 param.use_in(DefaultContentHandler)
 lsctables.use_in(DefaultContentHandler)
 
 
-def param_from_xml(filename, param_name, contenthandler = DefaultContentHandler, verbose = False):
+def param_from_xml(filename,
+                   param_name,
+                   contenthandler=DefaultContentHandler,
+                   verbose=False):
 
-	# Load document
-	xmldoc = utils.load_filename(filename, contenthandler = contenthandler, verbose = verbose)
+    # Load document
+    xmldoc = utils.load_filename(filename,
+                                 contenthandler=contenthandler,
+                                 verbose=verbose)
 
-	for root in (elem for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName) if elem.hasAttribute(u"Name") and elem.Name == pipe_macro.STATS_XML_ID_NAME):
-		result = param.get_param(root, param_name).pcdata
-	return result
+    for root in (
+            elem
+            for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName)
+            if elem.hasAttribute(u"Name")
+            and elem.Name == pipe_macro.STATS_XML_ID_NAME):
+        result = param.get_param(root, param_name).pcdata
+    return result
 
 
-def array_from_xml(filename, array_name, contenthandler = DefaultContentHandler, verbose = False):
+def array_from_xml(filename,
+                   array_name,
+                   contenthandler=DefaultContentHandler,
+                   verbose=False):
 
-	# Load document
-	xmldoc = utils.load_filename(filename, contenthandler = contenthandler, verbose = verbose)
+    # Load document
+    xmldoc = utils.load_filename(filename,
+                                 contenthandler=contenthandler,
+                                 verbose=verbose)
 
-	for root in (elem for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName) if elem.hasAttribute(u"Name") and elem.Name == pipe_macro.STATS_XML_ID_NAME):
-		result = array.get_array(root, array_name).array 
-	return result
+    for root in (
+            elem
+            for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName)
+            if elem.hasAttribute(u"Name")
+            and elem.Name == pipe_macro.STATS_XML_ID_NAME):
+        result = array.get_array(root, array_name).array
+    return result
 
-def postcoh_table_from_xml(filename, contenthandler = DefaultContentHandler, verbose = False):
 
-	files = filename.split(",")
-	all_table = lsctables.New(PostcohInspiralTable)
-	for file in files:
-	  # Load document
-	  xmldoc = utils.load_filename(file, contenthandler = contenthandler, verbose = verbose)
-	  postcoh = PostcohInspiralTable.get_table(xmldoc)
-	  all_table.extend(postcoh)
-	return all_table
+def postcoh_table_from_xml(filename,
+                           contenthandler=DefaultContentHandler,
+                           verbose=False):
+
+    files = filename.split(",")
+    all_table = lsctables.New(PostcohInspiralTable)
+    for file in files:
+        # Load document
+        xmldoc = utils.load_filename(file,
+                                     contenthandler=contenthandler,
+                                     verbose=verbose)
+        postcoh = PostcohInspiralTable.get_table(xmldoc)
+        all_table.extend(postcoh)
+    return all_table
+
 
 def convert_rankmap_to_fapmap(rankmap, rankfap):
-	fapmap = np.zeros(rankmap.shape)
-	for ix in range(0, rankmap.shape[0]):
-		for iy in range(0, rankmap.shape[1]):
-			rank = rankmap[ix, iy]
-			rank_idx = min(max(rank - pipe_macro.rankmin, 0)/pipe_macro.rankstep, pipe_macro.rankbin-1)
-			fapmap[ix, iy] = rankfap[rank_idx]
-	return fapmap
+    fapmap = np.zeros(rankmap.shape)
+    for ix in range(0, rankmap.shape[0]):
+        for iy in range(0, rankmap.shape[1]):
+            rank = rankmap[ix, iy]
+            rank_idx = min(
+                max(rank - pipe_macro.rankmin, 0) / pipe_macro.rankstep,
+                pipe_macro.rankbin - 1)
+            fapmap[ix, iy] = rankfap[rank_idx]
+    return fapmap
+
 
 def append_missing_options(missing_options, options, option):
-	if getattr(options, option) is None:
-		missing_options.append("--%s" % option.replace("_", "-"))
+    if getattr(options, option) is None:
+        missing_options.append("--%s" % option.replace("_", "-"))
 
 
 def parse_command_line():
-	parser = OptionParser(usage = "%prog [options] [file ...]", description = "%prog to plot pdf and cdf")
-	parser.add_option("--output", default = "", metavar = "name", help = "Set the output file name")
-	parser.add_option("--input-stats", default = "", metavar = "name", help = "Set the input stats file name")
-	parser.add_option("--zerolag-format", default = "", metavar = "name", help = "format support, single | multi")
-	parser.add_option("--cohsnr", type = "float", help = "if format is single, read the cohsnr")
-	parser.add_option("--cmbchisq", type = "float", help = "if format is single, read the combined chisq")
-	parser.add_option("--far-factor", type = "float", default = 12, help = "a factor multiplied to event far")
-	parser.add_option("--input-zerolag", default = None, metavar = "name", help = "Set the input stats file name")
-	parser.add_option("--ifos", metavar = "name", help = "set the ifos to plot pdf and cdf")
-	options, tmp = parser.parse_args()
+    parser = OptionParser(usage="%prog [options] [file ...]",
+                          description="%prog to plot pdf and cdf")
+    parser.add_option("--output",
+                      default="",
+                      metavar="name",
+                      help="Set the output file name")
+    parser.add_option("--input-stats",
+                      default="",
+                      metavar="name",
+                      help="Set the input stats file name")
+    parser.add_option("--zerolag-format",
+                      default="",
+                      metavar="name",
+                      help="format support, single | multi")
+    parser.add_option("--cohsnr",
+                      type="float",
+                      help="if format is single, read the cohsnr")
+    parser.add_option("--cmbchisq",
+                      type="float",
+                      help="if format is single, read the combined chisq")
+    parser.add_option("--far-factor",
+                      type="float",
+                      default=12,
+                      help="a factor multiplied to event far")
+    parser.add_option("--input-zerolag",
+                      default=None,
+                      metavar="name",
+                      help="Set the input stats file name")
+    parser.add_option("--ifos",
+                      metavar="name",
+                      help="set the ifos to plot pdf and cdf")
+    options, tmp = parser.parse_args()
 
-	missing_options = []
-	append_missing_options(missing_options, options, "output")
-	append_missing_options(missing_options, options, "input_stats")
-	if options.zerolag_format == "single":
-		append_missing_options(missing_options, options, "cohsnr")
-		append_missing_options(missing_options, options, "cmbchisq")
+    missing_options = []
+    append_missing_options(missing_options, options, "output")
+    append_missing_options(missing_options, options, "input_stats")
+    if options.zerolag_format == "single":
+        append_missing_options(missing_options, options, "cohsnr")
+        append_missing_options(missing_options, options, "cmbchisq")
 
-	if missing_options:
-		raise ValueError, "missing required option(s) %s" % ", ".join(sorted(missing_options))
+    if missing_options:
+        raise ValueError, "missing required option(s) %s" % ", ".join(
+            sorted(missing_options))
 
-	return options
+    return options
+
 
 options = parse_command_line()
 
 ifos = pipe_macro.get_sorted_ifo_string(options.ifos)
 
 # load the rankmap, rankfap, nevent, livetime, and hist_trials from background stats xml file
-rankmap_name = "%s:%s_%s" % (pipe_macro.BACKGROUND_XML_RANK_NAME, ifos, pipe_macro.RANK_MAP_SUFFIX)
-rankfap_name = "%s:%s_%s" % (pipe_macro.BACKGROUND_XML_RANK_NAME, ifos, pipe_macro.RANK_FAP_SUFFIX)
+rankmap_name = "%s:%s_%s" % (pipe_macro.BACKGROUND_XML_RANK_NAME, ifos,
+                             pipe_macro.RANK_MAP_SUFFIX)
+rankfap_name = "%s:%s_%s" % (pipe_macro.BACKGROUND_XML_RANK_NAME, ifos,
+                             pipe_macro.RANK_FAP_SUFFIX)
 nevent_name = "%s:%s_nevent" % (pipe_macro.BACKGROUND_XML_FEATURE_NAME, ifos)
-livetime_name = "%s:%s_livetime" % (pipe_macro.BACKGROUND_XML_FEATURE_NAME, ifos)
+livetime_name = "%s:%s_livetime" % (pipe_macro.BACKGROUND_XML_FEATURE_NAME,
+                                    ifos)
 hist_trials_name = "%s:hist_trials" % pipe_macro.BACKGROUND_XML_FEATURE_NAME
 
 rankmap = array_from_xml(options.input_stats, rankmap_name)
@@ -132,28 +190,33 @@ hist_trials = int(param_from_xml(options.input_stats, hist_trials_name))
 
 # load the zerolag file for comparison
 if options.input_zerolag is not None:
-	zerolags = postcoh_table_from_xml(options.input_zerolag)
-	if len(ifos) == 2: # single detector event ?
-		snr_name = 'snglsnr_%s' % ifos[0]
-		chisq_name = 'chisq_%s' % ifos[0]
-		all_cohsnr = np.log10(zerolags.getColumnByName(snr_name))
-		all_chisq = np.log10(zerolags.getColumnByName(chisq_name))
-	else:
+    zerolags = postcoh_table_from_xml(options.input_zerolag)
+    if len(ifos) == 2:  # single detector event ?
+        snr_name = 'snglsnr_%s' % ifos[0]
+        chisq_name = 'chisq_%s' % ifos[0]
+        all_cohsnr = np.log10(zerolags.getColumnByName(snr_name))
+        all_chisq = np.log10(zerolags.getColumnByName(chisq_name))
+    else:
 
-		all_cohsnr = np.log10(zerolags.getColumnByName("cohsnr"))
-		all_chisq = np.log10(zerolags.getColumnByName("cmbchisq"))
+        all_cohsnr = np.log10(zerolags.getColumnByName("cohsnr"))
+        all_chisq = np.log10(zerolags.getColumnByName("cmbchisq"))
 
 # get the event cohsnr and chisq from options
 event_cohsnr = np.log10(options.cohsnr)
 event_chisq = np.log10(options.cmbchisq)
 
-cohsnr_idx = min(max(event_cohsnr - pipe_macro.xmin, 0)/pipe_macro.xstep, pipe_macro.rankbin-1)
-chisq_idx = min(max(event_chisq - pipe_macro.ymin, 0)/pipe_macro.ystep, pipe_macro.rankbin-1)
+cohsnr_idx = min(
+    max(event_cohsnr - pipe_macro.xmin, 0) / pipe_macro.xstep,
+    pipe_macro.rankbin - 1)
+chisq_idx = min(
+    max(event_chisq - pipe_macro.ymin, 0) / pipe_macro.ystep,
+    pipe_macro.rankbin - 1)
 
 # FIXME: convert rankmap to rankfap
 
 fapmap = convert_rankmap_to_fapmap(rankmap, rankfap)
-farmap = fapmap * nevent / (float(livetime)*hist_trials) * float(options.far_factor)
+farmap = fapmap * nevent / (float(livetime) * hist_trials) * float(
+    options.far_factor)
 lgfarmap = np.log10(farmap)
 
 event_far = farmap[chisq_idx, cohsnr_idx]
@@ -165,21 +228,40 @@ y = np.arange(pipe_macro.ymin, pipe_macro.ymax, pipe_macro.ystep)
 X, Y = np.meshgrid(x, y)
 
 levels = np.arange(-13, -2, 2)
-CS = pyplot.contour(lgfarmap, levels, origin = 'lower', extent = (pipe_macro.xmin, pipe_macro.xmax, pipe_macro.ymin, pipe_macro.ymax))
-CB = pyplot.colorbar(CS, shrink = 0.8, extend = 'both')
+CS = pyplot.contour(lgfarmap,
+                    levels,
+                    origin='lower',
+                    extent=(pipe_macro.xmin, pipe_macro.xmax, pipe_macro.ymin,
+                            pipe_macro.ymax))
+CB = pyplot.colorbar(CS, shrink=0.8, extend='both')
 
 if options.input_zerolag is not None:
-	CM = pyplot.scatter(all_cohsnr, all_chisq, color = 'k', marker = 'o', s = 6, facecolors = 'none')
-	CM2 = pyplot.scatter(event_cohsnr, event_chisq, color = 'r', marker = 'x', s = 200, facecolors = 'none')
-	pyplot.legend((CM, CM2), ('all spiir zerolags', 'this spiir event'), loc='lower right')
+    CM = pyplot.scatter(all_cohsnr,
+                        all_chisq,
+                        color='k',
+                        marker='o',
+                        s=6,
+                        facecolors='none')
+    CM2 = pyplot.scatter(event_cohsnr,
+                         event_chisq,
+                         color='r',
+                         marker='x',
+                         s=200,
+                         facecolors='none')
+    pyplot.legend((CM, CM2), ('all spiir zerolags', 'this spiir event'),
+                  loc='lower right')
 else:
-	CM2 = pyplot.scatter(event_cohsnr, event_chisq, color = 'r', marker = 'x', s = 200, facecolors = 'none')
-	pyplot.legend((CM2,), ('this spiir event',), loc='lower right')
+    CM2 = pyplot.scatter(event_cohsnr,
+                         event_chisq,
+                         color='r',
+                         marker='x',
+                         s=200,
+                         facecolors='none')
+    pyplot.legend((CM2, ), ('this spiir event', ), loc='lower right')
 
-pyplot.ylim(-1,3)
-pyplot.xlim(0.2,2.2)
-pyplot.xlabel(r'$\log_{10}(\rho_c)$')	
-pyplot.ylabel(r'$\log_{10}(\xi_c^2)$')	
+pyplot.ylim(-1, 3)
+pyplot.xlim(0.2, 2.2)
+pyplot.xlabel(r'$\log_{10}(\rho_c)$')
+pyplot.ylabel(r'$\log_{10}(\xi_c^2)$')
 pyplot.title("%s Background nevent %d, livetime %d" % (ifos, nevent, livetime))
 pyplot.savefig(options.output)
-
