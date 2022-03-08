@@ -169,9 +169,17 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
 #endif
     PeakList *pklist = (PeakList *)malloc(sizeof(PeakList));
 
+    // 1 => npeak
+    // max_npeak * 4 => peak_pos, len_idx, d_tmplt_idx, pix_idx
+    // max_npeak * hist_trials => pix_idx_bg
+    // max_npeak * MAX_NIFO => ntoff
     int peak_intlen = (4 + MAX_NIFO + hist_trials) * max_npeak + 1;
+    // max_npeak * 3 * MAX_NIFO => snglsnr, coaphase, chisq
+    // max_npeak * 3 => cohsnr, nullsnr, cmbchisq
+    // max_npeak * hist_trials * 3 * MAX_NIFO => snglsnr_bg, coaphase_bg, chisq_bg
+    // max_npeak * hist_trials * 3 => cohsnr_bg, nullsnr_bg, cmbchisq_bg
     int peak_floatlen =
-      ((4 * MAX_NIFO) + (hist_trials * 4 * MAX_NIFO)) * max_npeak;
+      ((3 * MAX_NIFO + 3) + (hist_trials * (3 + 3 * MAX_NIFO))) * max_npeak;
     pklist->peak_intlen   = peak_intlen;
     pklist->peak_floatlen = peak_floatlen;
 
@@ -243,31 +251,33 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
           pklist->d_snglsnr[0] + (max_npeak * (i + MAX_NIFO));
         pklist->d_chisq[i] =
           pklist->d_snglsnr[0] + (max_npeak * (i + 2 * MAX_NIFO));
-
-        pklist->d_snglsnr_bg[i] =
-          pklist->d_snglsnr[0]
-          + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (i + 0 * MAX_NIFO))));
-        pklist->d_coaphase_bg[i] =
-          pklist->d_snglsnr[0]
-          + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (i + 1 * MAX_NIFO))));
-        pklist->d_chisq_bg[i] =
-          pklist->d_snglsnr[0]
-          + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (i + 2 * MAX_NIFO))));
     }
+
     pklist->d_cohsnr   = pklist->d_snglsnr[0] + (3 * MAX_NIFO + 0) * max_npeak;
     pklist->d_nullsnr  = pklist->d_snglsnr[0] + (3 * MAX_NIFO + 1) * max_npeak;
     pklist->d_cmbchisq = pklist->d_snglsnr[0] + (3 * MAX_NIFO + 2) * max_npeak;
 
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        pklist->d_snglsnr_bg[i] =
+          pklist->d_snglsnr[0]
+          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 0 * MAX_NIFO))));
+        pklist->d_coaphase_bg[i] =
+          pklist->d_snglsnr[0]
+          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 1 * MAX_NIFO))));
+        pklist->d_chisq_bg[i] =
+          pklist->d_snglsnr[0]
+          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 2 * MAX_NIFO))));
+    }
+
     pklist->d_cohsnr_bg =
       pklist->d_snglsnr[0]
-      + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (0 + 3 * MAX_NIFO))));
-
+      + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 0))));
     pklist->d_nullsnr_bg =
       pklist->d_snglsnr[0]
-      + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (1 + 3 * MAX_NIFO))));
+      + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 1))));
     pklist->d_cmbchisq_bg =
       pklist->d_snglsnr[0]
-      + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (2 + 3 * MAX_NIFO))));
+      + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 2))));
 
     /* create host space for peak list for int-type variables */
     CUDA_CHECK(
@@ -287,36 +297,40 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
     CUDA_CHECK(cudaMallocHost((void **)&(pklist->snglsnr[0]),
                               sizeof(float) * peak_floatlen));
     memset(pklist->snglsnr[0], 0, sizeof(float) * peak_floatlen);
+
     for (int i = 0; i < MAX_NIFO; ++i) {
         pklist->snglsnr[i]  = pklist->snglsnr[0] + (max_npeak * i);
         pklist->coaphase[i] = pklist->snglsnr[0] + (max_npeak * (i + MAX_NIFO));
         pklist->chisq[i] =
           pklist->snglsnr[0] + (max_npeak * (i + 2 * MAX_NIFO));
-
-        pklist->snglsnr_bg[i] =
-          pklist->snglsnr[0]
-          + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (i + 0 * MAX_NIFO))));
-        pklist->coaphase_bg[i] =
-          pklist->snglsnr[0]
-          + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (i + 1 * MAX_NIFO))));
-        pklist->chisq_bg[i] =
-          pklist->snglsnr[0]
-          + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (i + 2 * MAX_NIFO))));
     }
+
     pklist->cohsnr   = pklist->snglsnr[0] + (3 * MAX_NIFO + 0) * max_npeak;
     pklist->nullsnr  = pklist->snglsnr[0] + (3 * MAX_NIFO + 1) * max_npeak;
     pklist->cmbchisq = pklist->snglsnr[0] + (3 * MAX_NIFO + 2) * max_npeak;
 
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        pklist->snglsnr_bg[i] =
+          pklist->snglsnr[0]
+          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 0 * MAX_NIFO))));
+        pklist->coaphase_bg[i] =
+          pklist->snglsnr[0]
+          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 1 * MAX_NIFO))));
+        pklist->chisq_bg[i] =
+          pklist->snglsnr[0]
+          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 2 * MAX_NIFO))));
+    }
+
     pklist->cohsnr_bg =
       pklist->snglsnr[0]
-      + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (0 + 3 * MAX_NIFO))));
+      + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 0))));
 
     pklist->nullsnr_bg =
       pklist->snglsnr[0]
-      + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (1 + 3 * MAX_NIFO))));
+      + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 1))));
     pklist->cmbchisq_bg =
       pklist->snglsnr[0]
-      + (max_npeak * ((4 * MAX_NIFO) + (hist_trials * (2 + 3 * MAX_NIFO))));
+      + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 2))));
 
     /* temporary struct to store tmplt max in one max_npeak data */
     CUDA_CHECK(cudaMalloc((void **)&(pklist->d_peak_tmplt),
