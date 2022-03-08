@@ -22,6 +22,7 @@ import pygtk
 
 pygtk.require("2.0")
 import gobject
+# TODO: gobject.threads_init() should be removed during the gstreamer upgrade.
 try:
     gobject.threads_init()
 except AttributeError:
@@ -31,6 +32,7 @@ except AttributeError:
     # later versions and so can just eat it
     pass
 
+# TODO: Remove the version check once we run python 3.
 # This is somewhat unsatisfactory conditional version check. If we're running
 # under Python 3, then we won't be able to import pygst (because pygst is for
 # gstreamer-0.10, but gstreamer 0.10 does not support Python 3). Then,
