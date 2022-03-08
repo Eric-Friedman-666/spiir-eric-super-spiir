@@ -105,25 +105,25 @@ static void cohfar_accumbackground_dispose(GObject *object);
 
 static void update_stats_icombo(PostcohInspiralTable *intable,
                                 TriggerStatsXML *stats) {
-    int nifo, ifo;
-    nifo = __builtin_popcount(stats->icombo + 1);
+    int nStats, ifo;
+    nStats = __builtin_popcount(stats->icombo + 1) + 1;
 
     if (stats->icombo > -1) {
         // update the multi-IFO background at the last bin.
         trigger_stats_feature_rate_update(
           (double)(intable->cohsnr), (double)intable->cmbchisq,
-          stats->multistats[nifo]->feature, stats->multistats[nifo]);
+          stats->multistats[nStats - 1]->feature, stats->multistats[nStats - 1]);
 
         /* add single detector stats */
         // update single-IFO background according the single-IFO decomposition
-        int index;
-        for (ifo = 0, index = 0; ifo < MAX_NIFO; ifo++) {
+        int iStats;
+        for (ifo = 0, iStats = 0; ifo < MAX_NIFO; ifo++) {
             if ((stats->icombo + 1) & (1 << ifo)) {
                 trigger_stats_feature_rate_update(
                   (double)(intable->snglsnr[ifo]),
                   (double)(intable->chisq[ifo]),
-                  stats->multistats[index]->feature, stats->multistats[index]);
-                ++index;
+                  stats->multistats[iStats]->feature, stats->multistats[iStats]);
+                ++iStats;
             }
         }
     }
@@ -169,14 +169,15 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     // TriggerStats **stats_prompt = element->stats_prompt;
     // TriggerStatsPointerList *stats_list = element->stats_list;
     // /* reset stats_prompt */
-    // trigger_stats_reset(stats_prompt, element->nifo);
+    // int nStats = __builtin_popcount(icombo + 1) + 1;
+    // trigger_stats_reset(stats_prompt, nStats);
 
     /*
      * reset stats in the stats_list in order to input new background points
      */
     // int pos = stats_list->pos;
     // TriggerStats **cur_stats_in_list = stats_list->plist[pos];
-    // trigger_stats_reset(cur_stats_in_list, element->nifo);
+    // trigger_stats_reset(cur_stats_in_list, nStats);
 
     /*
      * calculate number of output postcoh entries
@@ -201,7 +202,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
 
     /* allocate extra space for prompt stats */
     // int out_size = sizeof(PostcohInspiralTable) * outentries +
-    // sizeof(TriggerStats) * (nifo + 1);
+    // sizeof(TriggerStats) * nStats;
     int out_size = sizeof(PostcohInspiralTable) * outentries;
     result       = gst_pad_alloc_buffer(srcpad, 0, out_size, caps, &outbuf);
     if (result != GST_FLOW_OK) {
@@ -218,7 +219,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     intable = (PostcohInspiralTable *)GST_BUFFER_DATA(inbuf);
     PostcohInspiralTable *outtable =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
-    int isingle, nifo;
+    int iStats, nifo, nStats;
     for (; intable < intable_end; intable++) {
         icombo = get_icombo(intable->ifos);
         // The combination of IFOs is invalid
@@ -248,16 +249,18 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
             // IFO, thus we can use the property of `(x & (x-1)) != 0` to
             // determine if we have more than one IFO participating
             //
-            // Note that this is inverted because icombo is sum(1 << index) - 1
+            // Note that this is inverted because icombo is sum(1 << ifo) - 1
             if ((icombo + 1) & icombo) {
                 nifo = __builtin_popcount(icombo + 1);
+                nStats = __builtin_popcount(icombo + 1) + 1;
+                
                 /* add single detector stats */
                 get_write_ifo_mapping(IFOComboMap[icombo].name, nifo,
                                       element->write_ifo_mapping);
 
-                for (isingle = 0; isingle <= nifo; isingle++) {
-                    trigger_stats_livetime_inc(bgstats->multistats, isingle);
-                    trigger_stats_livetime_inc(zlstats->multistats, isingle);
+                for (iStats = 0; iStats < nStats; iStats++) {
+                    trigger_stats_livetime_inc(bgstats->multistats, iStats);
+                    trigger_stats_livetime_inc(zlstats->multistats, iStats);
                 }
             }
             memcpy(outtable, intable, sizeof(PostcohInspiralTable));

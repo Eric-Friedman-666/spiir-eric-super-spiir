@@ -63,7 +63,7 @@ double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
 
 int scan_trigger_ifos(int icombo, PostcohInspiralTable *trigger);
 
-void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
+void trigger_stats_livetime_inc(TriggerStats **stats, const int iStats);
 
 void trigger_stats_xml_reset(TriggerStatsXML *stats);
 
