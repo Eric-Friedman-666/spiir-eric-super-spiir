@@ -140,13 +140,13 @@ void cohfar_get_stats_from_file(gchar **in_fnames,
                                 TriggerStatsXML *stats_out,
                                 int *hist_trials) {
     gchar **ifname;
-    int iStats;
+    int iStats, nStats = num_trigger_stats(stats_in->icombo);
     for (ifname = in_fnames; *ifname; ifname++) {
 #ifdef __DEBUG__
         printf("%s\n", *ifname);
 #endif
         trigger_stats_xml_from_xml(stats_in, hist_trials, *ifname);
-        for (iStats = 0; iStats < __builtin_popcount(stats_in->icombo + 1) + 1; iStats++) {
+        for (iStats = 0; iStats < nStats; iStats++) {
             trigger_stats_feature_rate_add(stats_out->multistats[iStats]->feature,
                                            stats_in->multistats[iStats]->feature,
                                            stats_out->multistats[iStats]);

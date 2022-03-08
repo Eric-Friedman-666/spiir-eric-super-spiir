@@ -39,17 +39,39 @@
 #define RANK_MIN_LIMIT 1e-100
 #define EPSILON        1e-6
 
+// TODO: Consider renaming `icombo` to `active_combo` or `active_ifos`
+// [THA]: We can determine if the IFO at IFOMap[ifo] is in the icombo by
+// checking if that power of two exists in the combo
+int is_active_ifo(const int icombo, const int ifo_idx) {
+    return (icombo + 1) & (1 << ifo_idx);
+}
+
+int have_shared_ifos(const int combo_lhs, const int combo_rhs) {
+    return (combo_lhs + 1) & (combo_rhs + 1);
+}
+
+// [THA]: We can see the number of detectors in a interferometer combination
+// by checking the number of set bits in `icombo + 1`. We can do this
+// because icombo is one less than the power of two combination of detectors
+// (see `include/pipe_macro.h`)
+int num_active_ifos(const int icombo) {
+    return __builtin_popcount(icombo + 1);
+}
+
+// [THA]: We only create TriggerStats for each individual IFO and their final
+// total combination (e.g. (H1, L1, H1L1) or (H1, L1, V1, H1L1V1))
+// Thus, the total number of combinations is the number of individual IFOs
+// in the combo + 1
+int num_trigger_stats(const int icombo) {
+    return __builtin_popcount(icombo + 1) + 1;
+}
+
 int scan_trigger_ifos(int icombo, PostcohInspiralTable *trigger) {
     int nifo = 0, one_ifo_size = sizeof(char) * IFO_LEN;
     char final_ifos[MAX_ALLIFO_LEN];
     gboolean pass_test = TRUE;
-    // [THA]: Because icombo is sum(1 << ifo) - 1, we should add one to it
-    // so that we don't need to add one in the loop.
-    ++icombo;
     for (int ifo = 0; ifo < MAX_NIFO; ++ifo) {
-        // [THA]: We can determine if the IFO at IFOMap[ifo] is in the icombo by
-        // checking if that power of two exists in the combo
-        if (icombo & (1 << ifo)) {
+        if (is_active_ifo(icombo, ifo)) {
             // [THA]: This is a check that the data from this IFO is actually
             // valid. If it's not valid, the number will be very *very* small
             if (trigger->snglsnr[ifo] > EPSILON) {
@@ -66,22 +88,22 @@ int scan_trigger_ifos(int icombo, PostcohInspiralTable *trigger) {
         trigger->ifos[IFO_LEN * nifo] = '\0';
         return get_icombo(trigger->ifos);
     } else {
-        return icombo - 1;
+        return icombo;
     }
 }
 
 int get_icombo(char *ifos) {
-    int icombo      = 0;
+    int combo_idx      = 0;
     unsigned len_in = strlen(ifos);
     int nifo_in     = (int)len_in / IFO_LEN, nifo_map, iifo, jifo;
-    for (icombo = 0; icombo < MAX_IFO_COMBOS; icombo++) {
+    for (combo_idx = 0; combo_idx < MAX_IFO_COMBOS; combo_idx++) {
         nifo_map = 0;
-        if (len_in == strlen(IFOComboMap[icombo].name)) {
+        if (len_in == strlen(IFOComboMap[combo_idx].name)) {
             for (iifo = 0; iifo < nifo_in; iifo++) {
                 // this allows V1H1 found as with the IFOComboMap's H1V1
                 for (jifo = 0; jifo < nifo_in; jifo++)
                     if (strncmp(ifos + iifo * IFO_LEN,
-                                IFOComboMap[icombo].name + jifo * IFO_LEN,
+                                IFOComboMap[combo_idx].name + jifo * IFO_LEN,
                                 IFO_LEN)
                         == 0) {
                         nifo_map++;
@@ -90,7 +112,7 @@ int get_icombo(char *ifos) {
                     }
             }
         }
-        if (nifo_in == nifo_map) return IFOComboMap[icombo].index;
+        if (nifo_in == nifo_map) return IFOComboMap[combo_idx].index;
     }
     fprintf(stderr,
             "get_icombo: failed to get index for %s, strlen %u, ifos need to "
@@ -199,7 +221,7 @@ void trigger_stats_reset(TriggerStats **multistats, int nStats) {
 }
 void trigger_stats_xml_reset(TriggerStatsXML *stats) {
     trigger_stats_reset(stats->multistats,
-                        __builtin_popcount(stats->icombo + 1) + 1);
+                        num_trigger_stats(stats->icombo));
 }
 
 FeatureStats *feature_stats_create() {
@@ -252,15 +274,7 @@ void rank_stats_destroy(RankingStats *rank) {
 }
 
 TriggerStats **trigger_stats_create(int icombo) {
-    // [THA]: We can see the number of detectors in a interferometer combination
-    // by checking the number of set bits in `icombo + 1`. We can do this
-    // because icombo is one less than the power of two combination of detectors
-    // (see `include/pipe_macro.h`)
-    // We only create TriggerStats for each individual IFO and their final
-    // total combination (e.g. (H1, L1, H1L1) or (H1, L1, V1, H1L1V1))
-    // Thus, the total number of combinations is the number of individual IFOs
-    // in the combo + 1
-    int nStats = __builtin_popcount(icombo + 1) + 1;
+    int nStats = num_trigger_stats(icombo));
     TriggerStats **multistats =
       (TriggerStats **)malloc(sizeof(TriggerStats *) * nStats);
 
@@ -280,10 +294,8 @@ TriggerStats **trigger_stats_create(int icombo) {
 
     // Individual IFOs
     int ifo = 0, iStats = 0;
-    ++icombo;
     for (ifo = 0; ifo < MAX_NIFO; ifo++) {
-        // Is this IFO in the combo?
-        if (icombo & (1 << ifo)) {
+        if (is_active_ifo(icombo, ifo)) {
             multistats[iStats] = (TriggerStats *)malloc(sizeof(TriggerStats));
             cur_stats         = multistats[iStats];
             cur_stats->ifos =
@@ -341,7 +353,7 @@ void trigger_stats_xml_destroy(TriggerStatsXML *stats) {
     g_string_free(stats->feature_xmlname, TRUE);
     g_string_free(stats->rank_xmlname, TRUE);
     trigger_stats_destroy(stats->multistats,
-                          __builtin_popcount(stats->icombo + 1) + 1);
+                          num_trigger_stats(stats->icombo));
     free(stats);
 }
 
@@ -739,7 +751,7 @@ static void signal_stats_gen_ratemap_from_pdf(FeatureStats *feature) {
 }
 
 void signal_stats_init(TriggerStatsXML *sgstats, int source_type) {
-    int iStats, nStats = __builtin_popcount(sgstats->icombo + 1) + 1;
+    int iStats, nStats = num_trigger_stats(sgstats->icombo);
     if (source_type == SOURCE_TYPE_BNS) {
         for (iStats = 0; iStats < nStats; iStats++) {
             TriggerStats *stats = sgstats->multistats[iStats];
@@ -988,8 +1000,7 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
 
     int nelem  = 10; // 4 for feature, 4 for rank, 2 for nevent,livetime
     int icombo = stats->icombo;
-    int nifo   = __builtin_popcount(icombo + 1);
-    int nnodes = __builtin_popcount(icombo + 1) + 1; // top level nodes
+    int nnodes = num_trigger_stats(icombo); // top level nodes
     int nnodes_inner = nnodes * nelem + 1, combo_idx; // 1 for hist_trials
     /* read rate */
 
@@ -1007,22 +1018,16 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     XmlArray *array_rank_pdf  = (XmlArray *)malloc(sizeof(XmlArray) * nnodes);
     XmlArray *array_rank_fap  = (XmlArray *)malloc(sizeof(XmlArray) * nnodes);
 
-    // This loop is over 'combo_idx', which enumerates all possible combinations of
-    // detectors. The if() statement pulls out these two cases:
-    //   * all active detectors (combo_idx == icombo)
-    //   * a single detector, that is active (second clause)
-    // This way we print out only statistics for the individual detectors as
-    // well as all detectors combined (but not subsets). A reminder that (icombo
-    // + 1) and (combo_idx + 1) essentially result in a bitfield on detectors.
+    // Print out only statistics for the individual detectors as
+    // well as all detectors combined (but not subsets).
     //
     // Within the loop, note that 'combo_idx' is the detector being looked at,
     // 'inode' is how many combos we've printed out so far, and 'pos_xns' is
     // where we actually should be in the 'xns' array.
     int pos_xns, inode;
-    for (combo_idx = 0, inode = 0; combo_idx < icombo + 1; combo_idx++) {
-        if (combo_idx == icombo // all active ifos, OR
-            || ( ((combo_idx + 1) & (icombo + 1)) //           (ifo active, AND
-               && __builtin_popcount(combo_idx + 1) == 1 ) ) // single ifo only)
+    for (combo_idx = 0, inode = 0; combo_idx <= icombo; combo_idx++) {
+        if (combo_idx == icombo // all active ifos
+            || (num_active_ifos(combo_idx) == 1 && have_shared_ifos(icombo, combo_idx)))
         {
             pos_xns = inode;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
@@ -1299,7 +1304,7 @@ gboolean trigger_stats_xml_dump(TriggerStatsXML *stats,
     }
     printf("write %s\n", stats->rank_xmlname->str);
     xmlTextWriterPtr writer = *pwriter;
-    int inode = 0, nnodes = __builtin_popcount(stats->icombo + 1) + 1;
+    int inode = 0, nnodes = num_trigger_stats(stats->icombo);
     XmlArray *array_lgsnr_rate = (XmlArray *)malloc(sizeof(XmlArray) * nnodes);
     XmlArray *array_lgchisq_rate =
       (XmlArray *)malloc(sizeof(XmlArray) * nnodes);

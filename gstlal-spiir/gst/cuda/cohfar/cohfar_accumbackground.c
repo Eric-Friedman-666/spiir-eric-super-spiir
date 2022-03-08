@@ -106,7 +106,7 @@ static void cohfar_accumbackground_dispose(GObject *object);
 static void update_stats_icombo(PostcohInspiralTable *intable,
                                 TriggerStatsXML *stats) {
     int nStats, ifo;
-    nStats = __builtin_popcount(stats->icombo + 1) + 1;
+    nStats = num_trigger_stats(stats->icombo);
 
     if (stats->icombo > -1) {
         // update the multi-IFO background at the last bin.
@@ -118,7 +118,7 @@ static void update_stats_icombo(PostcohInspiralTable *intable,
         // update single-IFO background according the single-IFO decomposition
         int iStats;
         for (ifo = 0, iStats = 0; ifo < MAX_NIFO; ifo++) {
-            if ((stats->icombo + 1) & (1 << ifo)) {
+            if (is_active_ifo(stats->icombo, ifo)) {
                 trigger_stats_feature_rate_update(
                   (double)(intable->snglsnr[ifo]),
                   (double)(intable->chisq[ifo]),
@@ -169,7 +169,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     // TriggerStats **stats_prompt = element->stats_prompt;
     // TriggerStatsPointerList *stats_list = element->stats_list;
     // /* reset stats_prompt */
-    // int nStats = __builtin_popcount(icombo + 1) + 1;
+    // int nStats = num_trigger_stats(icombo);
     // trigger_stats_reset(stats_prompt, nStats);
 
     /*
@@ -245,19 +245,13 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
             outtable++;
         } else {
             /* increment livetime if participating nifo >= 2 */
-            // If icombo is a power of two, then there is only one participating
-            // IFO, thus we can use the property of `(x & (x-1)) != 0` to
-            // determine if we have more than one IFO participating
-            //
-            // Note that this is inverted because icombo is sum(1 << ifo) - 1
-            if ((icombo + 1) & icombo) {
-                nifo = __builtin_popcount(icombo + 1);
-                nStats = __builtin_popcount(icombo + 1) + 1;
-                
+            nifo = num_active_ifos(icombo);
+            if (nifo > 1) {
                 /* add single detector stats */
                 get_write_ifo_mapping(IFOComboMap[icombo].name, nifo,
                                       element->write_ifo_mapping);
 
+                nStats = num_trigger_stats(icombo);
                 for (iStats = 0; iStats < nStats; iStats++) {
                     trigger_stats_livetime_inc(bgstats->multistats, iStats);
                     trigger_stats_livetime_inc(zlstats->multistats, iStats);

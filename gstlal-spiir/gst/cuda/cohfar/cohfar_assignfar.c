@@ -251,7 +251,7 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
                 fprintf(stderr, "icombo not found, cohfar_assignfar\n");
                 exit(0);
             }
-            nStats = __builtin_popcount(icombo + 1) + 1;
+            nStats = num_trigger_stats(icombo);
             cur_stats = element->bgstats_1w->multistats[nStats - 1];
             if (icombo > -1 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
                 update_trigger_fars(table, nStats, element);

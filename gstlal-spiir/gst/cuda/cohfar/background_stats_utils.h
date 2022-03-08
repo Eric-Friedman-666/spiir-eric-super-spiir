@@ -65,6 +65,12 @@ int scan_trigger_ifos(int icombo, PostcohInspiralTable *trigger);
 
 void trigger_stats_livetime_inc(TriggerStats **stats, const int iStats);
 
+int num_active_ifos(const int icombo);
+
+int num_trigger_stats(const int icombo);
+
+int is_active_ifo(const int icombo, const int ifo_idx);
+
 void trigger_stats_xml_reset(TriggerStatsXML *stats);
 
 void signal_stats_init(TriggerStatsXML *sgstats, int source_type);
