@@ -50,7 +50,7 @@ Bins2D *bins2D_create_long(double cmin_x,
                            double cmax_y,
                            int nbin_y);
 
-TriggerStats **trigger_stats_create(int icombo);
+TriggerStats **trigger_stats_create(int ifo_combo);
 
 int bins1D_get_idx(double val, Bins1D *bins);
 
@@ -61,15 +61,15 @@ void trigger_stats_feature_rate_update(double snr,
 
 double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
 
-int scan_trigger_ifos(int icombo, PostcohInspiralTable *trigger);
+int scan_trigger_ifos(int ifo_combo, PostcohInspiralTable *trigger);
 
 void trigger_stats_livetime_inc(TriggerStats **stats, const int iStats);
 
-int num_active_ifos(const int icombo);
+int num_active_ifos(const int ifo_combo);
 
-int num_trigger_stats(const int icombo);
+int num_trigger_stats(const int ifo_combo);
 
-int is_active_ifo(const int icombo, const int ifo_idx);
+int is_active_ifo(const int ifo_combo, const int ifo_idx);
 
 void trigger_stats_xml_reset(TriggerStatsXML *stats);
 

@@ -96,7 +96,7 @@ typedef struct {
     TriggerStats **multistats;
     GString *rank_xmlname;
     GString *feature_xmlname;
-    int icombo;
+    int ifo_combo;
 } TriggerStatsXML;
 
 #endif /* __BACKGROUND_STATS_H__ */

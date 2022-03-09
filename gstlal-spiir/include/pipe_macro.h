@@ -30,7 +30,7 @@ static const IFOType IFOComboMap[MAX_IFO_COMBOS] = {
 };
 /* function given a random ifo, output the index in the IFOComboMap list,
  * implemented in background_stats_utils.c */
-int get_icombo(char *ifos);
+int get_ifo_combo(char *ifos);
 
 #ifndef MAX_ALLIFO_LEN
 #define MAX_ALLIFO_LEN 14

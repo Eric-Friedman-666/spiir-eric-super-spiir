@@ -179,7 +179,7 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
     // max_npeak * hist_trials * 3 * MAX_NIFO => snglsnr_bg, coaphase_bg, chisq_bg
     // max_npeak * hist_trials * 3 => cohsnr_bg, nullsnr_bg, cmbchisq_bg
     int peak_floatlen =
-      ((3 * MAX_NIFO + 3) + (hist_trials * (3 + 3 * MAX_NIFO))) * max_npeak;
+      ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 3))) * max_npeak;
     pklist->peak_intlen   = peak_intlen;
     pklist->peak_floatlen = peak_floatlen;
 
@@ -297,7 +297,6 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
     CUDA_CHECK(cudaMallocHost((void **)&(pklist->snglsnr[0]),
                               sizeof(float) * peak_floatlen));
     memset(pklist->snglsnr[0], 0, sizeof(float) * peak_floatlen);
-
     for (int i = 0; i < MAX_NIFO; ++i) {
         pklist->snglsnr[i]  = pklist->snglsnr[0] + (max_npeak * i);
         pklist->coaphase[i] = pklist->snglsnr[0] + (max_npeak * (i + MAX_NIFO));

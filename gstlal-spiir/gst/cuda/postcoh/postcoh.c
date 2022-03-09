@@ -27,7 +27,7 @@
 #include <lal/Date.h>
 #include <lal/LIGOMetadataTables.h>
 #include <math.h>
-#include <pipe_macro.h> // for get_icombo, IFOComboMap
+#include <pipe_macro.h> // for get_ifo_combo, IFOComboMap
 #include <postcoh/postcoh.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcoh/postcohtable_utils.h>
@@ -667,7 +667,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
         data        = gst_pad_get_element_private(pad);
         set_offset_per_nanosecond(data, postcoh->offset_per_nanosecond);
         set_channels(data, postcoh->channels);
-        // [THA]: Non-standard IFO indexing (e.g. VH) works because `get_icombo`
+        // [THA]: Non-standard IFO indexing (e.g. VH) works because `get_ifo_combo`
         // doesn't care about the ordering of IFOs
         strncpy(state->all_ifos + IFO_LEN * i, data->ifo_name,
                 sizeof(char) * IFO_LEN);
@@ -675,7 +675,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     state->all_ifos[IFO_LEN * nifo] = '\0';
     // [THA]: This is the only place that ifo_combo_idx is used. Perhaps remove
     // it later to save space?
-    state->ifo_combo_idx = get_icombo(state->all_ifos);
+    state->ifo_combo_idx = get_ifo_combo(state->all_ifos);
     // [THA]: sizeof() only works for arrays that we've statically created, so
     // we use strlen() to get the length of the combination name
     /* overwrite all_ifos to be the same with the combo in the IFOComboMap */
@@ -1353,7 +1353,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 GString *filename = NULL;
                 FILE *file        = NULL;
                 filename =
-                  g_string_new(IFOComboMap[get_icombo(output->ifos)].name);
+                  g_string_new(IFOComboMap[get_ifo_combo(output->ifos)].name);
                 g_string_append_printf(
                   filename, "_skymap/%s_%d_%d_%d_%d", output->pivotal_ifo,
                   output->end_time.gpsSeconds, output->end_time.gpsNanoSeconds,
