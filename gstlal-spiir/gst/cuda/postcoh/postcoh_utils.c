@@ -169,15 +169,33 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
 #endif
     PeakList *pklist = (PeakList *)malloc(sizeof(PeakList));
 
-    // 1 => npeak
-    // max_npeak * 4 => peak_pos, len_idx, d_tmplt_idx, pix_idx
-    // max_npeak * hist_trials => pix_idx_bg
-    // max_npeak * MAX_NIFO => ntoff
+    // FIXME: Remove these comments once issue #5 is resolved:
+    //        https://git.ligo.org/lscsoft/spiir/-/issues/5
+    //        It should ensure the following calculations are automated
+    //
+    // This calculation is the sum of the sizes of the following variables
+    // peak_pos    => max_npeak
+    // len_idx     => max_npeak
+    // d_tmplt_idx => max_npeak
+    // pix_idx     => max_npeak
+    // ntoff       => max_npeak * MAX_NIFO
+    // pix_idx_bg  => max_npeak * hist_trials
+    // npeak       => 1
     int peak_intlen = (4 + MAX_NIFO + hist_trials) * max_npeak + 1;
-    // max_npeak * 3 * MAX_NIFO => snglsnr, coaphase, chisq
-    // max_npeak * 3 => cohsnr, nullsnr, cmbchisq
-    // max_npeak * hist_trials * 3 * MAX_NIFO => snglsnr_bg, coaphase_bg, chisq_bg
-    // max_npeak * hist_trials * 3 => cohsnr_bg, nullsnr_bg, cmbchisq_bg
+    
+    // This calculation is the sum of the sizes of the following variables
+    // snglsnr     => max_npeak * MAX_NIFO
+    // coaphase    => max_npeak * MAX_NIFO
+    // chisq       => max_npeak * MAX_NIFO
+    // cohsnr      => max_npeak
+    // nullsnr     => max_npeak
+    // cmbchisq    => max_npeak
+    // snglsnr_bg  => max_npeak * hist_trials * MAX_NIFO
+    // coaphase_bg => max_npeak * hist_trials * MAX_NIFO
+    // chisq_bg    => max_npeak * hist_trials * MAX_NIFO
+    // cohsnr_bg   => max_npeak * hist_trials
+    // nullsnr_bg  => max_npeak * hist_trials
+    // cmbchisq_bg => max_npeak * hist_trials
     int peak_floatlen =
       ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 3))) * max_npeak;
     pklist->peak_intlen   = peak_intlen;
@@ -246,9 +264,10 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
                                sizeof(float) * peak_floatlen, stream));
 
     for (int i = 0; i < MAX_NIFO; ++i) {
-        pklist->d_snglsnr[i] = pklist->d_snglsnr[0] + (max_npeak * i);
+        pklist->d_snglsnr[i] =
+          pklist->d_snglsnr[0] + (max_npeak * (i + 0 * MAX_NIFO));
         pklist->d_coaphase[i] =
-          pklist->d_snglsnr[0] + (max_npeak * (i + MAX_NIFO));
+          pklist->d_snglsnr[0] + (max_npeak * (i + 1 * MAX_NIFO));
         pklist->d_chisq[i] =
           pklist->d_snglsnr[0] + (max_npeak * (i + 2 * MAX_NIFO));
     }
@@ -298,8 +317,10 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
                               sizeof(float) * peak_floatlen));
     memset(pklist->snglsnr[0], 0, sizeof(float) * peak_floatlen);
     for (int i = 0; i < MAX_NIFO; ++i) {
-        pklist->snglsnr[i]  = pklist->snglsnr[0] + (max_npeak * i);
-        pklist->coaphase[i] = pklist->snglsnr[0] + (max_npeak * (i + MAX_NIFO));
+        pklist->snglsnr[i]  =
+          pklist->snglsnr[0] + (max_npeak * (i + 0 * MAX_NIFO));
+        pklist->coaphase[i] =
+          pklist->snglsnr[0] + (max_npeak * (i + 1 * MAX_NIFO));
         pklist->chisq[i] =
           pklist->snglsnr[0] + (max_npeak * (i + 2 * MAX_NIFO));
     }
@@ -323,7 +344,6 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
     pklist->cohsnr_bg =
       pklist->snglsnr[0]
       + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 0))));
-
     pklist->nullsnr_bg =
       pklist->snglsnr[0]
       + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 1))));
