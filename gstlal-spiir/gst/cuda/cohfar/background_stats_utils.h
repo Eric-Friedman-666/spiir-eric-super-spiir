@@ -63,13 +63,13 @@ double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
 
 int scan_trigger_ifos(int ifo_combo, PostcohInspiralTable *trigger);
 
-void trigger_stats_livetime_inc(TriggerStats **stats, const int iStats);
+void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
 
 int num_active_ifos(const int ifo_combo);
 
 int num_trigger_stats(const int ifo_combo);
 
-int is_active_ifo(const int ifo_combo, const int ifo_idx);
+int is_active_ifo(const int ifo_combo, const int ifo_id);
 
 void trigger_stats_xml_reset(TriggerStatsXML *stats);
 
