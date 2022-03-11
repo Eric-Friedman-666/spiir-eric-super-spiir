@@ -39,42 +39,44 @@
 #define RANK_MIN_LIMIT 1e-100
 #define EPSILON        1e-6
 
-// [THA]: We can determine if the IFO at IFOMap[ifo_id] is in the ifo_combo by
-// checking if that power of two exists in the combo
-int is_active_ifo(const int ifo_combo, const int ifo_id) {
-    return (ifo_combo + 1) & (1 << ifo_id);
+typedef size_t ifo_set_type
+
+// [THA]: We can determine if the IFO at IFOMap[ifo_id] is in the ifo_set by
+// checking if that power of two exists in the ifo_set
+int ifo_set__contains(const ifo_set_type ifos, const int ifo_id) {
+    return (ifos + 1) & (1 << ifo_id);
 }
 
-int has_shared_ifos(const int combo_lhs, const int combo_rhs) {
-    return (combo_lhs + 1) & (combo_rhs + 1);
+int ifo_set__has_shared_ifos(const ifo_set_type ifos_lhs, const ifo_set_type ifos_rhs) {
+    return (ifos_lhs + 1) & (ifos_rhs + 1);
 }
 
 // [THA]: We can see the number of detectors in a interferometer combination
-// by checking the number of set bits in `ifo_combo + 1`. We can do this
-// because ifo_combo is one less than the power of two combination of detectors
+// by checking the number of set bits in `ifo_set + 1`. We can do this
+// because ifo_set is one less than the power of two combination of detectors
 // (see `include/pipe_macro.h`)
-int num_active_ifos(const int ifo_combo) {
-    return __builtin_popcount(ifo_combo + 1);
+int ifo_set__count(const ifo_set_type ifos) {
+    return __builtin_popcount(ifos + 1);
 }
 
 // [THA]: We only create TriggerStats for each individual IFO and their final
 // total combination (e.g. (H1, L1, H1L1) or (H1, L1, V1, H1L1V1))
 // Thus, the total number of combinations is the number of individual IFOs
-// in the combo + 1
-int num_trigger_stats(const int ifo_combo) {
-    return __builtin_popcount(ifo_combo + 1) + 1;
+// in the ifo_set + 1
+int ifo_set__num_trigger_stats(const ifo_set_type ifos) {
+    return __builtin_popcount(ifos + 1) + 1;
 }
 
-int scan_trigger_ifos(int ifo_combo, PostcohInspiralTable *trigger) {
+ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *trigger) {
     int nifo = 0, one_ifo_size = sizeof(char) * IFO_LEN;
     char final_ifos[MAX_ALLIFO_LEN];
     gboolean pass_test = TRUE;
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        if (is_active_ifo(ifo_combo, ifo_id)) {
+        if (ifo_set__contains(enabled_ifos, ifo_id)) {
             // [THA]: This is a check that the data from this ifo is actually
             // valid. If it's not valid, the number will be very *very* small
             if (trigger->snglsnr[ifo_id] > EPSILON) {
-                strncpy(final_ifos + IFO_LEN * nifo, IFOMap[ifo_id].name,
+                strncpy(final_ifos + IFO_LEN * nifo, IFOMap[ifo_id],
                         one_ifo_size);
                 nifo++;
             } else {
@@ -85,24 +87,27 @@ int scan_trigger_ifos(int ifo_combo, PostcohInspiralTable *trigger) {
     if (pass_test != TRUE) {
         strncpy(trigger->ifos, final_ifos, nifo * one_ifo_size);
         trigger->ifos[IFO_LEN * nifo] = '\0';
-        return get_ifo_combo(trigger->ifos);
+        return get_ifo_set(trigger->ifos);
     } else {
-        return ifo_combo;
+        return enabled_ifos;
     }
 }
 
-int get_ifo_combo(char *ifos) {
-    int cur_combo      = 0;
+const string get_ifo_string(ifo_set_type ifo_set) {
+    return IFOComboMap[ifo_set];
+}
+
+ifo_set_type get_ifo_set(char *ifos) {
     unsigned len_in = strlen(ifos);
     int nifo_in     = (int)len_in / IFO_LEN, nifo_map, iifo, jifo;
-    for (cur_combo = 0; cur_combo < MAX_IFO_COMBOS; cur_combo++) {
+    for (ifo_set_type cur_ifo_set = 0; cur_ifo_set < MAX_IFO_SET; cur_ifo_set++) {
         nifo_map = 0;
-        if (len_in == strlen(IFOComboMap[cur_combo].name)) {
+        if (len_in == strlen(get_ifo_string(cur_ifo_set))) {
             for (iifo = 0; iifo < nifo_in; iifo++) {
                 // this allows V1H1 found as with the IFOComboMap's H1V1
                 for (jifo = 0; jifo < nifo_in; jifo++)
                     if (strncmp(ifos + iifo * IFO_LEN,
-                                IFOComboMap[cur_combo].name + jifo * IFO_LEN,
+                                get_ifo_string(cur_ifo_set) + jifo * IFO_LEN,
                                 IFO_LEN)
                         == 0) {
                         nifo_map++;
@@ -111,10 +116,10 @@ int get_ifo_combo(char *ifos) {
                     }
             }
         }
-        if (nifo_in == nifo_map) return IFOComboMap[cur_combo].index;
+        if (nifo_in == nifo_map) return cur_ifo_set;
     }
     fprintf(stderr,
-            "get_ifo_combo: failed to get index for %s, strlen %u, ifos need to "
+            "get_ifo_set: failed to get index for %s, strlen %u, ifos need to "
             "end with null terminator\n",
             ifos, len_in);
     return -1;
@@ -219,7 +224,7 @@ void trigger_stats_reset(TriggerStats **multistats, int num_stats) {
 }
 void trigger_stats_xml_reset(TriggerStatsXML *stats) {
     trigger_stats_reset(stats->multistats,
-                        num_trigger_stats(stats->ifo_combo));
+                        ifo_set__num_trigger_stats(stats->enabled_ifos));
 }
 
 FeatureStats *feature_stats_create() {
@@ -271,8 +276,8 @@ void rank_stats_destroy(RankingStats *rank) {
     free(rank);
 }
 
-TriggerStats **trigger_stats_create(int ifo_combo) {
-    int num_stats = num_trigger_stats(ifo_combo));
+TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
+    int num_stats = ifo_set__num_trigger_stats(enabled_ifos));
     TriggerStats **multistats =
       (TriggerStats **)malloc(sizeof(TriggerStats *) * num_stats);
 
@@ -280,9 +285,9 @@ TriggerStats **trigger_stats_create(int ifo_combo) {
     multistats[num_stats - 1]        = (TriggerStats *)malloc(sizeof(TriggerStats));
     TriggerStats *cur_stats = multistats[num_stats - 1];
     cur_stats->ifos =
-      malloc(strlen(IFOComboMap[ifo_combo].name) * sizeof(char) + 1);
-    strncpy(cur_stats->ifos, IFOComboMap[ifo_combo].name,
-            strlen(IFOComboMap[ifo_combo].name) * sizeof(char) + 1);
+      malloc(strlen(get_ifo_string(enabled_ifos)) * sizeof(char) + 1);
+    strncpy(cur_stats->ifos, get_ifo_string(enabled_ifos),
+            strlen(get_ifo_string(enabled_ifos)) * sizeof(char) + 1);
     // create feature
     cur_stats->feature = feature_stats_create();
     // our rank, cdf
@@ -292,13 +297,13 @@ TriggerStats **trigger_stats_create(int ifo_combo) {
 
     // Individual IFOs
     for (int ifo_id = 0, int stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
-        if (is_active_ifo(ifo_combo, ifo_id)) {
+        if (ifo_set__contains(enabled_ifos, ifo_id)) {
             multistats[stats_idx] = (TriggerStats *)malloc(sizeof(TriggerStats));
             cur_stats = multistats[stats_idx];
             cur_stats->ifos =
-              malloc(strlen(IFOMap[ifo_id].name) * sizeof(char) + 1);
-            strncpy(cur_stats->ifos, IFOMap[ifo_id].name,
-                    strlen(IFOMap[ifo_id].name) * sizeof(char) + 1);
+              malloc(strlen(IFOMap[ifo_id]) * sizeof(char) + 1);
+            strncpy(cur_stats->ifos, IFOMap[ifo_id],
+                    strlen(IFOMap[ifo_id]) * sizeof(char) + 1);
             // create feature
             cur_stats->feature = feature_stats_create();
             // our rank, cdf
@@ -326,8 +331,8 @@ TriggerStatsXML *trigger_stats_xml_create(char *ifos, int stats_type) {
         printf("create sgstats %s\n", stats->feature_xmlname->str);
     }
 
-    stats->ifo_combo        = get_ifo_combo(ifos);
-    stats->multistats = trigger_stats_create(stats->ifo_combo);
+    stats->enabled_ifos = get_ifo_set(ifos);
+    stats->multistats = trigger_stats_create(stats->enabled_ifos);
     return stats;
 }
 
@@ -350,7 +355,7 @@ void trigger_stats_xml_destroy(TriggerStatsXML *stats) {
     g_string_free(stats->feature_xmlname, TRUE);
     g_string_free(stats->rank_xmlname, TRUE);
     trigger_stats_destroy(stats->multistats,
-                          num_trigger_stats(stats->ifo_combo));
+                          ifo_set__num_trigger_stats(stats->enabled_ifos));
     free(stats);
 }
 
@@ -748,7 +753,7 @@ static void signal_stats_gen_ratemap_from_pdf(FeatureStats *feature) {
 }
 
 void signal_stats_init(TriggerStatsXML *sgstats, int source_type) {
-    int num_stats = num_trigger_stats(sgstats->ifo_combo);
+    int num_stats = ifo_set__num_trigger_stats(sgstats->enabled_ifos);
     if (source_type == SOURCE_TYPE_BNS) {
         for (int i = 0; i < num_stats; i++) {
             TriggerStats *stats = sgstats->multistats[i];
@@ -996,9 +1001,9 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     if (!g_file_test(filename, G_FILE_TEST_EXISTS)) { return FALSE; }
 
     int num_elem  = 10; // 4 for feature, 4 for rank, 2 for nevent,livetime
-    int ifo_combo = stats->ifo_combo;
-    int num_stats = num_trigger_stats(ifo_combo); // top level xml nodes
-    int num_nodes = num_stats * num_elem + 1, cur_combo; // 1 for hist_trials
+    ifo_set_type enabled_ifos = stats->enabled_ifos;
+    int num_stats = ifo_set__num_trigger_stats(enabled_ifos); // top level xml nodes
+    int num_nodes = num_stats * num_elem + 1, cur_ifo_set; // 1 for hist_trials
     /* read rate */
 
     XmlNodeStruct *xns = (XmlNodeStruct *)malloc(sizeof(XmlNodeStruct) * num_nodes);
@@ -1018,78 +1023,81 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     // Print out only statistics for the individual detectors as
     // well as all detectors combined (but not subsets).
     //
-    // Within the loop, note that 'cur_combo' is the detector being looked at,
-    // 'stats_idx' is how many combos we've printed out so far, and 'pos_xns' is
+    // Within the loop, note that 'cur_ifo_set' is the detector being looked at,
+    // 'stats_idx' is how many ifo_sets we've printed out so far, and 'pos_xns' is
     // where we actually should be in the 'xns' array.
+    // FIXME: ifo_set_type is supposed to put all bitset operations behind helper functions with
+    // meaningful names, but to replace these loops we'd need a helper function that either
+    // creates an iterator or returns a list of valid values. So for now cur_ifo_set breaks the rules
     int pos_xns;
-    for (int cur_combo = 0, int stats_idx = 0; cur_combo <= ifo_combo; cur_combo++) {
-        if (cur_combo == ifo_combo // all active ifos
-            || (num_active_ifos(cur_combo) == 1 && has_shared_ifos(ifo_combo, cur_combo)))
+    for (ifo_set_type cur_ifo_set = 0, int stats_idx = 0; cur_ifo_set <= enabled_ifos; cur_ifo_set++) {
+        if (cur_ifo_set == enabled_ifos // all active ifos
+            || (ifo_set__count(cur_ifo_set) == 1 && ifo_set__has_shared_ifos(enabled_ifos, cur_ifo_set)))
         {
             pos_xns = stats_idx;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->feature_xmlname->str, IFOComboMap[cur_combo].name,
+                    stats->feature_xmlname->str, get_ifo_string(cur_ifo_set),
                     SNR_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_rate[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->feature_xmlname->str, IFOComboMap[cur_combo].name,
+                    stats->feature_xmlname->str, get_ifo_string(cur_ifo_set),
                     CHISQ_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgchisq_rate[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->feature_xmlname->str, IFOComboMap[cur_combo].name,
+                    stats->feature_xmlname->str, get_ifo_string(cur_ifo_set),
                     SNR_CHISQ_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_lgchisq_rate[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->feature_xmlname->str, IFOComboMap[cur_combo].name,
+                    stats->feature_xmlname->str, get_ifo_string(cur_ifo_set),
                     SNR_CHISQ_PDF_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_lgchisq_pdf[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->rank_xmlname->str, IFOComboMap[cur_combo].name,
+                    stats->rank_xmlname->str, get_ifo_string(cur_ifo_set),
                     RANK_MAP_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_rank_map[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_nevent:param",
-                    stats->feature_xmlname->str, IFOComboMap[cur_combo].name);
+                    stats->feature_xmlname->str, get_ifo_string(cur_ifo_set));
             xns[pos_xns].processPtr = readParam;
             xns[pos_xns].data       = &(param_nevent[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_livetime:param",
-                    stats->feature_xmlname->str, IFOComboMap[cur_combo].name);
+                    stats->feature_xmlname->str, get_ifo_string(cur_ifo_set));
             xns[pos_xns].processPtr = readParam;
             xns[pos_xns].data       = &(param_livetime[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->rank_xmlname->str, IFOComboMap[cur_combo].name,
+                    stats->rank_xmlname->str, get_ifo_string(cur_ifo_set),
                     RANK_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_rank_rate[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->rank_xmlname->str, IFOComboMap[cur_combo].name,
+                    stats->rank_xmlname->str, get_ifo_string(cur_ifo_set),
                     RANK_PDF_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_rank_pdf[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->rank_xmlname->str, IFOComboMap[cur_combo].name,
+                    stats->rank_xmlname->str, get_ifo_string(cur_ifo_set),
                     RANK_FAP_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_rank_fap[stats_idx]);
@@ -1147,10 +1155,10 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
                (long *)array_rank_fap[i].data, y_size);
         cur_stats->nevent   = *((long *)param_nevent[i].data);
         cur_stats->livetime = *((long *)param_livetime[i].data);
-        // printf("filename %s, ifo_combo %d, fap addr %p\n", filename, ifo_combo,
-        // ((gsl_matrix *)cur_stats->fap->data)->data); printf("ifo_combo %d,
-        // nevent addr %p, %p\n", ifo_combo, (param_nevent[ifo_combo].data),
-        // (&(param_nevent[ifo_combo]))->data);
+        // printf("filename %s, enabled_ifos %d, fap addr %p\n", filename, enabled_ifos,
+        // ((gsl_matrix *)cur_stats->fap->data)->data); printf("enabled_ifos %d,
+        // nevent addr %p, %p\n", enabled_ifos, (param_nevent[enabled_ifos].data),
+        // (&(param_nevent[enabled_ifos]))->data);
     }
     *hist_trials = *((int *)param_hist_trials->data);
 
@@ -1301,7 +1309,7 @@ gboolean trigger_stats_xml_dump(TriggerStatsXML *stats,
     }
     printf("write %s\n", stats->rank_xmlname->str);
     xmlTextWriterPtr writer = *pwriter;
-    int num_stats = num_trigger_stats(stats->ifo_combo);
+    int num_stats = ifo_set__num_trigger_stats(stats->enabled_ifos);
     XmlArray *array_lgsnr_rate = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
     XmlArray *array_lgchisq_rate =
       (XmlArray *)malloc(sizeof(XmlArray) * num_stats);

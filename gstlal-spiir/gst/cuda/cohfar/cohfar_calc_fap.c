@@ -140,7 +140,7 @@ void cohfar_get_stats_from_file(gchar **in_fnames,
                                 TriggerStatsXML *stats_out,
                                 int *hist_trials) {
     gchar **ifname;
-    int num_stats = num_trigger_stats(stats_in->ifo_combo);
+    int num_stats = ifo_set__num_trigger_stats(stats_in->enabled_ifos);
     for (ifname = in_fnames; *ifname; ifname++) {
 #ifdef __DEBUG__
         printf("%s\n", *ifname);

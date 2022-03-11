@@ -103,11 +103,11 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
 static gboolean cohfar_accumbackground_sink_event(GstPad *pad, GstEvent *event);
 static void cohfar_accumbackground_dispose(GObject *object);
 
-static void update_stats_ifo_combo(PostcohInspiralTable *intable,
+static void update_stats_enabled_ifos(PostcohInspiralTable *intable,
                                 TriggerStatsXML *stats) {
-    int num_stats = num_trigger_stats(stats->ifo_combo);
+    int num_stats = ifo_set__num_trigger_stats(stats->enabled_ifos);
 
-    if (stats->ifo_combo > -1) {
+    if (stats->enabled_ifos > -1) {
         // update the multi-IFO background at the last bin.
         trigger_stats_feature_rate_update(
           (double)(intable->cohsnr), (double)intable->cmbchisq,
@@ -116,7 +116,7 @@ static void update_stats_ifo_combo(PostcohInspiralTable *intable,
         /* add single detector stats */
         // update single-IFO background according the single-IFO decomposition
         for (int ifo_id = 0, int stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
-            if (is_active_ifo(stats->ifo_combo, ifo_id)) {
+            if (ifo_set__contains(stats->enabled_ifos, ifo_id)) {
                 trigger_stats_feature_rate_update(
                   (double)(intable->snglsnr[ifo_id]),
                   (double)(intable->chisq[ifo_id]),
@@ -167,7 +167,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     // TriggerStats **stats_prompt = element->stats_prompt;
     // TriggerStatsPointerList *stats_list = element->stats_list;
     // /* reset stats_prompt */
-    // int num_stats = num_trigger_stats(ifo_combo);
+    // int num_stats = ifo_set__num_trigger_stats(element->enabled_ifos);
     // trigger_stats_reset(stats_prompt, num_stats);
 
     /*
@@ -208,7 +208,6 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
           srcpad, "Could not allocate postcoh-inspiral buffer %d", result);
         return result;
     }
-    int ifo_combo = 0;
 
     /*
      * update background rate
@@ -218,37 +217,37 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     PostcohInspiralTable *outtable =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
     for (; intable < intable_end; intable++) {
-        ifo_combo = get_ifo_combo(intable->ifos);
+        ifo_set_type enabled_ifos = get_ifo_set(intable->ifos);
         // The combination of IFOs is invalid
-        if (ifo_combo < 0) {
+        if (enabled_ifos < 0) {
             LIGOTimeGPS ligo_time;
             XLALINT8NSToGPS(&ligo_time, GST_BUFFER_TIMESTAMP(inbuf));
             fprintf(stderr,
-                    "invalid ifo combo in cohfar_accumbackground at GPS %d, "
+                    "invalid ifo_set in cohfar_accumbackground at GPS %d, "
                     "outentries %d, table flag %d, cohsnr %f\n",
                     ligo_time.gpsSeconds, outentries, intable->is_background,
                     intable->cohsnr);
         }
         if (intable->is_background == FLAG_BACKGROUND) {
-            update_stats_ifo_combo(
+            update_stats_enabled_ifos(
               intable,
               bgstats); // update the last combination and single IFO stats
         } else if (intable->is_background
                    == FLAG_FOREGROUND) { /* coherent trigger entry */
-            update_stats_ifo_combo(
+            update_stats_enabled_ifos(
               intable,
               zlstats); // update the last combination and single IFO stats
             memcpy(outtable, intable, sizeof(PostcohInspiralTable));
             outtable++;
         } else {
             /* increment livetime if participating nifo >= 2 */
-            int nifo = num_active_ifos(ifo_combo);
+            int nifo = ifo_set__count(enabled_ifos);
             if (nifo > 1) {
                 /* add single detector stats */
-                get_write_ifo_mapping(IFOComboMap[ifo_combo].name, nifo,
+                get_write_ifo_mapping(get_ifo_string(enabled_ifos), nifo,
                                       element->write_ifo_mapping);
 
-                int num_stats = num_trigger_stats(ifo_combo);
+                int num_stats = ifo_set__num_trigger_stats(enabled_ifos);
                 for (int i = 0; i < num_stats; i++) {
                     trigger_stats_livetime_inc(bgstats->multistats, i);
                     trigger_stats_livetime_inc(zlstats->multistats, i);
@@ -407,7 +406,7 @@ static void cohfar_accumbackground_set_property(GObject *object,
     case PROP_IFOS:
         element->ifos   = g_value_dup_string(value);
         element->nifo   = strlen(element->ifos) / IFO_LEN;
-        element->ifo_combo = get_ifo_combo(element->ifos);
+        element->enabled_ifos = get_ifo_set(element->ifos);
         element->bgstats =
           trigger_stats_xml_create(element->ifos, STATS_XML_TYPE_BACKGROUND);
         element->zlstats =

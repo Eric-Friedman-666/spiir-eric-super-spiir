@@ -21,7 +21,7 @@
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
 #include <gst/gst.h>
-#include <pipe_macro.h> // for IFOComboMap
+#include <pipe_macro.h> // for get_ifo_string
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
 
@@ -143,14 +143,14 @@ void cuda_device_print(int deviceCount) {
     }
 }
 
-/* get ifo indices of a given combo in IFOMap
+/* get ifo indices of a given ifo_set in IFOMap
  * e.g. HV: 0, 2
  */
-void get_write_ifo_mapping(char *ifo_combo, int nifo, int *write_ifo_mapping) {
+void get_write_ifo_mapping(char *ifos, int nifo, int *write_ifo_mapping) {
     int iifo, jifo;
     for (iifo = 0; iifo < nifo; iifo++)
         for (jifo = 0; jifo < MAX_NIFO; jifo++)
-            if (strncmp(ifo_combo + iifo * IFO_LEN, IFOMap[jifo].name, IFO_LEN)
+            if (strncmp(ifos + iifo * IFO_LEN, IFOMap[jifo], IFO_LEN)
                 == 0) {
                 write_ifo_mapping[iifo] = jifo;
                 break;
@@ -410,7 +410,7 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
         gchar **this_ifo_split = g_strsplit(*isigma, ":", -1);
 
         for (int i = 0; i < nifo; i++) {
-            if (strncmp(this_ifo_split[0], IFOMap[i].name, IFO_LEN) == 0) {
+            if (strncmp(this_ifo_split[0], IFOMap[i], IFO_LEN) == 0) {
                 match_ifo = i;
                 break;
             }
@@ -419,8 +419,8 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
         parseFile(this_ifo_split[1], xns, 1);
 
         ntmplt = array_sigmasq[0].dim[0];
-// combos like HL, match_ifo will still be like 0:H,1:L
-// combos like HV, match_ifo will still be like 0:H,1:V
+// ifo_sets like HL, match_ifo will still be like 0:H,1:L
+// ifo_sets like HV, match_ifo will still be like 0:H,1:V
 #ifdef __DEBUG__
         printf("this sigma %s, this ifo %s, match ifo %d,ntmplt %d \n", *isigma,
                this_ifo_split[0], match_ifo, ntmplt);
@@ -637,7 +637,7 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
         gchar **this_ifo_split = g_strsplit(*iauto, ":", -1);
 
         for (int i = 0; i < nifo; i++) {
-            if (strncmp(this_ifo_split[0], IFOMap[i].name, IFO_LEN) == 0) {
+            if (strncmp(this_ifo_split[0], IFOMap[i], IFO_LEN) == 0) {
                 match_ifo = i;
                 break;
             }

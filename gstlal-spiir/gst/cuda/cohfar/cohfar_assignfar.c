@@ -238,22 +238,22 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
 
     TriggerStats *cur_stats;
     if (element->pass_silent_time) {
-        int ifo_combo, num_stats;
+        ifo_set_type enabled_ifos;
         PostcohInspiralTable *table =
           (PostcohInspiralTable *)GST_BUFFER_DATA(buf);
         PostcohInspiralTable *table_end =
           (PostcohInspiralTable *)(GST_BUFFER_DATA(buf) + GST_BUFFER_SIZE(buf));
         for (; table < table_end; table++) {
             if (table->is_background == FLAG_EMPTY) continue;
-            ifo_combo = get_ifo_combo(table->ifos);
-            ifo_combo = scan_trigger_ifos(ifo_combo, table);
-            if (ifo_combo < 0) {
-                fprintf(stderr, "ifo_combo not found, cohfar_assignfar\n");
+            enabled_ifos = get_ifo_set(table->ifos);
+            enabled_ifos = scan_trigger_ifos(enabled_ifos, table);
+            if (enabled_ifos < 0) {
+                fprintf(stderr, "enabled_ifos not found, cohfar_assignfar\n");
                 exit(0);
             }
-            num_stats = num_trigger_stats(ifo_combo);
+            int num_stats = ifo_set__num_trigger_stats(enabled_ifos);
             cur_stats = element->bgstats_1w->multistats[num_stats - 1];
-            if (ifo_combo > -1 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
+            if (enabled_ifos > -1 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
                 update_trigger_fars(table, num_stats, element);
             }
         }
@@ -303,7 +303,7 @@ static void cohfar_assignfar_set_property(GObject *object,
     case PROP_IFOS:
         element->ifos   = g_value_dup_string(value);
         element->nifo   = strlen(element->ifos) / IFO_LEN;
-        element->ifo_combo = get_ifo_combo(element->ifos);
+        element->enabled_ifos = get_ifo_set(element->ifos);
         element->bgstats_1w =
           trigger_stats_xml_create(element->ifos, STATS_XML_TYPE_BACKGROUND);
         element->bgstats_1d =

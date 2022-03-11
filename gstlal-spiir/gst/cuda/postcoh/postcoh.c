@@ -27,7 +27,7 @@
 #include <lal/Date.h>
 #include <lal/LIGOMetadataTables.h>
 #include <math.h>
-#include <pipe_macro.h> // for get_ifo_combo, IFOComboMap
+#include <pipe_macro.h> // for get_ifo_set, get_ifo_string
 #include <postcoh/postcoh.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcoh/postcohtable_utils.h>
@@ -605,7 +605,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
 
     state->nifo              = GST_ELEMENT(postcoh)->numsinkpads;
     state->input_ifo_mapping = (gint *)malloc(sizeof(gint) * state->nifo);
-    state->ifo_combo_idx     = 0;
+    state->enabled_ifos_idx     = 0;
     state->all_ifos =
       (gchar *)malloc(sizeof(gchar) * state->nifo * IFO_LEN + 1);
     state->peak_list = (PeakList **)malloc(sizeof(PeakList *) * state->nifo);
@@ -658,29 +658,29 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
 
     gint8 i = 0, j = 0, cur_ifo = 0, nifo = state->nifo;
     GST_OBJECT_LOCK(postcoh->collect);
-    /* find the ifo_combo_mapping and input_ifo_mapping:
-     * first find the ifo_combo index in the IFOComboMap
-     * then, map original sinkpad's ifo to the position in this combo */
+    /* find the enabled_ifos_mapping and input_ifo_mapping:
+     * first find the enabled_ifos index in the IFOComboMap
+     * then, map original sinkpad's ifo to the position in this ifo_set */
     for (i = 0, sinkpads = GST_ELEMENT(postcoh)->sinkpads; sinkpads;
          sinkpads = g_list_next(sinkpads), i++) {
         GstPad *pad = GST_PAD(sinkpads->data);
         data        = gst_pad_get_element_private(pad);
         set_offset_per_nanosecond(data, postcoh->offset_per_nanosecond);
         set_channels(data, postcoh->channels);
-        // [THA]: Non-standard IFO indexing (e.g. VH) works because `get_ifo_combo`
+        // [THA]: Non-standard IFO indexing (e.g. VH) works because `get_ifo_set`
         // doesn't care about the ordering of IFOs
         strncpy(state->all_ifos + IFO_LEN * i, data->ifo_name,
                 sizeof(char) * IFO_LEN);
     }
     state->all_ifos[IFO_LEN * nifo] = '\0';
-    // [THA]: This is the only place that ifo_combo_idx is used. Perhaps remove
+    // [THA]: This is the only place that enabled_ifos_idx is used. Perhaps remove
     // it later to save space?
-    state->ifo_combo_idx = get_ifo_combo(state->all_ifos);
+    state->enabled_ifos_idx = get_ifo_set(state->all_ifos);
     // [THA]: sizeof() only works for arrays that we've statically created, so
     // we use strlen() to get the length of the combination name
-    /* overwrite all_ifos to be the same with the combo in the IFOComboMap */
-    strncpy(state->all_ifos, IFOComboMap[state->ifo_combo_idx].name,
-            strlen(IFOComboMap[state->ifo_combo_idx].name));
+    /* overwrite all_ifos to be the same with the ifo_set in the IFOComboMap */
+    strncpy(state->all_ifos, get_ifo_string(state->enabled_ifos_idx),
+            strlen(get_ifo_string(state->enabled_ifos_idx)));
     state->all_ifos[IFO_LEN * nifo] = '\0';
 
     /* initialize input_ifo_mapping, snglsnr matrix, and peak_list */
@@ -1353,7 +1353,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 GString *filename = NULL;
                 FILE *file        = NULL;
                 filename =
-                  g_string_new(IFOComboMap[get_ifo_combo(output->ifos)].name);
+                  g_string_new(get_ifo_string(get_ifo_set(output->ifos)));
                 g_string_append_printf(
                   filename, "_skymap/%s_%d_%d_%d_%d", output->pivotal_ifo,
                   output->end_time.gpsSeconds, output->end_time.gpsNanoSeconds,
@@ -1790,7 +1790,7 @@ static void cuda_postcoh_process(GstCollectPads *pads,
         for (int iifo = 0; iifo < state->nifo; ++iifo)
             if (!state->cur_ifo_is_gap[iifo]) {
                 strncpy(state->cur_ifos + IFO_LEN * cur_ifo,
-                        IFOMap[state->write_ifo_mapping[iifo]].name,
+                        IFOMap[state->write_ifo_mapping[iifo]],
                         sizeof(char) * IFO_LEN);
                 cur_ifo++;
             }

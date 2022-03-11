@@ -6,31 +6,31 @@
 #define MAX_IFO_LEN 4
 #endif
 
-typedef struct _IFOType {
-    const char *name;
-    int index;
-} IFOType;
-
 #define MAX_NIFO 3
 #ifdef __cplusplus
 constexpr
 #endif
-  static const IFOType IFOMap[MAX_NIFO] = {
-      { "H1", 0 }, // 1 << 0 = 1
-      { "L1", 1 }, // 1 << 1 = 2
-      { "V1", 2 }, // 1 << 2 = 4
+  static const char *IFOMap[MAX_NIFO] = {
+      "H1", // 1 << 0 = 1
+      "L1", // 1 << 1 = 2
+      "V1", // 1 << 2 = 4
   };
-#define MAX_IFO_COMBOS 7 // 2^3-1
+#define MAX_IFO_SET 7 // 2^3-1
+
+/* function to encapsulate IFOComboMap, such that ifo_set isn't directly 
+*  used as an index */
+char *get_ifo_string(ifo_set_type ifo_set);
+
 // A combination is sum(1 << index) - 1
 // This gives us some nice mathematical properties that we can use to check
 // if an IFO exists in a given ComboMap
-static const IFOType IFOComboMap[MAX_IFO_COMBOS] = {
-    { "H1", 0 },   { "L1", 1 },   { "H1L1", 2 },   { "V1", 3 },
-    { "H1V1", 4 }, { "L1V1", 5 }, { "H1L1V1", 6 },
+static const char * IFOComboMap[MAX_IFO_SET] = {
+    "H1",   "L1",   "H1L1",   "V1",
+    "H1V1", "L1V1", "H1L1V1",
 };
 /* function given a random ifo, output the index in the IFOComboMap list,
  * implemented in background_stats_utils.c */
-int get_ifo_combo(char *ifos);
+ifo_set_type get_ifo_set(char *ifos);
 
 #ifndef MAX_ALLIFO_LEN
 #define MAX_ALLIFO_LEN 14

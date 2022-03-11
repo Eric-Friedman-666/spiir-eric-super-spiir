@@ -36,11 +36,11 @@ void postcohtable_init(XmlTable *table) {
     for (int i = 0; i < MAX_NIFO; ++i) {
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:end_time_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:end_time_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("int_4s"));
         g_array_append_val(
           table->names, *g_string_append(g_string_new("postcoh:end_time_ns_"),
-                                         IFOMap[i].name));
+                                         IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("int_4s"));
     }
     g_array_append_val(table->names, *g_string_new("postcoh:is_background"));
@@ -58,31 +58,31 @@ void postcohtable_init(XmlTable *table) {
     for (int i = 0; i < MAX_NIFO; ++i) {
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:snglsnr_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:snglsnr_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:snglsnr_"), IFOMap[i].name));
-        g_array_append_val(table->type_names, *g_string_new("real_4"));
-    }
-    for (int i = 0; i < MAX_NIFO; ++i) {
-        g_array_append_val(
-          table->names,
-          *g_string_append(g_string_new("postcoh:coaphase_"), IFOMap[i].name));
-        g_array_append_val(table->type_names, *g_string_new("real_4"));
-        g_array_append_val(
-          table->names,
-          *g_string_append(g_string_new("postcoh:coaphase_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:snglsnr_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
     }
     for (int i = 0; i < MAX_NIFO; ++i) {
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:chisq_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:coaphase_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:chisq_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:coaphase_"), IFOMap[i]));
+        g_array_append_val(table->type_names, *g_string_new("real_4"));
+    }
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        g_array_append_val(
+          table->names,
+          *g_string_append(g_string_new("postcoh:chisq_"), IFOMap[i]));
+        g_array_append_val(table->type_names, *g_string_new("real_4"));
+        g_array_append_val(
+          table->names,
+          *g_string_append(g_string_new("postcoh:chisq_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
     }
     g_array_append_val(table->names, *g_string_new("postcoh:cohsnr"));
@@ -100,11 +100,11 @@ void postcohtable_init(XmlTable *table) {
     for (int i = 0; i < MAX_NIFO; ++i) {
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:far_sngl_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:far_sngl_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:far_sngl_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:far_sngl_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
     }
     g_array_append_val(table->names, *g_string_new("postcoh:far_2h"));
@@ -145,11 +145,11 @@ void postcohtable_init(XmlTable *table) {
     for (int i = 0; i < MAX_NIFO; ++i) {
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:deff_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:deff_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("real_8"));
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:deff_"), IFOMap[i].name));
+          *g_string_append(g_string_new("postcoh:deff_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("real_8"));
     }
 }

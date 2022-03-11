@@ -203,7 +203,7 @@ typedef struct _PostcohState {
     int skymap_peakcur[MAX_NIFO];
     gint cur_ifo_bits;
     char *all_ifos;
-    gint ifo_combo_idx;
+    gint enabled_ifos_idx;
     gint is_member_init;
     float snglsnr_max[MAX_NIFO];
     float *tmp_maxsnr;

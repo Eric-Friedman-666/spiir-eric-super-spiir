@@ -345,96 +345,96 @@ void prepare_getset() {
     int offset = SINGLE;
     for (int i = 0; i < MAX_NIFO; ++i) {
         char *var  = "chisq_";
-        char *name = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        char *name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         struct lal_array *data =
           (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.chisq);
         data->index  = i;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         PyGetSetDef def  = { name, pylal_float_array_get, pylal_float_array_set,
                             name, data };
         getset[offset++] = def;
 
         var          = "snglsnr_";
-        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data         = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr);
         data->index  = i;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
         def.closure      = data;
         getset[offset++] = def;
 
         var          = "coaphase_";
-        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data         = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase);
         data->index  = i;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
         def.closure      = data;
         getset[offset++] = def;
 
         var          = "far_sngl_";
-        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data         = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_sngl);
         data->index  = i;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
         def.closure      = data;
         getset[offset++] = def;
 
         var          = "far_1d_sngl_";
-        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data         = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1d_sngl);
         data->index  = i;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
         def.closure      = data;
         getset[offset++] = def;
 
         var          = "far_1w_sngl_";
-        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data         = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1w_sngl);
         data->index  = i;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
         def.closure      = data;
         getset[offset++] = def;
 
         var          = "far_2h_sngl_";
-        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data         = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_2h_sngl);
         data->index  = i;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
         def.closure      = data;
         getset[offset++] = def;
 
         var          = "deff_";
-        name         = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data         = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.deff);
         data->index  = i;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.get          = pylal_double_array_get;
         def.set          = pylal_double_array_set;
@@ -443,13 +443,13 @@ void prepare_getset() {
         getset[offset++] = def;
 
         var  = "end_time_sngl_";
-        name = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset =
           offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl);
         data->index = i * 2;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.get          = pylal_int_array_get;
         def.set          = pylal_int_array_set;
@@ -458,13 +458,13 @@ void prepare_getset() {
         getset[offset++] = def;
 
         var  = "end_time_ns_sngl_";
-        name = (char *)malloc(strlen(IFOMap[i].name) + strlen(var) + 1);
+        name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         data = (struct lal_array *)malloc(sizeof(struct lal_array));
         data->offset =
           offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl);
         data->index = i * 2 + 1;
         strcpy(name, var);
-        strcat(name, IFOMap[i].name);
+        strcat(name, IFOMap[i]);
         def.name         = name;
         def.get          = pylal_int_array_get;
         def.set          = pylal_int_array_set;
@@ -697,7 +697,7 @@ PyMODINIT_FUNC init_postcohtable(void) {
     Py_INCREF(ifo_map);
     for (int i = 0; i < MAX_NIFO; ++i) {
         PyObject *str =
-          PyString_FromStringAndSize(IFOMap[i].name, strlen(IFOMap[i].name));
+          PyString_FromStringAndSize(IFOMap[i], strlen(IFOMap[i]));
         assert(str);
         Py_INCREF(str);
         PyList_SetItem(ifo_map, i, str);
