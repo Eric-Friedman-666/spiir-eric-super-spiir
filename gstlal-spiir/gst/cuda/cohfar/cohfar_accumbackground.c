@@ -115,7 +115,7 @@ static void update_stats_enabled_ifos(PostcohInspiralTable *intable,
 
         /* add single detector stats */
         // update single-IFO background according the single-IFO decomposition
-        for (int ifo_id = 0, int stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
+        for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
             if (ifo_set__contains(stats->enabled_ifos, ifo_id)) {
                 trigger_stats_feature_rate_update(
                   (double)(intable->snglsnr[ifo_id]),

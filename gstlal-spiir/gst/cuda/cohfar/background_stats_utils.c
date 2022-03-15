@@ -39,8 +39,6 @@
 #define RANK_MIN_LIMIT 1e-100
 #define EPSILON        1e-6
 
-typedef size_t ifo_set_type
-
 // [THA]: We can determine if the IFO at IFOMap[ifo_id] is in the ifo_set by
 // checking if that power of two exists in the ifo_set
 int ifo_set__contains(const ifo_set_type ifos, const int ifo_id) {
@@ -93,7 +91,7 @@ ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *
     }
 }
 
-const string get_ifo_string(ifo_set_type ifo_set) {
+const char *get_ifo_string(ifo_set_type ifo_set) {
     return IFOComboMap[ifo_set];
 }
 
@@ -277,7 +275,7 @@ void rank_stats_destroy(RankingStats *rank) {
 }
 
 TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
-    int num_stats = ifo_set__num_trigger_stats(enabled_ifos));
+    int num_stats = ifo_set__num_trigger_stats(enabled_ifos);
     TriggerStats **multistats =
       (TriggerStats **)malloc(sizeof(TriggerStats *) * num_stats);
 
@@ -296,7 +294,7 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
     cur_stats->livetime = 0;
 
     // Individual IFOs
-    for (int ifo_id = 0, int stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
+    for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
         if (ifo_set__contains(enabled_ifos, ifo_id)) {
             multistats[stats_idx] = (TriggerStats *)malloc(sizeof(TriggerStats));
             cur_stats = multistats[stats_idx];
@@ -1026,11 +1024,11 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     // Within the loop, note that 'cur_ifo_set' is the detector being looked at,
     // 'stats_idx' is how many ifo_sets we've printed out so far, and 'pos_xns' is
     // where we actually should be in the 'xns' array.
-    // FIXME: ifo_set_type is supposed to put all bitset operations behind helper functions with
-    // meaningful names, but to replace these loops we'd need a helper function that either
-    // creates an iterator or returns a list of valid values. So for now cur_ifo_set breaks the rules
-    int pos_xns;
-    for (ifo_set_type cur_ifo_set = 0, int stats_idx = 0; cur_ifo_set <= enabled_ifos; cur_ifo_set++) {
+    // FIXME: ifo_set_type is intended to put encapsulate all bitset operations with helper functions
+    // However, iterating through all combinations of valid ifo_sets is outside of scope
+    // For now, cur_ifo_set is treated as both an int and an ifo_set_type
+    int pos_xns, stats_idx = 0;
+    for (ifo_set_type cur_ifo_set = 0; cur_ifo_set <= enabled_ifos; cur_ifo_set++) {
         if (cur_ifo_set == enabled_ifos // all active ifos
             || (ifo_set__count(cur_ifo_set) == 1 && ifo_set__has_shared_ifos(enabled_ifos, cur_ifo_set)))
         {

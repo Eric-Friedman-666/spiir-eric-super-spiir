@@ -17,14 +17,16 @@ constexpr
   };
 #define MAX_IFO_SET 7 // 2^3-1
 
+typedef size_t ifo_set_type;
+
 /* function to encapsulate IFOComboMap, such that ifo_set isn't directly 
 *  used as an index */
-char *get_ifo_string(ifo_set_type ifo_set);
+const char *get_ifo_string(ifo_set_type ifo_set);
 
 // A combination is sum(1 << index) - 1
 // This gives us some nice mathematical properties that we can use to check
 // if an IFO exists in a given ComboMap
-static const char * IFOComboMap[MAX_IFO_SET] = {
+static const char *IFOComboMap[MAX_IFO_SET] = {
     "H1",   "L1",   "H1L1",   "V1",
     "H1V1", "L1V1", "H1L1V1",
 };
