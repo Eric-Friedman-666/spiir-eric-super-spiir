@@ -605,7 +605,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
 
     state->nifo              = GST_ELEMENT(postcoh)->numsinkpads;
     state->input_ifo_mapping = (gint *)malloc(sizeof(gint) * state->nifo);
-    state->enabled_ifos_idx     = 0;
+    state->enabled_ifos_idx  = 0;
     state->all_ifos =
       (gchar *)malloc(sizeof(gchar) * state->nifo * IFO_LEN + 1);
     state->peak_list = (PeakList **)malloc(sizeof(PeakList *) * state->nifo);
@@ -1238,7 +1238,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
     PostcohInspiralTable *output =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
-    int iifo = 0, jifo = 0, nifo = state->nifo;
+    int iifo_id = 0, jifo_id = 0, nifo = state->nifo;
     int ifos_size    = sizeof(char) * IFO_LEN * state->cur_nifo,
         one_ifo_size = sizeof(char) * IFO_LEN;
     int ipeak, npeak = 0, itrial = 0, exe_len = state->exe_len,
@@ -1269,9 +1269,9 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
      * and cmbchisq = single chisq */
     /* only output multi-detector events, cohsnr, cmbchisq only make sense when
      * cur_nifo >=2 */
-    for (iifo = 0; (iifo < nifo) && (state->cur_nifo >= 2); iifo++) {
-        if (state->cur_ifo_is_gap[iifo]) continue;
-        PeakList *pklist = state->peak_list[iifo];
+    for (iifo_id = 0; (iifo_id < nifo) && (state->cur_nifo >= 2); iifo_id++) {
+        if (state->cur_ifo_is_gap[iifo_id]) continue;
+        PeakList *pklist = state->peak_list[iifo_id];
         npeak            = pklist->npeak[0];
 
         int peak_cur, len_cur, peak_cur_bg;
@@ -1289,28 +1289,28 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             len_cur = pklist->len_idx[peak_cur];
             XLALGPSAdd(&(end_time), (double)len_cur / exe_len);
             output->end_time = end_time;
-            for (int i = 0; i < MAX_NIFO; ++i) {
+            for (int jifo_id = 0; jifo_id < MAX_NIFO; ++jifo_id) {
                 XLALGPSAdd(&(end_time),
-                           (double)pklist->ntoff[i][peak_cur] / exe_len);
-                output->end_time_sngl[i] = end_time;
+                           (double)pklist->ntoff[jifo_id][peak_cur] / exe_len);
+                output->end_time_sngl[jifo_id] = end_time;
                 end_time                 = output->end_time;
 
-                output->snglsnr[i]  = pklist->snglsnr[i][peak_cur];
-                output->coaphase[i] = pklist->coaphase[i][peak_cur];
-                output->chisq[i]    = pklist->chisq[i][peak_cur];
+                output->snglsnr[jifo_id]  = pklist->snglsnr[jifo_id][peak_cur];
+                output->coaphase[jifo_id] = pklist->coaphase[jifo_id][peak_cur];
+                output->chisq[jifo_id]    = pklist->chisq[jifo_id][peak_cur];
             }
 
-            for (jifo = 0; jifo < nifo; jifo++) {
-                int write_ifo = state->write_ifo_mapping[jifo];
+            for (jifo_id = 0; jifo_id < nifo; jifo_id++) {
+                int write_ifo = state->write_ifo_mapping[jifo_id];
                 output->deff[write_ifo] =
-                  sqrt(state->sigmasq[jifo][cur_tmplt_idx])
+                  sqrt(state->sigmasq[jifo_id][cur_tmplt_idx])
                   / pklist->snglsnr[write_ifo][peak_cur]; // in MPC
             }
             output->is_background = FLAG_FOREGROUND;
             output->livetime      = livetime;
             strncpy(output->ifos, state->cur_ifos, ifos_size);
             output->ifos[IFO_LEN * state->cur_nifo] = '\0';
-            strncpy(output->pivotal_ifo, state->all_ifos + IFO_LEN * iifo,
+            strncpy(output->pivotal_ifo, state->all_ifos + IFO_LEN * iifo_id,
                     one_ifo_size);
             output->pivotal_ifo[IFO_LEN] = '\0';
             output->tmplt_idx            = cur_tmplt_idx;
@@ -1348,8 +1348,8 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             output->dec      = (M_PI_2 - theta) * RAD2DEG;
             output->event_id = postcoh->cur_event_id++;
             if (postcoh->output_skymap
-                && state->snglsnr_max[iifo] > postcoh->output_skymap
-                && state->skymap_peakcur[iifo] == peak_cur) {
+                && state->snglsnr_max[iifo_id] > postcoh->output_skymap
+                && state->skymap_peakcur[iifo_id] == peak_cur) {
                 GString *filename = NULL;
                 FILE *file        = NULL;
                 filename =
@@ -1409,14 +1409,14 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                     strncpy(output->ifos, state->cur_ifos, ifos_size);
                     output->ifos[IFO_LEN * state->cur_nifo] = '\0';
                     strncpy(output->pivotal_ifo,
-                            state->all_ifos + IFO_LEN * iifo, one_ifo_size);
+                            state->all_ifos + IFO_LEN * iifo_id, one_ifo_size);
                     output->pivotal_ifo[IFO_LEN] = '\0';
                     output->tmplt_idx            = pklist->tmplt_idx[peak_cur];
-                    for (int i = 0; i < MAX_NIFO; ++i) {
-                        output->snglsnr[i] = pklist->snglsnr_bg[i][peak_cur_bg];
-                        output->coaphase[i] =
-                          pklist->coaphase_bg[i][peak_cur_bg];
-                        output->chisq[i] = pklist->chisq_bg[i][peak_cur_bg];
+                    for (int jifo_id = 0; jifo_id < MAX_NIFO; ++jifo_id) {
+                        output->snglsnr[jifo_id] = pklist->snglsnr_bg[jifo_id][peak_cur_bg];
+                        output->coaphase[jifo_id] =
+                          pklist->coaphase_bg[jifo_id][peak_cur_bg];
+                        output->chisq[jifo_id] = pklist->chisq_bg[jifo_id][peak_cur_bg];
                     }
 
                     // output->pix_idx = pklist->pix_idx[itrial*max_npeak +
@@ -1456,7 +1456,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
         GST_LOG_OBJECT(postcoh,
                        "write to output, ifo %d, npeak %d, %d total entries",
-                       iifo, npeak, write_entries);
+                       iifo_id, npeak, write_entries);
     }
     return write_entries;
 }

@@ -65,6 +65,10 @@ int ifo_set__num_trigger_stats(const ifo_set_type ifos) {
     return __builtin_popcount(ifos + 1) + 1;
 }
 
+const char *get_ifo_string(ifo_set_type ifo_set) {
+    return IFOComboMap[ifo_set];
+}
+
 ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *trigger) {
     int nifo = 0, one_ifo_size = sizeof(char) * IFO_LEN;
     char final_ifos[MAX_ALLIFO_LEN];
@@ -91,13 +95,12 @@ ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *
     }
 }
 
-const char *get_ifo_string(ifo_set_type ifo_set) {
-    return IFOComboMap[ifo_set];
-}
-
 ifo_set_type get_ifo_set(char *ifos) {
     unsigned len_in = strlen(ifos);
     int nifo_in     = (int)len_in / IFO_LEN, nifo_map, iifo, jifo;
+    // FIXME: ifo_set_type is intended to put encapsulate all bitset operations with helper functions
+    // However, iterating through all combinations of valid ifo_sets is outside of scope
+    // For now, cur_ifo_set is treated as both an int and an ifo_set_type
     for (ifo_set_type cur_ifo_set = 0; cur_ifo_set < MAX_IFO_SET; cur_ifo_set++) {
         nifo_map = 0;
         if (len_in == strlen(get_ifo_string(cur_ifo_set))) {

@@ -143,7 +143,7 @@ void cuda_device_print(int deviceCount) {
     }
 }
 
-/* get ifo indices of a given ifo_set in IFOMap
+/* get ifo indices of a given set of ifos in IFOMap
  * e.g. HV: 0, 2
  */
 void get_write_ifo_mapping(char *ifos, int nifo, int *write_ifo_mapping) {
@@ -419,8 +419,8 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
         parseFile(this_ifo_split[1], xns, 1);
 
         ntmplt = array_sigmasq[0].dim[0];
-// ifo_sets like HL, match_ifo will still be like 0:H,1:L
-// ifo_sets like HV, match_ifo will still be like 0:H,1:V
+// ifo sets like HL, match_ifo will still be like 0:H,1:L
+// ifo sets like HV, match_ifo will still be like 0:H,1:V
 #ifdef __DEBUG__
         printf("this sigma %s, this ifo %s, match ifo %d,ntmplt %d \n", *isigma,
                this_ifo_split[0], match_ifo, ntmplt);
