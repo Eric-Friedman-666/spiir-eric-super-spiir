@@ -21,7 +21,7 @@
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
 #include <gst/gst.h>
-#include <pipe_macro.h> // for get_ifo_string
+#include <pipe_macro.h> // for ifo_set__get_string
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
 
@@ -201,7 +201,7 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
     pklist->peak_intlen   = peak_intlen;
     pklist->peak_floatlen = peak_floatlen;
 
-    // [THA]: Why do we use `cudaMallocManaged()` sometimes below? Well, a large
+    // Why do we use `cudaMallocManaged()` sometimes below? Well, a large
     // number of the below pointers are to 2D arrays that we won't be accessing
     // after setting up, but whilst we're setting them up they need to be able
     // to be accessed on the CPU. `cudaMallocManaged()` allows us to access the

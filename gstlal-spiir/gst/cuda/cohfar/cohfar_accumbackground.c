@@ -105,7 +105,7 @@ static void cohfar_accumbackground_dispose(GObject *object);
 
 static void update_stats_enabled_ifos(PostcohInspiralTable *intable,
                                 TriggerStatsXML *stats) {
-    int num_stats = ifo_set__num_trigger_stats(stats->enabled_ifos);
+    int num_stats = trigger_stats_num_stats(stats->enabled_ifos);
 
     if (stats->enabled_ifos > -1) {
         // update the multi-IFO background at the last bin.
@@ -167,7 +167,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     // TriggerStats **stats_prompt = element->stats_prompt;
     // TriggerStatsPointerList *stats_list = element->stats_list;
     // /* reset stats_prompt */
-    // int num_stats = ifo_set__num_trigger_stats(element->enabled_ifos);
+    // int num_stats = trigger_stats_num_stats(element->enabled_ifos);
     // trigger_stats_reset(stats_prompt, num_stats);
 
     /*
@@ -244,10 +244,10 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
             int nifo = ifo_set__count(enabled_ifos);
             if (nifo > 1) {
                 /* add single detector stats */
-                get_write_ifo_mapping(get_ifo_string(enabled_ifos), nifo,
+                get_write_ifo_mapping(ifo_set__get_string(enabled_ifos), nifo,
                                       element->write_ifo_mapping);
 
-                int num_stats = ifo_set__num_trigger_stats(enabled_ifos);
+                int num_stats = trigger_stats_num_stats(enabled_ifos);
                 for (int i = 0; i < num_stats; i++) {
                     trigger_stats_livetime_inc(bgstats->multistats, i);
                     trigger_stats_livetime_inc(zlstats->multistats, i);

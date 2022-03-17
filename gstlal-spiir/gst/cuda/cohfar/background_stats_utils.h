@@ -67,9 +67,9 @@ void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
 
 int ifo_set__count(const ifo_set_type ifos);
 
-int ifo_set__num_trigger_stats(const ifo_set_type ifos);
-
 int ifo_set__contains(const ifo_set_type ifos, const int ifo_id);
+
+int trigger_stats_num_stats(const ifo_set_type ifos);
 
 void trigger_stats_xml_reset(TriggerStatsXML *stats);
 

@@ -21,7 +21,7 @@ typedef size_t ifo_set_type;
 
 /* function to encapsulate IFOComboMap, such that ifo_set isn't directly 
 *  used as an index */
-const char *get_ifo_string(ifo_set_type ifo_set);
+const char *ifo_set__get_string(ifo_set_type ifo_set);
 
 // A combination is sum(1 << index) - 1
 // This gives us some nice mathematical properties that we can use to check
