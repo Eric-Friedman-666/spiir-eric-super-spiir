@@ -1005,7 +1005,7 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     int num_elem  = 10; // 4 for feature, 4 for rank, 2 for nevent,livetime
     ifo_set_type enabled_ifos = stats->enabled_ifos;
     int num_stats = trigger_stats_num_stats(enabled_ifos); // top level xml nodes
-    int num_nodes = num_stats * num_elem + 1, cur_ifo_set; // 1 for hist_trials
+    int num_nodes = num_stats * num_elem + 1; // 1 for hist_trials
     /* read rate */
 
     XmlNodeStruct *xns = (XmlNodeStruct *)malloc(sizeof(XmlNodeStruct) * num_nodes);

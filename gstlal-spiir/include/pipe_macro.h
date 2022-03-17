@@ -17,7 +17,7 @@ constexpr
   };
 #define MAX_IFO_SET 7 // 2^3-1
 
-typedef size_t ifo_set_type;
+typedef int ifo_set_type;
 
 /* function to encapsulate IFOComboMap, such that ifo_set isn't directly 
 *  used as an index */
