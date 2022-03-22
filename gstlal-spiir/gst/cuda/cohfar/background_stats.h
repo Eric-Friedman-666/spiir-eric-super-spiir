@@ -96,14 +96,7 @@ typedef struct {
     TriggerStats **multistats;
     GString *rank_xmlname;
     GString *feature_xmlname;
-    int ncombo;
+    ifo_set_type enabled_ifos;
 } TriggerStatsXML;
-
-typedef TriggerStats **TriggerStatsPointer;
-typedef struct {
-    TriggerStatsPointer *plist;
-    int size;
-    int pos;
-} TriggerStatsPointerList;
 
 #endif /* __BACKGROUND_STATS_H__ */

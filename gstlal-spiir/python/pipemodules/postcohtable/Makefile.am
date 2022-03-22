@@ -17,7 +17,7 @@ postcohtable_PYTHON = \
 postcohtable_LTLIBRARIES = _postcohtable.la
 
 _postcohtable_la_SOURCES = _postcohtable.c
-_postcohtable_la_CPPFLAGS = $(AM_CPPFLAGS) $(PYTHON_CPPFLAGS) -DMODULE_NAME="\"gstlal.pipemodules.postcohtable._postcohtable\""
+_postcohtable_la_CPPFLAGS = $(AM_CPPFLAGS) $(LAL_CFLAGS) $(GSL_CFLAGS) $(gstreamer_CFLAGS) $(GSTLAL_CFLAGS) $(ADD_CFLAGS) $(PYTHON_CPPFLAGS) -DMODULE_NAME="\"gstlal.pipemodules.postcohtable._postcohtable\"" -fno-strict-aliasing -fpermissive
 _postcohtable_la_CFLAGS = $(AM_CFLAGS) $(LAL_CFLAGS) $(GSL_CFLAGS) $(gstreamer_CFLAGS) $(GSTLAL_CFLAGS) $(ADD_CFLAGS) -fno-strict-aliasing -DMODULE_NAME="\"gstlal.pipemodules.postcohtable._postcohtable\""
 _postcohtable_la_LDFLAGS = $(AM_LDFLAGS) $(LAL_LIBS) $(GSL_LIBS) $(GSTLAL_LDFLAGS) $(PYTHON_LIBS) $(ADD_LIBS) -module -avoid-version
 

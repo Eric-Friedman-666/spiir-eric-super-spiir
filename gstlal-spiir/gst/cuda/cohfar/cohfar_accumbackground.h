@@ -59,7 +59,7 @@ typedef struct {
 
     char *ifos;
     int nifo;
-    int ncombo; // ifo combination
+    ifo_set_type enabled_ifos;
     int write_ifo_mapping[MAX_NIFO];
     TriggerStatsXML *bgstats;
     TriggerStatsXML *zlstats;

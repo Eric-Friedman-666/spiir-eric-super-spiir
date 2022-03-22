@@ -27,7 +27,7 @@
 #include <lal/Date.h>
 #include <lal/LIGOMetadataTables.h>
 #include <math.h>
-#include <pipe_macro.h> // for get_icombo, IFOComboMap
+#include <pipe_macro.h> // for get_ifo_set, ifo_set__get_string
 #include <postcoh/postcoh.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcoh/postcohtable_utils.h>
@@ -605,7 +605,6 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
 
     state->nifo              = GST_ELEMENT(postcoh)->numsinkpads;
     state->input_ifo_mapping = (gint *)malloc(sizeof(gint) * state->nifo);
-    state->ifo_combo_idx     = 0;
     state->all_ifos =
       (gchar *)malloc(sizeof(gchar) * state->nifo * IFO_LEN + 1);
     state->peak_list = (PeakList **)malloc(sizeof(PeakList *) * state->nifo);
@@ -658,25 +657,27 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
 
     gint8 i = 0, j = 0, cur_ifo = 0, nifo = state->nifo;
     GST_OBJECT_LOCK(postcoh->collect);
-    /* find the ifo_combo_mapping and input_ifo_mapping:
-     * first find the ifo_combo index in the IFOComboMap
-     * then, map original sinkpad's ifo to the position in this combo */
+    /* find the enabled_ifos_mapping and input_ifo_mapping:
+     * first find the enabled_ifos index in the IFOComboMap
+     * then, map original sinkpad's ifo to the position in this ifo_set */
     for (i = 0, sinkpads = GST_ELEMENT(postcoh)->sinkpads; sinkpads;
          sinkpads = g_list_next(sinkpads), i++) {
         GstPad *pad = GST_PAD(sinkpads->data);
         data        = gst_pad_get_element_private(pad);
         set_offset_per_nanosecond(data, postcoh->offset_per_nanosecond);
         set_channels(data, postcoh->channels);
-        // FIXME: need to consider non-standard ifo indexing, like HV, need
-        // testing
+        // Non-standard IFO indexing (e.g. VH) works because `get_ifo_set`
+        // doesn't care about the ordering of IFOs
         strncpy(state->all_ifos + IFO_LEN * i, data->ifo_name,
                 sizeof(char) * IFO_LEN);
     }
     state->all_ifos[IFO_LEN * nifo] = '\0';
-    state->ifo_combo_idx            = get_icombo(state->all_ifos);
-    /* overwrite all_ifos to be the same with the combo in the IFOComboMap */
-    strncpy(state->all_ifos, IFOComboMap[state->ifo_combo_idx].name,
-            sizeof(IFOComboMap[state->ifo_combo_idx].name));
+    ifo_set_type enabled_ifos = get_ifo_set(state->all_ifos);
+    // sizeof() only works for arrays that we've statically created, so
+    // we use strlen() to get the length of the combination name
+    /* overwrite all_ifos to be the same with the ifo_set in the IFOComboMap */
+    strncpy(state->all_ifos, ifo_set__get_string(enabled_ifos),
+            strlen(ifo_set__get_string(enabled_ifos)));
     state->all_ifos[IFO_LEN * nifo] = '\0';
 
     /* initialize input_ifo_mapping, snglsnr matrix, and peak_list */
@@ -1144,7 +1145,7 @@ static int cuda_postcoh_select_background(PeakList *pklist,
             // cohsnr_thresh
             //* pklist->snglsnr_H[iifo*max_npeak + peak_cur])
             if (sqrt(pklist->cohsnr_bg[background_cur])
-                > 1.414 + pklist->snglsnr_H[write_ifo * max_npeak + peak_cur]) {
+                > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
                 left_backgrounds++;
                 GST_LOG("mark back,%d ipeak, %d itrial", ipeak, itrial);
             } else
@@ -1204,9 +1205,7 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
             peak_cur = peak_pos[ipeak];
             // FIXME: consider a different threshold for 3-detector
             if (sqrt(pklist->cohsnr[peak_cur])
-                > 1.414
-                    + pklist->snglsnr_H[write_ifo * (state->max_npeak)
-                                        + peak_cur]) {
+                > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
                 cluster_peak_pos[final_peaks++] = peak_cur;
             } else
                 bubbled_peak_pos[bubbled_peaks++] = peak_cur;
@@ -1236,7 +1235,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
     PostcohInspiralTable *output =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
-    int iifo = 0, jifo = 0, nifo = state->nifo;
+    int nifo = state->nifo;
     int ifos_size    = sizeof(char) * IFO_LEN * state->cur_nifo,
         one_ifo_size = sizeof(char) * IFO_LEN;
     int ipeak, npeak = 0, itrial = 0, exe_len = state->exe_len,
@@ -1263,13 +1262,15 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
     write_entries++;
     /* end of the first entry */
 
+    // TODO: Refactor this loop into smaller chunks.
+    //      It could use separate loops or procedures.
     /* FIXME: can output single-detector events, consider cohsnr = single snr,
      * and cmbchisq = single chisq */
     /* only output multi-detector events, cohsnr, cmbchisq only make sense when
      * cur_nifo >=2 */
-    for (iifo = 0; (iifo < nifo) && (state->cur_nifo >= 2); iifo++) {
-        if (state->cur_ifo_is_gap[iifo]) continue;
-        PeakList *pklist = state->peak_list[iifo];
+    for (int pivotal_ifo = 0; (pivotal_ifo < nifo) && (state->cur_nifo >= 2); pivotal_ifo++) {
+        if (state->cur_ifo_is_gap[pivotal_ifo]) continue;
+        PeakList *pklist = state->peak_list[pivotal_ifo];
         npeak            = pklist->npeak[0];
 
         int peak_cur, len_cur, peak_cur_bg;
@@ -1287,39 +1288,28 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             len_cur = pklist->len_idx[peak_cur];
             XLALGPSAdd(&(end_time), (double)len_cur / exe_len);
             output->end_time = end_time;
-            XLALGPSAdd(&(end_time),
-                       (double)pklist->ntoff_H[peak_cur] / exe_len);
-            output->end_time_H = end_time;
-            end_time           = output->end_time;
-            XLALGPSAdd(&(end_time),
-                       (double)pklist->ntoff_L[peak_cur] / exe_len);
-            output->end_time_L = end_time;
-            end_time           = output->end_time;
-            XLALGPSAdd(&(end_time),
-                       (double)pklist->ntoff_V[peak_cur] / exe_len);
-            output->end_time_V = end_time;
-            output->snglsnr_H  = pklist->snglsnr_H[peak_cur];
-            output->snglsnr_L  = pklist->snglsnr_L[peak_cur];
-            output->snglsnr_V  = pklist->snglsnr_V[peak_cur];
-            output->coaphase_H = pklist->coaphase_H[peak_cur];
-            output->coaphase_L = pklist->coaphase_L[peak_cur];
-            output->coaphase_V = pklist->coaphase_V[peak_cur];
-            output->chisq_H    = pklist->chisq_H[peak_cur];
-            output->chisq_L    = pklist->chisq_L[peak_cur];
-            output->chisq_V    = pklist->chisq_V[peak_cur];
+            for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+                XLALGPSAdd(&(end_time),
+                           (double)pklist->ntoff[ifo_id][peak_cur] / exe_len);
+                output->end_time_sngl[ifo_id] = end_time;
+                end_time                 = output->end_time;
 
-            for (jifo = 0; jifo < nifo; jifo++) {
-                int write_ifo = state->write_ifo_mapping[jifo];
-                *(&output->deff_H + write_ifo) =
-                  sqrt(state->sigmasq[jifo][cur_tmplt_idx])
-                  / *(pklist->snglsnr_H + write_ifo * state->max_npeak
-                      + peak_cur); // in MPC
+                output->snglsnr[ifo_id]  = pklist->snglsnr[ifo_id][peak_cur];
+                output->coaphase[ifo_id] = pklist->coaphase[ifo_id][peak_cur];
+                output->chisq[ifo_id]    = pklist->chisq[ifo_id][peak_cur];
+            }
+
+            for (int ifo_id = 0; ifo_id < nifo; ifo_id++) {
+                int write_ifo = state->write_ifo_mapping[ifo_id];
+                output->deff[write_ifo] =
+                  sqrt(state->sigmasq[ifo_id][cur_tmplt_idx])
+                  / pklist->snglsnr[write_ifo][peak_cur]; // in MPC
             }
             output->is_background = FLAG_FOREGROUND;
             output->livetime      = livetime;
             strncpy(output->ifos, state->cur_ifos, ifos_size);
             output->ifos[IFO_LEN * state->cur_nifo] = '\0';
-            strncpy(output->pivotal_ifo, state->all_ifos + IFO_LEN * iifo,
+            strncpy(output->pivotal_ifo, state->all_ifos + IFO_LEN * pivotal_ifo,
                     one_ifo_size);
             output->pivotal_ifo[IFO_LEN] = '\0';
             output->tmplt_idx            = cur_tmplt_idx;
@@ -1357,12 +1347,12 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             output->dec      = (M_PI_2 - theta) * RAD2DEG;
             output->event_id = postcoh->cur_event_id++;
             if (postcoh->output_skymap
-                && state->snglsnr_max[iifo] > postcoh->output_skymap
-                && state->skymap_peakcur[iifo] == peak_cur) {
+                && state->snglsnr_max[pivotal_ifo] > postcoh->output_skymap
+                && state->skymap_peakcur[pivotal_ifo] == peak_cur) {
                 GString *filename = NULL;
                 FILE *file        = NULL;
                 filename =
-                  g_string_new(IFOComboMap[get_icombo(output->ifos)].name);
+                  g_string_new(ifo_set__get_string(get_ifo_set(output->ifos)));
                 g_string_append_printf(
                   filename, "_skymap/%s_%d_%d_%d_%d", output->pivotal_ifo,
                   output->end_time.gpsSeconds, output->end_time.gpsNanoSeconds,
@@ -1381,20 +1371,20 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 output->skymap_fname[0] = '\0';
             output->rank = 0;
 
-            GST_LOG_OBJECT(postcoh,
-                           "end_time_L %d, ipeak %d, peak_cur %d, len_cur %d, "
-                           "tmplt_idx %d, pix_idx %d \t,"
-                           "snglsnr_L %f, snglsnr_H %f, snglsnr_V %f,"
-                           "coaphase_L %f, coaphase_H %f, coa_phase_V %f,"
-                           "chisq_L %f, chisq_H %f, chisq_V %f,"
-                           "cohsnr %f, nullsnr %f, cmbchisq %f\n",
-                           output->end_time_L.gpsSeconds, ipeak, peak_cur,
-                           len_cur, output->tmplt_idx, output->pix_idx,
-                           output->snglsnr_L, output->snglsnr_H,
-                           output->snglsnr_V, output->coaphase_L,
-                           output->coaphase_H, output->coaphase_V,
-                           output->chisq_L, output->chisq_H, output->chisq_V,
-                           output->cohsnr, output->nullsnr, output->cmbchisq);
+            GST_LOG_OBJECT(
+              postcoh,
+              "end_time_sngl_0 %d, ipeak %d, peak_cur %d, len_cur %d, "
+              "tmplt_idx %d, pix_idx %d \t,"
+              "snglsnr_0 %f, snglsnr_1 %f, snglsnr_2 %f,"
+              "coaphase_0 %f, coaphase_1 %f, coa_phase_2 %f,"
+              "chisq_0 %f, chisq_1 %f, chisq_2 %f,"
+              "cohsnr %f, nullsnr %f, cmbchisq %f\n",
+              output->end_time_sngl[0].gpsSeconds, ipeak, peak_cur, len_cur,
+              output->tmplt_idx, output->pix_idx, output->snglsnr[0],
+              output->snglsnr[1], output->snglsnr[2], output->coaphase[0],
+              output->coaphase[1], output->coaphase[2], output->chisq[0],
+              output->chisq[1], output->chisq[2], output->cohsnr,
+              output->nullsnr, output->cmbchisq);
 
             XLALINT8NSToGPS(&output->epoch, ts);
             output->deltaT = 1. / postcoh->rate;
@@ -1418,18 +1408,15 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                     strncpy(output->ifos, state->cur_ifos, ifos_size);
                     output->ifos[IFO_LEN * state->cur_nifo] = '\0';
                     strncpy(output->pivotal_ifo,
-                            state->all_ifos + IFO_LEN * iifo, one_ifo_size);
+                            state->all_ifos + IFO_LEN * pivotal_ifo, one_ifo_size);
                     output->pivotal_ifo[IFO_LEN] = '\0';
                     output->tmplt_idx            = pklist->tmplt_idx[peak_cur];
-                    output->snglsnr_H  = pklist->snglsnr_bg_H[peak_cur_bg];
-                    output->snglsnr_L  = pklist->snglsnr_bg_L[peak_cur_bg];
-                    output->snglsnr_V  = pklist->snglsnr_bg_V[peak_cur_bg];
-                    output->coaphase_H = pklist->coaphase_bg_H[peak_cur_bg];
-                    output->coaphase_L = pklist->coaphase_bg_L[peak_cur_bg];
-                    output->coaphase_V = pklist->coaphase_bg_V[peak_cur_bg];
-                    output->chisq_H    = pklist->chisq_bg_H[peak_cur_bg];
-                    output->chisq_L    = pklist->chisq_bg_L[peak_cur_bg];
-                    output->chisq_V    = pklist->chisq_bg_V[peak_cur_bg];
+                    for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+                        output->snglsnr[ifo_id] = pklist->snglsnr_bg[ifo_id][peak_cur_bg];
+                        output->coaphase[ifo_id] =
+                          pklist->coaphase_bg[ifo_id][peak_cur_bg];
+                        output->chisq[ifo_id] = pklist->chisq_bg[ifo_id][peak_cur_bg];
+                    }
 
                     // output->pix_idx = pklist->pix_idx[itrial*max_npeak +
                     // peak_cur];
@@ -1445,16 +1432,16 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                       postcoh,
                       "ipeak %d, itrial %d, len_cur %d, tmplt_idx %d, pix_idx "
                       "%d,"
-                      "snglsnr_L %f, snglsnr_H %f, snglsnr_V %f,"
-                      "coaphase_L %f, coaphase_H %f, coa_phase_V %f,"
-                      "chisq_L %f, chisq_H %f, chisq_V %f,"
+                      "snglsnr[0] %f, snglsnr[1] %f, snglsnr[2] %f,"
+                      "coaphase[0] %f, coaphase[1] %f, coa_phase[2] %f,"
+                      "chisq[0] %f, chisq[1] %f, chisq[2] %f,"
                       "cohsnr %f, nullsnr %f, cmbchisq %f\n",
                       ipeak, itrial, len_cur, output->tmplt_idx,
-                      output->pix_idx, output->snglsnr_L, output->snglsnr_H,
-                      output->snglsnr_V, output->coaphase_L, output->coaphase_H,
-                      output->coaphase_V, output->chisq_L, output->chisq_H,
-                      output->chisq_V, output->cohsnr, output->nullsnr,
-                      output->cmbchisq);
+                      output->pix_idx, output->snglsnr[0], output->snglsnr[2],
+                      output->snglsnr[2], output->coaphase[0],
+                      output->coaphase[1], output->coaphase[2],
+                      output->chisq[0], output->chisq[1], output->chisq[2],
+                      output->cohsnr, output->nullsnr, output->cmbchisq);
 
                     /* do not dump snr for background */
                     XLALINT8NSToGPS(&output->epoch, ts);
@@ -1468,7 +1455,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
         GST_LOG_OBJECT(postcoh,
                        "write to output, ifo %d, npeak %d, %d total entries",
-                       iifo, npeak, write_entries);
+                       pivotal_ifo, npeak, write_entries);
     }
     return write_entries;
 }
@@ -1802,7 +1789,7 @@ static void cuda_postcoh_process(GstCollectPads *pads,
         for (int iifo = 0; iifo < state->nifo; ++iifo)
             if (!state->cur_ifo_is_gap[iifo]) {
                 strncpy(state->cur_ifos + IFO_LEN * cur_ifo,
-                        IFOMap[state->write_ifo_mapping[iifo]].name,
+                        IFOMap[state->write_ifo_mapping[iifo]],
                         sizeof(char) * IFO_LEN);
                 cur_ifo++;
             }

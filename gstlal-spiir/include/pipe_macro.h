@@ -7,24 +7,32 @@
 #endif
 
 #define MAX_NIFO 3
-typedef struct _IFOType {
-    const char *name;
-    int index;
-} IFOType;
+#ifdef __cplusplus
+constexpr
+#endif
+  static const char *IFOMap[MAX_NIFO] = {
+      "H1", // 1 << 0 = 1
+      "L1", // 1 << 1 = 2
+      "V1", // 1 << 2 = 4
+  };
+#define MAX_IFO_SET 7 // 2^3-1
 
-static const IFOType IFOMap[MAX_NIFO] = {
-    { "H1", 0 },
-    { "L1", 1 },
-    { "V1", 2 },
-};
-#define MAX_IFO_COMBOS 7 // 2^3-1
-static const IFOType IFOComboMap[MAX_IFO_COMBOS] = {
-    { "H1", 0 },   { "L1", 1 },   { "V1", 2 },     { "H1L1", 3 },
-    { "H1V1", 4 }, { "L1V1", 5 }, { "H1L1V1", 6 },
+typedef int ifo_set_type;
+
+/* function to encapsulate IFOComboMap, such that ifo_set isn't directly 
+*  used as an index */
+const char *ifo_set__get_string(ifo_set_type ifo_set);
+
+// A combination is sum(1 << index) - 1
+// This gives us some nice mathematical properties that we can use to check
+// if an IFO exists in a given ComboMap
+static const char *IFOComboMap[MAX_IFO_SET] = {
+    "H1",   "L1",   "H1L1",   "V1",
+    "H1V1", "L1V1", "H1L1V1",
 };
 /* function given a random ifo, output the index in the IFOComboMap list,
  * implemented in background_stats_utils.c */
-int get_icombo(char *ifos);
+ifo_set_type get_ifo_set(char *ifos);
 
 #ifndef MAX_ALLIFO_LEN
 #define MAX_ALLIFO_LEN 14
@@ -76,7 +84,6 @@ int get_icombo(char *ifos);
 #define STATS_XML_WRITE_END   3
 #define STATS_XML_WRITE_FULL  4
 
-#define MAX(a, b)        (a > b ? a : b)
 #define PNOISE_MIN_LIMIT -30
 #define PSIG_MIN_LIMIT   -30
 #define LR_MIN_LIMIT     -30

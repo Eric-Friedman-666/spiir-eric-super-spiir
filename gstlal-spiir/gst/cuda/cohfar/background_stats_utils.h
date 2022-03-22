@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>
+ * Copyright (C) 2015 Qi Chu <qi.chu@uwa.edu.au>,
+ *               2020 Tom Almeida <tom@tommoa.me>,
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the
@@ -31,6 +32,7 @@
 #include <LIGOLwHeader.h>
 #include <cohfar/background_stats.h>
 #include <glib.h>
+#include <postcohtable.h>
 
 Bins1D *bins1D_create_long(double cmin, double cmax, int nbin);
 
@@ -48,14 +50,30 @@ Bins2D *bins2D_create_long(double cmin_x,
                            double cmax_y,
                            int nbin_y);
 
-TriggerStats **trigger_stats_create(int ncombo);
+TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos);
 
 int bins1D_get_idx(double val, Bins1D *bins);
 
-void trigger_stats_feature_rates_update(double snr,
-                                        double chisq,
-                                        FeatureStats *feature,
-                                        TriggerStats *cur_stats);
+void trigger_stats_feature_rate_update(double snr,
+                                       double chisq,
+                                       FeatureStats *feature,
+                                       TriggerStats *cur_stats);
+
+double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
+
+ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *trigger);
+
+void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
+
+int ifo_set__count(const ifo_set_type ifos);
+
+int ifo_set__contains(const ifo_set_type ifos, const int ifo_id);
+
+int trigger_stats_num_stats(const ifo_set_type ifos);
+
+void trigger_stats_xml_reset(TriggerStatsXML *stats);
+
+void signal_stats_init(TriggerStatsXML *sgstats, int source_type);
 
 void trigger_stats_feature_rates_add(FeatureStats *feature1,
                                      FeatureStats *feature2,
