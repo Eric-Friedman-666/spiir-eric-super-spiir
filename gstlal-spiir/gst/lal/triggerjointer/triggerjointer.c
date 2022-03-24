@@ -384,8 +384,8 @@ static gboolean trigger_jointer_set_snr_info(TriggerJointer *jointer) {
           "timelag in nsamples %d",
           data->ifo_name, data->ifo_mapping, data->rate, data->channels,
           data->bps, data->ntimelag);
-        return TRUE;
     }
+    return TRUE;
 }
 
 static GstPad *trigger_jointer_request_new_pad(GstElement *element,
@@ -749,7 +749,8 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
     int tmplt_idx, this_sample;
     float this_sec, this_nano;
 
-    PostcohInspiralTable *trigger =
+    PostcohInspiralTable *trigger;
+    PostcohInspiralTable *trigger_start =
       (PostcohInspiralTable *)GST_BUFFER_DATA(postcoh_buf);
     PostcohInspiralTable *trigger_end =
       (PostcohInspiralTable *)(GST_BUFFER_DATA(postcoh_buf)
@@ -792,20 +793,20 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
             continue;
         }
 
-        /* not a gap, extend the trigger field ifos with the new ifo */
-        if (trigger->ifos) {
-            len_ifos = strlen(trigger->ifos);
-            nifo     = len_ifos / IFO_LEN;
-            pad_loc  = len_ifos + IFO_LEN;
-        }
-
         /* find the coinc snr from tmplt idx
          * and time idx */
         int isample, max_isample = 0;
         COMPLEX_F this_snr;
         float max_abs_snr = 0, this_abs_snr;
         LIGOTimeGPS end_time;
-        for (; trigger < trigger_end; trigger++) {
+        for (trigger = trigger_start; trigger < trigger_end; trigger++) {
+            /* not a gap, extend the trigger field ifos with the new ifo */
+            if (trigger->ifos) {
+                len_ifos = strlen(trigger->ifos);
+                nifo     = len_ifos / IFO_LEN;
+                pad_loc  = len_ifos + IFO_LEN;
+            }
+
             /* not a zerolag trigger but an entry
              * just to indicate ifos */
             if (trigger->is_background != FLAG_FOREGROUND) continue;

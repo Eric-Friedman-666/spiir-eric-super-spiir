@@ -409,7 +409,7 @@ class FinalSink(object):
                  far_factor,
                  cluster_window=0.5,
                  snapshot_interval=None,
-                 fapupdater_ifos="H1L1V1",
+                 fapupdater_ifos="H1L1V1K1",
                  fapupdater_interval=None,
                  cohfar_accumbackground_output_prefix=None,
                  cohfar_accumbackground_output_name=None,
@@ -438,7 +438,7 @@ class FinalSink(object):
         self.is_first_event = True
         self.channel_dict = channel_dict
         self.ifos = lsctables.ifos_from_instrument_set(
-            channel_dict.keys()).replace(",", "")  # format: "H1L1V1"
+            channel_dict.keys()).replace(",", "")  # format: "H1L1V1K1"
         self.fapupdater_ifos = fapupdater_ifos; # ifos that are used for significance estimation
 
         # cluster parameters

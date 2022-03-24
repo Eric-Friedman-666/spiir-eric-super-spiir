@@ -687,6 +687,7 @@ def mkPostcohSPIIROnline(pipeline,
                                     max_size_buffers=10,
                                     max_size_bytes=100000000)
 
+            #TODO KAFKA Insert Dynamic Pipeline switch here
             if instrument in cuda_postcoh_parti_ifos:
                 if postcoh is None:
                     postcoh = pipemodules.mkcudapostcoh(
