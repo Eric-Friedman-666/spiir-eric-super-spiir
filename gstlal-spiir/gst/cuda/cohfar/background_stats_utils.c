@@ -53,6 +53,10 @@ int ifo_set__count(const ifo_set_type ifos) {
     return __builtin_popcount(ifos);
 }
 
+int ifo_set__is_empty(const ifo_set_type ifos) {
+    return ifo_set__count(ifos) == 0;
+}
+
 const char *ifo_set__get_string(ifo_set_type ifo_set) {
     return IFOComboMap[ifo_set - 1];
 }
