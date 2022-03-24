@@ -107,7 +107,7 @@ static void update_stats_enabled_ifos(PostcohInspiralTable *intable,
                                 TriggerStatsXML *stats) {
     int num_stats = trigger_stats_num_stats(stats->enabled_ifos);
 
-    if (stats->enabled_ifos > -1) {
+    if (!ifo_set__is_empty(stats->enabled_ifos)) {
         // update the multi-IFO background at the last bin.
         trigger_stats_feature_rate_update(
           (double)(intable->cohsnr), (double)intable->cmbchisq,
@@ -219,7 +219,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     for (; intable < intable_end; intable++) {
         ifo_set_type enabled_ifos = get_ifo_set(intable->ifos);
         // The combination of IFOs is invalid
-        if (enabled_ifos < 0) {
+        if (ifo_set__is_empty(enabled_ifos)) {
             LIGOTimeGPS ligo_time;
             XLALINT8NSToGPS(&ligo_time, GST_BUFFER_TIMESTAMP(inbuf));
             fprintf(stderr,

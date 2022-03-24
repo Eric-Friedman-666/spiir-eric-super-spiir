@@ -15,9 +15,9 @@ constexpr
       "L1", // 1 << 1 = 2
       "V1", // 1 << 2 = 4
   };
-#define MAX_IFO_SET 7 // 2^3-1
+#define MAX_IFO_SET 0b111 // { H1, L1, V1 } bitset
 
-typedef int ifo_set_type;
+typedef unsigned int ifo_set_type;
 
 /* function to encapsulate IFOComboMap, such that ifo_set isn't directly 
 *  used as an index */

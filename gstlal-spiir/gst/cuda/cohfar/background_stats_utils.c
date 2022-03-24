@@ -42,23 +42,23 @@
 // We can determine if the IFO at IFOMap[ifo_id] is in the ifo_set by
 // checking if that power of two exists in the ifo_set
 int ifo_set__contains(const ifo_set_type ifos, const int ifo_id) {
-    return (ifos + 1) & (1 << ifo_id);
+    return ifos & (1 << ifo_id);
 }
 
 int ifo_set__has_shared_ifos(const ifo_set_type ifos_lhs, const ifo_set_type ifos_rhs) {
-    return (ifos_lhs + 1) & (ifos_rhs + 1);
+    return ifos_lhs & ifos_rhs;
 }
 
-// We can see the number of detectors in a interferometer combination
-// by checking the number of set bits in `ifo_set + 1`. We can do this
-// because ifo_set is one less than the power of two combination of detectors
-// (see `include/pipe_macro.h`)
 int ifo_set__count(const ifo_set_type ifos) {
-    return __builtin_popcount(ifos + 1);
+    return __builtin_popcount(ifos);
+}
+
+int ifo_set__is_empty(const ifo_set_type ifos) {
+    return ifo_set__count(ifos) == 0;
 }
 
 const char *ifo_set__get_string(ifo_set_type ifo_set) {
-    return IFOComboMap[ifo_set];
+    return IFOComboMap[ifo_set - 1];
 }
 
 ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *trigger) {
@@ -93,7 +93,7 @@ ifo_set_type get_ifo_set(char *ifos) {
     // FIXME: ifo_set_type is intended to put encapsulate all bitset operations with helper functions
     // However, iterating through all combinations of valid ifo_sets is outside of scope
     // For now, cur_ifo_set is treated as both an int and an ifo_set_type
-    for (ifo_set_type cur_ifo_set = 0; cur_ifo_set < MAX_IFO_SET; cur_ifo_set++) {
+    for (ifo_set_type cur_ifo_set = 0b1; cur_ifo_set <= MAX_IFO_SET; cur_ifo_set++) {
         nifo_map = 0;
         if (len_in == strlen(ifo_set__get_string(cur_ifo_set))) {
             for (iifo = 0; iifo < nifo_in; iifo++) {
@@ -115,7 +115,7 @@ ifo_set_type get_ifo_set(char *ifos) {
             "get_ifo_set: failed to get index for %s, strlen %u, ifos need to "
             "end with null terminator\n",
             ifos, len_in);
-    return -1;
+    return 0;
 }
 
 Bins1D *bins1D_long_create(double cmin, double cmax, int nbin) {
@@ -1032,7 +1032,7 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     // However, iterating through all combinations of valid ifo_sets is outside of scope
     // For now, cur_ifo_set is treated as both an int and an ifo_set_type
     int pos_xns, stats_idx = 0;
-    for (ifo_set_type cur_ifo_set = 0; cur_ifo_set <= enabled_ifos; cur_ifo_set++) {
+    for (ifo_set_type cur_ifo_set = 0b1; cur_ifo_set <= enabled_ifos; cur_ifo_set++) {
         if (cur_ifo_set == enabled_ifos // all active ifos
             || (ifo_set__count(cur_ifo_set) == 1 && ifo_set__has_shared_ifos(enabled_ifos, cur_ifo_set)))
         {
