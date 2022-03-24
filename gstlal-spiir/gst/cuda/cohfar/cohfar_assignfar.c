@@ -247,13 +247,13 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
             if (table->is_background == FLAG_EMPTY) continue;
             enabled_ifos = get_ifo_set(table->ifos);
             enabled_ifos = scan_trigger_ifos(enabled_ifos, table);
-            if (enabled_ifos < 0) {
+            if (!ifo_set__count(enabled_ifos)) {
                 fprintf(stderr, "enabled_ifos not found, cohfar_assignfar\n");
                 exit(0);
             }
             int num_stats = trigger_stats_num_stats(enabled_ifos);
             cur_stats = element->bgstats_1w->multistats[num_stats - 1];
-            if (enabled_ifos > -1 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
+            if (ifo_set__count(enabled_ifos) && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
                 update_trigger_fars(table, num_stats, element);
             }
         }
