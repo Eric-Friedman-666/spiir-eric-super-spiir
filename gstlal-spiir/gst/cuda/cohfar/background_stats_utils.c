@@ -49,10 +49,6 @@ int ifo_set__has_shared_ifos(const ifo_set_type ifos_lhs, const ifo_set_type ifo
     return ifos_lhs & ifos_rhs;
 }
 
-// We can see the number of detectors in a interferometer combination
-// by checking the number of set bits in `ifo_set + 1`. We can do this
-// because ifo_set is one less than the power of two combination of detectors
-// (see `include/pipe_macro.h`)
 int ifo_set__count(const ifo_set_type ifos) {
     return __builtin_popcount(ifos);
 }
