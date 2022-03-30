@@ -94,8 +94,8 @@ class SimInspiral(lsctables.SimInspiral):
             return self.alpha5
         if instrument == "V1":
             return self.alpha6
-        if instrument == "K1":
-            return self.alpha7
+        # if instrument == "K1": #KAGRA
+        #     return self.alpha7
         return 0.0
 
 
@@ -970,8 +970,8 @@ FROM
                         return sim.alpha5
                     if ifo == 'V1':
                         return sim.alpha6
-                    if ifo == "K1":
-                        return sim.alpha7
+                    # if ifo == "K1":   #KAGRA
+                    #     return sim.alpha7
                 if len(oninstruments) > 4:
                     raise ValueError(
                         "More than 4 instruments not supported for injection snr calculation at this time."
@@ -985,10 +985,10 @@ FROM
                             return sim.alpha5
                         if ifo == 'V1':
                             return sim.alpha6
-                        if ifo == "K1":
-                            return sim.alpha7
+                        # if ifo == "K1":   #KAGRA
+                        #     return sim.alpha7
                     else:
-                        return sorted([sim.alpha4, sim.alpha5, sim.alpha6, sim.alpha7])[1]
+                        return sorted([sim.alpha4, sim.alpha5, sim.alpha6])[1]
 
             def missed_decisive_charsnr(sim, oninstruments):
                 if len(oninstruments) == 1:
@@ -999,14 +999,14 @@ FROM
                         return sim.alpha5
                     if ifo == 'V1':
                         return sim.alpha6
-                    if ifo == "K1":
-                        return sim.alpha7
+                    # if ifo == "K1":   #KAGRA
+                    #     return sim.alpha7
                 if len(oninstruments) > 3:
                     raise ValueError(
                         "More than 3 instruments not supported for injection snr calculation at this time."
                     )
                 else:
-                    return sorted([sim.alpha4, sim.alpha5, sim.alpha6, sim.alpha7])[1]
+                    return sorted([sim.alpha4, sim.alpha5, sim.alpha6])[1]
 
             for cnt, (
                     title, x_label, x_func, y_label, y_func, filename_fragment

@@ -1175,9 +1175,9 @@ static int cuda_postcoh_select_background(PeakList *pklist,
                 GST_LOG("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
                         ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
                         pklist->snglsnr[write_ifo][peak_cur]);
-		printf("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
-                        ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
-                        pklist->snglsnr[write_ifo][peak_cur]);
+		// printf("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
+        //                 ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
+        //                 pklist->snglsnr[write_ifo][peak_cur]);
             } else {
                 GST_LOG(
                   "no mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",

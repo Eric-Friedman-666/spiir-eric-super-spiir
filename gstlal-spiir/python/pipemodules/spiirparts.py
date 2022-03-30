@@ -632,6 +632,7 @@ def mkPostcohSPIIROnline(pipeline,
                                                 hoftdicts[instrument])
 
     for i_dict, bank_dict in enumerate(banks):
+        postcohdict = {}
         postcoh = None
         head = None
         #
@@ -688,6 +689,23 @@ def mkPostcohSPIIROnline(pipeline,
                                     max_size_bytes=100000000)
 
             #TODO KAFKA Insert Dynamic Pipeline switch here
+            # for combination in ['H1L1V1K1']:#, 'H1L1V1']:#, 'H1L1K1', 'H1V1K1', 'H1L1', 'H1V1', 'H1K1', 'L1V1K1', 'L1V1', 'L1K1']:
+            #     if instrument in cuda_postcoh_parti_ifos and instrument in combination:
+            #         if combination not in postcohdict:
+            #             postcohdict[combination] = pipemodules.mkcudapostcoh(
+            #                 pipeline,
+            #                 snr,
+            #                 instrument,
+            #                 cuda_postcoh_detrsp_fname,
+            #                 autocorrelation_fname_list[i_dict],
+            #                 bank_list[0],
+            #                 hist_trials=cuda_postcoh_hist_trials,
+            #                 snglsnr_thresh=cuda_postcoh_snglsnr_thresh,
+            #                 output_skymap=cuda_postcoh_output_skymap,
+            #                 stream_id=bankid)
+            #         else:
+            #             snr.link_pads(None, postcohdict[combination], instrument)
+            
             if instrument in cuda_postcoh_parti_ifos:
                 if postcoh is None:
                     postcoh = pipemodules.mkcudapostcoh(
@@ -717,6 +735,13 @@ def mkPostcohSPIIROnline(pipeline,
                     is_jointer_created = True
                 this_name = "snr_%s" % instrument
                 snr.link_pads(None, jointer, this_name)
+
+        # for combination in ['H1L1V1K1']:#, 'H1L1V1']:#, 'H1L1K1', 'H1V1K1', 'H1L1', 'H1V1', 'H1K1', 'L1V1K1', 'L1V1', 'L1K1']:
+        #     if postcoh is None:
+        #         postcoh = pipemodules.mkmax_postcoh(
+        #             pipeline,
+        #         )
+        #     postcohdict[combination].link_pads(None, postcohdict[combination], combination)
 
         # FIXME: hard-coded to do compression
         if verbose:
