@@ -159,7 +159,7 @@ static void update_trigger_fars(PostcohInspiralTable *table,
         }
     }
     GST_DEBUG_OBJECT(
-      element, "this long-scale far %f, mid-scale far %f, short-scale far %f",
+      element, "The long-scale far %f, mid-scale far %f, short-scale far %f",
       table->far_1w, table->far_1d, table->far_2h);
 }
 
@@ -322,11 +322,11 @@ static void cohfar_assignfar_set_property(GObject *object,
         element->ninput       = g_strv_length(element->input_fnames);
         if (element->ninput != 3) {
             fprintf(stderr,
-                    "Number of input files for zerolag FAR assignment is not 3 "
-                    "but %d,"
-                    " your cohfar-assignfar-input-fname option %s might not "
-                    "provide the right place"
-                    " for the input files. exiting \n",
+                    "Error: Expected 3 input files for zerolag FAR assignment, "
+                    " but %d were provided."
+                    " Your cohfar-assignfar-input-fname option '%s' might not "
+                    "provide the right path"
+                    " for the input files. Exiting \n",
                     element->ninput, g_value_dup_string(value));
             exit(0);
         }

@@ -103,16 +103,14 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
 static gboolean cohfar_accumbackground_sink_event(GstPad *pad, GstEvent *event);
 static void cohfar_accumbackground_dispose(GObject *object);
 
-// TODO: Consider rename. trigger_stats_update_stats(stats, intable, table_ifos)
-//        intable is ambiguous, it could stand for inspiral or input
-static void update_stats_enabled_ifos(PostcohInspiralTable *intable,
-                                ifo_set_type table_ifos,
-                                TriggerStatsXML *stats) {
+static void trigger_stats_update_stats(TriggerStatsXML *stats,
+                                PostcohInspiralTable *table,
+                                ifo_set_type table_ifos) {
     if (!ifo_set__is_empty(stats->enabled_ifos)) {
         int num_stats = trigger_stats_num_stats(stats->enabled_ifos);
         // update the multi-IFO background at the last bin.
         trigger_stats_feature_rate_update(
-          (double)(intable->cohsnr), (double)intable->cmbchisq,
+          (double)(table->cohsnr), (double)table->cmbchisq,
           stats->multistats[num_stats - 1]->feature,
           stats->multistats[num_stats - 1]);
 
@@ -124,8 +122,8 @@ static void update_stats_enabled_ifos(PostcohInspiralTable *intable,
                 /* check ifo in table, e.g. table: LK */
                 if (ifo_set__contains(table_ifos, ifo_id)) {
                     trigger_stats_feature_rate_update(
-                      (double)(intable->snglsnr[ifo_id]),
-                      (double)(intable->chisq[ifo_id]),
+                      (double)(table->snglsnr[ifo_id]),
+                      (double)(table->chisq[ifo_id]),
                       stats->multistats[stats_idx]->feature, stats->multistats[stats_idx]);
                 }
                 ++stats_idx;
@@ -236,14 +234,14 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
                     intable->cohsnr);
         }
         if (intable->is_background == FLAG_BACKGROUND) {
-            update_stats_enabled_ifos(
-              intable, table_ifos,
-              bgstats); // update the last combination and single IFO stats
+            trigger_stats_update_stats(
+              bgstats, intable,
+              table_ifos); // update the last combination and single IFO stats
         } else if (intable->is_background
                    == FLAG_FOREGROUND) { /* coherent trigger entry */
-            update_stats_enabled_ifos(
-              intable, table_ifos,
-              zlstats); // update the last combination and single IFO stats
+            trigger_stats_update_stats(
+              zlstats, intable,
+              table_ifos); // update the last combination and single IFO stats
             memcpy(outtable, intable, sizeof(PostcohInspiralTable));
             outtable++;
         } else {
