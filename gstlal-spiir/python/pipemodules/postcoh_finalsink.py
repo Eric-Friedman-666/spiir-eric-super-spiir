@@ -51,6 +51,7 @@ except ImportError:
 
 from glue import iterutils
 from glue import segments
+from glue import gpstime
 from glue.ligolw import ligolw
 from glue.ligolw import dbtables
 from glue.ligolw import ilwd
@@ -582,7 +583,7 @@ class FinalSink(object):
                 logging.info("buf gap at %d" % buf.timestamp)
                 return
             buf_timestamp = LIGOTimeGPS(0, buf.timestamp)
-            newevents = postcohtable.GSTLALPostcohInspiral.from_buffer(buf)
+            newevents = postcohtable.PostcohInspiralWrapper.from_buffer(buf)
             self.need_candidate_check = False
 
             if len(newevents) == 0:
@@ -622,7 +623,11 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
             if self.cluster_window == 0:
-                self.postcoh_table.extend(newevents)
+                # self.postcoh_table.extend(newevents)
+                for event in newevents:
+                    event.delete_all_snr_series()
+                    self.postcoh_table.append(event)
+
                 del self.cur_event_table[:]
 
             # NOTE: only consider clustered trigger for uploading to gracedb
@@ -635,10 +640,14 @@ class FinalSink(object):
                 if self.need_candidate_check:
                     self.nevent_clustered += 1
                     self.__set_far(self.candidate)
-                    self.postcoh_table.append(self.candidate)
-                    if self.gracedb_far_threshold and self.__pass_test(
-                            self.candidate):
+
+                     if self.gracedb_far_threshold and self.__pass_test(
+                             self.candidate):
                         self.__do_gracedb_alert(self.candidate)
+
+                    self.candidate.delete_all_snr_series()
+                    self.postcoh_table.append(self.candidate)
+
                     if self.need_online_perform:
                         self.onperformer.update_eye_candy(self.candidate)
                     self.candidate = None
@@ -798,7 +807,7 @@ class FinalSink(object):
         # if it is not one order of magnitude more significant than the last trigger
         # or if it not more significant the last submitted trigger
         # FIXME: what if there are two adjacent significant events
-        if ((abs(float(trigger.end) - last_time) < 50
+        if ((abs(float(trigger.end) - last_time) < 50 and last_far > 0 # NOTE: last_far > 0 is for testing
              and abs(trigger.far / last_far) > 0.5)) or (
                  abs(float(trigger.end) - float(last_submitted_time)) < 100
                  and trigger.far > last_submitted_far * 0.5):
@@ -837,7 +846,7 @@ class FinalSink(object):
 
         self.coincs_document.assemble_tables(trigger)
         xmldoc = self.coincs_document.xmldoc
-        filename = "%s_%s_%d_%d.xml" % (trigger.ifos, trigger.end_time,
+        filename = "%s/%s_%s_%d_%d.xml" % (self.path, trigger.ifos, trigger.end_time,
                                         trigger.bankid, trigger.tmplt_idx)
         #
         # construct message and send to gracedb.
@@ -1238,8 +1247,7 @@ class CoincsDocFromPostcoh(object):
                 pass
 
         # FIXME: hard-coded ifo len == 2
-        iifo = 0
-        for ifo in re.findall('..', trigger.ifos):
+        for iifo, ifo in enumerate(re.findall('..', trigger.ifos)):
             row = sngl_inspiral_table.RowType()
             # Setting the individual row
             row.process_id = self.process.process_id
@@ -1308,7 +1316,29 @@ class CoincsDocFromPostcoh(object):
             row.spin2z = trigger.spin2z
             row.event_id = "sngl_inspiral:event_id:%d" % iifo
             sngl_inspiral_table.append(row)
-            iifo += 1
+
+            # Append snr_series data into XML document
+            epoch_second = getattr(trigger,
+                                   "snr_series_epoch_gpsSeconds_" + ifo)
+            epoch_nanoSeconds = getattr(
+                trigger, "snr_series_epoch_gpsNanoSeconds_" + ifo)
+            epoch = LIGOTimeGPS(epoch_second, epoch_nanoSeconds)
+            snr_time_series = lal.CreateCOMPLEX8TimeSeries(
+                name=getattr(trigger, "snr_series_name_" + ifo),
+                epoch=epoch,
+                f0=getattr(trigger, "snr_series_f0_" + ifo),
+                deltaT=getattr(trigger, "snr_series_deltaT_" + ifo),
+                sampleUnits=getattr(trigger, "snr_series_sampleUnits_" + ifo),
+                length=getattr(trigger, "snr_series_data_length_" + ifo))
+            snr_time_series.data.data = getattr(
+                trigger, "snr_series_data_" + ifo)
+            snr_time_series_element = lal.series.build_COMPLEX8TimeSeries(
+                snr_time_series)
+            # Add event_id into the snr_time_series_element
+            snr_time_series_element.appendChild(
+                ligolw_param.Param.build(
+                    u"event_id", u"ilwd:char", row.event_id))
+            self.xmldoc.childNodes[-1].appendChild(snr_time_series_element)
 
 
 def call_plot_fits_func(pngname,
