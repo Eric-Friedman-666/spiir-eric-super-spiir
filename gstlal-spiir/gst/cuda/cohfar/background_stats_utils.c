@@ -61,6 +61,64 @@ const char *ifo_set__get_string(ifo_set_type ifo_set) {
     return IFOComboMap[ifo_set - 1];
 }
 
+// Try to parse the set of IFOs specified by ifo_str of the form "H1V1".
+// Simple greedy parser that assumes no IFO name is a prefix of another.
+// Empty string is considered invalid input.
+// ifos_str: A string representing a set of IFOs, e.g: "H1V1", "V1L1".
+// parsed_ifos (output): The set of parsed IFOs, or unmodified on failure.
+// return: True iff the parse was successful.
+bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos) {
+    // Empty string is invalid input
+    if (*ifos_str == '\0') return false;
+
+    ifo_set_type ifos = 0;
+
+    // Read IFO names until we hit end of ifos_str
+    // If we fail to find an IFO, we return failure
+    const char *ifos_str_end = ifos_str + strlen(ifos_str);
+    while (ifos_str < ifos_str_end) {
+        bool found_ifo = false;
+
+        // Take first IFO that is a prefix of the remaining string
+        for (size_t ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+            // Skip duplicates
+            if (ifo_set__contains(ifos, ifo_id)) continue;
+
+            char *ifo_name = IFOMap[ifo_id];
+            size_t ifo_name_len = strlen(ifo_name);
+            if (!strncmp(ifos_str, ifo_name, ifo_name_len)) {
+                // Insert into bitset and progress string
+                ifos |= 1 << ifo_id;
+                ifos_str += ifo_name_len;
+                found_ifo = true;
+                break;
+            }
+        }
+
+        // If none of the IFOs match, parsing has failed
+        if (!found_ifo) {
+            return false;
+        }
+    }
+    
+    *parsed_ifos = ifos;
+    return true;
+}
+
+// Parse the set of IFOs specified by ifo_str of the form "H1V1".
+// Defaults to empty set on failed parse.
+// Empty string is considered invalid input.
+// Prints an error message to stderr.
+// ifos_str: A string representing a set of IFOs, e.g: "H1V1", "V1L1".
+// return: The set of parsed IFOs, or the empty set on failure.
+ifo_set_type ifo_set__parse_or_empty(const char *ifos_str) {
+    ifo_set_type parsed_ifos = 0;
+    if (!ifo_set__try_parse(ifos_str, &parsed_ifos)) {
+        fprintf(stderr, "ifo_set__try_parse: failed to parse ifo set \"%s\"\n", ifos_str);
+    }
+    return parsed_ifos;
+}
+
 ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *trigger) {
     int nifo = 0, one_ifo_size = sizeof(char) * IFO_LEN;
     char final_ifos[MAX_ALLIFO_LEN];
@@ -81,41 +139,10 @@ ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *
     if (pass_test != TRUE) {
         strncpy(trigger->ifos, final_ifos, nifo * one_ifo_size);
         trigger->ifos[IFO_LEN * nifo] = '\0';
-        return get_ifo_set(trigger->ifos);
+        return ifo_set__parse_or_empty(trigger->ifos); // TODO: Consider using ifo_set__try_parse to check for errors
     } else {
         return enabled_ifos;
     }
-}
-
-ifo_set_type get_ifo_set(char *ifos) {
-    unsigned len_in = strlen(ifos);
-    int nifo_in     = (int)len_in / IFO_LEN, nifo_map, iifo, jifo;
-    // FIXME: ifo_set_type is intended to put encapsulate all bitset operations with helper functions
-    // However, iterating through all combinations of valid ifo_sets is outside of scope
-    // For now, cur_ifo_set is treated as both an int and an ifo_set_type
-    for (ifo_set_type cur_ifo_set = 0b1; cur_ifo_set <= MAX_IFO_SET; cur_ifo_set++) {
-        nifo_map = 0;
-        if (len_in == strlen(ifo_set__get_string(cur_ifo_set))) {
-            for (iifo = 0; iifo < nifo_in; iifo++) {
-                // this allows V1H1 found as with the IFOComboMap's H1V1
-                for (jifo = 0; jifo < nifo_in; jifo++)
-                    if (strncmp(ifos + iifo * IFO_LEN,
-                                ifo_set__get_string(cur_ifo_set) + jifo * IFO_LEN,
-                                IFO_LEN)
-                        == 0) {
-                        nifo_map++;
-                        // printf("nifo %d, in_ifo %d, cmp ifo %d, map_ifo
-                        // %d\n", nifo_in, iifo, jifo, nifo_map);
-                    }
-            }
-        }
-        if (nifo_in == nifo_map) return cur_ifo_set;
-    }
-    fprintf(stderr,
-            "get_ifo_set: failed to get index for %s, strlen %u, ifos need to "
-            "end with null terminator\n",
-            ifos, len_in);
-    return 0;
 }
 
 Bins1D *bins1D_long_create(double cmin, double cmax, int nbin) {
@@ -333,7 +360,7 @@ TriggerStatsXML *trigger_stats_xml_create(char *ifos, int stats_type) {
         printf("create sgstats %s\n", stats->feature_xmlname->str);
     }
 
-    stats->enabled_ifos = get_ifo_set(ifos);
+    stats->enabled_ifos = ifo_set__parse_or_empty(ifos); // TODO: Consider using ifo_set__try_parse to check for errors
     stats->multistats = trigger_stats_create(stats->enabled_ifos);
     return stats;
 }
