@@ -104,8 +104,8 @@ static gboolean cohfar_accumbackground_sink_event(GstPad *pad, GstEvent *event);
 static void cohfar_accumbackground_dispose(GObject *object);
 
 static void trigger_stats_update_stats(TriggerStatsXML *stats,
-                                PostcohInspiralTable *table,
-                                ifo_set_type table_ifos) {
+                                       PostcohInspiralTable *table,
+                                       ifo_set_type table_ifos) {
     if (!ifo_set__is_empty(stats->enabled_ifos)) {
         int num_stats = trigger_stats_num_stats(stats->enabled_ifos);
         // update the multi-IFO background at the last bin.
@@ -124,7 +124,8 @@ static void trigger_stats_update_stats(TriggerStatsXML *stats,
                     trigger_stats_feature_rate_update(
                       (double)(table->snglsnr[ifo_id]),
                       (double)(table->chisq[ifo_id]),
-                      stats->multistats[stats_idx]->feature, stats->multistats[stats_idx]);
+                      stats->multistats[stats_idx]->feature,
+                      stats->multistats[stats_idx]);
                 }
                 ++stats_idx;
             }
@@ -247,20 +248,25 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
         } else {
             int nifo = ifo_set__count(table_ifos);
             if (nifo > 1) {
-                trigger_stats_livetime_inc(bgstats->multistats, 
-                          trigger_stats_num_stats(bgstats->enabled_ifos) - 1);
-                trigger_stats_livetime_inc(zlstats->multistats, 
-                          trigger_stats_num_stats(zlstats->enabled_ifos) - 1);
-                
+                trigger_stats_livetime_inc(
+                  bgstats->multistats,
+                  trigger_stats_num_stats(bgstats->enabled_ifos) - 1);
+                trigger_stats_livetime_inc(
+                  zlstats->multistats,
+                  trigger_stats_num_stats(zlstats->enabled_ifos) - 1);
+
                 // update single-IFO background according the single-IFO
                 // decomposition
-                for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
+                for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO;
+                     ifo_id++) {
                     if (ifo_set__contains(bgstats->enabled_ifos, ifo_id)) {
-                      if (ifo_set__contains(table_ifos, ifo_id)) {
-                          trigger_stats_livetime_inc(bgstats->multistats, stats_idx);
-                          trigger_stats_livetime_inc(zlstats->multistats, stats_idx);
-                      }
-                      stats_idx++;
+                        if (ifo_set__contains(table_ifos, ifo_id)) {
+                            trigger_stats_livetime_inc(bgstats->multistats,
+                                                       stats_idx);
+                            trigger_stats_livetime_inc(zlstats->multistats,
+                                                       stats_idx);
+                        }
+                        stats_idx++;
                     }
                 }
             }
