@@ -51,15 +51,9 @@ __device__ static inline float atomicMax(float *address, float val) {
     return __int_as_float(old);
 }
 
-// Forces euclidean modulo in C, where the remainder is always non-negative,
-// accounts for possible UB.
-__device__ static inline int modulo_euclidean(int a, int b) {
-    int m = a % b;
-    if (m < 0) {
-        // m += (b < 0) ? -b : b; // avoid this form: -b is UB when b == INT_MIN
-        m = (b < 0) ? m - b : m + b;
-    }
-    return m;
+// Forces euclidean modulo, where the remainder is always non-negative.
+__device__ static inline size_t ring_index(ptrdirr_t ind, size_t len) {
+    return ind % len + (ind < 0) * len;
 }
 
 __global__ void ker_max_snglsnr(COMPLEX_F **snr, // INPUT: snr
@@ -82,7 +76,7 @@ __global__ void ker_max_snglsnr(COMPLEX_F **snr, // INPUT: snr
     int index = 0, start_idx = 0;
 
     for (int i = wIDg; i < timeN; i += wNg) {
-        start_idx = (i + start_exe) % len;
+        start_idx = ring_index(i + start_exe, len);
         // one warp is used to find the max snr for one time
         for (int j = wIDl; j < ntmplt; j += WARP_SIZE) {
             index = start_idx * ntmplt + j;
@@ -335,11 +329,11 @@ __global__ void ker_coh_skymap(
                 NtOff =
                   round(toa_diff_map[map_idx * num_sky_directions + ipix] / dt);
                 NtOff = (j == iifo ? 0 : NtOff);
-                // dk[j] = snr[j][modulo_euclidean(start_exe + len_cur + NtOff,
+                // dk[j] = snr[j][ring_index(start_exe + len_cur + NtOff,
                 // len) * ntmplt + tmplt_cur ];
                 dk[j] =
                   snr[j][tmplt_cur * len
-                         + modulo_euclidean(start_exe + len_cur + NtOff, len)];
+                         + ring_index(start_exe + len_cur + NtOff, len)];
             }
 
             for (int j = 0; j < nifo; ++j) {
@@ -468,11 +462,11 @@ __global__ void ker_coh_max_and_chisq_versatile(
                 NtOff =
                   round(toa_diff_map[map_idx * num_sky_directions + ipix] / dt);
                 NtOff = (j == iifo ? 0 : NtOff);
-                // dk[j] = snr[j][modulo_euclidean(start_exe + len_cur + NtOff,
+                // dk[j] = snr[j][ring_index(start_exe + len_cur + NtOff,
                 // len) * ntmplt + tmplt_cur ];
                 dk[j] =
                   snr[j][tmplt_cur * len
-                         + modulo_euclidean(start_exe + len_cur + NtOff, len)];
+                         + ring_index(start_exe + len_cur + NtOff, len)];
             }
             if (cur_nifo == 2) {
                 for (int k = 0; k < nifo; ++k) {
@@ -570,7 +564,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
             NtOff        = (j == iifo ? 0 : NtOff);
             peak_pos_tmp = start_exe + len_cur + NtOff;
             tmp_maxsnr =
-              snr[j][len * tmplt_cur + modulo_euclidean(peak_pos_tmp, len)];
+              snr[j][len * tmplt_cur + ring_index(peak_pos_tmp, len)];
 
             /* store the snglsnr and phase for each detector even the detector
              * does not participate */
@@ -588,7 +582,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
                  ishift <= autochisq_half_len; ishift += blockDim.x) {
                 tmp_snr =
                   snr[j][len * tmplt_cur
-                         + modulo_euclidean(peak_pos_tmp + ishift, len)];
+                         + ring_index(peak_pos_tmp + ishift, len)];
                 tmp_autocorr =
                   autocorr_matrix[j][tmplt_cur * autochisq_len + ishift
                                      + autochisq_half_len];
@@ -663,10 +657,10 @@ __global__ void ker_coh_max_and_chisq_versatile(
                     // well.
                     int offset =
                       (j == iifo ? 0 : NtOff - (trial_offset * (j - iifo)));
-                    // dk[j] = snr[j][modulo_euclidean(start_exe + len_cur +
+                    // dk[j] = snr[j][ring_index(start_exe + len_cur +
                     // offset, len) * ntmplt + tmplt_cur ];
                     dk[j] = snr[j][len * tmplt_cur
-                                   + modulo_euclidean(
+                                   + ring_index(
                                      start_exe + len_cur + offset, len)];
                 }
                 if (cur_nifo == 2) {
@@ -739,7 +733,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
             ishift<=autochisq_half_len; ishift++)
                 {
 
-                data += snr[j][modulo_euclidean(start_exe + peak_cur + NtOff +
+                data += snr[j][ring_index(start_exe + peak_cur + NtOff +
             ishift, len) * ntmplt + tmplt_cur] - maxsnglsnr[peak_cur] *
             autocorr_matrix[j][ tmplt_cur * autochisq_len + ishift +
             autochisq_half_len];
@@ -768,10 +762,10 @@ __global__ void ker_coh_max_and_chisq_versatile(
                   start_exe + len_cur
                   + (j == iifo ? 0 : NtOff - (trial_offset * (j - iifo)));
 
-                // tmp_maxsnr = snr[j][modulo_euclidean(peak_pos_tmp, len) *
+                // tmp_maxsnr = snr[j][ring_index(peak_pos_tmp, len) *
                 // ntmplt + tmplt_cur];
                 tmp_maxsnr =
-                  snr[j][len * tmplt_cur + modulo_euclidean(peak_pos_tmp, len)];
+                  snr[j][len * tmplt_cur + ring_index(peak_pos_tmp, len)];
                 /* set the d_snglsnr_* */
                 snglsnr_bg[write_ifo_mapping[j]][output_offset] =
                   sqrt(tmp_maxsnr.re * tmp_maxsnr.re
@@ -782,11 +776,11 @@ __global__ void ker_coh_max_and_chisq_versatile(
 
                 for (int ishift = srcLane - autochisq_half_len;
                      ishift <= autochisq_half_len; ishift += WARP_SIZE) {
-                    // tmp_snr = snr[j][modulo_euclidean(peak_pos_tmp + ishift,
+                    // tmp_snr = snr[j][ring_index(peak_pos_tmp + ishift,
                     // len) * ntmplt + tmplt_cur];
                     tmp_snr =
                       snr[j][len * tmplt_cur
-                             + modulo_euclidean(peak_pos_tmp + ishift, len)];
+                             + ring_index(peak_pos_tmp + ishift, len)];
                     tmp_autocorr =
                       autocorr_matrix[j][tmplt_cur * autochisq_len + ishift
                                          + autochisq_half_len];
