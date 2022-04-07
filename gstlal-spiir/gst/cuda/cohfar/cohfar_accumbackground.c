@@ -217,7 +217,8 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     PostcohInspiralTable *outtable =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
     for (; intable < intable_end; intable++) {
-        ifo_set_type enabled_ifos = ifo_set__parse_or_empty(intable->ifos); // TODO: Consider using ifo_set__try_parse to check for errors
+        // TODO: Consider using ifo_set__try_parse to check for errors
+        ifo_set_type enabled_ifos = ifo_set__parse_or_empty(intable->ifos);
         // The combination of IFOs is invalid
         if (ifo_set__is_empty(enabled_ifos)) {
             LIGOTimeGPS ligo_time;
@@ -406,7 +407,8 @@ static void cohfar_accumbackground_set_property(GObject *object,
     case PROP_IFOS:
         element->ifos   = g_value_dup_string(value);
         element->nifo   = strlen(element->ifos) / IFO_LEN;
-        element->enabled_ifos = ifo_set__parse_or_empty(element->ifos); // TODO: Consider using ifo_set__try_parse to check for errors
+        // TODO: Consider using ifo_set__try_parse to check for errors
+        element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);
         element->bgstats =
           trigger_stats_xml_create(element->ifos, STATS_XML_TYPE_BACKGROUND);
         element->zlstats =

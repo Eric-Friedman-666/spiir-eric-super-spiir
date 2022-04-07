@@ -246,7 +246,10 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
         for (; table < table_end; table++) {
             if (table->is_background == FLAG_EMPTY) continue;
             if (!ifo_set__try_parse(table->ifos, &enabled_ifos)) {
-                fprintf(stderr, "cohfar_assign_transform_ip: failed to parse ifo set \"%.16s\"\n", table->ifos);
+                fprintf(stderr,
+                        "cohfar_assign_transform_ip: failed to parse ifo set "
+                        "\"%.16s\"\n",
+                        table->ifos);
                 exit(0);
             }
             enabled_ifos = scan_trigger_ifos(enabled_ifos, table);
@@ -306,7 +309,8 @@ static void cohfar_assignfar_set_property(GObject *object,
     case PROP_IFOS:
         element->ifos   = g_value_dup_string(value);
         element->nifo   = strlen(element->ifos) / IFO_LEN;
-        element->enabled_ifos = ifo_set__parse_or_empty(element->ifos); // TODO: Consider using ifo_set__try_parse to check for errors
+        // TODO: Consider using ifo_set__try_parse to check for errors
+        element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);
         element->bgstats_1w =
           trigger_stats_xml_create(element->ifos, STATS_XML_TYPE_BACKGROUND);
         element->bgstats_1d =

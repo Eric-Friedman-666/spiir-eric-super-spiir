@@ -666,13 +666,14 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
         data        = gst_pad_get_element_private(pad);
         set_offset_per_nanosecond(data, postcoh->offset_per_nanosecond);
         set_channels(data, postcoh->channels);
-        // Non-standard IFO indexing (e.g. VH) works because `ifo_set__try_parse`
-        // doesn't care about the ordering of IFOs
+        // Non-standard IFO indexing (e.g. VH) works because
+        // `ifo_set__try_parse` doesn't care about the ordering of IFOs
         strncpy(state->all_ifos + IFO_LEN * i, data->ifo_name,
                 sizeof(char) * IFO_LEN);
     }
     state->all_ifos[IFO_LEN * nifo] = '\0';
-    ifo_set_type enabled_ifos = ifo_set__parse_or_empty(state->all_ifos); // TODO: Consider using ifo_set__try_parse to check for errors
+    // TODO: Consider using ifo_set__try_parse to check for errors
+    ifo_set_type enabled_ifos = ifo_set__parse_or_empty(state->all_ifos);
     // sizeof() only works for arrays that we've statically created, so
     // we use strlen() to get the length of the combination name
     /* overwrite all_ifos to be the same with the ifo_set in the IFOComboMap */
@@ -1351,8 +1352,9 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 && state->skymap_peakcur[pivotal_ifo] == peak_cur) {
                 GString *filename = NULL;
                 FILE *file        = NULL;
-                filename =
-                  g_string_new(ifo_set__get_string(ifo_set__parse_or_empty(output->ifos)));  // TODO: Consider using ifo_set__try_parse to check for errors
+                // TODO: Consider using ifo_set__try_parse to check for errors
+                filename = g_string_new(
+                  ifo_set__get_string(ifo_set__parse_or_empty(output->ifos)));
                 g_string_append_printf(
                   filename, "_skymap/%s_%d_%d_%d_%d", output->pivotal_ifo,
                   output->end_time.gpsSeconds, output->end_time.gpsNanoSeconds,

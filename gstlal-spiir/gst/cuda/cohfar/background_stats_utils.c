@@ -84,7 +84,7 @@ bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos) {
             // Skip duplicates
             if (ifo_set__contains(ifos, ifo_id)) continue;
 
-            char *ifo_name = IFOMap[ifo_id];
+            char *ifo_name      = IFOMap[ifo_id];
             size_t ifo_name_len = strlen(ifo_name);
             if (!strncmp(ifos_str, ifo_name, ifo_name_len)) {
                 // Insert into bitset and progress string
@@ -96,11 +96,9 @@ bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos) {
         }
 
         // If none of the IFOs match, parsing has failed
-        if (!found_ifo) {
-            return false;
-        }
+        if (!found_ifo) { return false; }
     }
-    
+
     *parsed_ifos = ifos;
     return true;
 }
@@ -114,7 +112,8 @@ bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos) {
 ifo_set_type ifo_set__parse_or_empty(const char *ifos_str) {
     ifo_set_type parsed_ifos = 0;
     if (!ifo_set__try_parse(ifos_str, &parsed_ifos)) {
-        fprintf(stderr, "ifo_set__try_parse: failed to parse ifo set \"%s\"\n", ifos_str);
+        fprintf(stderr, "ifo_set__try_parse: failed to parse ifo set \"%s\"\n",
+                ifos_str);
     }
     return parsed_ifos;
 }
@@ -139,7 +138,8 @@ ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *
     if (pass_test != TRUE) {
         strncpy(trigger->ifos, final_ifos, nifo * one_ifo_size);
         trigger->ifos[IFO_LEN * nifo] = '\0';
-        return ifo_set__parse_or_empty(trigger->ifos); // TODO: Consider using ifo_set__try_parse to check for errors
+        // TODO: Consider using ifo_set__try_parse to check for errors
+        return ifo_set__parse_or_empty(trigger->ifos);
     } else {
         return enabled_ifos;
     }
@@ -360,7 +360,8 @@ TriggerStatsXML *trigger_stats_xml_create(char *ifos, int stats_type) {
         printf("create sgstats %s\n", stats->feature_xmlname->str);
     }
 
-    stats->enabled_ifos = ifo_set__parse_or_empty(ifos); // TODO: Consider using ifo_set__try_parse to check for errors
+    // TODO: Consider using ifo_set__try_parse to check for errors
+    stats->enabled_ifos = ifo_set__parse_or_empty(ifos);
     stats->multistats = trigger_stats_create(stats->enabled_ifos);
     return stats;
 }
