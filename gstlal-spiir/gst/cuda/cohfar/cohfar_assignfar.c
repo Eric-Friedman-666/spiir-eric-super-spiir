@@ -248,7 +248,7 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
             if (!ifo_set__try_parse(table->ifos, &enabled_ifos)) {
                 fprintf(stderr,
                         "cohfar_assign_transform_ip: failed to parse ifo set "
-                        "\"%.16s\"\n",
+                        "\"%.16s\" (truncated to 16 characters)\n",
                         table->ifos);
                 exit(0);
             }

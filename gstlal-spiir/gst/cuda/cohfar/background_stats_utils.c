@@ -81,7 +81,7 @@ bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos) {
 
         // Take first IFO that is a prefix of the remaining string
         for (size_t ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-            // Skip duplicates
+            // Don't try to match IFOs already in set, as duplicates are invalid
             if (ifo_set__contains(ifos, ifo_id)) continue;
 
             char *ifo_name      = IFOMap[ifo_id];
