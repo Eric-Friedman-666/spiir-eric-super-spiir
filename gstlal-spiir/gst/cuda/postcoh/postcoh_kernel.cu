@@ -52,7 +52,7 @@ __device__ static inline float atomicMax(float *address, float val) {
 }
 
 // Forces euclidean modulo, where the remainder is always non-negative.
-__device__ static inline size_t ring_index(ptrdirr_t ind, size_t len) {
+__device__ static inline size_t ring_index(ptrdiff_t ind, size_t len) {
     return ind % len + (ind < 0) * len;
 }
 
