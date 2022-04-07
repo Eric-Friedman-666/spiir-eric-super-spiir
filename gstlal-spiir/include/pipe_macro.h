@@ -1,5 +1,8 @@
 #ifndef __PIPE_MACRO_H__
 #define __PIPE_MACRO_H__
+
+#include <stdbool.h>
+
 /* FIXME: upgrade to include more detectors like KAGRA */
 #ifndef IFO_LEN
 #define IFO_LEN     2
@@ -23,16 +26,16 @@ typedef unsigned int ifo_set_type;
 *  used as an index */
 const char *ifo_set__get_string(ifo_set_type ifo_set);
 
-// A combination is sum(1 << index) - 1
-// This gives us some nice mathematical properties that we can use to check
-// if an IFO exists in a given ComboMap
+// Parse IFO set from string representation. See implementation for details.
+bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos);
+ifo_set_type ifo_set__parse_or_empty(const char *ifos_str);
+
+// Mapping from IFO set to string representation
+// Index is one less than the bitset representation of the set
 static const char *IFOComboMap[MAX_IFO_SET] = {
     "H1",   "L1",   "H1L1",   "V1",
     "H1V1", "L1V1", "H1L1V1",
 };
-/* function given a random ifo, output the index in the IFOComboMap list,
- * implemented in background_stats_utils.c */
-ifo_set_type get_ifo_set(char *ifos);
 
 #ifndef MAX_ALLIFO_LEN
 #define MAX_ALLIFO_LEN 14
