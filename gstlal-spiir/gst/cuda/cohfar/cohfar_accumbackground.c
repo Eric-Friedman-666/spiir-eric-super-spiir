@@ -117,9 +117,8 @@ static void trigger_stats_update_stats(TriggerStatsXML *stats,
         /* add single detector stats */
         // update single-IFO background according the single-IFO decomposition
         for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
-            /* check ifo in stats, e.g. stats: LVK */
             if (ifo_set__contains(stats->enabled_ifos, ifo_id)) {
-                /* check ifo in table, e.g. table: LK */
+                // table_ifos may exclude some ifos from stats
                 if (ifo_set__contains(table_ifos, ifo_id)) {
                     trigger_stats_feature_rate_update(
                       (double)(table->snglsnr[ifo_id]),
