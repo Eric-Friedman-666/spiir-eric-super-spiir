@@ -61,7 +61,8 @@ void trigger_stats_feature_rate_update(double snr,
 
 double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
 
-ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *trigger);
+ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos,
+                               PostcohInspiralTable *trigger);
 
 void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
 

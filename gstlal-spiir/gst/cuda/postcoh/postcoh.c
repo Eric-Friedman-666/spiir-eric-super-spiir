@@ -1243,7 +1243,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
     PostcohInspiralTable *output =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
-    int nifo = state->nifo;
+    int nifo         = state->nifo;
     int ifos_size    = sizeof(char) * IFO_LEN * state->cur_nifo,
         one_ifo_size = sizeof(char) * IFO_LEN;
     int ipeak, npeak = 0, itrial = 0, exe_len = state->exe_len,
@@ -1276,7 +1276,8 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
      * and cmbchisq = single chisq */
     /* only output multi-detector events, cohsnr, cmbchisq only make sense when
      * cur_nifo >=2 */
-    for (int pivotal_ifo = 0; (pivotal_ifo < nifo) && (state->cur_nifo >= 2); pivotal_ifo++) {
+    for (int pivotal_ifo = 0; (pivotal_ifo < nifo) && (state->cur_nifo >= 2);
+         pivotal_ifo++) {
         if (state->cur_ifo_is_gap[pivotal_ifo]) continue;
         PeakList *pklist = state->peak_list[pivotal_ifo];
         npeak            = pklist->npeak[0];
@@ -1300,7 +1301,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 XLALGPSAdd(&(end_time),
                            (double)pklist->ntoff[ifo_id][peak_cur] / exe_len);
                 output->end_time_sngl[ifo_id] = end_time;
-                end_time                 = output->end_time;
+                end_time                      = output->end_time;
 
                 output->snglsnr[ifo_id]  = pklist->snglsnr[ifo_id][peak_cur];
                 output->coaphase[ifo_id] = pklist->coaphase[ifo_id][peak_cur];
@@ -1317,8 +1318,8 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             output->livetime      = livetime;
             strncpy(output->ifos, state->cur_ifos, ifos_size);
             output->ifos[IFO_LEN * state->cur_nifo] = '\0';
-            strncpy(output->pivotal_ifo, state->all_ifos + IFO_LEN * pivotal_ifo,
-                    one_ifo_size);
+            strncpy(output->pivotal_ifo,
+                    state->all_ifos + IFO_LEN * pivotal_ifo, one_ifo_size);
             output->pivotal_ifo[IFO_LEN] = '\0';
             output->tmplt_idx            = cur_tmplt_idx;
             output->bankid               = postcoh->stream_id;
@@ -1418,14 +1419,17 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                     strncpy(output->ifos, state->cur_ifos, ifos_size);
                     output->ifos[IFO_LEN * state->cur_nifo] = '\0';
                     strncpy(output->pivotal_ifo,
-                            state->all_ifos + IFO_LEN * pivotal_ifo, one_ifo_size);
+                            state->all_ifos + IFO_LEN * pivotal_ifo,
+                            one_ifo_size);
                     output->pivotal_ifo[IFO_LEN] = '\0';
                     output->tmplt_idx            = pklist->tmplt_idx[peak_cur];
                     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-                        output->snglsnr[ifo_id] = pklist->snglsnr_bg[ifo_id][peak_cur_bg];
+                        output->snglsnr[ifo_id] =
+                          pklist->snglsnr_bg[ifo_id][peak_cur_bg];
                         output->coaphase[ifo_id] =
                           pklist->coaphase_bg[ifo_id][peak_cur_bg];
-                        output->chisq[ifo_id] = pklist->chisq_bg[ifo_id][peak_cur_bg];
+                        output->chisq[ifo_id] =
+                          pklist->chisq_bg[ifo_id][peak_cur_bg];
                     }
 
                     // output->pix_idx = pklist->pix_idx[itrial*max_npeak +

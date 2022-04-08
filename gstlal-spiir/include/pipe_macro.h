@@ -22,8 +22,8 @@ constexpr
 
 typedef unsigned int ifo_set_type;
 
-/* function to encapsulate IFOComboMap, such that ifo_set isn't directly 
-*  used as an index */
+/* function to encapsulate IFOComboMap, such that ifo_set isn't directly
+ *  used as an index */
 const char *ifo_set__get_string(ifo_set_type ifo_set);
 
 // Parse IFO set from string representation. See implementation for details.
@@ -33,8 +33,7 @@ ifo_set_type ifo_set__parse_or_empty(const char *ifos_str);
 // Mapping from IFO set to string representation
 // Index is one less than the bitset representation of the set
 static const char *IFOComboMap[MAX_IFO_SET] = {
-    "H1",   "L1",   "H1L1",   "V1",
-    "H1V1", "L1V1", "H1L1V1",
+    "H1", "L1", "H1L1", "V1", "H1V1", "L1V1", "H1L1V1",
 };
 
 #ifndef MAX_ALLIFO_LEN

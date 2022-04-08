@@ -45,13 +45,12 @@ int ifo_set__contains(const ifo_set_type ifos, const int ifo_id) {
     return ifos & (1 << ifo_id);
 }
 
-int ifo_set__has_shared_ifos(const ifo_set_type ifos_lhs, const ifo_set_type ifos_rhs) {
+int ifo_set__has_shared_ifos(const ifo_set_type ifos_lhs,
+                             const ifo_set_type ifos_rhs) {
     return ifos_lhs & ifos_rhs;
 }
 
-int ifo_set__count(const ifo_set_type ifos) {
-    return __builtin_popcount(ifos);
-}
+int ifo_set__count(const ifo_set_type ifos) { return __builtin_popcount(ifos); }
 
 int ifo_set__is_empty(const ifo_set_type ifos) {
     return ifo_set__count(ifos) == 0;
@@ -118,7 +117,8 @@ ifo_set_type ifo_set__parse_or_empty(const char *ifos_str) {
     return parsed_ifos;
 }
 
-ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos, PostcohInspiralTable *trigger) {
+ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos,
+                               PostcohInspiralTable *trigger) {
     int nifo = 0, one_ifo_size = sizeof(char) * IFO_LEN;
     char final_ifos[MAX_ALLIFO_LEN];
     gboolean pass_test = TRUE;
@@ -311,8 +311,8 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
       (TriggerStats **)malloc(sizeof(TriggerStats *) * num_stats);
 
     // Allocate for the final combination (all IFOs together)
-    multistats[num_stats - 1]        = (TriggerStats *)malloc(sizeof(TriggerStats));
-    TriggerStats *cur_stats = multistats[num_stats - 1];
+    multistats[num_stats - 1] = (TriggerStats *)malloc(sizeof(TriggerStats));
+    TriggerStats *cur_stats   = multistats[num_stats - 1];
     cur_stats->ifos =
       malloc(strlen(ifo_set__get_string(enabled_ifos)) * sizeof(char) + 1);
     strncpy(cur_stats->ifos, ifo_set__get_string(enabled_ifos),
@@ -327,10 +327,10 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
     // Individual IFOs
     for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
         if (ifo_set__contains(enabled_ifos, ifo_id)) {
-            multistats[stats_idx] = (TriggerStats *)malloc(sizeof(TriggerStats));
-            cur_stats = multistats[stats_idx];
-            cur_stats->ifos =
-              malloc(strlen(IFOMap[ifo_id]) * sizeof(char) + 1);
+            multistats[stats_idx] =
+              (TriggerStats *)malloc(sizeof(TriggerStats));
+            cur_stats       = multistats[stats_idx];
+            cur_stats->ifos = malloc(strlen(IFOMap[ifo_id]) * sizeof(char) + 1);
             strncpy(cur_stats->ifos, IFOMap[ifo_id],
                     strlen(IFOMap[ifo_id]) * sizeof(char) + 1);
             // create feature
@@ -362,7 +362,7 @@ TriggerStatsXML *trigger_stats_xml_create(char *ifos, int stats_type) {
 
     // TODO: Consider using ifo_set__try_parse to check for errors
     stats->enabled_ifos = ifo_set__parse_or_empty(ifos);
-    stats->multistats = trigger_stats_create(stats->enabled_ifos);
+    stats->multistats   = trigger_stats_create(stats->enabled_ifos);
     return stats;
 }
 
@@ -1030,65 +1030,72 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     /* sanity check */
     if (!g_file_test(filename, G_FILE_TEST_EXISTS)) { return FALSE; }
 
-    int num_elem  = 10; // 4 for feature, 4 for rank, 2 for nevent,livetime
+    int num_elem = 10; // 4 for feature, 4 for rank, 2 for nevent,livetime
     ifo_set_type enabled_ifos = stats->enabled_ifos;
-    int num_stats = trigger_stats_num_stats(enabled_ifos); // top level xml nodes
+    int num_stats =
+      trigger_stats_num_stats(enabled_ifos); // top level xml nodes
     int num_nodes = num_stats * num_elem + 1; // 1 for hist_trials
     /* read rate */
 
-    XmlNodeStruct *xns = (XmlNodeStruct *)malloc(sizeof(XmlNodeStruct) * num_nodes);
-    XmlArray *array_lgsnr_rate   = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlArray *array_lgchisq_rate = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlNodeStruct *xns =
+      (XmlNodeStruct *)malloc(sizeof(XmlNodeStruct) * num_nodes);
+    XmlArray *array_lgsnr_rate =
+      (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlArray *array_lgchisq_rate =
+      (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
     XmlArray *array_lgsnr_lgchisq_rate =
       (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
     XmlArray *array_lgsnr_lgchisq_pdf =
       (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlArray *array_rank_map  = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlParam *param_nevent    = (XmlParam *)malloc(sizeof(XmlParam) * num_stats);
-    XmlParam *param_livetime  = (XmlParam *)malloc(sizeof(XmlParam) * num_stats);
-    XmlArray *array_rank_rate = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlArray *array_rank_pdf  = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlArray *array_rank_fap  = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlArray *array_rank_map = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlParam *param_nevent   = (XmlParam *)malloc(sizeof(XmlParam) * num_stats);
+    XmlParam *param_livetime = (XmlParam *)malloc(sizeof(XmlParam) * num_stats);
+    XmlArray *array_rank_rate =
+      (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlArray *array_rank_pdf = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlArray *array_rank_fap = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
 
     // Print out only statistics for the individual detectors as
     // well as all detectors combined (but not subsets).
     //
     // Within the loop, note that 'cur_ifo_set' is the detector being looked at,
-    // 'stats_idx' is how many ifo_sets we've printed out so far, and 'pos_xns' is
-    // where we actually should be in the 'xns' array.
-    // FIXME: ifo_set_type is intended to put encapsulate all bitset operations with helper functions
-    // However, iterating through all combinations of valid ifo_sets is outside of scope
-    // For now, cur_ifo_set is treated as both an int and an ifo_set_type
+    // 'stats_idx' is how many ifo_sets we've printed out so far, and 'pos_xns'
+    // is where we actually should be in the 'xns' array.
+    // FIXME: ifo_set_type is intended to put encapsulate all bitset operations
+    // with helper functions However, iterating through all combinations of
+    // valid ifo_sets is outside of scope For now, cur_ifo_set is treated as
+    // both an int and an ifo_set_type
     int pos_xns, stats_idx = 0;
-    for (ifo_set_type cur_ifo_set = 0b1; cur_ifo_set <= enabled_ifos; cur_ifo_set++) {
+    for (ifo_set_type cur_ifo_set = 0b1; cur_ifo_set <= enabled_ifos;
+         cur_ifo_set++) {
         if (cur_ifo_set == enabled_ifos // all active ifos
-            || (ifo_set__count(cur_ifo_set) == 1 && ifo_set__has_shared_ifos(enabled_ifos, cur_ifo_set)))
-        {
+            || (ifo_set__count(cur_ifo_set) == 1
+                && ifo_set__has_shared_ifos(enabled_ifos, cur_ifo_set))) {
             pos_xns = stats_idx;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->feature_xmlname->str, ifo_set__get_string(cur_ifo_set),
-                    SNR_RATE_SUFFIX);
+                    stats->feature_xmlname->str,
+                    ifo_set__get_string(cur_ifo_set), SNR_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_rate[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->feature_xmlname->str, ifo_set__get_string(cur_ifo_set),
-                    CHISQ_RATE_SUFFIX);
+                    stats->feature_xmlname->str,
+                    ifo_set__get_string(cur_ifo_set), CHISQ_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgchisq_rate[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->feature_xmlname->str, ifo_set__get_string(cur_ifo_set),
-                    SNR_CHISQ_RATE_SUFFIX);
+                    stats->feature_xmlname->str,
+                    ifo_set__get_string(cur_ifo_set), SNR_CHISQ_RATE_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_lgchisq_rate[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_%s:array",
-                    stats->feature_xmlname->str, ifo_set__get_string(cur_ifo_set),
-                    SNR_CHISQ_PDF_SUFFIX);
+                    stats->feature_xmlname->str,
+                    ifo_set__get_string(cur_ifo_set), SNR_CHISQ_PDF_SUFFIX);
             xns[pos_xns].processPtr = readArray;
             xns[pos_xns].data       = &(array_lgsnr_lgchisq_pdf[stats_idx]);
 
@@ -1101,13 +1108,15 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_nevent:param",
-                    stats->feature_xmlname->str, ifo_set__get_string(cur_ifo_set));
+                    stats->feature_xmlname->str,
+                    ifo_set__get_string(cur_ifo_set));
             xns[pos_xns].processPtr = readParam;
             xns[pos_xns].data       = &(param_nevent[stats_idx]);
 
             pos_xns += num_stats;
             sprintf((char *)xns[pos_xns].tag, "%s:%s_livetime:param",
-                    stats->feature_xmlname->str, ifo_set__get_string(cur_ifo_set));
+                    stats->feature_xmlname->str,
+                    ifo_set__get_string(cur_ifo_set));
             xns[pos_xns].processPtr = readParam;
             xns[pos_xns].data       = &(param_livetime[stats_idx]);
 
@@ -1185,9 +1194,11 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
                (long *)array_rank_fap[i].data, y_size);
         cur_stats->nevent   = *((long *)param_nevent[i].data);
         cur_stats->livetime = *((long *)param_livetime[i].data);
-        // printf("filename %s, enabled_ifos %d, fap addr %p\n", filename, enabled_ifos,
+        // printf("filename %s, enabled_ifos %d, fap addr %p\n", filename,
+        // enabled_ifos,
         // ((gsl_matrix *)cur_stats->fap->data)->data); printf("enabled_ifos %d,
-        // nevent addr %p, %p\n", enabled_ifos, (param_nevent[enabled_ifos].data),
+        // nevent addr %p, %p\n", enabled_ifos,
+        // (param_nevent[enabled_ifos].data),
         // (&(param_nevent[enabled_ifos]))->data);
     }
     *hist_trials = *((int *)param_hist_trials->data);
@@ -1339,18 +1350,20 @@ gboolean trigger_stats_xml_dump(TriggerStatsXML *stats,
     }
     printf("write %s\n", stats->rank_xmlname->str);
     xmlTextWriterPtr writer = *pwriter;
-    int num_stats = trigger_stats_num_stats(stats->enabled_ifos);
-    XmlArray *array_lgsnr_rate = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    int num_stats           = trigger_stats_num_stats(stats->enabled_ifos);
+    XmlArray *array_lgsnr_rate =
+      (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
     XmlArray *array_lgchisq_rate =
       (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
     XmlArray *array_lgsnr_lgchisq_rate =
       (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
     XmlArray *array_lgsnr_lgchisq_pdf =
       (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlArray *array_rank_map  = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlArray *array_rank_rate = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlArray *array_rank_pdf  = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
-    XmlArray *array_rank_fap  = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlArray *array_rank_map = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlArray *array_rank_rate =
+      (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlArray *array_rank_pdf = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
+    XmlArray *array_rank_fap = (XmlArray *)malloc(sizeof(XmlArray) * num_stats);
 
     TriggerStats **multistats = stats->multistats;
     int nbin_x = multistats[0]->feature->lgsnr_lgchisq_pdf->nbin_x,
@@ -1465,9 +1478,8 @@ gboolean trigger_stats_xml_dump(TriggerStatsXML *stats,
         g_string_printf(array_name, "%s:%s_%s:array",
                         stats->feature_xmlname->str, multistats[i]->ifos,
                         CHISQ_RATE_SUFFIX);
-        ligoxml_write_Array(writer, &(array_lgchisq_rate[i]),
-                            BAD_CAST "int_8s", BAD_CAST " ",
-                            BAD_CAST array_name->str);
+        ligoxml_write_Array(writer, &(array_lgchisq_rate[i]), BAD_CAST "int_8s",
+                            BAD_CAST " ", BAD_CAST array_name->str);
         g_string_printf(array_name, "%s:%s_%s:array",
                         stats->feature_xmlname->str, multistats[i]->ifos,
                         SNR_CHISQ_RATE_SUFFIX);
