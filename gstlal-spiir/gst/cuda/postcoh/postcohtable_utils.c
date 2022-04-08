@@ -39,8 +39,8 @@ void postcohtable_init(XmlTable *table) {
           *g_string_append(g_string_new("postcoh:end_time_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("int_4s"));
         g_array_append_val(
-          table->names, *g_string_append(g_string_new("postcoh:end_time_ns_"),
-                                         IFOMap[i]));
+          table->names,
+          *g_string_append(g_string_new("postcoh:end_time_ns_"), IFOMap[i]));
         g_array_append_val(table->type_names, *g_string_new("int_4s"));
     }
     g_array_append_val(table->names, *g_string_new("postcoh:is_background"));

@@ -117,14 +117,14 @@ static void update_trigger_fars(PostcohInspiralTable *table,
     table->far_1w = far;
     rank_1w   = trigger_stats_get_val_from_map(stat, (double)table->cmbchisq,
                                              cur_stats->rank->rank_map);
-    cur_stats = element->bgstats_1d->multistats[num_stats - 1];
+    cur_stats     = element->bgstats_1d->multistats[num_stats - 1];
     far       = BOUND(FLT_MIN,
                 gen_fap_from_feature(stat, (double)table->cmbchisq, cur_stats)
                   * cur_stats->nevent / (cur_stats->livetime * hist_trials));
     table->far_1d = far;
     rank_1d   = trigger_stats_get_val_from_map(stat, (double)table->cmbchisq,
                                              cur_stats->rank->rank_map);
-    cur_stats = element->bgstats_2h->multistats[num_stats - 1];
+    cur_stats     = element->bgstats_2h->multistats[num_stats - 1];
     far       = BOUND(FLT_MIN,
                 gen_fap_from_feature(stat, (double)table->cmbchisq, cur_stats)
                   * cur_stats->nevent / (cur_stats->livetime * hist_trials));
@@ -150,11 +150,11 @@ static void update_trigger_fars(PostcohInspiralTable *table,
 
         cur_stats = element->bgstats_2h->multistats[ifo_id];
         if (cur_stats->livetime > 0) {
-            far                   = BOUND(FLT_MIN,
-                        gen_fap_from_feature((double)table->snglsnr[ifo_id],
-                                             (double)table->chisq[ifo_id], cur_stats)
-                          * cur_stats->nevent
-                          / (cur_stats->livetime * hist_trials));
+            far = BOUND(
+              FLT_MIN,
+              gen_fap_from_feature((double)table->snglsnr[ifo_id],
+                                   (double)table->chisq[ifo_id], cur_stats)
+                * cur_stats->nevent / (cur_stats->livetime * hist_trials));
             table->far_2h_sngl[ifo_id] = far;
         }
     }
@@ -261,8 +261,9 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
                 exit(0);
             }
             int num_stats = trigger_stats_num_stats(enabled_ifos);
-            cur_stats = element->bgstats_1w->multistats[num_stats - 1];
-            if (!ifo_set__is_empty(enabled_ifos) && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
+            cur_stats     = element->bgstats_1w->multistats[num_stats - 1];
+            if (!ifo_set__is_empty(enabled_ifos)
+                && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
                 update_trigger_fars(table, num_stats, element);
             }
         }
@@ -328,13 +329,14 @@ static void cohfar_assignfar_set_property(GObject *object,
         element->input_fnames = g_strsplit(g_value_dup_string(value), ",", -1);
         element->ninput       = g_strv_length(element->input_fnames);
         if (element->ninput != 3) {
-            fprintf(stderr,
-                    "Expected 3 input files for zerolag FAR assignment, "
-                    " but '%d' were provided."
-                    " Your cohfar-assignfar-input-fname option \"%s\" might not "
-                    "provide the right path"
-                    " for the input files. Exiting \n",
-                    element->ninput, g_value_dup_string(value));
+            fprintf(
+              stderr,
+              "Expected 3 input files for zerolag FAR assignment, "
+              " but '%d' were provided."
+              " Your cohfar-assignfar-input-fname option \"%s\" might not "
+              "provide the right path"
+              " for the input files. Exiting \n",
+              element->ninput, g_value_dup_string(value));
             exit(0);
         }
         break;

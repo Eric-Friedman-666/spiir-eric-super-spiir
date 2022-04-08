@@ -163,8 +163,11 @@ static int get_type(gchar **ptype) {
     if (g_strcmp0(*ptype, "all") == 0) return STATS_XML_TYPE_ALL;
 }
 
-static int process_stats_full(
-  gchar **in_fnames, int num_stats, gchar **pifos, gchar **pout, int *update_pdf) {
+static int process_stats_full(gchar **in_fnames,
+                              int num_stats,
+                              gchar **pifos,
+                              gchar **pout,
+                              int *update_pdf) {
     int hist_trials;
     TriggerStatsXML *zlstats_in =
       trigger_stats_xml_create(*pifos, STATS_XML_TYPE_ZEROLAG);
@@ -245,8 +248,8 @@ static int process_stats_single(gchar **in_fnames,
     TriggerStatsXML *stats_out = trigger_stats_xml_create(*pifos, type);
     cohfar_get_stats_from_file(in_fnames, stats_in, stats_out, &hist_trials);
     if (*update_pdf == 1) {
-		// num_stats : single detectors and detector combination
-		// e.g. H1L1V1: H1, L1, V1, H1L1V1
+        // num_stats : single detectors and detector combination
+        // e.g. H1L1V1: H1, L1, V1, H1L1V1
         for (int i = 0; i < num_stats; i++) {
             trigger_stats_feature_rate_to_pdf(
               stats_out->multistats[i]->feature);
@@ -300,15 +303,17 @@ int main(int argc, char *argv[]) {
           bgstats_out->multistats[num_stats - 1]);
         trigger_stats_feature_rate_to_pdf(
           bgstats_out->multistats[num_stats - 1]->feature);
-        trigger_stats_feature_to_rank(bgstats_out->multistats[num_stats - 1]->feature,
-                                      bgstats_out->multistats[num_stats - 1]->rank);
+        trigger_stats_feature_to_rank(
+          bgstats_out->multistats[num_stats - 1]->feature,
+          bgstats_out->multistats[num_stats - 1]->rank);
         if (data_dim1) {
             free(data_dim1);
             free(data_dim2);
         }
     } else if (g_strcmp0(*pfmt, "stats") == 0) {
         if (type == STATS_XML_TYPE_ALL) {
-            rc = process_stats_full(in_fnames, num_stats, pifos, pout, update_pdf);
+            rc =
+              process_stats_full(in_fnames, num_stats, pifos, pout, update_pdf);
         } else {
             rc = process_stats_single(in_fnames, num_stats, pifos, pout, type,
                                       update_pdf);
