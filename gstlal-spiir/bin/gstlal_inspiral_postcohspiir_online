@@ -619,8 +619,6 @@ set_rlimit()
 
 options, filenames, process_params, iir_banks, detectors = parse_command_line()
 
-print options.cohfar_assignfar_input_fname
-
 if not options.check_time_stamps:
     pipeparts.mkchecktimestamps = lambda pipeline, src, *args: src
 
@@ -662,7 +660,7 @@ else:
 
 # need to print out host name
 import socket
-print(socket.gethostname())
+print("pipeline executing on node" + socket.gethostname())
 if int(options.finalsink_need_online_perform) > 0:
     # create a new, empty, Bottle application
     bottle.default_app.push()

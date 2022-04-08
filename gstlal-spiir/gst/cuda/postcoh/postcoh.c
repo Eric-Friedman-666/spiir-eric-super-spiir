@@ -1148,9 +1148,16 @@ static int cuda_postcoh_select_background(PeakList *pklist,
             if (sqrt(pklist->cohsnr_bg[background_cur])
                 > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
                 left_backgrounds++;
-                GST_LOG("mark back,%d ipeak, %d itrial", ipeak, itrial);
-            } else
+                GST_LOG("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
+                        ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
+                        pklist->snglsnr[write_ifo][peak_cur]);
+            } else {
+                GST_LOG(
+                  "no mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
+                  ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
+                  pklist->snglsnr[write_ifo][peak_cur]);
                 pklist->cohsnr_bg[background_cur] = -1;
+            }
         }
     }
     return left_backgrounds;
@@ -1224,7 +1231,7 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
 
         GST_DEBUG("ifo %d, back entries %d, npeak %d", iifo, left_entries,
                   npeak);
-        /* mark background triggers which do not pass the test */
+        /* mark the foreground triggers to be added to the postcoh table */
         left_entries += npeak;
     }
     return left_entries;
@@ -1403,6 +1410,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 len_cur  = pklist->len_idx[peak_cur];
                 /* check if cohsnr pass the valid test */
                 peak_cur_bg = (itrial - 1) * max_npeak + peak_cur;
+
                 if (peak_cur >= 0 && pklist->cohsnr_bg[peak_cur_bg] > 0) {
                     // output->end_time = end_time[ipeak];
                     output->is_background = FLAG_BACKGROUND;
@@ -1439,7 +1447,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                       "chisq[0] %f, chisq[1] %f, chisq[2] %f,"
                       "cohsnr %f, nullsnr %f, cmbchisq %f\n",
                       ipeak, itrial, len_cur, output->tmplt_idx,
-                      output->pix_idx, output->snglsnr[0], output->snglsnr[2],
+                      output->pix_idx, output->snglsnr[0], output->snglsnr[1],
                       output->snglsnr[2], output->coaphase[0],
                       output->coaphase[1], output->coaphase[2],
                       output->chisq[0], output->chisq[1], output->chisq[2],
@@ -1900,6 +1908,7 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
                          common_size, (float)common_size / postcoh->bps);
 
         if (common_size == -1) {
+            /* no pad has buffer, send EOS downstream */
             res = gst_pad_push_event(postcoh->srcpad, gst_event_new_eos());
             return res;
         }

@@ -158,6 +158,9 @@ static void update_trigger_fars(PostcohInspiralTable *table,
             table->far_2h_sngl[ifo_id] = far;
         }
     }
+    GST_DEBUG_OBJECT(
+      element, "The long-scale FAR %f, mid-scale FAR %f, short-scale FAR %f",
+      table->far_1w, table->far_1d, table->far_2h);
 }
 
 /*
@@ -286,7 +289,7 @@ static gboolean cohfar_assignfar_event(GstBaseTransform *base,
         //      if (fflush (sink->file))
         //        goto flush_failed;
 
-        GST_LOG_OBJECT(element, "EVENT EOS. Finish assign far");
+        GST_LOG_OBJECT(element, "EVENT EOS. Finish assign FAR");
         break;
     default: break;
     }
@@ -323,13 +326,17 @@ static void cohfar_assignfar_set_property(GObject *object,
         /* must make sure ifos have been loaded */
         g_assert(element->ifos != NULL);
         element->input_fnames = g_strsplit(g_value_dup_string(value), ",", -1);
-        gchar *ifname;
-        for (ifname = element->input_fnames; *ifname;
-             ifname++, element->ninput++)
-            ;
-        if (element->ninput != 3) printf("ninput %d\n", element->ninput);
-        /* FIXME: only allow three inputs to set fars */
-        // g_assert(element->ninput == 3);
+        element->ninput       = g_strv_length(element->input_fnames);
+        if (element->ninput != 3) {
+            fprintf(stderr,
+                    "Expected 3 input files for zerolag FAR assignment, "
+                    " but '%d' were provided."
+                    " Your cohfar-assignfar-input-fname option \"%s\" might not "
+                    "provide the right path"
+                    " for the input files. Exiting \n",
+                    element->ninput, g_value_dup_string(value));
+            exit(0);
+        }
         break;
 
     case PROP_SILENT_TIME: element->silent_time = g_value_get_int(value); break;
@@ -398,8 +405,8 @@ static void cohfar_assignfar_base_init(gpointer gclass) {
     GstBaseTransformClass *transform_class = GST_BASE_TRANSFORM_CLASS(gclass);
 
     gst_element_class_set_details_simple(
-      element_class, "assign far to postcoh triggers", "assign far",
-      "assign far to postcoh triggers according to a given stats file.\n",
+      element_class, "assign FAR to postcoh triggers", "assign FAR",
+      "assign FAR to postcoh triggers according to a given stats file.\n",
       "Qi Chu <qi.chu at ligo dot org>");
     gst_element_class_add_pad_template(
       element_class,
