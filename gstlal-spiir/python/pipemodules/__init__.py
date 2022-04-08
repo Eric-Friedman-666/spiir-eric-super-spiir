@@ -44,7 +44,7 @@ except AttributeError:
 import sys
 if sys.version_info[0] == 2:
     import pygst
-    
+
     pygst.require('0.10')
     import gst
 
