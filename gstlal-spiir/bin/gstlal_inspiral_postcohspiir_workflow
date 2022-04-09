@@ -1152,6 +1152,7 @@ def gen_cluster_zerolag_bankbin_nodes(ifos,
             output_files={"extract": xmlname},
             input_files={"database": db})
 
+
 # store the output_nodes for next stage of clustering: cluster bankbin zlag xmls to bankbox zlag xml
     return nodes, xmlnode
 
