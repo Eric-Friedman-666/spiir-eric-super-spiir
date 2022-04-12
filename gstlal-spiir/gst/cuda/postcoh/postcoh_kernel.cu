@@ -51,7 +51,7 @@ __device__ static inline float atomicMax(float *address, float val) {
     return __int_as_float(old);
 }
 
-// Forces euclidean modulo, where the remainder is always non-negative.
+// Returns a wrapped index that can be safely used by the ring buffer.
 __device__ static inline size_t ring_index(ptrdiff_t ind, size_t len) {
     return ind % len + (ind < 0) * len;
 }
