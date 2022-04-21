@@ -3,6 +3,12 @@ image: docker:20.10.14
 services:
   - docker:20.10.14-dind
 
+variables:
+  DOCKER_TLS_CERTDIR: "/certs"
+
+before_script:
+  - docker info
+
 build spiir:
   script:
     - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
