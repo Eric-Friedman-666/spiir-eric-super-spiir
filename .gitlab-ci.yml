@@ -1,5 +1,4 @@
 test gpu access:
-  image: nvidia/cuda:11.6.0-runtime-ubuntu20.04
   script:
     - nvidia-smi
 
@@ -7,6 +6,9 @@ build spiir:
   image: docker:latest
   script:
     - ls /
+    - docker ps -a
+    - docker images
+    - docker volume ls
     - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
 
 generate artifacts:
