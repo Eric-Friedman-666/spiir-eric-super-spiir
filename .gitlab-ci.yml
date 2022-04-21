@@ -1,4 +1,19 @@
 
+build spiir:
+  image: docker:latest
+  services: 
+    - docker:dind
+  build:
+    script:
+      - ls /artifacts
+      - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
+
+generate artifacts:
+  image: spiir
+  scripts:
+    - ls /artifacts
+    - HLVK_bypass_artifacts_1187006000-1187009600
+
 check pep8 standards:
   image: python:2.7
   before_script:
