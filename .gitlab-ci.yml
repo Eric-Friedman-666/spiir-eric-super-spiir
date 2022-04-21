@@ -1,6 +1,8 @@
 test gpu access:
   script:
     - nvidia-smi
+  tags:
+    - ozgrav
 
 build spiir:
   image: docker:latest
@@ -10,6 +12,8 @@ build spiir:
     - docker images
     - docker volume ls
     - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
+  tags:
+    - ozgrav
 
 generate artifacts:
   image: spiir
@@ -18,6 +22,8 @@ generate artifacts:
     - HLVK_bypass_artifacts_1187006000-1187009600
   dependencies:
     - build spiir
+  tags:
+    - ozgrav
 
 check pep8 standards:
   image: python:2.7
