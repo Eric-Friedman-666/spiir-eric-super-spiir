@@ -1,16 +1,13 @@
 
 build spiir:
   image: docker:latest
-  services: 
-    - docker:dind
-  build:
-    script:
-      - ls /artifacts
-      - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
+  script:
+    - ls /artifacts
+    - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
 
 generate artifacts:
   image: spiir
-  scripts:
+  script:
     - ls /artifacts
     - HLVK_bypass_artifacts_1187006000-1187009600
 
