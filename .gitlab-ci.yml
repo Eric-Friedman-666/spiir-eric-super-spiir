@@ -20,7 +20,7 @@ generate artifacts:
   
 run pipeline:
   image: spiir
-  scripts:
+  script:
     - |
       macrostart=1187006000
       duration=3600
