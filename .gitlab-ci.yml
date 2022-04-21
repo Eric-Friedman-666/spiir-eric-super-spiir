@@ -9,8 +9,15 @@ variables:
 before_script:
   - docker info
 
+test gpu:
+  image: nvidia/cuda:11.6.0-runtime-ubuntu20.04
+  script:
+    - nvidia-smi
+
 build spiir:
   script:
+    - ls -ltcra /
+    - ls -ltcra /artifacts
     - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
   tags:
     - ozgrav
