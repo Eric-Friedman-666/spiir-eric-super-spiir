@@ -202,11 +202,12 @@ ENV PYTHON2 ${PYTHON2PREFIX}/bin/python
 ENV PIP2 ${PYTHON2PREFIX}/bin/pip
 RUN --mount=type=cache,target=/root/.cache \
 	--mount=type=cache,target=/root/.conda/pkgs \
-	${CONDA} create -p ${PYTHON2PREFIX} -y python=2.7.14 && \
+	${CONDA} create -p ${PYTHON2PREFIX} -y python=2.7.14 zlib==1.2.11 && \
 	${PIP2} config set global.cache-dir false && \
-	${PIP2} install --upgrade pip setuptools && \
+	${PIP2} install --upgrade pip setuptools wheel==0.37.0 && \
 	${PIP2} install numpy==1.14.1 scipy==1.0.0 matplotlib==2.2.2   h5py==2.7.1 healpy==1.12.4 astropy==2.0.3 \
-	cryptography pyopenssl Cython ligo-segments shapely yapf clang-format && \
+	importlib-metadata==2.1.2 pathlib2==2.3.6 pytz==2021.3 \
+	cryptography pyopenssl Cython==0.29.26 ligo-segments shapely yapf clang-format==13.0.0 && \
 	${CONDA} clean -a
 
 ENV PYTHON3PREFIX ${PREFIX}/python3
@@ -216,8 +217,8 @@ RUN --mount=type=cache,target=/root/.cache \
 	--mount=type=cache,target=/root/.conda/pkgs \
 	${CONDA} create -p ${PYTHON3PREFIX} -y python=3.7.4 && \
 	${PIP3} config set global.cache-dir false && \
-	${PIP3} install --upgrade pip setuptools && \
-	${PIP3} install meson==0.60.3 ninja --prefix=$PREFIX/python3_stuff && \
+	${PIP3} install --upgrade pip==21.3.1 setuptools==60.3.1 wheel==0.37.0 && \
+	${PIP3} install meson==0.60.3 ninja==1.10.2.3 --prefix=$PREFIX/python3_stuff && \
 	${CONDA} clean -a
 
 ENV PATH=$PATH:$PREFIX/python3_stuff/bin:$PREFIX/python3/bin
