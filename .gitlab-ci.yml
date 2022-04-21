@@ -13,11 +13,12 @@ test gpu:
   image: nvidia/cuda:11.6.0-runtime-ubuntu20.04
   script:
     - nvidia-smi
+  tags:
+    - ozgrav
 
 build spiir:
   script:
-    - ls -ltcra /
-    - ls -ltcra /artifacts
+    - cp /artifacts/iir_* . && cp /artifacts/*.patch .
     - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
   tags:
     - ozgrav
