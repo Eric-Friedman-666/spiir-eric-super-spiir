@@ -379,7 +379,7 @@ RUN --mount=type=cache,target=/root/ccache \
 	cd .. && \
 	rm -r $p && rm $p.tar.gz
 
-COPY /artifacts/framecpp_0000_Makefile_fix.patch .
+COPY framecpp_0000_Makefile_fix.patch .
 RUN --mount=type=cache,target=/root/ccache \
 	p=ldas-tools-framecpp-2.5.8 && \
 	echo -e "\\n\\n>> [`date`] building $p" && \
@@ -493,7 +493,7 @@ RUN --mount=type=cache,target=/root/ccache \
 	cd .. && \
 	rm -r $p && rm $p.tar.bz2
 
-COPY /artifacts/manoj_00_gstreamer.patch .
+COPY manoj_00_gstreamer.patch .
 RUN --mount=type=cache,target=/root/ccache \
 	p=gstreamer && \
 	echo -e "\\n\\n>> [`date`] Cloning $p" && \
@@ -548,8 +548,8 @@ RUN --mount=type=cache,target=/root/ccache \
 	cd .. && \
 	rm -r $p
 
-COPY /artifacts/lalsuite_0000_cleanup.patch .
-COPY /artifacts/lalsuite_0001_variable_epsilon.patch .
+COPY lalsuite_0000_cleanup.patch .
+COPY lalsuite_0001_variable_epsilon.patch .
 RUN --mount=type=cache,target=/root/ccache \
 	p=lalsuite && \
 	echo -e "\\n\\n>> [`date`] Cloning $p" && \
@@ -578,7 +578,7 @@ RUN --mount=type=cache,target=/root/ccache \
 	cd .. && \
 	rm -r $p
 
-COPY /artifacts/glue_0000_zipsafe.patch .
+COPY glue_0000_zipsafe.patch .
 RUN --mount=type=cache,target=/root/ccache \
 	p=glue && \
 	echo -e "\\n\\n>> [`date`] Cloning $p" && \

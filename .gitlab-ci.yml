@@ -6,9 +6,6 @@ services:
 variables:
   DOCKER_TLS_CERTDIR: "/certs"
 
-before_script:
-  - docker info
-
 test gpu:
   image: nvidia/cuda:11.6.0-runtime-ubuntu20.04
   script:
