@@ -15,7 +15,7 @@ generate artifacts:
     - ls /
     - HLVK_bypass_artifacts_1187006000-1187009600
   dependencies:
-    build spiir
+    - build spiir
 
 check pep8 standards:
   image: python:2.7
