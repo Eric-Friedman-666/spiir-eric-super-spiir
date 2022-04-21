@@ -87,7 +87,6 @@ typedef struct {
     char *ifos;
     RankingStats *rank;
     FeatureStats *feature;
-    int hist_trials;
     long nevent;
     long livetime;
 } TriggerStats;
