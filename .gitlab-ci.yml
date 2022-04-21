@@ -1,16 +1,10 @@
-test gpu access:
-  script:
-    - nvidia-smi
-  tags:
-    - ozgrav
+image: docker:20.10.14
+
+services:
+  - docker:20.10.14-dind
 
 build spiir:
-  image: docker:latest
   script:
-    - ls /
-    - docker ps -a
-    - docker images
-    - docker volume ls
     - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
   tags:
     - ozgrav
@@ -18,10 +12,73 @@ build spiir:
 generate artifacts:
   image: spiir
   script:
-    - ls /
-    - HLVK_bypass_artifacts_1187006000-1187009600
+    - generate_pipeline_artifacts.sh
   dependencies:
     - build spiir
+  tags:
+    - ozgrav
+  
+run pipeline:
+  image: spiir
+  scripts:
+    - |
+      macrostart=1187006000
+      duration=3600
+      macroend=$(($macrostart + $duration))
+      dir=/artifacts/HLVK_bypass_artifacts_${macrostart}-${macroend}
+      cache=${dir}/fake-frame.cache
+      psd=${dir}/H1L1V1K1-REFERENCE_PSD-${macrostart}-${duration}.xml.gz
+      map=${dir}/H1L1V1K1_detrsp_map.xml
+      macrofarinput=${dir}/${CI_JOB_ID}/marginalized_stats_2w.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_1d.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_2h.xml.gz
+      macrolocfapoutput=${dir}/${CI_JOB_ID}/marginalized_stats_2w.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_1d.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_2h.xml.gz
+      macrojobtag=${dir}/${CI_JOB_ID}
+      macronodename=postcohspiir
+      macroiirbank="H1:/artifacts/iir_H1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,L1:/artifacts/iir_L1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,V1:/artifacts/iir_V1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,K1:/artifacts/iir_K1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz"
+      macrostatsprefix=${dir}/${CI_JOB_ID}/bank0003_stats
+      macrooutprefix=${dir}/${CI_JOB_ID}/zerolag
+      gstlal_inspiral_postcohspiir_online \
+        --job-tag ${macrojobtag} \
+        --iir-bank ${macroiirbank} \
+        --data-source frames \
+        --channel-name H1=FAKE_INJECTIONS \
+        --channel-name L1=FAKE_INJECTIONS \
+        --channel-name V1=FAKE_INJECTIONS \
+        --channel-name K1=FAKE_INJECTIONS \
+        --gpu-acc on \
+        --ht-gate-threshold 15.0 \
+        --cuda-postcoh-snglsnr-thresh 4 \
+        --cuda-postcoh-hist-trials 100 \
+        --cuda-postcoh-detrsp-fname ${map} \
+        --cuda-postcoh-output-skymap 100 \
+        --cuda-postcoh-parti-ifos H1L1V1K1 \
+        --cuda-postcoh-detrsp-refresh-interval 86400 \
+        --check-time-stamp \
+        --finalsink-output-prefix ${macrooutprefix} \
+        --finalsink-snapshot-interval 1800 \
+        --cohfar-accumbackground-snapshot-interval 3600 \
+        --cohfar-accumbackground-output-prefix ${macrostatsprefix} \
+        --cohfar-assignfar-input-fname ${macrofarinput} \
+        --cohfar-assignfar-silent-time 0 \
+        --cohfar-assignfar-refresh-interval 3600 \
+        --finalsink-fapupdater-interval 1800 \
+        --finalsink-cluster-window 1 \
+        --finalsink-fapupdater-collect-walltime 604800,86400,7200 \
+        --finalsink-far-factor 1 \
+        --finalsink-gracedb-far-thresh 0.0001 \
+        --finalsink-need-online-perform 1 \
+        --finalsink-gracedb-group Test \
+        --finalsink-gracedb-search MDC \
+        --finalsink-gracedb-service-url https://gracedb-playground.ligo.org/api/ \
+        --code-version bypass_snrseries \
+        --frame-cache ${cache} \
+        --gps-start-time ${macrostart} \
+        --gps-end-time ${macroend} \
+        --finalsink-singlefar-veto-thresh 0.5 \
+        --finalsink-superevent-thresh 0.0001 \
+        --reference-psd ${psd} \
+        --psd-fft-length 32
+  dependencies:
+    - generate artifacts
   tags:
     - ozgrav
 
@@ -49,4 +106,3 @@ check clang standards:
         - if [ ! -z "$linter_errors" ]; then echo "Detected clang formatting issues; please fix"; exit 1; else echo "Clang formatting is correct"; exit 0; fi
   only:
     - merge_requests
-
