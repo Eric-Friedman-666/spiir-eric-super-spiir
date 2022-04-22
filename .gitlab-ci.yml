@@ -7,24 +7,18 @@ variables:
   # DOCKER_TLS_CERTDIR: "/certs"
   start: 1187006000
   duration: 100
-  end: $(($start+$duration))
-  branch: $((echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g'))
-  dir: /artifacts/${branch}_${start}-${end}
 
 test gpu:
   image: nvidia/cuda:11.6.0-runtime-ubuntu20.04
   script:
-    - echo $start
-    - echo $duration
-    - echo $end
-    - echo $branch
-    - echo $dir
     - nvidia-smi
   tags:
     - ozgrav
 
 build spiir:
   script:
+    - end=$(($start+$duration))
+    - branch=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
     - cp /artifacts/iir_* . && cp /artifacts/*.patch .
     - DOCKER_BUILDKIT=1 docker build . -t spiir:$branch -f spiir.Dockerfile --progress=plain
   tags:
@@ -32,6 +26,9 @@ build spiir:
 
 generate artifacts:
   script:
+    - end=$(($start+$duration))
+    - branch=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
+    - dir=/artifacts/${branch}_${start}-${end}
     - docker run --rm --entrypoint generate_pipeline_artifacts.sh spiir:$branch $start $length $end $dir
   dependencies:
     - build spiir
@@ -41,6 +38,9 @@ generate artifacts:
 run pipeline:
   script:
     - |
+      end=$(($start+$duration))
+      branch=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
+      dir=/artifacts/${branch}_${start}-${end}
       cache=${dir}/fake-frame.cache
       psd=${dir}/H1L1V1K1-REFERENCE_PSD-${start}-${duration}.xml.gz
       map=${dir}/H1L1V1K1_detrsp_map.xml
