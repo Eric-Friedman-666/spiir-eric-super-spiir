@@ -15,6 +15,7 @@ test gpu:
 
 build spiir:
   script:
+    - docker images
     - cp /artifacts/iir_* . && cp /artifacts/*.patch .
     - DOCKER_BUILDKIT=1 docker build . -t spiir -f spiir.Dockerfile --progress=plain
   tags:
