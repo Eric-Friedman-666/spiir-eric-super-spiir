@@ -8,12 +8,17 @@ variables:
   start: 1187006000
   duration: 100
   end: $(($start+$duration))
-  branch: $(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
+  branch: $((echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g'))
   dir: /artifacts/${branch}_${start}-${end}
 
 test gpu:
   image: nvidia/cuda:11.6.0-runtime-ubuntu20.04
   script:
+    - echo $start
+    - echo $duration
+    - echo $end
+    - echo $branch
+    - echo $dir
     - nvidia-smi
   tags:
     - ozgrav
