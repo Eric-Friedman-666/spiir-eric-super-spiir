@@ -668,6 +668,8 @@ RUN --mount=type=cache,target=/root/ccache \
 	make && \
 	make install
 
+COPY generate_pipeline_artifacts.sh .
+
 ENTRYPOINT ["gstlal_inspiral_postcohspiir_online", "--job-tag", "000", \
 	"--iir-bank", "H1:/iir_H1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,L1:/iir_L1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,V1:/iir_V1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz", \
 	"--data-source", "frames", \

@@ -25,6 +25,8 @@
  * gst-plugin-good collect data and alignment, and flag gap reference: postcoh
  */
 
+#include <lal/TimeSeries.h>
+#include <lal/Units.h>
 #include <math.h>
 #include <triggerjointer/triggerjointer.h>
 
@@ -866,6 +868,41 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
             trigger->end_time_sngl[data->ifo_mapping] = end_time;
             trigger->cohsnr = sqrt(trigger->cohsnr * trigger->cohsnr
                                    + max_abs_snr * max_abs_snr);
+
+            /* epoch is the GPS time of the first sample */
+            LIGOTimeGPS epoch = trigger->end_time_sngl[data->ifo_mapping];
+            g_assert(trigger->autochisq_len % 2 == 1);
+            XLALGPSAdd(&epoch, -1.0 / data->rate
+                        * (trigger->autochisq_len - 1) / 2);
+
+            // Allocate the memory
+            // epoch = epoch
+            // f0 = 0
+            // deltaT = 1. / postcoh->rate
+            // sampleUnits = &lalDimensionlessUnit
+            // length = state->autochisq_len
+            trigger->snr_series[data->ifo_mapping] =
+              XLALCreateCOMPLEX8TimeSeries("snr", &epoch, 0., 1. / data->rate,
+                                           &lalDimensionlessUnit,
+                                           trigger->autochisq_len);
+
+            this_sample =
+              round(((double)epoch.gpsSeconds + (double)(epoch.gpsNanoSeconds) / GST_SECOND)
+                    * data->rate);
+
+            // the first data sample
+            COMPLEX8 *curr_snglsnr =
+              &snglsnr[data->ntmplt * this_sample + tmplt_idx];
+
+            /* FIXME: speedup. Load snglsnr data into snr_series->data->data
+             */
+            for (int j = 0;
+                 j < trigger->snr_series[data->ifo_mapping]->data->length;
+                 j++) {
+                trigger->snr_series[data->ifo_mapping]->data->data[j] =
+                  *curr_snglsnr;
+                curr_snglsnr += data->ntmplt;
+            }
 
             GST_DEBUG_OBJECT(
               jointer,

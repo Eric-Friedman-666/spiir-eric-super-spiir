@@ -43,6 +43,7 @@ typedef struct tagPostcohInspiralTable {
     INT4 tmplt_idx;
     INT4 bankid;
     INT4 pix_idx;
+    INT4 autochisq_len;
     REAL4 snglsnr[MAX_NIFO];
     REAL4 coaphase[MAX_NIFO];
     REAL4 chisq[MAX_NIFO];

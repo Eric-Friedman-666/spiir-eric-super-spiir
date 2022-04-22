@@ -546,6 +546,7 @@ class FinalSink(object):
         self.thread_upload_skymap = None
 
     def __pass_test(self, candidate):
+        return True
         if self.candidate.far <= 0.0:
             return False
 
@@ -641,8 +642,8 @@ class FinalSink(object):
                     self.nevent_clustered += 1
                     self.__set_far(self.candidate)
 
-                     if self.gracedb_far_threshold and self.__pass_test(
-                             self.candidate):
+                    if self.gracedb_far_threshold and self.__pass_test(
+                            self.candidate):
                         self.__do_gracedb_alert(self.candidate)
 
                     self.candidate.delete_all_snr_series()
