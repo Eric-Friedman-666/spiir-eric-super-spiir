@@ -15,8 +15,9 @@ test gpu:
 
 build spiir:
   script:
+    - branch=$($CI_COMMIT_BRANCH | sed -n -e 's/^\* \(.*\)/\1/p' | sed -e 's?[_|/]?-?g')
     - cp /artifacts/iir_* . && cp /artifacts/*.patch .
-    - DOCKER_BUILDKIT=1 docker build . -t spiir:$CI_COMMIT_BRANCH -f spiir.Dockerfile --progress=plain
+    - DOCKER_BUILDKIT=1 docker build . -t spiir:$branch -f spiir.Dockerfile --progress=plain
   tags:
     - ozgrav
 
