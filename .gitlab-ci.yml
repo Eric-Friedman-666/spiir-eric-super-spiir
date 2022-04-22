@@ -3,8 +3,13 @@ image: docker:20.10.14
 # services:
 #   - docker:20.10.14-dind
 
-# variables:
-#   DOCKER_TLS_CERTDIR: "/certs"
+variables:
+  # DOCKER_TLS_CERTDIR: "/certs"
+  start: 1187006000
+  duration: 100
+  end: $(($start+$duration))
+  branch: $(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
+  dir: /artifacts/${branch}_${start}-${end}
 
 test gpu:
   image: nvidia/cuda:11.6.0-runtime-ubuntu20.04
@@ -15,7 +20,6 @@ test gpu:
 
 build spiir:
   script:
-    - branch=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
     - cp /artifacts/iir_* . && cp /artifacts/*.patch .
     - DOCKER_BUILDKIT=1 docker build . -t spiir:$branch -f spiir.Dockerfile --progress=plain
   tags:
@@ -23,11 +27,7 @@ build spiir:
 
 generate artifacts:
   script:
-    - start=1187006000
-    - duration=100
-    - end=$(($start+$duration))
-    - dir=/artifacts/${CI_COMMIT_BRANCH}_${start}-${end}
-    - docker run -it --rm --entrypoint generate_pipeline_artifacts.sh spiir $start $length $end $dir
+    - docker run --rm --entrypoint generate_pipeline_artifacts.sh spiir:$branch $start $length $end $dir
   dependencies:
     - build spiir
   tags:
@@ -36,12 +36,8 @@ generate artifacts:
 run pipeline:
   script:
     - |
-      macrostart=1187006000
-      duration=100
-      macroend=$(($macrostart + $duration))
-      dir=/artifacts/${CI_COMMIT_BRANCH}_${macrostart}-${macroend}
       cache=${dir}/fake-frame.cache
-      psd=${dir}/H1L1V1K1-REFERENCE_PSD-${macrostart}-${duration}.xml.gz
+      psd=${dir}/H1L1V1K1-REFERENCE_PSD-${start}-${duration}.xml.gz
       map=${dir}/H1L1V1K1_detrsp_map.xml
       macrofarinput=${dir}/${CI_JOB_ID}/marginalized_stats_2w.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_1d.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_2h.xml.gz
       macrolocfapoutput=${dir}/${CI_JOB_ID}/marginalized_stats_2w.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_1d.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_2h.xml.gz
@@ -50,7 +46,7 @@ run pipeline:
       macroiirbank="H1:/artifacts/iir_H1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,L1:/artifacts/iir_L1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,V1:/artifacts/iir_V1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,K1:/artifacts/iir_K1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz"
       macrostatsprefix=${dir}/${CI_JOB_ID}/bank0003_stats
       macrooutprefix=${dir}/${CI_JOB_ID}/zerolag
-      docker run -it --rm --entrypoint gstlal_inspiral_postcohspiir_online spiir \
+      docker run --rm --entrypoint gstlal_inspiral_postcohspiir_online spiir:$branch \
         --job-tag ${macrojobtag} \
         --iir-bank ${macroiirbank} \
         --data-source frames \
@@ -85,8 +81,8 @@ run pipeline:
         --finalsink-gracedb-service-url https://gracedb-playground.ligo.org/api/ \
         --code-version bypass_snrseries \
         --frame-cache ${cache} \
-        --gps-start-time ${macrostart} \
-        --gps-end-time ${macroend} \
+        --gps-start-time ${start} \
+        --gps-end-time ${end} \
         --finalsink-singlefar-veto-thresh 0.5 \
         --finalsink-superevent-thresh 0.0001 \
         --reference-psd ${psd} \
