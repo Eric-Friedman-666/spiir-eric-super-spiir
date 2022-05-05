@@ -575,37 +575,29 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        gstlal_GSTLALPostcohInspiral *item_typed = (gstlal_GSTLALPostcohInspiral *) item;
+        gstlal_GSTLALPostcohInspiral *item_typed =
+          (gstlal_GSTLALPostcohInspiral *)item;
 
         item_typed->row = *gstlal_postcohinspiral;
 
-        item_typed->end_time_sngl =
-          PyArray_SimpleNewFromData(2, end_time_dims, NPY_INT,
-                                    item_typed->row.end_time_sngl);
-        item_typed->snglsnr =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    item_typed->row.snglsnr);
-        item_typed->coaphase =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    item_typed->row.coaphase);
+        item_typed->end_time_sngl = PyArray_SimpleNewFromData(
+          2, end_time_dims, NPY_INT, item_typed->row.end_time_sngl);
+        item_typed->snglsnr = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.snglsnr);
+        item_typed->coaphase = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.coaphase);
         item_typed->chisq =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    item_typed->row.chisq);
-        item_typed->far_sngl =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    item_typed->row.far_sngl);
-        item_typed->far_1w_sngl =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    item_typed->row.far_1w_sngl);
-        item_typed->far_1d_sngl =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    item_typed->row.far_1d_sngl);
-        item_typed->far_2h_sngl =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    item_typed->row.far_2h_sngl);
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT, item_typed->row.chisq);
+        item_typed->far_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.far_sngl);
+        item_typed->far_1w_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.far_1w_sngl);
+        item_typed->far_1d_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.far_1d_sngl);
+        item_typed->far_2h_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.far_2h_sngl);
         item_typed->deff =
-          PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE,
-                                    item_typed->row.deff);
+          PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, item_typed->row.deff);
 
         /* duplicate the SNR time series if we have length? */
         if (gstlal_postcohinspiral->snr_length) {
