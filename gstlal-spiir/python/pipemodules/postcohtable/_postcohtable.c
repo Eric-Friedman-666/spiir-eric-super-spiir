@@ -267,7 +267,9 @@ static struct PyGetSetDef getset[SINGLE + 10 * MAX_NIFO + 1] = {
       "_snr_sampleUnits" },
     { "_snr_data_length", snr_component_get, NULL, ".snr.data.length",
       "_snr_data_length" },
-    { "_snr_data", snr_component_get, NULL, ".snr.data", "_snr_data" }
+    { "_snr_data", snr_component_get, NULL, ".snr.data", "_snr_data" },
+
+    { NULL }
 };
 
 struct lal_array {
@@ -600,9 +602,9 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
           PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, item_typed->row.deff);
 
         /* duplicate the SNR time series if we have length? */
-        if (gstlal_postcohinspiral->snr_length) {
-            const size_t nbytes = sizeof(gstlal_postcohinspiral->snr[0])
-                                  * gstlal_postcohinspiral->snr_length;
+        if (item_typed->row.snr_length) {
+            const size_t nbytes = sizeof(item_typed->row.snr[0])
+                                  * item_typed->row.snr_length;
             if (data + nbytes > end) {
                 Py_DECREF(item);
                 Py_DECREF(result);
@@ -611,20 +613,20 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
                 return NULL;
             }
             COMPLEX8TimeSeries *series = XLALCreateCOMPLEX8TimeSeries(
-              "snr", &gstlal_postcohinspiral->epoch, 0.,
-              gstlal_postcohinspiral->deltaT, &lalDimensionlessUnit,
-              gstlal_postcohinspiral->snr_length);
+              "snr", &item_typed->row.epoch, 0.,
+              item_typed->row.deltaT, &lalDimensionlessUnit,
+              item_typed->row.snr_length);
             if (!series) {
                 Py_DECREF(item);
                 Py_DECREF(result);
                 PyErr_SetString(PyExc_MemoryError, "out of memory");
                 return NULL;
             }
-            memcpy(series->data->data, gstlal_postcohinspiral->snr, nbytes);
+            memcpy(series->data->data, item_typed->row.snr, nbytes);
             data += nbytes;
-            ((gstlal_GSTLALPostcohInspiral *)item)->snr = series;
+            item_typed->snr = series;
         } else
-            ((gstlal_GSTLALPostcohInspiral *)item)->snr = NULL;
+            item_typed->snr = NULL;
 
         if (PyList_Append(result, item)) printf("append failure");
         Py_DECREF(item);
