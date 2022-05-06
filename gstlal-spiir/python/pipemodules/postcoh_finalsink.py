@@ -562,7 +562,7 @@ class FinalSink(object):
         ]
         ifo_fars_ok = [
             far < self.singlefar_veto_thresh and far > 0.
-            for far in self.__get_single_fars(candidate)
+            for far in candidate.far_sngl
         ]
         if self.candidate.far < self.superevent_thresh:
             return sum([
@@ -735,10 +735,6 @@ class FinalSink(object):
         ]
         for i, ifo in enumerate(pipe_macro.IFO_MAP):
             setattr(candidate, "far_sngl_%s" % ifo, far_sngl[i])
-
-    def __get_single_fars(self, candidate):
-        for ifo in pipe_macro.IFO_MAP:
-            yield getattr(candidate, "far_sngl_%s" % ifo)
 
     # def __lookback_far(self, candidate):
     # FIXME: hard-code to check event that's < 5e-7
