@@ -1,99 +1,20 @@
 image: docker:20.10.14
 
-# services:
-#   - docker:20.10.14-dind
-
-variables:
-  # DOCKER_TLS_CERTDIR: "/certs"
-  start: 1187006000
-  duration: 100
-
-test gpu:
-  image: nvidia/cuda:11.6.0-runtime-ubuntu20.04
-  script:
-    - nvidia-smi
-  tags:
-    - ozgrav
-
 build spiir:
   script:
-    - end=$(($start+$duration))
-    - branch=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
+    - BRANCH=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
     - cp /artifacts/iir_* . && cp /artifacts/*.patch .
-    - DOCKER_BUILDKIT=1 docker build . -t spiir:$branch -f spiir.Dockerfile --progress=plain
-  tags:
-    - ozgrav
-
-generate artifacts:
-  script:
-    - end=$(($start+$duration))
-    - branch=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
-    - dir=/artifacts/${branch}_${start}-${end}
-    - docker run --rm --entrypoint generate_pipeline_artifacts.sh spiir:$branch $start $length $end $dir
-  dependencies:
-    - build spiir
+    - DOCKER_BUILDKIT=1 docker build . -t spiir:${BRANCH} -f spiir.Dockerfile --progress=plain
   tags:
     - ozgrav
   
 run pipeline:
   script:
     - |
-      end=$(($start+$duration))
-      branch=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
-      dir=/artifacts/${branch}_${start}-${end}
-      cache=${dir}/fake-frame.cache
-      psd=${dir}/H1L1V1K1-REFERENCE_PSD-${start}-${duration}.xml.gz
-      map=${dir}/H1L1V1K1_detrsp_map.xml
-      macrofarinput=${dir}/${CI_JOB_ID}/marginalized_stats_2w.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_1d.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_2h.xml.gz
-      macrolocfapoutput=${dir}/${CI_JOB_ID}/marginalized_stats_2w.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_1d.xml.gz,${dir}/${CI_JOB_ID}/marginalized_stats_2h.xml.gz
-      macrojobtag=${dir}/${CI_JOB_ID}
-      macronodename=postcohspiir
-      macroiirbank="H1:/artifacts/iir_H1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,L1:/artifacts/iir_L1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,V1:/artifacts/iir_V1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,K1:/artifacts/iir_K1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz"
-      macrostatsprefix=${dir}/${CI_JOB_ID}/bank0003_stats
-      macrooutprefix=${dir}/${CI_JOB_ID}/zerolag
-      docker run --rm --entrypoint gstlal_inspiral_postcohspiir_online spiir:$branch \
-        --job-tag ${macrojobtag} \
-        --iir-bank ${macroiirbank} \
-        --data-source frames \
-        --channel-name H1=FAKE_INJECTIONS \
-        --channel-name L1=FAKE_INJECTIONS \
-        --channel-name V1=FAKE_INJECTIONS \
-        --channel-name K1=FAKE_INJECTIONS \
-        --gpu-acc on \
-        --ht-gate-threshold 15.0 \
-        --cuda-postcoh-snglsnr-thresh 4 \
-        --cuda-postcoh-hist-trials 100 \
-        --cuda-postcoh-detrsp-fname ${map} \
-        --cuda-postcoh-output-skymap 100 \
-        --cuda-postcoh-parti-ifos H1L1V1K1 \
-        --cuda-postcoh-detrsp-refresh-interval 86400 \
-        --check-time-stamp \
-        --finalsink-output-prefix ${macrooutprefix} \
-        --finalsink-snapshot-interval 1800 \
-        --cohfar-accumbackground-snapshot-interval 3600 \
-        --cohfar-accumbackground-output-prefix ${macrostatsprefix} \
-        --cohfar-assignfar-input-fname ${macrofarinput} \
-        --cohfar-assignfar-silent-time 0 \
-        --cohfar-assignfar-refresh-interval 3600 \
-        --finalsink-fapupdater-interval 1800 \
-        --finalsink-cluster-window 1 \
-        --finalsink-fapupdater-collect-walltime 604800,86400,7200 \
-        --finalsink-far-factor 1 \
-        --finalsink-gracedb-far-thresh 0.0001 \
-        --finalsink-need-online-perform 1 \
-        --finalsink-gracedb-group Test \
-        --finalsink-gracedb-search MDC \
-        --finalsink-gracedb-service-url https://gracedb-playground.ligo.org/api/ \
-        --code-version bypass_snrseries \
-        --frame-cache ${cache} \
-        --gps-start-time ${start} \
-        --gps-end-time ${end} \
-        --finalsink-singlefar-veto-thresh 0.5 \
-        --finalsink-superevent-thresh 0.0001 \
-        --reference-psd ${psd} \
-        --psd-fft-length 32
+      BRANCH=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
+      docker run --rm --entrypoint ./submit.sh spiir:${BRANCH} 0 1187006000 300 /artifacts/${BRANCH} ${CI_JOB_ID}
   dependencies:
-    - generate artifacts
+    - build spiir
   tags:
     - ozgrav
 

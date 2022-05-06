@@ -1510,13 +1510,13 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
             GST_LOG_OBJECT(
               postcoh,
-              "end_time_sngl_0 %d, ipeak %d, peak_cur %d, len_cur %d, "
+              "end_time_sngl_0 %d %d, ipeak %d, peak_cur %d, len_cur %d, "
               "tmplt_idx %d, pix_idx %d \t,"
               "snglsnr_0 %f, snglsnr_1 %f, snglsnr_2 %f,"
               "coaphase_0 %f, coaphase_1 %f, coa_phase_2 %f,"
               "chisq_0 %f, chisq_1 %f, chisq_2 %f,"
               "cohsnr %f, nullsnr %f, cmbchisq %f\n",
-              output->end_time_sngl[0].gpsSeconds, ipeak, peak_cur, len_cur,
+              output->end_time_sngl[0].gpsSeconds, output->end_time_sngl[0].gpsNanoSeconds, ipeak, peak_cur, len_cur,
               output->tmplt_idx, output->pix_idx, output->snglsnr[0],
               output->snglsnr[1], output->snglsnr[2], output->coaphase[0],
               output->coaphase[1], output->coaphase[2], output->chisq[0],

@@ -1,121 +1,5 @@
 # syntax = docker/dockerfile:1.2
-#### https://gitlab.com/nvidia/container-images/cuda/-/blob/master/dist/10.0/ubuntu1804/base/Dockerfile
-FROM ubuntu:18.04
-
-ENV NVARCH x86_64
-ENV NVIDIA_REQUIRE_CUDA "cuda>=10.0 brand=tesla,driver>=384,driver<385 brand=tesla,driver>=410,driver<411"
-ENV NV_CUDA_CUDART_VERSION 10.0.130-1
-
-ENV NV_ML_REPO_ENABLED 1
-ENV NV_ML_REPO_URL https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/${NVARCH}
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	gnupg2 curl ca-certificates && \
-	curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/${NVARCH}/7fa2af80.pub | apt-key add - && \
-	echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/${NVARCH} /" > /etc/apt/sources.list.d/cuda.list && \
-	if [ ! -z ${NV_ML_REPO_ENABLED} ]; then echo "deb ${NV_ML_REPO_URL} /" > /etc/apt/sources.list.d/nvidia-ml.list; fi && \
-	apt-get purge --autoremove -y curl \
-	&& rm -rf /var/lib/apt/lists/*
-
-ENV CUDA_VERSION 10.0.130
-
-# For libraries in the cuda-compat-* package: https://docs.nvidia.com/cuda/eula/index.html#attachment-a
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	cuda-cudart-10-0=${NV_CUDA_CUDART_VERSION} \
-	cuda-compat-10-0 \
-	&& ln -s cuda-10.0 /usr/local/cuda && \
-	rm -rf /var/lib/apt/lists/*
-
-# Required for nvidia-docker v1
-RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf && \
-	echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
-
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
-ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
-
-# nvidia-container-runtime
-ENV NVIDIA_VISIBLE_DEVICES all
-ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
-
-#### https://gitlab.com/nvidia/container-images/cuda/-/blob/master/dist/10.0/ubuntu1804/runtime/Dockerfile
-ENV NV_CUDA_LIB_VERSION 10.0.130-1
-ENV NV_NVTX_VERSION 10.0.130-1
-ENV NV_LIBNPP_VERSION 10.0.130-1
-ENV NV_LIBCUSPARSE_VERSION 10.0.130-1
-
-
-ENV NV_LIBCUBLAS_PACKAGE_NAME cuda-cublas-10-0
-
-ENV NV_LIBCUBLAS_VERSION 10.0.130-1
-ENV NV_LIBCUBLAS_PACKAGE ${NV_LIBCUBLAS_PACKAGE_NAME}=${NV_LIBCUBLAS_VERSION}
-
-
-ENV NV_LIBNCCL_PACKAGE_NAME "libnccl2"
-ENV NV_LIBNCCL_PACKAGE_VERSION 2.6.4-1
-ENV NCCL_VERSION 2.6.4
-ENV NV_LIBNCCL_PACKAGE ${NV_LIBNCCL_PACKAGE_NAME}=${NV_LIBNCCL_PACKAGE_VERSION}+cuda10.0
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	cuda-libraries-10-0=${NV_CUDA_LIB_VERSION} \
-	cuda-npp-10-0=${NV_LIBNPP_VERSION} \
-	cuda-nvtx-10-0=${NV_NVTX_VERSION} \
-	cuda-cusparse-10-0=${NV_LIBCUSPARSE_VERSION} \
-	${NV_LIBCUBLAS_PACKAGE} \
-	${NV_LIBNCCL_PACKAGE} \
-	&& rm -rf /var/lib/apt/lists/*
-
-# Keep apt from auto upgrading the cublas and nccl packages. See https://gitlab.com/nvidia/container-images/cuda/-/issues/88
-RUN apt-mark hold ${NV_LIBNCCL_PACKAGE_NAME} ${NV_LIBCUBLAS_PACKAGE_NAME}
-
-#### https://gitlab.com/nvidia/container-images/cuda/-/blob/master/dist/10.0/ubuntu1804/devel/Dockerfile
-ENV NV_CUDA_LIB_VERSION 10.0.130-1
-ENV NV_CUDA_CUDART_DEV_VERSION 10.0.130-1
-ENV NV_NVML_DEV_VERSION 10.0.130-1
-ENV NV_LIBCUSPARSE_DEV_VERSION 10.0.130-1
-ENV NV_LIBNPP_DEV_VERSION 10.0.130-1
-ENV NV_LIBCUBLAS_DEV_PACKAGE_NAME cuda-cublas-dev-10-0
-
-ENV NV_LIBCUBLAS_DEV_VERSION 10.0.130-1
-ENV NV_LIBCUBLAS_DEV_PACKAGE ${NV_LIBCUBLAS_DEV_PACKAGE_NAME}=${NV_LIBCUBLAS_DEV_VERSION}
-
-ENV NV_LIBNCCL_DEV_PACKAGE_NAME libnccl-dev
-ENV NV_LIBNCCL_DEV_VERSION 2.6.4-1
-ENV NCCL_VERSION ${NV_LIBNCCL_DEV_VERSION}
-ENV NV_LIBNCCL_DEV_PACKAGE ${NV_LIBNCCL_DEV_PACKAGE_NAME}=${NV_LIBNCCL_DEV_VERSION}+cuda10.0
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	cuda-nvml-dev-10-0=${NV_NVML_DEV_VERSION} \
-	cuda-command-line-tools-10-0=${NV_CUDA_LIB_VERSION} \
-	cuda-nvprof-10-0=${NV_CUDA_LIB_VERSION} \
-	cuda-npp-dev-10-0=${NV_LIBNPP_DEV_VERSION} \
-	cuda-libraries-dev-10-0=${NV_CUDA_LIB_VERSION} \
-	cuda-minimal-build-10-0=${NV_CUDA_LIB_VERSION} \
-	${NV_LIBCUBLAS_DEV_PACKAGE} \
-	${NV_LIBNCCL_DEV_PACKAGE} \
-	&& rm -rf /var/lib/apt/lists/*
-
-# apt from auto upgrading the cublas package. See https://gitlab.com/nvidia/container-images/cuda/-/issues/88
-RUN apt-mark hold ${NV_LIBCUBLAS_DEV_PACKAGE_NAME} ${NV_LIBNCCL_DEV_PACKAGE_NAME}
-
-ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs
-
-#### https://gitlab.com/nvidia/container-images/cuda/-/blob/master/dist/10.0/ubuntu1804/devel/cudnn7/Dockerfile
-ENV NV_CUDNN_PACKAGE_VERSION 7.6.5.32-1
-ENV NV_CUDNN_VERSION 7.6.5.32
-
-ENV NV_CUDNN_PACKAGE_NAME libcudnn7
-ENV NV_CUDNN_PACKAGE ${NV_CUDNN_PACKAGE_NAME}=${NV_CUDNN_PACKAGE_VERSION}+cuda10.0
-ENV NV_CUDNN_PACKAGE_DEV ${NV_CUDNN_PACKAGE_NAME}-dev=${NV_CUDNN_PACKAGE_VERSION}+cuda10.0
-
-ENV CUDNN_VERSION ${NV_CUDNN_VERSION}
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	${NV_CUDNN_PACKAGE} \
-	${NV_CUDNN_PACKAGE_DEV} \
-	&& apt-mark hold ${NV_CUDNN_PACKAGE_NAME} && \
-	rm -rf /var/lib/apt/lists/*
-
-#############################################################################################
+FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu18.04
 
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 RUN --mount=type=cache,target=/var/cache/apt --mount=type=cache,target=/var/lib/apt \
@@ -202,12 +86,11 @@ ENV PYTHON2 ${PYTHON2PREFIX}/bin/python
 ENV PIP2 ${PYTHON2PREFIX}/bin/pip
 RUN --mount=type=cache,target=/root/.cache \
 	--mount=type=cache,target=/root/.conda/pkgs \
-	${CONDA} create -p ${PYTHON2PREFIX} -y python=2.7.14 zlib==1.2.11 && \
+	${CONDA} create -p ${PYTHON2PREFIX} -y python=2.7.14 && \
 	${PIP2} config set global.cache-dir false && \
-	${PIP2} install --upgrade pip setuptools wheel==0.37.0 && \
+	${PIP2} install --upgrade pip setuptools && \
 	${PIP2} install numpy==1.14.1 scipy==1.0.0 matplotlib==2.2.2   h5py==2.7.1 healpy==1.12.4 astropy==2.0.3 \
-	importlib-metadata==2.1.2 pathlib2==2.3.6 pytz==2021.3 \
-	cryptography pyopenssl Cython==0.29.26 ligo-segments shapely yapf clang-format==13.0.0 && \
+	cryptography pyopenssl Cython ligo-segments shapely yapf clang-format && \
 	${CONDA} clean -a
 
 ENV PYTHON3PREFIX ${PREFIX}/python3
@@ -217,8 +100,8 @@ RUN --mount=type=cache,target=/root/.cache \
 	--mount=type=cache,target=/root/.conda/pkgs \
 	${CONDA} create -p ${PYTHON3PREFIX} -y python=3.7.4 && \
 	${PIP3} config set global.cache-dir false && \
-	${PIP3} install --upgrade pip==21.3.1 setuptools==60.3.1 wheel==0.37.0 && \
-	${PIP3} install meson==0.60.3 ninja==1.10.2.3 --prefix=$PREFIX/python3_stuff && \
+	${PIP3} install --upgrade pip setuptools && \
+	${PIP3} install meson==0.60.3 ninja --prefix=$PREFIX/python3_stuff && \
 	${CONDA} clean -a
 
 ENV PATH=$PATH:$PREFIX/python3_stuff/bin:$PREFIX/python3/bin
@@ -625,6 +508,10 @@ RUN --mount=type=cache,target=/root/ccache \
 # cd .. && \
 # rm -r $p && rm $p.tar.gz
 
+RUN $CONDA create -n postprocess tqdm pandas lscsoft-glue ligo.skymap ligo-proxy-utils gwpy -c conda-forge
+
+ENV POSTPROCESS /root/.conda/envs/postprocess/bin/python
+
 # COPY gstlal_0001patrick_fix_includes_revised.patch .
 RUN --mount=type=cache,target=/root/ccache \
 	p=spiir && \
@@ -668,40 +555,45 @@ RUN --mount=type=cache,target=/root/ccache \
 	make && \
 	make install
 
+COPY submit.sh .
 COPY generate_pipeline_artifacts.sh .
+COPY pipeline.sh .
+COPY create_skymaps.py .
 
-ENTRYPOINT ["gstlal_inspiral_postcohspiir_online", "--job-tag", "000", \
-	"--iir-bank", "H1:/iir_H1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,L1:/iir_L1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,V1:/iir_V1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz", \
-	"--data-source", "frames", \
-	"--frame-cache", "/frame.cache.C00", \
-	"--gps-start-time", "1187008582", \
-	"--gps-end-time", "1187008932", \
-	"--track-psd", \
-	"--channel-name", "H1=GDS-CALIB_STRAIN", \
-	"--channel-name", "L1=GDS-CALIB_STRAIN", \
-	"--channel-name", "V1=Hrec_hoft_16384Hz", \
-	"--cohfar-accumbackground-output-prefix", "000/bank0_stats", \
-	"--cohfar-accumbackground-snapshot-interval", "200", \
-	"--cohfar-assignfar-silent-time", "0", \
-	"--cohfar-assignfar-input-fname", "000/marginalized_1w.xml.gz,000/marginalized_1d.xml.gz,000/marginalized_2h.xml.gz", \
-	"--cohfar-assignfar-refresh-interval", "200", \
-	"--gpu-acc", "on", \
-	"--ht-gate-threshold", "15.0", \
-	"--cuda-postcoh-snglsnr-thresh", "4", \
-	"--cuda-postcoh-hist-trials", "100", \
-	"--cuda-postcoh-detrsp-fname", "/H1L1V1_detrsp_map_1187008882.xml", \
-	"--cuda-postcoh-detrsp-refresh-interval", "86400", \
-	"--cuda-postcoh-output-skymap", "7", \
-	"--check-time-stamp", \
-	"--finalsink-fapupdater-collect-walltime", "604800,86400,7200", \
-	"--finalsink-fapupdater-interval", "1800", \
-	"--finalsink-output-prefix", "000/000_zerolag", \
-	"--finalsink-snapshot-interval", "1200", \
-	"--finalsink-cluster-window", "1", \
-	"--finalsink-far-factor", "2", \
-	"--finalsink-singlefar-veto-thresh", "0.5", \
-	"--finalsink-superevent-thresh", "0.0001", \
-	"--finalsink-need-online-perform", "1", \
-	"--finalsink-gracedb-far-threshold", "0.0001", \
-	"--code-version", "unit_testing", \
-	"--verbose"]
+# # create injection xml
+# lalapps_inspinj --m-distr totalMass --min-mass1 1 --max-mass1 3 --min-mass2 1 --max-mass2 3 --min-mtotal 2 --max-mtotal 6 --gps-start-time 1187006000 --gps-end-time 1187006500 --enable-spin --min-spin1 0 --max-spin1 0.4 --min-spin2 0 --max-spin2 0.4 --waveform SpinTaylorT4threePointFivePN --f-lower 20 --i-distr uniform --l-distr random --t-distr uniform --time-step 30 --taper-injection start --seed 1 --output fake_inj.xml --d-distr uniform --min-distance 5000 --max-distance 20000 --verbose
+# ligolw_print −t sim_inspiral −c h_end_time −c mass1 −c mass2 −c mchirp −c eta −c spin1z −c spin2z −c eff_dist_h −c alpha4 −c longitude −c latitude fake_inj_1.xml
+
+# # create fake frames from injection xml
+# gstlal_fake_frames --data-source LIGO --output-path fake_frames_inj --gps-start-time 1187006000 --frame-type H1_INJECTIONS --gps-end-time 1187006500 --frame-duration 16 --frames-per-file 125 --verbose --channel-name=H1=FAKE_INJECTIONS --injections fake_inj.xml
+# gstlal_fake_frames --data-source AdvLIGO --output-path fake_frames_inj --gps-start-time 1187006000 --frame-type L1_INJECTIONS --gps-end-time 1187006500 --frame-duration 16 --frames-per-file 125 --verbose --channel-name=L1=FAKE_INJECTIONS --injections fake_inj.xml
+# gstlal_fake_frames --data-source AdvVirgo --output-path fake_frames_inj --gps-start-time 1187006000 --frame-type V1_INJECTIONS --gps-end-time 1187006500 --frame-duration 16 --frames-per-file 125 --verbose --channel-name=V1=FAKE_INJECTIONS --injections fake_inj.xml
+# gstlal_fake_frames --data-source AdvVirgo --output-path fake_frames_inj --gps-start-time 1187006000 --frame-type K1_INJECTIONS --gps-end-time 1187006500 --frame-duration 16 --frames-per-file 125 --verbose --channel-name=K1=FAKE_INJECTIONS --injections fake_inj.xml
+
+# # append fake frames to cache file
+# ls fake_frames_inj/*/*.gwf | lalapps_path2cache >> fake-frame.cache
+
+# # # generate reference_psd
+# # gstlal_reference_psd --data-source frames --frame-cache fake-frame.cache --gps-start-time=1187006000 --gps-end-time=1187006500 --channel-name=H1=FAKE_INJECTIONS --channel-name=L1=FAKE_INJECTIONS --channel-name=V1=FAKE_INJECTIONS --channel-name=K1=FAKE_INJECTIONS --write-psd H1L1V1K1-REFERENCE_PSD-1187006000-500.xml.gz --verbose --psd-fft-length 16
+
+# # # generate spiir bank
+# # gstlal_iir_bank --reference-psd ${PSD} --template-bank /fred/oz016/manoj/test/new_split/${SBNK}/${IFO}_split_bank/${IFO}-GSTLAL_SPLIT_BANK_${BNK}-0-0.xml.gz --flow 15.0 --waveform-domain FD --padding 1.3 --instrument ${IFO} --output gstlal_iir_bank_${SUF}/iir_${IFO}-GSTLAL_SPLIT_BANK_${BNK}-a1-0-0.xml.gz --autocorrelation-length 351 --sampleRate 2048.0 -v --epsilon-options "'{"epsilon_start":1.0,"nround_max":25,"initial_overlap_min":0.95,"b0_optimized_overlap_min":0.'"${BOPTPERC}"',"epsilon_factor":1.2,"filters_max":350}'" --optimizer-options "'{"verbose":true,"passes":16,"indv":true,"hessian":true}'" --approximant ${APPROX} --negative-latency ${NEGLAT}"
+
+# # generate detrsp map
+# gstlal_postcoh_gen_detrsp_map --ifo-horizons H1:111,L1:212,V1:56,K1:56 --chealpix-order 5 --output-coh-coeff H1L1V1K1_detrsp_map.xml --output-prob-coeff H1L1V1K1_prob_map.xml --gps-time 1187006000
+
+# # run pipeline
+# gstlal_inspiral_postcohspiir_online --job-tag 000  --iir-bank H1:iir_H1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,L1:iir_L1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,V1:iir_V1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz,K1:iir_K1-GSTLAL_SPLIT_BANK_0003-a1-0-0.xml.gz  --gpu-acc on  --data-source frames  --frame-cache fake-frame.cache --gps-start-time 1187006000  --gps-end-time 1187006500  --track-psd --channel-name H1=FAKE_INJECTIONS  --channel-name L1=FAKE_INJECTIONS  --channel-name V1=FAKE_INJECTIONS  --channel-name K1=FAKE_INJECTIONS  --cohfar-accumbackground-output-prefix 000/bank0_stats  --cohfar-accumbackground-snapshot-interval 200  --cohfar-assignfar-silent-time 0  --cohfar-assignfar-input-fname 000/marginalized_1w.xml.gz,000/marginalized_1d.xml.gz,000/marginalized_2h.xml.gz  --cohfar-assignfar-refresh-interval 200  --gpu-acc on  --ht-gate-threshold 15.0  --cuda-postcoh-snglsnr-thresh 4  --cuda-postcoh-hist-trials 100  --cuda-postcoh-detrsp-fname H1L1V1K1_detrsp_map.xml  --cuda-postcoh-detrsp-refresh-interval 86400  --cuda-postcoh-output-skymap 7  --check-time-stamp  --finalsink-fapupdater-collect-walltime 604800,86400,7200  --finalsink-fapupdater-interval 1800  --finalsink-output-prefix 000/000_zerolag  --finalsink-snapshot-interval 1200  --finalsink-cluster-window 1  --finalsink-far-factor 2  --finalsink-singlefar-veto-thresh 0.5  --finalsink-superevent-thresh 0.0001  --finalsink-need-online-perform 1  --finalsink-gracedb-far-threshold 0.0001  --code-version unit_testing  --verbose
+
+# # find top event_id, time, and skymap name
+# ligolw_print -c bankid -c cohsnr -c fap -c far -c ifos -c event_id -c end_time -c skymap_fname 000/000_zerolag_1187006000_469.xml.gz -v
+
+# # generate fits from skymap binary
+# gstlal_postcoh_skymap2fits --output-cohsnr cohsnr_skymap.fits.gz --output-prob spiir.fits.gz --cuda-postcoh-detrsp-fname H1L1V1K1_prob_map.xml --event-id 0 --event-time 1187006432 H1L1_skymap/H1_1187006432_89355469_3_29
+
+# # generate .png from fits
+# bayestar_plot_allsky_postcohspiir -o cohsnr_skymap --label "Coherent SNR" spiir.fits.gz --colorbar --colormap "cylon"
+# ligo-skymap-plot -o cohsnr.png --colorbar --colormap viridis cohsnr_skymap.fits.gz
+# ligo-skymap-plot -o prob.png --colorbar --colormap viridis spiir.fits.gz
+
+# /apps/skylake/software/compiler/gcc/6.4.0/python/2.7.14/bin/python

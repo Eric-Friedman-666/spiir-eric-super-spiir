@@ -647,6 +647,7 @@ def mkPostcohSPIIROnline(pipeline,
             bankname = bank_list[0]
             bankid = spiir_utils.get_bankid_from_bankname(bankname)
             max_bank_rate = spiir_utils.get_maxrate_from_xml(bankname)
+            autochisq_len = spiir_utils.get_autochisq_len_from_xml(bankname)
             head = pipeparts.mkqueue(pipeline,
                                      hoftdicts[instrument],
                                      max_size_time=gst.SECOND * 10,
@@ -731,7 +732,7 @@ def mkPostcohSPIIROnline(pipeline,
                         print(
                             "creating jointer and attach %s SNR series to this jointer"
                             % instrument)
-                    jointer = pipemodules.mktrigger_jointer(pipeline, snr)
+                    jointer = pipemodules.mktrigger_jointer(pipeline, snr, autochisq_len)
                     is_jointer_created = True
                 this_name = "snr_%s" % instrument
                 snr.link_pads(None, jointer, this_name)

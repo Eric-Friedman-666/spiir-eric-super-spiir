@@ -116,8 +116,20 @@ def mkcudamultiratespiir(pipeline,
     return elem
 
 
-def mktrigger_jointer(pipeline, head):
-    elem = gst.element_factory_make("trigger_jointer")
+def mktrigger_jointer(pipeline, head, autochisq_len):
+    properties = dict((name, value) for name, value in zip((
+        "autochisq-len",), (autochisq_len,)))
+    if "name" in properties:
+        elem = gst.element_factory_make("trigger_jointer", properties.pop("name"))
+    else:
+        elem = gst.element_factory_make("trigger_jointer")
+    # make sure stream_id go first
+    for name, value in properties.items():
+        if name == "stream-id":
+            elem.set_property(name.replace("_", "-"), value)
+    for name, value in properties.items():
+        if name != "stream-id":
+            elem.set_property(name.replace("_", "-"), value)
     pipeline.add(elem)
     return elem
 

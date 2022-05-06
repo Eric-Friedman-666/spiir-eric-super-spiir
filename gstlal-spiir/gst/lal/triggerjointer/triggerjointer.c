@@ -29,6 +29,7 @@
 #include <lal/Units.h>
 #include <math.h>
 #include <triggerjointer/triggerjointer.h>
+#include <LIGOLwHeader.h>
 
 /* ceil the maximum time lag to the second digit. the original max time lag is
  * obtained from find_timelag.py code in gst/lal/triggerjointer/test/ */
@@ -380,6 +381,8 @@ static gboolean trigger_jointer_set_snr_info(TriggerJointer *jointer) {
         data->ntimelag = floor(ori_timelag / (double)GST_SECOND * data->rate);
         /* timelag in nano seconds (GstClockTime) */
         data->timelag = data->ntimelag / (double)data->rate * GST_SECOND;
+
+        data->preserved_len = jointer->autochisq_len + 2 * data->ntimelag;
         GST_DEBUG_OBJECT(
           data,
           "get ifo_name %s, ifo_mapping %d, rate %d, channels %d, bps %d,"
@@ -591,6 +594,7 @@ static gboolean trigger_jointer_align_collected(GstCollectPads *pads,
 
             /* padding the adapters in the SNR pads with zeros to account
              * for history data */
+            // guint zerobuf_size = (data->preserved_len / 2) * data->bps;
             guint zerobuf_size = data->ntimelag * data->bps;
             /* padding a zero buffer for history data */
             if (!trigger_jointer_padding_adapter(data, zerobuf_size)) {
@@ -749,6 +753,7 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
     XLALINT8NSToGPS(&cur_buftime, postcoh_buf_ts);
 
     int tmplt_idx, this_sample;
+    int series_sample;
     float this_sec, this_nano;
 
     PostcohInspiralTable *trigger;
@@ -762,8 +767,9 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
          snrdata = g_slist_next(snrdata)) {
         data     = snrdata->data;
         exe_size = round(exe_dur * data->rate * data->bps);
-        one_take_size =
-          exe_size + data->ntimelag * 2 * data->bps; // bps: bypes per sample
+        one_take_size = exe_size + data->preserved_len * data->bps;
+        // one_take_size =
+        //   exe_size + data->ntimelag * 2 * data->bps; // bps: bypes per sample
         GST_DEBUG_OBJECT(jointer,
                          "process snr peek size %d, exe_size %d, start time "
                          "%" GST_TIME_FORMAT ", end time %" GST_TIME_FORMAT,
@@ -780,6 +786,8 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
         snglsnr = (COMPLEX_F *)gst_adapter_peek(data->adapter, one_take_size);
         /* no enough data in adapter, do nothing */
         if (snglsnr == NULL) continue;
+
+        int one_take_len = one_take_size / data->bps;
 
         /*
          * check if this period of data is gap data
@@ -801,6 +809,7 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
         COMPLEX_F this_snr;
         float max_abs_snr = 0, this_abs_snr;
         LIGOTimeGPS end_time;
+        LIGOTimeGPS epoch;
         for (trigger = trigger_start; trigger < trigger_end; trigger++) {
             /* not a gap, extend the trigger field ifos with the new ifo */
             if (trigger->ifos) {
@@ -812,6 +821,14 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
             /* not a zerolag trigger but an entry
              * just to indicate ifos */
             if (trigger->is_background != FLAG_FOREGROUND) continue;
+
+            GST_DEBUG_OBJECT(
+              jointer,
+              "test ifos -> %s, snr %f, coaphase %f, end_time_snglr %d   %d,"
+              "cohsnr %f",
+              trigger->ifos, trigger->snglsnr[data->ifo_mapping], trigger->coaphase[data->ifo_mapping], 
+              trigger->end_time_sngl[data->ifo_mapping].gpsSeconds, trigger->end_time_sngl[data->ifo_mapping].gpsNanoSeconds, trigger->cohsnr);
+
             max_isample = 0;
             max_abs_snr = 0;
             /* inserting the IFO into the IFO list */
@@ -854,16 +871,11 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
               snglsnr[data->ntmplt * (this_sample + max_isample) + tmplt_idx];
             trigger->coaphase[data->ifo_mapping] =
               atan2(this_snr.im, this_snr.re);
-            end_time = trigger->end_time; // end time from the triggering
+            end_time = cur_buftime; // end time from the triggering
                                           // single-ifo trigger
             XLALGPSAdd(&(end_time),
-                       (double)(max_isample - data->ntimelag)
+                       (double)(this_sample + max_isample - data->ntimelag)
                          / data->rate); // adjust for the start
-            end_time.gpsSeconds =
-              end_time.gpsSeconds
-              - trigger->ringdown_dur.gpsSeconds; // adjust for ringdown
-            end_time.gpsNanoSeconds =
-              end_time.gpsNanoSeconds - trigger->ringdown_dur.gpsNanoSeconds;
 
             trigger->end_time_sngl[data->ifo_mapping] = end_time;
             trigger->cohsnr = sqrt(trigger->cohsnr * trigger->cohsnr
@@ -874,6 +886,19 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
             g_assert(trigger->autochisq_len % 2 == 1);
             XLALGPSAdd(&epoch, -1.0 / data->rate
                         * (trigger->autochisq_len - 1) / 2);
+            // g_assert(data->ntimelag % 2 == 1);
+            // XLALGPSAdd(&epoch, -1.0 / data->rate
+            //             * ((data->ntimelag) / 2));
+
+
+            this_sec = epoch.gpsSeconds
+                        - cur_buftime.gpsSeconds;
+            this_nano = epoch.gpsNanoSeconds
+                        - cur_buftime.gpsNanoSeconds;
+                        
+            series_sample =
+              round(((double)this_sec + (double)(this_nano) / GST_SECOND)
+                    * data->rate) + data->ntimelag;
 
             // Allocate the memory
             // epoch = epoch
@@ -884,34 +909,54 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
             trigger->snr_series[data->ifo_mapping] =
               XLALCreateCOMPLEX8TimeSeries("snr", &epoch, 0., 1. / data->rate,
                                            &lalDimensionlessUnit,
-                                           trigger->autochisq_len);
+                                           jointer->autochisq_len);
 
-            this_sample =
-              round(((double)epoch.gpsSeconds + (double)(epoch.gpsNanoSeconds) / GST_SECOND)
-                    * data->rate);
+            int j = 0;
+            if(series_sample < 0) {
+                fprintf(stderr, "Missing start of snr_series, series_sample: %d", series_sample);
+                for (; series_sample < 0 && j < trigger->snr_series[data->ifo_mapping]->data->length; series_sample++) {
+                    trigger->snr_series[data->ifo_mapping]->data->data[j] = 0.0;
+                    j++;
+                }
+            }
 
             // the first data sample
             COMPLEX8 *curr_snglsnr =
-              &snglsnr[data->ntmplt * this_sample + tmplt_idx];
+              &snglsnr[data->ntmplt * series_sample + tmplt_idx];
 
             /* FIXME: speedup. Load snglsnr data into snr_series->data->data
              */
-            for (int j = 0;
-                 j < trigger->snr_series[data->ifo_mapping]->data->length;
+            for (;
+                 j < trigger->snr_series[data->ifo_mapping]->data->length && j + series_sample <= one_take_len;
                  j++) {
+                
                 trigger->snr_series[data->ifo_mapping]->data->data[j] =
                   *curr_snglsnr;
                 curr_snglsnr += data->ntmplt;
+
             }
+
+            if (j < trigger->snr_series[data->ifo_mapping]->data->length) {
+                fprintf(stderr, "Missing end of snr_series, series_sample: %d", series_sample);
+                for (;
+                    j < trigger->snr_series[data->ifo_mapping]->data->length;
+                    j++) {
+                    
+                    trigger->snr_series[data->ifo_mapping]->data->data[j] = 0.0;
+                }
+            }
+
 
             GST_DEBUG_OBJECT(
               jointer,
               "new ifos -> %s, this ifo %d, sample %d, tmplt_idx %d,"
-              "coinc ifo time %d, %d, max snr.re %f, snr.im %f, snr %f",
+              "coinc ifo time %d, %d, max snr.re %f, snr.im %f, snr %f"
+              "series epoch %d, %d, sample %d, series sample %d, series length %d, one_take_len %d",
               trigger->ifos, data->ifo_mapping, max_isample, tmplt_idx,
               end_time.gpsSeconds, end_time.gpsNanoSeconds, this_snr.re,
               this_snr.im,
-              sqrt(this_snr.re * this_snr.re + this_snr.im * this_snr.im));
+              sqrt(this_snr.re * this_snr.re + this_snr.im * this_snr.im),
+              epoch.gpsSeconds, epoch.gpsNanoSeconds, this_sample, series_sample, jointer->autochisq_len, one_take_len);
         }
         gst_adapter_flush(data->adapter, exe_size);
     }
@@ -1074,9 +1119,45 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
     return ret;
 }
 
-/* no set caps */
+enum {
+    PROP_0,
+    PROP_AUTOCHISQ_LEN
+};
 
-/* no set properties */
+static void trigger_jointer_set_property(GObject *object,
+                                      guint id,
+                                      const GValue *value,
+                                      GParamSpec *pspec) {
+
+    fprintf(
+          stderr,
+          "trigger set property");
+
+    TriggerJointer *element = TRIGGER_JOINTER(object);
+
+    GST_OBJECT_LOCK(element);
+    switch (id) {
+    case PROP_AUTOCHISQ_LEN: element->autochisq_len = g_value_get_int(value); break;
+
+    default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
+    }
+    GST_OBJECT_UNLOCK(element);
+}
+
+static void trigger_jointer_get_property(GObject *object,
+                                      guint id,
+                                      GValue *value,
+                                      GParamSpec *pspec) {
+    TriggerJointer *element = TRIGGER_JOINTER(object);
+
+    GST_OBJECT_LOCK(element);
+    switch (id) {
+    case PROP_AUTOCHISQ_LEN: g_value_set_int(value, element->autochisq_len); break;
+
+    default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
+    }
+    GST_OBJECT_UNLOCK(element);
+}
 
 /* initialization */
 
@@ -1119,6 +1200,8 @@ static void trigger_jointer_class_init(TriggerJointerClass *klass) {
 
     parent_class = g_type_class_ref(GST_TYPE_ELEMENT);
 
+    gobject_class->get_property = GST_DEBUG_FUNCPTR(trigger_jointer_get_property);
+    gobject_class->set_property = GST_DEBUG_FUNCPTR(trigger_jointer_set_property);
     gobject_class->dispose = GST_DEBUG_FUNCPTR(trigger_jointer_dispose);
     gstelement_class->request_new_pad =
       GST_DEBUG_FUNCPTR(trigger_jointer_request_new_pad);
@@ -1126,6 +1209,12 @@ static void trigger_jointer_class_init(TriggerJointerClass *klass) {
       GST_DEBUG_FUNCPTR(trigger_jointer_release_pad);
     gstelement_class->change_state =
       GST_DEBUG_FUNCPTR(trigger_jointer_change_state);
+    
+    g_object_class_install_property(
+      gobject_class, PROP_AUTOCHISQ_LEN,
+      g_param_spec_int("autochisq-len", "autochisq length", "autochisq length",
+                       0, G_MAXINT, 0,
+                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static void trigger_jointer_init(TriggerJointer *jointer,
@@ -1148,4 +1237,5 @@ static void trigger_jointer_init(TriggerJointer *jointer,
     jointer->is_snr_info_set    = FALSE;
     jointer->is_all_aligned     = FALSE;
     jointer->is_next_tstart_set = FALSE;
+    jointer->autochisq_len = JOINTER_PARAMS_NOT_INIT;
 }

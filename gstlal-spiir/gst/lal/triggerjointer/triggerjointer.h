@@ -56,6 +56,9 @@ typedef struct _Complex_F {
 #else
 #endif
 
+#define JOINTER_PARAMS_NOT_INIT -1
+#define JOINTER_PARAMS_INIT     1
+
 typedef struct _TriggerJointerCollectData TriggerJointerCollectData;
 typedef void (*TriggerJointerPeakfinder)(gpointer d_snglsnr, gint size);
 
@@ -74,6 +77,7 @@ struct _TriggerJointerCollectData {
     gint ntmplt;
     GstClockTime timelag; // IFO-dependent timelag in nano seconds
     gint ntimelag; // IFO-dependent timelag in offset (number of samples)
+    gint preserved_len;
     GstClockTime next_tstart; // expected next buffer time
     GstAdapter *adapter;
     GArray *flag_segments;
@@ -106,6 +110,8 @@ struct _TriggerJointer {
 
     GstClockTime t0;
     gint output_skymap;
+
+    gint autochisq_len;
 };
 
 struct _TriggerJointerClass {

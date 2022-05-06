@@ -109,6 +109,24 @@ def get_negative_from_xml(filename,
     return negative_latency
 
 
+def get_autochisq_len_from_xml(filename,
+                               contenthandler=DefaultContentHandler,
+                               verbose=False):
+    xmldoc = utils.load_filename(filename,
+                                 contenthandler=contenthandler,
+                                 verbose=verbose)
+    for root in (
+            elem
+            for elem in xmldoc.getElementsByTagName(ligolw.LIGO_LW.tagName)
+            if elem.hasAttribute(u"Name")
+            and elem.Name == "gstlal_iir_bank_Bank"):
+        autocorrelation_bank_real = array.get_array(root, 'autocorrelation_bank_real').array
+        autochisq_len = autocorrelation_bank_real.shape[1]
+        break
+
+    return autochisq_len
+
+
 # a modification from the cbc_template_fir.generate_templates
 def gen_whitened_fir_template(template_table,
                               approximant,
