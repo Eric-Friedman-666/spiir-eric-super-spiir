@@ -562,7 +562,7 @@ class FinalSink(object):
         ]
         ifo_fars_ok = [
             far < self.singlefar_veto_thresh and far > 0.
-            for far in candidate.far_sngl
+            for far in self.candidate.far_sngl
         ]
         if self.candidate.far < self.superevent_thresh:
             return sum([
