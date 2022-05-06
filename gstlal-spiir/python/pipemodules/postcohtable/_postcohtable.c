@@ -274,14 +274,13 @@ static struct PyGetSetDef getset[SINGLE + 10 * MAX_NIFO + 1] = {
 
 struct lal_array {
     Py_ssize_t offset;
-    Py_ssize_t index;
 };
 
 static PyObject *pylal_double_array_get(PyObject *obj, void *closure) {
     assert(obj);
     const struct lal_array *offset = closure;
-    
-    double *field = (double *)((void *)obj + offset->offset) + offset->index;
+
+    double *field = (double *)((void *)obj + offset->offset);
     return PyFloat_FromDouble(*field);
 }
 
@@ -292,7 +291,7 @@ static int pylal_double_array_set(PyObject *obj, PyObject *value, void *closure)
     double value_as_double  = PyFloat_AsDouble(value);
     if (PyErr_Occurred()) return -1;
 
-    double *field = (double *)((void *)obj + offset->offset) + offset->index;
+    double *field = (double *)((void *)obj + offset->offset);
     *field = value_as_double;
     return 0;
 }
@@ -301,7 +300,7 @@ static PyObject *pylal_float_array_get(PyObject *obj, void *closure) {
     assert(obj);
     const struct lal_array *offset = closure;
 
-    float *field = (float *)((void *)obj + offset->offset) + offset->index;
+    float *field = (float *)((void *)obj + offset->offset);
     return PyFloat_FromDouble((double)*field);
 }
 
@@ -312,7 +311,7 @@ static int pylal_float_array_set(PyObject *obj, PyObject *value, void *closure) 
     double value_as_double  = PyFloat_AsDouble(value);
     if (PyErr_Occurred()) return -1;
 
-    float *field = (float *)((void *)obj + offset->offset) + offset->index;
+    float *field = (float *)((void *)obj + offset->offset);
     *field = (float)value_as_double;
     return 0;
 }
@@ -321,7 +320,7 @@ static PyObject *pylal_int_array_get(PyObject *obj, void *closure) {
     assert(obj);
     const struct lal_array *offset = closure;
     
-    int *field = (int *)((void *)obj + offset->offset) + offset->index;
+    int *field = (int *)((void *)obj + offset->offset);
     return PyInt_FromLong((long)*field);
 }
 
@@ -332,7 +331,7 @@ static int pylal_int_array_set(PyObject *obj, PyObject *value, void *closure) {
     int value_as_long       = (int)PyInt_AsLong(value);
     if (PyErr_Occurred()) return -1;
 
-    int *field = (int *)((void *)obj + offset->offset) + offset->index;
+    int *field = (int *)((void *)obj + offset->offset);
     *field = (int)value_as_long;
     return 0;
 }
@@ -344,8 +343,7 @@ void prepare_getset() {
         char *name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         struct lal_array *closure =
           (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.chisq);
-        closure->index  = i;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.chisq[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         PyGetSetDef def  = { name, pylal_float_array_get, pylal_float_array_set,
@@ -355,8 +353,7 @@ void prepare_getset() {
         var          = "snglsnr_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr);
-        closure->index  = i;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
@@ -367,8 +364,7 @@ void prepare_getset() {
         var          = "coaphase_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase);
-        closure->index  = i;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
@@ -379,8 +375,7 @@ void prepare_getset() {
         var          = "far_sngl_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_sngl);
-        closure->index  = i;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
@@ -391,8 +386,7 @@ void prepare_getset() {
         var          = "far_1d_sngl_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1d_sngl);
-        closure->index  = i;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1d_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
@@ -403,8 +397,7 @@ void prepare_getset() {
         var          = "far_1w_sngl_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1w_sngl);
-        closure->index  = i;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1w_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
@@ -415,8 +408,7 @@ void prepare_getset() {
         var          = "far_2h_sngl_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_2h_sngl);
-        closure->index  = i;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_2h_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
@@ -427,8 +419,7 @@ void prepare_getset() {
         var          = "deff_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.deff);
-        closure->index  = i;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.deff[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
@@ -441,8 +432,7 @@ void prepare_getset() {
         var  = "end_time_sngl_";
         name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl);
-        closure->index  = i * 2;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
@@ -455,8 +445,7 @@ void prepare_getset() {
         var  = "end_time_ns_sngl_";
         name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
         closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl);
-        closure->index  = i * 2 + 1;
+        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[i]) + offsetof(LIGOTimeGPS, gpsNanoSeconds);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
