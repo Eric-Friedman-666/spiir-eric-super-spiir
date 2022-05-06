@@ -728,13 +728,13 @@ class FinalSink(object):
     def __set_far(self, candidate):
         candidate.far = (max(candidate.far_2h, candidate.far_1d,
                              candidate.far_1w)) * self.far_factor
-        candidate.far_sngl = [
+        far_sngl = [
             (max(fars) * self.far_factor)
             for fars in zip(candidate.far_2h_sngl, candidate.far_1d_sngl,
                             candidate.far_1w_sngl)
         ]
         for i, ifo in enumerate(pipe_macro.IFO_MAP):
-            setattr(candidate, "far_sngl_%s" % ifo, candidate.far_sngl[i])
+            setattr(candidate, "far_sngl_%s" % ifo, far_sngl[i])
 
     # def __lookback_far(self, candidate):
     # FIXME: hard-code to check event that's < 5e-7

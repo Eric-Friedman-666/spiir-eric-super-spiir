@@ -49,7 +49,8 @@
  */
 
 typedef struct {
-    PyObject_HEAD PostcohInspiralTable row;
+    PyObject_HEAD;
+    PostcohInspiralTable row;
     COMPLEX8TimeSeries *snr;
     PyObject *end_time_sngl;
     PyObject *snglsnr;
@@ -147,23 +148,23 @@ static PyMemberDef members[] = {
 
     // Things that are done single detector are ndarrays
     { "end_time_sngl", T_OBJECT_EX,
-      offsetof(gstlal_GSTLALPostcohInspiral, end_time_sngl), 0,
+      offsetof(gstlal_GSTLALPostcohInspiral, end_time_sngl), READONLY,
       "end_time_sngl" },
     { "snglsnr", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, snglsnr),
-      0, "snglsnr" },
+      READONLY, "snglsnr" },
     { "coaphase", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, coaphase),
-      0, "coaphase" },
-    { "chisq", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, chisq), 0,
+      READONLY, "coaphase" },
+    { "chisq", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, chisq), READONLY,
       "chisq" },
     { "far_sngl", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, far_sngl),
-      0, "far_sngl" },
+      READONLY, "far_sngl" },
     { "far_1w_sngl", T_OBJECT_EX,
-      offsetof(gstlal_GSTLALPostcohInspiral, far_1w_sngl), 0, "far_1w_sngl" },
+      offsetof(gstlal_GSTLALPostcohInspiral, far_1w_sngl), READONLY, "far_1w_sngl" },
     { "far_1d_sngl", T_OBJECT_EX,
-      offsetof(gstlal_GSTLALPostcohInspiral, far_1d_sngl), 0, "far_1d_sngl" },
+      offsetof(gstlal_GSTLALPostcohInspiral, far_1d_sngl), READONLY, "far_1d_sngl" },
     { "far_2h_sngl", T_OBJECT_EX,
-      offsetof(gstlal_GSTLALPostcohInspiral, far_2h_sngl), 0, "far_2h_sngl" },
-    { "deff", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, deff), 0,
+      offsetof(gstlal_GSTLALPostcohInspiral, far_2h_sngl), READONLY, "far_2h_sngl" },
+    { "deff", T_OBJECT_EX, offsetof(gstlal_GSTLALPostcohInspiral, deff), READONLY,
       "deff" },
     { NULL },
 };
@@ -178,6 +179,7 @@ static PyObject *pylal_inline_string_get(PyObject *obj, void *data) {
     char *s = (char *)obj + desc->offset;
 
     if ((ssize_t)strlen(s) >= desc->length) {
+        // FIXME: Handle this edge case or remove the test.
         /* something's wrong, obj probably isn't a valid address */
     }
 
@@ -526,18 +528,18 @@ static PyObject *__new__(PyTypeObject *type, PyObject *args, PyObject *kwds) {
 }
 
 static void __del__(PyObject *self) {
-    gstlal_GSTLALPostcohInspiral *typed_self =
+    gstlal_GSTLALPostcohInspiral *self_typed =
       (gstlal_GSTLALPostcohInspiral *)self;
-    if (typed_self->snr) XLALDestroyCOMPLEX8TimeSeries(typed_self->snr);
-    Py_DECREF(typed_self->end_time_sngl);
-    Py_DECREF(typed_self->snglsnr);
-    Py_DECREF(typed_self->coaphase);
-    Py_DECREF(typed_self->chisq);
-    Py_DECREF(typed_self->far_sngl);
-    Py_DECREF(typed_self->far_1w_sngl);
-    Py_DECREF(typed_self->far_1d_sngl);
-    Py_DECREF(typed_self->far_2h_sngl);
-    Py_DECREF(typed_self->deff);
+    if (self_typed->snr) XLALDestroyCOMPLEX8TimeSeries(self_typed->snr);
+    Py_DECREF(self_typed->end_time_sngl);
+    Py_DECREF(self_typed->snglsnr);
+    Py_DECREF(self_typed->coaphase);
+    Py_DECREF(self_typed->chisq);
+    Py_DECREF(self_typed->far_sngl);
+    Py_DECREF(self_typed->far_1w_sngl);
+    Py_DECREF(self_typed->far_1d_sngl);
+    Py_DECREF(self_typed->far_2h_sngl);
+    Py_DECREF(self_typed->deff);
     Py_TYPE(self)->tp_free(self);
 }
 
@@ -574,44 +576,35 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
                             "buffer overrun while copying postcoh row");
             return NULL;
         }
-        /* sorb the PostcohInspiralTable entry from the pipeline to the
-         * gstlal_GSTLALPostcohInspiral item*/
-        ((gstlal_GSTLALPostcohInspiral *)item)->row =
-          (PostcohInspiralTable)*gstlal_postcohinspiral;
 
-        // Set the single-detector arrays
-        ((gstlal_GSTLALPostcohInspiral *)item)->end_time_sngl =
-          PyArray_SimpleNewFromData(1, end_time_dims, NPY_INT,
-                                    gstlal_postcohinspiral->end_time_sngl);
-        ((gstlal_GSTLALPostcohInspiral *)item)->snglsnr =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    gstlal_postcohinspiral->snglsnr);
-        ((gstlal_GSTLALPostcohInspiral *)item)->coaphase =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    gstlal_postcohinspiral->coaphase);
-        ((gstlal_GSTLALPostcohInspiral *)item)->chisq =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    gstlal_postcohinspiral->chisq);
-        ((gstlal_GSTLALPostcohInspiral *)item)->far_sngl =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    gstlal_postcohinspiral->far_sngl);
-        ((gstlal_GSTLALPostcohInspiral *)item)->far_1w_sngl =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    gstlal_postcohinspiral->far_1w_sngl);
-        ((gstlal_GSTLALPostcohInspiral *)item)->far_1d_sngl =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    gstlal_postcohinspiral->far_1d_sngl);
-        ((gstlal_GSTLALPostcohInspiral *)item)->far_2h_sngl =
-          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                    gstlal_postcohinspiral->far_2h_sngl);
-        ((gstlal_GSTLALPostcohInspiral *)item)->deff =
-          PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE,
-                                    gstlal_postcohinspiral->deff);
+        gstlal_GSTLALPostcohInspiral *item_typed =
+          (gstlal_GSTLALPostcohInspiral *)item;
+
+        item_typed->row = *gstlal_postcohinspiral;
+
+        item_typed->end_time_sngl = PyArray_SimpleNewFromData(
+          2, end_time_dims, NPY_INT, item_typed->row.end_time_sngl);
+        item_typed->snglsnr = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.snglsnr);
+        item_typed->coaphase = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.coaphase);
+        item_typed->chisq =
+          PyArray_SimpleNewFromData(1, dims, NPY_FLOAT, item_typed->row.chisq);
+        item_typed->far_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.far_sngl);
+        item_typed->far_1w_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.far_1w_sngl);
+        item_typed->far_1d_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.far_1d_sngl);
+        item_typed->far_2h_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, item_typed->row.far_2h_sngl);
+        item_typed->deff =
+          PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, item_typed->row.deff);
 
         /* duplicate the SNR time series if we have length? */
-        if (gstlal_postcohinspiral->snr_length) {
-            const size_t nbytes = sizeof(gstlal_postcohinspiral->snr[0])
-                                  * gstlal_postcohinspiral->snr_length;
+        if (item_typed->row.snr_length) {
+            const size_t nbytes = sizeof(item_typed->row.snr[0])
+                                  * item_typed->row.snr_length;
             if (data + nbytes > end) {
                 Py_DECREF(item);
                 Py_DECREF(result);
@@ -620,20 +613,20 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
                 return NULL;
             }
             COMPLEX8TimeSeries *series = XLALCreateCOMPLEX8TimeSeries(
-              "snr", &gstlal_postcohinspiral->epoch, 0.,
-              gstlal_postcohinspiral->deltaT, &lalDimensionlessUnit,
-              gstlal_postcohinspiral->snr_length);
+              "snr", &item_typed->row.epoch, 0.,
+              item_typed->row.deltaT, &lalDimensionlessUnit,
+              item_typed->row.snr_length);
             if (!series) {
                 Py_DECREF(item);
                 Py_DECREF(result);
                 PyErr_SetString(PyExc_MemoryError, "out of memory");
                 return NULL;
             }
-            memcpy(series->data->data, gstlal_postcohinspiral->snr, nbytes);
+            memcpy(series->data->data, item_typed->row.snr, nbytes);
             data += nbytes;
-            ((gstlal_GSTLALPostcohInspiral *)item)->snr = series;
+            item_typed->snr = series;
         } else
-            ((gstlal_GSTLALPostcohInspiral *)item)->snr = NULL;
+            item_typed->snr = NULL;
 
         if (PyList_Append(result, item)) printf("append failure");
         Py_DECREF(item);
