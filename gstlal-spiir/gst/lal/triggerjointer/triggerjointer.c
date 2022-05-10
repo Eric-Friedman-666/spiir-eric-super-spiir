@@ -437,6 +437,7 @@ static GstPad *trigger_jointer_request_new_pad(GstElement *element,
         /* gap segments */
         data->flag_segments = g_array_new(FALSE, FALSE, sizeof(FlagSegment));
         data->ifo_name      = (gchar *)malloc(IFO_LEN * sizeof(gchar));
+        fflush(stdout); // Without this, a buffer overflow is detected on the next line, only when running the dockerfile. TODO fix this hack.
         strncpy(data->ifo_name, req_name + 4,
                 sizeof(data->ifo_name)); // 4 for snr_
         for (j = 0; j < MAX_NIFO; j++) {
@@ -821,14 +822,6 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
             /* not a zerolag trigger but an entry
              * just to indicate ifos */
             if (trigger->is_background != FLAG_FOREGROUND) continue;
-
-            GST_DEBUG_OBJECT(
-              jointer,
-              "test ifos -> %s, snr %f, coaphase %f, end_time_snglr %d   %d,"
-              "cohsnr %f",
-              trigger->ifos, trigger->snglsnr[data->ifo_mapping], trigger->coaphase[data->ifo_mapping], 
-              trigger->end_time_sngl[data->ifo_mapping].gpsSeconds, trigger->end_time_sngl[data->ifo_mapping].gpsNanoSeconds, trigger->cohsnr);
-
             max_isample = 0;
             max_abs_snr = 0;
             /* inserting the IFO into the IFO list */
@@ -1128,11 +1121,6 @@ static void trigger_jointer_set_property(GObject *object,
                                       guint id,
                                       const GValue *value,
                                       GParamSpec *pspec) {
-
-    fprintf(
-          stderr,
-          "trigger set property");
-
     TriggerJointer *element = TRIGGER_JOINTER(object);
 
     GST_OBJECT_LOCK(element);
