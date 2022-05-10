@@ -12,7 +12,7 @@ run pipeline:
   script:
     - |
       BRANCH=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
-      docker run --rm --entrypoint ./submit.sh spiir:${BRANCH} 0 1187006000 300 /artifacts/${BRANCH} ${CI_JOB_ID}
+      docker run -v cicd-artifacts:/artifacts --rm --entrypoint ./submit.sh spiir:${BRANCH} 0 1187006000 300 /artifacts/${BRANCH} ${CI_JOB_ID}
   dependencies:
     - build spiir
   tags:
