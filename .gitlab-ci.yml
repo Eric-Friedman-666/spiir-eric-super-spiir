@@ -6,7 +6,7 @@ build spiir:
     - cp /artifacts/iir_* . && cp /artifacts/*.patch .
     - DOCKER_BUILDKIT=1 docker build . -t spiir:${BRANCH} -f spiir.Dockerfile --progress=plain
   tags:
-    - ozgrav
+    - spiir,gpu
   
 run pipeline:
   script:
@@ -16,7 +16,7 @@ run pipeline:
   dependencies:
     - build spiir
   tags:
-    - ozgrav
+    - spiir,gpu
 
 check pep8 standards:
   image: python:2.7
