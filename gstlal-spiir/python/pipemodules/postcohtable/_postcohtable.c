@@ -169,40 +169,41 @@ static PyMemberDef members[] = {
     { NULL },
 };
 
-struct pylal__inline_string_description {
+struct py_interop__string_closure {
     Py_ssize_t offset;
     Py_ssize_t length;
 };
 
-static PyObject *pylal_inline_string_get(PyObject *obj, void *closure) {
+static PyObject *py_interop__string_get(PyObject *obj, void *closure) {
     assert(obj);
-    const struct pylal__inline_string_description *closure_typed = closure;
-    char *field = (char*)((void *)obj + closure_typed->offset);
+    const struct py_interop__string_closure *closure_typed = closure;
 
-    /* If this fails, something's wrong, obj probably isn't a valid address */
-    assert((ssize_t)strlen(field) < closure_typed->length); // TODO: Better to set an error and return -1 instead?
+    char *field = (char*)((void *)obj + closure_typed->offset);
+    assert(memchr(field, '\0', closure_typed->length));
 
     return PyString_FromString(field);
 }
 
-static int pylal_inline_string_set(PyObject *obj, PyObject *value, void *closure) {
+static int py_interop__string_set(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
-    assert(value); // TODO: Better to set an error and return -1 instead?
-    const struct pylal__inline_string_description *closure_typed = closure;
-    char *value_as_string                              = PyString_AsString(value);
+    assert(value); // TODO: Could set an error instead, this isn't supposed to be unreachable
+    const struct py_interop__string_closure *closure_typed = closure;
+    char *value_as_string = PyString_AsString(value);
     if (PyErr_Occurred()) return -1;
-    char *field = (char*)((void *)obj + closure_typed->offset);
-
-    if ((ssize_t)strlen(value_as_string) >= closure_typed->length) {
+    if ((Py_ssize_t)memchr(value_as_string, '\0', closure_typed->length) >= closure_typed->length) {
         PyErr_Format(PyExc_ValueError, "string too long \'%s\'", value_as_string);
         return -1;
     }
 
+    char *field = (char *)((void *)obj + closure_typed->offset);
+    assert(memchr(field, '\0', closure_typed->length));
+
+    // TODO: replace strcpy with strncpy
     strcpy(field, value_as_string);
     return 0;
 }
 
-static PyObject *snr_component_get(PyObject *obj, void *closure) {
+static PyObject *py_interop__snr_series_get(PyObject *obj, void *closure) {
     assert(obj);
     COMPLEX8TimeSeries *snr = ((gstlal_GSTLALPostcohInspiral *)obj)->snr;
     const char *name        = closure;
@@ -241,222 +242,218 @@ static PyObject *snr_component_get(PyObject *obj, void *closure) {
     return NULL;
 }
 
-#define SINGLE 11
-static struct PyGetSetDef getset[SINGLE + 10 * MAX_NIFO + 1] = {
-    { "ifos", pylal_inline_string_get, pylal_inline_string_set, "ifos",
-      &(struct pylal__inline_string_description) {
+#define NUM_SINGLE_FIELDS 11
+#define NUM_FIELDS_PER_IFO 10
+// TODO: Move into prepare_getset
+static struct PyGetSetDef getset[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO + 1] = {
+    { "ifos", py_interop__string_get, py_interop__string_set, "ifos",
+      &(struct py_interop__string_closure) {
         offsetof(gstlal_GSTLALPostcohInspiral, row.ifos), MAX_ALLIFO_LEN } },
-    { "pivotal_ifo", pylal_inline_string_get, pylal_inline_string_set,
+    { "pivotal_ifo", py_interop__string_get, py_interop__string_set,
       "pivotal_ifo",
-      &(struct pylal__inline_string_description) {
+      &(struct py_interop__string_closure) {
         offsetof(gstlal_GSTLALPostcohInspiral, row.pivotal_ifo),
         MAX_IFO_LEN } },
-    { "skymap_fname", pylal_inline_string_get, pylal_inline_string_set,
+    { "skymap_fname", py_interop__string_get, py_interop__string_set,
       "skymap_fname",
-      &(struct pylal__inline_string_description) {
+      &(struct py_interop__string_closure) {
         offsetof(gstlal_GSTLALPostcohInspiral, row.skymap_fname),
         MAX_SKYMAP_FNAME_LEN } },
-    { "_snr_name", snr_component_get, NULL, ".snr.name", "_snr_name" },
-    { "_snr_epoch_gpsSeconds", snr_component_get, NULL, ".snr.epoch.gpsSeconds",
+    { "_snr_name", py_interop__snr_series_get, NULL, ".snr.name", "_snr_name" },
+    { "_snr_epoch_gpsSeconds", py_interop__snr_series_get, NULL, ".snr.epoch.gpsSeconds",
       "_snr_epoch_gpsSeconds" },
-    { "_snr_epoch_gpsNanoSeconds", snr_component_get, NULL,
+    { "_snr_epoch_gpsNanoSeconds", py_interop__snr_series_get, NULL,
       ".snr.epoch.gpsNanoSeconds", "_snr_epoch_gpsNanoSeconds" },
-    { "_snr_f0", snr_component_get, NULL, ".snr.f0", "_snr_f0" },
-    { "_snr_deltaT", snr_component_get, NULL, ".snr.deltaT", "_snr_deltaT" },
-    { "_snr_sampleUnits", snr_component_get, NULL, ".snr.sampleUnits",
+    { "_snr_f0", py_interop__snr_series_get, NULL, ".snr.f0", "_snr_f0" },
+    { "_snr_deltaT", py_interop__snr_series_get, NULL, ".snr.deltaT", "_snr_deltaT" },
+    { "_snr_sampleUnits", py_interop__snr_series_get, NULL, ".snr.sampleUnits",
       "_snr_sampleUnits" },
-    { "_snr_data_length", snr_component_get, NULL, ".snr.data.length",
+    { "_snr_data_length", py_interop__snr_series_get, NULL, ".snr.data.length",
       "_snr_data_length" },
-    { "_snr_data", snr_component_get, NULL, ".snr.data", "_snr_data" },
+    { "_snr_data", py_interop__snr_series_get, NULL, ".snr.data", "_snr_data" },
 
     { NULL }
 };
 
-struct lal_array {
-    Py_ssize_t offset;
-};
+static Py_ssize_t closures[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO];
 
-static PyObject *pylal_double_array_get(PyObject *obj, void *closure) {
+static PyObject *py_interop__double_array_get(PyObject *obj, void *closure) {
     assert(obj);
-    const struct lal_array *offset = closure;
+    const Py_ssize_t *offset = closure;
 
-    double *field = (double *)((void *)obj + offset->offset);
+    double *field = (double *)((void *)obj + *offset);
     return PyFloat_FromDouble(*field);
 }
 
-static int pylal_double_array_set(PyObject *obj, PyObject *value, void *closure) {
+static int py_interop__double_array_set(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
     assert(value);
-    const struct lal_array *offset = closure;
+    const Py_ssize_t *offset = closure;
     double value_as_double  = PyFloat_AsDouble(value);
     if (PyErr_Occurred()) return -1;
 
-    double *field = (double *)((void *)obj + offset->offset);
+    double *field = (double *)((void *)obj + *offset);
     *field = value_as_double;
     return 0;
 }
 
-static PyObject *pylal_float_array_get(PyObject *obj, void *closure) {
+static PyObject *py_interop__float_array_get(PyObject *obj, void *closure) {
     assert(obj);
-    const struct lal_array *offset = closure;
+    const Py_ssize_t *offset = closure;
 
-    float *field = (float *)((void *)obj + offset->offset);
+    float *field = (float *)((void *)obj + *offset);
     return PyFloat_FromDouble((double)*field);
 }
 
-static int pylal_float_array_set(PyObject *obj, PyObject *value, void *closure) {
+static int py_interop__float_array_set(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
     assert(value);
-    const struct lal_array *offset = closure;
+    const Py_ssize_t *offset = closure;
     double value_as_double  = PyFloat_AsDouble(value);
     if (PyErr_Occurred()) return -1;
 
-    float *field = (float *)((void *)obj + offset->offset);
+    float *field = (float *)((void *)obj + *offset);
     *field = (float)value_as_double;
     return 0;
 }
 
-static PyObject *pylal_int_array_get(PyObject *obj, void *closure) {
+static PyObject *py_interop__int_array_get(PyObject *obj, void *closure) {
     assert(obj);
-    const struct lal_array *offset = closure;
+    const Py_ssize_t *offset = closure;
     
-    int *field = (int *)((void *)obj + offset->offset);
+    int *field = (int *)((void *)obj + *offset);
     return PyInt_FromLong((long)*field);
 }
 
-static int pylal_int_array_set(PyObject *obj, PyObject *value, void *closure) {
+static int py_interop__int_array_set(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
     assert(value);
-    const struct lal_array *offset = closure;
+    const Py_ssize_t *offset = closure;
     int value_as_long       = (int)PyInt_AsLong(value);
     if (PyErr_Occurred()) return -1;
 
-    int *field = (int *)((void *)obj + offset->offset);
+    int *field = (int *)((void *)obj + *offset);
     *field = (int)value_as_long;
     return 0;
 }
 
+// Allocate a 2D array of max size for names
+//#define MAX_NAME_LENGTH 15
+//char[][] names = char[SINGLE + 10 * MAX_NIFO][MAX_POSTCOHTABLE_NAME_LENGTH]
+// TODO: Replace all mallocs with static memory.
 void prepare_getset() {
-    int offset = SINGLE;
+    int cur_ifo_field = 0;
     for (int i = 0; i < MAX_NIFO; ++i) {
+        // These names aer unclear (move to function before renaming)
+        // var, name, IFOMap[i] (could move that to a function)
         char *var  = "chisq_";
+        // Rearrange IFOMap and var here for clarity
         char *name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        struct lal_array *closure =
-          (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.chisq[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
-        PyGetSetDef def  = { name, pylal_float_array_get, pylal_float_array_set,
-                            name, closure };
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.chisq[i]);
+        PyGetSetDef def  = { name, py_interop__float_array_get, py_interop__float_array_set,
+                            name, &closures[cur_ifo_field] };
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var          = "snglsnr_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr[i]);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var          = "coaphase_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase[i]);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var          = "far_sngl_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.far_sngl[i]);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var          = "far_1d_sngl_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1d_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1d_sngl[i]);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var          = "far_1w_sngl_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1w_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.far_1w_sngl[i]);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var          = "far_2h_sngl_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.far_2h_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.far_2h_sngl[i]);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var          = "deff_";
         name         = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.deff[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
-        def.get          = pylal_double_array_get;
-        def.set          = pylal_double_array_set;
+        def.get          = py_interop__double_array_get;
+        def.set          = py_interop__double_array_set;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.deff[i]);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var  = "end_time_sngl_";
         name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[i]);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
-        def.get          = pylal_int_array_get;
-        def.set          = pylal_int_array_set;
+        def.get          = py_interop__int_array_get;
+        def.set          = py_interop__int_array_set;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[i]);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
 
         var  = "end_time_ns_sngl_";
         name = (char *)malloc(strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct lal_array *)malloc(sizeof(struct lal_array));
-        closure->offset = offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[i]) + offsetof(LIGOTimeGPS, gpsNanoSeconds);
         strcpy(name, var);
         strcat(name, IFOMap[i]);
         def.name         = name;
-        def.get          = pylal_int_array_get;
-        def.set          = pylal_int_array_set;
+        def.get          = py_interop__int_array_get;
+        def.set          = py_interop__int_array_set;
         def.doc          = name;
-        def.closure      = closure;
-        getset[offset++] = def;
+        closures[cur_ifo_field] = offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[i]) + offsetof(LIGOTimeGPS, gpsNanoSeconds);
+        def.closure      = &closures[cur_ifo_field];
+        getset[NUM_SINGLE_FIELDS + cur_ifo_field++] = def;
     }
     PyGetSetDef def = { NULL };
-    getset[offset]  = def;
+    getset[NUM_SINGLE_FIELDS + cur_ifo_field]  = def;
 }
 
 // static Py_ssize_t getreadbuffer(PyObject *self, Py_ssize_t segment, void
@@ -676,14 +673,17 @@ PyMODINIT_FUNC init_postcohtable(void) {
         Py_INCREF(str);
         PyList_SetItem(ifo_map, i, str);
     }
+    // TODO: The return value should be checked in case it failed
+    // It only decrements the ref count on success
+    // If it fails we should exit the program
     PyModule_AddObject(module, "ifo_map", ifo_map);
 
     /* Cached ID types */
-    // process_id_type = pylal_get_ilwdchar_class("process", "process_id");
-    // row_event_id_type = pylal_get_ilwdchar_class("postcoh", "event_id");
+    // process_id_type = py_interop__get_ilwdchar_class("process", "process_id");
+    // row_event_id_type = py_interop__get_ilwdchar_class("postcoh", "event_id");
 
     /* PostcohInspiralTable */
-    //_gstlal_GSTLALPostcohInspiral_Type = &pylal_postcohinspiraltable_type;
+    //_gstlal_GSTLALPostcohInspiral_Type = &py_interop__postcohinspiraltable_type;
     if (PyType_Ready(&gstlal_GSTLALPostcohInspiral_Type) < 0) return;
     Py_INCREF(&gstlal_GSTLALPostcohInspiral_Type);
     PyModule_AddObject(module, "GSTLALPostcohInspiral",
