@@ -2,7 +2,7 @@ image: docker:20.10.14
 
 build spiir:
   script:
-    - COMMIT_ID=$(CI_COMMIT_BRANCH:-$CI_COMMIT_REF_SLUG)
+    - COMMIT_ID=${CI_COMMIT_BRANCH:-$CI_COMMIT_REF_SLUG}
     - BRANCH=$(echo $COMMIT_ID | sed -e 's?[_|/]?-?g')
     - cp /artifacts/iir_* . && cp /artifacts/*.patch .
     - DOCKER_BUILDKIT=1 docker build . -t spiir:${BRANCH} -f spiir.Dockerfile --progress=plain
