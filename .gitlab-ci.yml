@@ -2,7 +2,8 @@ image: docker:20.10.14
 
 build spiir:
   script:
-    - BRANCH=$(echo $CI_COMMIT_BRANCH | sed -e 's?[_|/]?-?g')
+    - COMMIT_ID=$(CI_COMMIT_BRANCH:-$CI_COMMIT_REF_SLUG)
+    - BRANCH=$(echo $COMMIT_ID | sed -e 's?[_|/]?-?g')
     - cp /artifacts/iir_* . && cp /artifacts/*.patch .
     - DOCKER_BUILDKIT=1 docker build . -t spiir:${BRANCH} -f spiir.Dockerfile --progress=plain
   tags:
@@ -22,7 +23,7 @@ check pep8 standards:
     - merge_requests
 
 check clang standards:
-  image: ubuntu
+  image: ubuntu:22.04
   before_script:
     - apt-get update && apt-get install -y clang-format-6.0 git-core
   script:
