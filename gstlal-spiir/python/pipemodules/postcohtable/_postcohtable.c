@@ -198,8 +198,7 @@ static int py_interop__string_set(PyObject *obj, PyObject *value, void *closure)
     char *field = (char *)((void *)obj + closure_typed->offset);
     assert(memchr(field, '\0', closure_typed->length));
 
-    // TODO: replace strcpy with strncpy
-    strcpy(field, value_as_string);
+    strncpy(field, value_as_string, closure_typed->length);
     return 0;
 }
 
@@ -245,39 +244,12 @@ static PyObject *py_interop__snr_series_get(PyObject *obj, void *closure) {
 #define NUM_SINGLE_FIELDS 11
 #define NUM_FIELDS_PER_IFO 10
 #define MAX_FIELD_NAME_LENGTH 25
-// TODO: Move into prepare_getset
-static struct PyGetSetDef getset[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO + 1] = {
-    { "ifos", py_interop__string_get, py_interop__string_set, "ifos",
-      &(struct py_interop__string_closure) {
-        offsetof(gstlal_GSTLALPostcohInspiral, row.ifos), MAX_ALLIFO_LEN } },
-    { "pivotal_ifo", py_interop__string_get, py_interop__string_set,
-      "pivotal_ifo",
-      &(struct py_interop__string_closure) {
-        offsetof(gstlal_GSTLALPostcohInspiral, row.pivotal_ifo),
-        MAX_IFO_LEN } },
-    { "skymap_fname", py_interop__string_get, py_interop__string_set,
-      "skymap_fname",
-      &(struct py_interop__string_closure) {
-        offsetof(gstlal_GSTLALPostcohInspiral, row.skymap_fname),
-        MAX_SKYMAP_FNAME_LEN } },
-    { "_snr_name", py_interop__snr_series_get, NULL, ".snr.name", "_snr_name" },
-    { "_snr_epoch_gpsSeconds", py_interop__snr_series_get, NULL, ".snr.epoch.gpsSeconds",
-      "_snr_epoch_gpsSeconds" },
-    { "_snr_epoch_gpsNanoSeconds", py_interop__snr_series_get, NULL,
-      ".snr.epoch.gpsNanoSeconds", "_snr_epoch_gpsNanoSeconds" },
-    { "_snr_f0", py_interop__snr_series_get, NULL, ".snr.f0", "_snr_f0" },
-    { "_snr_deltaT", py_interop__snr_series_get, NULL, ".snr.deltaT", "_snr_deltaT" },
-    { "_snr_sampleUnits", py_interop__snr_series_get, NULL, ".snr.sampleUnits",
-      "_snr_sampleUnits" },
-    { "_snr_data_length", py_interop__snr_series_get, NULL, ".snr.data.length",
-      "_snr_data_length" },
-    { "_snr_data", py_interop__snr_series_get, NULL, ".snr.data", "_snr_data" },
+static struct PyGetSetDef getset[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO + 1] = { { NULL } };
+static char field_names[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO][MAX_FIELD_NAME_LENGTH + 1 + MAX_IFO_LEN];
 
-    { NULL }
-};
-
-static char names[NUM_FIELDS_PER_IFO * MAX_NIFO][MAX_FIELD_NAME_LENGTH];
-static Py_ssize_t closures[NUM_FIELDS_PER_IFO * MAX_NIFO];
+#define NUM_STRING_FIELDS 3
+static struct py_interop__string_closure string_closures[NUM_STRING_FIELDS];
+static Py_ssize_t numeric_closures[NUM_FIELDS_PER_IFO * MAX_NIFO];
 
 static PyObject *py_interop__double_array_get(PyObject *obj, void *closure) {
     assert(obj);
@@ -339,91 +311,104 @@ static int py_interop__int_array_set(PyObject *obj, PyObject *value, void *closu
     return 0;
 }
 
-static void set_ifo_field_name(char *name, int ifo_id, int field_index) {
-    strncpy(&names[field_index][0], name, MAX_FIELD_NAME_LENGTH - (MAX_IFO_LEN + 1));
-    strncat(&names[field_index][0], "_", 1);
-    strncat(&names[field_index][0], IFOMap[ifo_id], MAX_IFO_LEN);
+static void set_field_name(char *name, int field_idx) {
+    strncpy(&field_names[field_idx][0], name, MAX_FIELD_NAME_LENGTH);
 }
 
-static void set_ifo_field_def(char *name, Py_ssize_t offset, getter get, setter set, int ifo_id, int field_index) {
-    set_ifo_field_name(name, ifo_id, field_index);
-    closures[field_index] = offset;
-    getset[NUM_SINGLE_FIELDS + field_index] = (struct PyGetSetDef) { &names[field_index][0], get, set,
-                        &names[field_index][0], &closures[field_index] };
+static void set_ifo_field_name(char *name, int ifo_id, int field_idx) {
+    set_field_name(name, field_idx);
+    strncat(&field_names[field_idx][0], "_", 1);
+    strncat(&field_names[field_idx][0], IFOMap[ifo_id], MAX_IFO_LEN);
 }
 
-// Allocate a 2D array of max size for names
-//#define MAX_NAME_LENGTH 15
-//char[][] names = char[SINGLE + 10 * MAX_NIFO][MAX_POSTCOHTABLE_NAME_LENGTH]
-// TODO: Replace all mallocs with static memory.
+static void set_field_def(getter get, setter set, void *closure, int field_idx) {
+    PyGetSetDef def = { &field_names[field_idx][0], get, set, &field_names[field_idx][0], closure };
+    getset[field_idx] = def;
+}
+
+static void set_string_field_def(char *name, int string_field_idx, int field_idx) {
+    set_field_name(name, field_idx);
+    set_field_def(py_interop__string_get, py_interop__string_set, &string_closures[string_field_idx], field_idx);
+}
+
+static void set_snr_field_def(char *name, int field_idx) {
+    set_field_name(name, field_idx);
+    set_field_def(py_interop__snr_series_get, NULL, &field_names[field_idx][0], field_idx);
+}
+
+static void set_numeric_field_def(Py_ssize_t offset, getter get, setter set, int numeric_field_idx, int field_idx) {
+    numeric_closures[numeric_field_idx] = offset;
+    set_field_def(get, set, &numeric_closures[numeric_field_idx], field_idx);
+}
+
+static void set_float_field_def(Py_ssize_t offset, int numeric_field_idx, int field_idx) {
+    set_numeric_field_def(offset, py_interop__float_array_get, py_interop__float_array_set, numeric_field_idx, field_idx);
+}
+
+static void set_double_field_def(Py_ssize_t offset, int numeric_field_idx, int field_idx) {
+    set_numeric_field_def(offset, py_interop__double_array_get, py_interop__double_array_set, numeric_field_idx, field_idx);
+}
+
+static void set_int_field_def(Py_ssize_t offset, int numeric_field_idx, int field_idx) {
+    set_numeric_field_def(offset, py_interop__int_array_get, py_interop__int_array_set, numeric_field_idx, field_idx);
+}
+
 void prepare_getset() {
-    int cur_ifo_field = 0;
+    int field_idx = 0;
+    int string_field_idx = 0;
+    int numeric_field_idx = 0;
+
+    string_closures[string_field_idx] = (struct py_interop__string_closure) { offsetof(gstlal_GSTLALPostcohInspiral, row.ifos), MAX_ALLIFO_LEN };
+    set_string_field_def("ifos", string_field_idx++, field_idx++);
+
+    string_closures[string_field_idx] = (struct py_interop__string_closure) { offsetof(gstlal_GSTLALPostcohInspiral, row.pivotal_ifo), MAX_IFO_LEN };
+    set_string_field_def("pivotal_ifo", string_field_idx++, field_idx++);
+
+    string_closures[string_field_idx] = (struct py_interop__string_closure) { offsetof(gstlal_GSTLALPostcohInspiral, row.skymap_fname), MAX_SKYMAP_FNAME_LEN };
+    set_string_field_def("skymap_fname", string_field_idx++, field_idx++);
+
+    set_snr_field_def("_snr_name", field_idx++);
+    set_snr_field_def("_snr_epoch_gpsSeconds", field_idx++);
+    set_snr_field_def("_snr_epoch_gpsNanoSeconds", field_idx++);
+    set_snr_field_def("_snr_f0", field_idx++);
+    set_snr_field_def("_snr_deltaT", field_idx++);
+    set_snr_field_def("_snr_sampleUnits", field_idx++);
+    set_snr_field_def("_snr_data_length", field_idx++);
+    set_snr_field_def("_snr_data", field_idx++);
+
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        // These names aer unclear (move to function before renaming)
-        // var, name, IFOMap[ifo_id] (could move that to a function)
-        set_ifo_field_def("chisq",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.chisq[ifo_id]),
-                          py_interop__float_array_get,
-                          py_interop__float_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("snglsnr",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr[ifo_id]),
-                          py_interop__float_array_get,
-                          py_interop__float_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("coaphase",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase[ifo_id]),
-                          py_interop__float_array_get,
-                          py_interop__float_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("far_sngl",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.far_sngl[ifo_id]),
-                          py_interop__float_array_get,
-                          py_interop__float_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("far_1d_sngl",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.far_1d_sngl[ifo_id]),
-                          py_interop__float_array_get,
-                          py_interop__float_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("far_1w_sngl",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.far_1w_sngl[ifo_id]),
-                          py_interop__float_array_get,
-                          py_interop__float_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("far_2h_sngl",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.far_2h_sngl[ifo_id]),
-                          py_interop__float_array_get,
-                          py_interop__float_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("deff",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.deff[ifo_id]),
-                          py_interop__double_array_get,
-                          py_interop__double_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("end_time_sngl",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[ifo_id]),
-                          py_interop__int_array_get,
-                          py_interop__int_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
-        set_ifo_field_def("end_time_ns_sngl",
-                          offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[ifo_id]) + offsetof(LIGOTimeGPS, gpsNanoSeconds),
-                          py_interop__int_array_get,
-                          py_interop__int_array_set,
-                          ifo_id,
-                          cur_ifo_field++);
+        set_ifo_field_name("chisq", ifo_id, field_idx);
+        set_float_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.chisq[ifo_id]), numeric_field_idx++, field_idx++);
+        
+        set_ifo_field_name("snglsnr", ifo_id, field_idx);
+        set_float_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.snglsnr[ifo_id]), numeric_field_idx++, field_idx++);
+
+        set_ifo_field_name("coaphase", ifo_id, field_idx);
+        set_float_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.coaphase[ifo_id]), numeric_field_idx++, field_idx++);
+
+        set_ifo_field_name("far_sngl", ifo_id, field_idx);
+        set_float_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.far_sngl[ifo_id]), numeric_field_idx++, field_idx++);
+
+        set_ifo_field_name("far_1d_sngl", ifo_id, field_idx);
+        set_float_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.far_1d_sngl[ifo_id]), numeric_field_idx++, field_idx++);
+
+        set_ifo_field_name("far_1w_sngl", ifo_id, field_idx);
+        set_float_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.far_1w_sngl[ifo_id]), numeric_field_idx++, field_idx++);
+
+        set_ifo_field_name("far_2h_sngl", ifo_id, field_idx);
+        set_float_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.far_2h_sngl[ifo_id]), numeric_field_idx++, field_idx++);
+
+        set_ifo_field_name("deff", ifo_id, field_idx);
+        set_double_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.deff[ifo_id]), numeric_field_idx++, field_idx++);
+
+        set_ifo_field_name("end_time_sngl", ifo_id, field_idx);
+        set_int_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[ifo_id]), numeric_field_idx++, field_idx++);
+
+        set_ifo_field_name("end_time_ns_sngl", ifo_id, field_idx);
+        set_int_field_def(offsetof(gstlal_GSTLALPostcohInspiral, row.end_time_sngl[ifo_id]) + offsetof(LIGOTimeGPS, gpsNanoSeconds), numeric_field_idx++, field_idx++);
     }
     PyGetSetDef def = { NULL };
-    getset[NUM_SINGLE_FIELDS + cur_ifo_field]  = def;
+    getset[field_idx]  = def;
 }
 
 // static Py_ssize_t getreadbuffer(PyObject *self, Py_ssize_t segment, void
