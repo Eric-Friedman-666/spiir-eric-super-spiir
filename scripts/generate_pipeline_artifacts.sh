@@ -66,8 +66,5 @@ else
     gstlal_postcoh_gen_detrsp_map --ifo-horizons H1:111,L1:212,V1:56,K1:56 --chealpix-order 5 --output-coh-coeff ${dir}/H1L1V1K1_detrsp_map.xml --output-prob-coeff ${dir}/H1L1V1K1_prob_map.xml --gps-time ${start}
 fi
 
-# # # generate spiir bank
-# # gstlal_iir_bank --reference-psd ${PSD} --template-bank /fred/oz016/manoj/test/new_split/${SBNK}/${IFO}_split_bank/${IFO}-GSTLAL_SPLIT_BANK_${BNK}-0-0.xml.gz --flow 15.0 --waveform-domain FD --padding 1.3 --instrument ${IFO} --output gstlal_iir_bank_${SUF}/iir_${IFO}-GSTLAL_SPLIT_BANK_${BNK}-a1-0-0.xml.gz --autocorrelation-length 351 --sampleRate 2048.0 -v --epsilon-options "'{"epsilon_start":1.0,"nround_max":25,"initial_overlap_min":0.95,"b0_optimized_overlap_min":0.'"${BOPTPERC}"',"epsilon_factor":1.2,"filters_max":350}'" --optimizer-options "'{"verbose":true,"passes":16,"indv":true,"hessian":true}'" --approximant ${APPROX} --negative-latency ${NEGLAT}"
-
-# # # generate fits from skymap binary
-# # gstlal_postcoh_skymap2fits --output-cohsnr cohsnr_skymap.fits.gz --output-prob spiir.fits.gz --cuda-postcoh-detrsp-fname H1L1V1K1_prob_map.xml --event-id 0 --event-time 1187006432 H1L1_skymap/H1_1187006432_89355469_3_29
+# # generate fits from skymap binary
+# gstlal_postcoh_skymap2fits --output-cohsnr cohsnr_skymap.fits.gz --output-prob spiir.fits.gz --cuda-postcoh-detrsp-fname H1L1V1K1_prob_map.xml --event-id 0 --event-time 1187006432 H1L1_skymap/H1_1187006432_89355469_3_29

@@ -1,19 +1,16 @@
 import argparse
 import concurrent.futures
-import itertools
 import logging
 import multiprocessing
 import subprocess
 import sys
-import shutil
 from functools import partial
 from pathlib import Path
-from typing import List
 from tqdm import tqdm
 import pandas as pd
 import re
 
-from glue.ligolw import ligolw, lsctables, array, param, utils, types
+from glue.ligolw import ligolw, lsctables, array, param, utils
 
 # FIXME:  require calling code to provide the content handler
 class DefaultContentHandler(ligolw.LIGOLWContentHandler):
@@ -99,8 +96,7 @@ if __name__ == "__main__":
         1 <= args.n_workers <= multiprocessing.cpu_count()
     ), f"Program requires 1 <= n <= {multiprocessing.cpu_count()}"
 
-    print(args.data_dir)
-    # get filepaths to zerolag xml.gz files (assumed specific depth of 3)
+    # get filepaths to coinc files
     file_paths = list([f for f in args.data_dir.glob(f"{args.run_name}/*_*_*_*.xml")])
     # file_paths = [f for f in file_paths if re.search(r'_\d{9,12}_\d{1}_\d{3}\.xml$', f)]
     if len(file_paths) == 0:
@@ -109,9 +105,10 @@ if __name__ == "__main__":
     else:
         logger.debug(f"Number of files detected: {len(file_paths)}")
 
+    # find path for zerolag file
     zerolags_path = list([f for f in args.data_dir.glob(f"{args.run_name}/*_*_*_zerolag_*_*.xml.gz")])[0]
 
-    # multiprocessing generation
+    # subprocess spawner
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.n_workers) as executor:
         with tqdm(
             desc=f"Generating fits from coinc XML files (n_workers={args.n_workers})",
@@ -121,12 +118,13 @@ if __name__ == "__main__":
         ) as progress:
             futures = {}
             for i, file_path in enumerate(file_paths):
-
+                # get time of coinc
                 result = re.search(r"([0-9]+)_[0-9]+_[0-9]+\.xml", str(file_path))
                 time = int(result.group(1))
 
+                # filter coincs to cohsnr's greater than 12
                 found = False
-                proc = subprocess.Popen(['ligolw_print', '-c', 'cohsnr', '-c', 'end_time', f'{zerolags_path}'], stdout=subprocess.PIPE)
+                proc = subprocess.Popen(['ligolw_print', '-c', 'cohsnr', '-c', 'end_time', f'{zerolags_path}'], stdout=subprocess.PIPE) # redundant compute, TODO only read once
                 while True:
                     line = proc.stdout.readline()
                     if not line:
@@ -140,37 +138,21 @@ if __name__ == "__main__":
                 if not found:
                     continue
 
-                # build subprocess command for lscsoft-glue's ligolw_print
+                # generate fits with and without the snr series
                 out_path = str(file_path) + "_out"
                 cmd = ["bayestar-localize-coincs", str(file_path), args.psd, "-o", out_path, "--disable-snr-series"]
                 logger.debug(f"subprocess cmd: {' '.join(cmd)}")
 
-                ## mypy does not like adding custom attributes after instantiation
-                ## alternative solution to below uses typing.TYPE_CHECKING
-                ## https://stackoverflow.com/a/62501800
-
                 # submit to thread pool and store as {future: fh} for later retrieval
                 futures[executor.submit(partial(subprocess.run), cmd)] = (time, out_path)
 
-                # build subprocess command for lscsoft-glue's ligolw_print
                 out_path = str(file_path) + "_out_snr"
                 cmd = ["bayestar-localize-coincs", str(file_path), args.psd, "-o", out_path, "--enable-snr-series"]
                 logger.debug(f"subprocess cmd: {' '.join(cmd)}")
 
-                ## mypy does not like adding custom attributes after instantiation
-                ## alternative solution to below uses typing.TYPE_CHECKING
-                ## https://stackoverflow.com/a/62501800
-
-                # submit to thread pool and store as {future: fh} for later retrieval
                 futures[executor.submit(partial(subprocess.run), cmd)] = (time, out_path)
-                # can we add stderr=f_log above? to write errors direct to file logger
 
-                # store file handler on custom attribute to close it later
-                # setattr(future, fh, typing.cast(typing.BinaryIO, fh))
-                # future.fh = typing.cast(typing.BinaryIO, fh)  # for type checks
-                # future.add_done_callback(lambda f: f.fh.close())
-                # futures.append(future)
-
+                # plot snr_series' in coinc xml and save as png
                 xmldoc = utils.load_filename(file_path,
                                  contenthandler=DefaultContentHandler,
                                  verbose=False)
@@ -212,8 +194,7 @@ if __name__ == "__main__":
                     logger.debug(f"Number of fits files detected: {len(fits_files)}")
                     subfutures = {}
                     for i, fits_path in enumerate(fits_files):
-                        out_path = out_path+"_bayestar.png"
-
+                        # find coordinates of injection associated with coinc
                         long = 0
                         lat = 0
                         found = False
@@ -230,13 +211,15 @@ if __name__ == "__main__":
                                 found = True
                                 break
 
-                        cmd = ["ligo-skymap-plot", str(fits_path), "-o", out_path, "--annotate", "--contour", "50", "90"]
+                        # plot skymap of coinc's .fits and save as png
+                        skymap_path = out_path+"_bayestar.png"
+                        cmd = ["ligo-skymap-plot", str(fits_path), "-o", skymap_path, "--annotate", "--contour", "50", "90"]
                         if (found):
                             cmd += ["--radec", str(long), str(lat)]
                             print(line.rstrip().decode(), cmd, time, det_time, long, lat)
                         logger.debug(f"subprocess cmd: {' '.join(cmd)}")
 
-                        subfutures[executor.submit(partial(subprocess.run), cmd)] = out_path
+                        subfutures[executor.submit(partial(subprocess.run), cmd)] = skymap_path
                     
                     for subfuture in concurrent.futures.as_completed(subfutures):
                         if subfuture.exception() is not None:

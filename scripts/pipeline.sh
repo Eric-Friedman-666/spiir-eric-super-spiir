@@ -18,7 +18,7 @@ PARTIFOS=$7
 SUF=$8
 
 cmd () {
-    start=3
+    start=3 #initial id of bank files
     bpj=1 #number of bank files
 
     jobno=`seq -f "%03g" ${i} ${i}`
@@ -42,8 +42,8 @@ cmd () {
     #"/fred/oz016/dtang/banks/filt/gstlal_iir_bank_b0optmin97pc_pycbc-test_0"
     #`pwd` 
     #/fred/oz016/chichi/o2bank/N0_newint/gstlal_iir_bank_b0optmin98pc_ER14a_0
+
     mkdir ${DIR}/${PIPE_ID}/${jobno}
-    # cd ${DIR}/${PIPE_ID}/${jobno}
 
     for bank in $(seq -f "%04g" $(( ${start}+${bpj}*${i} )) $(( ${start}+${bpj}*($i) )) ); do
       if [[ "$SUF" == *"H"* ]]; then
@@ -60,7 +60,6 @@ cmd () {
       fi
     done
 
-    # /fred/oz016/dtang/banks/filt/gstlal_iir_bank_b0optmin97pc_pycbc-test_0
     for bank in $(seq -f "%04g" $(( ${start}+${bpj}*${i}+1 )) $(( ${start}+${bpj}*($i+1)-1 )) ); do
       if [[ "$SUF" == *"H"* ]]; then
         tmpmacroiirbank="H1:${bankdir}/iir_H1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
@@ -139,16 +138,13 @@ cmd () {
     --finalsink-superevent-thresh 0.0001 \
     --reference-psd ${psd} \
     --psd-fft-length 32"
+    # if we use nxydump over the whole run we have TBs of dumped data
     # --nxydump-segment 1187006235:1187006245 \
     # --nxydump-directory ${DIR}/${PIPE_ID}/${jobno}"
     # TODO nxydump freezes if bypass for some reason
 
     echo $CMD
 }
-
-# if we use nxydump over the whole run we have TBs of dumped data
-# --nxydump-segment ${macrostart}:${macroend} \
-# --nxydump-directory '.' \
 
 export GST_DEBUG_NO_COLOR=1
 export GST_DEBUG=triggerjointer:6,cuda_postcoh:6
@@ -164,14 +160,15 @@ then
   module load python/3.8.5
   source /fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/ldavis/venv/bin/activate
   cd /fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/ldavis/source
-  CMD2="python create_skymaps.py --data_dir ${DIR} --run_name ${PIPE_ID}/${jobno} --psd ${psd} --debug"
+  CMD2="python ./scripts/create_skymaps.py --data_dir ${DIR} --run_name ${PIPE_ID}/${jobno} --psd ${psd} --debug"
   srun $CMD2
 else
   for TID in $(seq $(grep -m 1 "SBATCH --array" pipeline.sh | sed 's/.*=\([0-9]\).*$/\1/') $(grep -m 1 "SBATCH --array" pipeline.sh | sed 's/.*\([0-9]\).*$/\1/')); do
     i=$TID
     cmd
     $CMD > ${DIR}/${PIPE_ID}/logs_${SUF}/pipe_${TID}.out 2>${DIR}/${PIPE_ID}/logs_${SUF}/pipe_${TID}.err
-    "${POSTPROCESS:-python3}" create_skymaps.py --data_dir ${DIR} --run_name ${PIPE_ID}/${jobno} --psd ${psd} --debug
+    export PATH=$POSTPROCESS
+    $POSTPROCESS/python ./scripts/create_skymaps.py --data_dir ${DIR} --run_name ${PIPE_ID}/${jobno} --psd ${psd} --debug
     #disown
   done
 fi
