@@ -106,7 +106,7 @@ if __name__ == "__main__":
         logger.debug(f"Number of files detected: {len(file_paths)}")
 
     # find path for zerolag file
-    zerolags_path = list([f for f in args.data_dir.glob(f"{args.run_name}/*_*_*_zerolag_*_*.xml.gz")])[0]
+    zerolags_path = list([f for f in args.data_dir.glob(f"{args.run_name}/*_zerolag_*_*.xml.gz")])[0]
 
     # subprocess spawner
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.n_workers) as executor:

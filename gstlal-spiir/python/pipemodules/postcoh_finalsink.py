@@ -546,7 +546,8 @@ class FinalSink(object):
         self.thread_upload_skymap = None
 
     def __pass_test(self, candidate):
-        return True
+        if (self.candidate.cohsnr > 20):
+            return True
         if self.candidate.far <= 0.0:
             return False
 

@@ -10,8 +10,8 @@ DIR="$ARTIFACTS/${START}-${DURATION}"
 
 ./scripts/generate_pipeline_artifacts.sh ${START} ${DURATION} ${END} ${DIR}
 
-IFOS_LIST=( "HLVK" "HLVK" "HLVK" "HLVK" "HLV" "HLV" "HLV" "HL" "HL" )
-PARTIFOS_LIST=( "H1L1V1K1" "H1L1V1" "H1L1" "H1" "H1L1V1" "H1L1" "H1" "H1L1" "H1" )
+IFOS_LIST=( "HLVK" "HLVK" "HLVK" "HLV" "HLV" "HL" )
+PARTIFOS_LIST=( "H1L1V1K1" "H1L1V1" "H1L1" "H1L1V1" "H1L1" "H1L1" )
 
 for idx in "${!IFOS_LIST[@]}"; do
   IFOS=${IFOS_LIST[$idx]}
