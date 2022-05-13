@@ -678,7 +678,6 @@ PyMODINIT_FUNC init_postcohtable(void) {
         PyList_SetItem(ifo_map, ifo_id, str);
     }
     PyModule_AddObject(module, "ifo_map", ifo_map);
-    if (PyErr_Occurred()) return NULL;
 
     /* Cached ID types */
     // process_id_type = py_interop__get_ilwdchar_class("process",
@@ -691,5 +690,4 @@ PyMODINIT_FUNC init_postcohtable(void) {
     Py_INCREF(&PostcohInspiralWrapper_Type);
     PyModule_AddObject(module, "GSTLALPostcohInspiral",
                        (PyObject *)&PostcohInspiralWrapper_Type);
-    if (PyErr_Occurred()) return NULL;
 }
