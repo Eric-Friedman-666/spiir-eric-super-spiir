@@ -196,6 +196,7 @@ static int
     return 0;
 }
 
+// FIXME: This should follow the same format as our other get functions.
 static PyObject *postcohtable_py__snr_series_get(PyObject *obj, void *closure) {
     assert(obj);
     COMPLEX8TimeSeries *snr = ((PostcohInspiralWrapper *)obj)->snr;
@@ -244,7 +245,7 @@ static char field_names[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO]
                        [MAX_FIELD_NAME_LENGTH + 1 + MAX_IFO_LEN];
 
 #define NUM_STRING_FIELDS 3
-static PostcohPyStringClosure string_closures[NUM_STRING_FIELDS];
+static PostcohPyStringClosure attr_string_closures[NUM_STRING_FIELDS];
 static Py_ssize_t attr_offsets[NUM_FIELDS_PER_IFO * MAX_NIFO];
 
 static PyObject *postcohtable_py__get_double(PyObject *obj, void *closure) {
@@ -324,141 +325,134 @@ static __inline__ void
 
 static __inline__ void
   declare_getset(getter get, setter set, void *closure, int field_idx) {
-    PyGetSetDef def   = { field_names[field_idx], get, set,
-                        field_names[field_idx], closure };
-    getset[field_idx] = def;
+    getset[field_idx] = (PyGetSetDef) { field_names[field_idx], get, set,
+                                        field_names[field_idx], closure };
 }
 
-static __inline__ void declare_string_getset(char *name,
-                                             PostcohPyStringClosure closure,
-                                             int string_field_idx,
+static __inline__ void declare_string_getset(PostcohPyStringClosure closure,
+                                             getter get,
+                                             setter set,
+                                             int closure_idx,
                                              int field_idx) {
-    set_field_name(name, field_idx);
-    string_closures[string_field_idx] = closure;
-    declare_getset(postcohtable_py__get_string, postcohtable_py__set_string,
-                   &string_closures[string_field_idx], field_idx);
+    attr_string_closures[closure_idx] = closure;
+    declare_getset(get, set, &attr_string_closures[closure_idx], field_idx);
 }
 
-static __inline__ void declare_snr_getset(char *name, int field_idx) {
-    set_field_name(name, field_idx);
-    declare_getset(postcohtable_py__snr_series_get, NULL,
-                   field_names[field_idx], field_idx);
+static __inline__ void declare_offset_getset(
+  Py_ssize_t offset, getter get, setter set, int closure_idx, int field_idx) {
+    attr_offsets[closure_idx] = offset;
+    declare_getset(get, set, &attr_offsets[closure_idx], field_idx);
 }
 
-static __inline__ void declare_numeric_getset(Py_ssize_t offset,
-                                              getter get,
-                                              setter set,
-                                              int offset_closure_idx,
-                                              int field_idx) {
-    attr_offsets[offset_closure_idx] = offset;
-    declare_getset(get, set, &attr_offsets[offset_closure_idx], field_idx);
-}
-
-static __inline__ void declare_float_getset(Py_ssize_t offset,
-                                            int offset_closure_idx,
-                                            int field_idx) {
-    declare_numeric_getset(offset, postcohtable_py__get_float,
-                           postcohtable_py__set_float, offset_closure_idx,
-                           field_idx);
-}
-
-static __inline__ void declare_double_getset(Py_ssize_t offset,
-                                             int offset_closure_idx,
-                                             int field_idx) {
-    declare_numeric_getset(offset, postcohtable_py__get_double,
-                           postcohtable_py__set_double, offset_closure_idx,
-                           field_idx);
-}
-
-static __inline__ void
-  declare_int_getset(Py_ssize_t offset, int offset_closure_idx, int field_idx) {
-    declare_numeric_getset(offset, postcohtable_py__get_int,
-                           postcohtable_py__set_int, offset_closure_idx,
-                           field_idx);
+static __inline void
+  declare_name_getset(getter get, setter set, int field_idx) {
+    declare_getset(get, set, field_names[field_idx], field_idx);
 }
 
 void prepare_getset() {
     int field_idx          = 0;
-    int string_field_idx   = 0;
+    int string_closure_idx = 0;
     int offset_closure_idx = 0;
 
+    set_field_name("ifos", field_idx);
     declare_string_getset(
-      "ifos",
       (PostcohPyStringClosure) { offsetof(PostcohInspiralWrapper, row.ifos),
                                  MAX_ALLIFO_LEN },
-      string_field_idx++, field_idx++);
+      postcohtable_py__get_string, postcohtable_py__set_string,
+      string_closure_idx++, field_idx++);
 
+    set_field_name("pivotal_ifo", field_idx);
     declare_string_getset(
-      "pivotal_ifo",
       (PostcohPyStringClosure) {
         offsetof(PostcohInspiralWrapper, row.pivotal_ifo), MAX_IFO_LEN },
-      string_field_idx++, field_idx++);
+      postcohtable_py__get_string, postcohtable_py__set_string,
+      string_closure_idx++, field_idx++);
 
-    declare_string_getset("skymap_fname",
-                          (struct py_interop__string_closure) {
-                            offsetof(PostcohInspiralWrapper, row.skymap_fname),
-                            MAX_SKYMAP_FNAME_LEN },
-                          string_field_idx++, field_idx++);
+    set_field_name("skymap_fname", field_idx);
+    declare_string_getset(
+      (PostcohPyStringClosure) {
+        offsetof(PostcohInspiralWrapper, row.skymap_fname),
+        MAX_SKYMAP_FNAME_LEN },
+      postcohtable_py__get_string, postcohtable_py__set_string,
+      string_closure_idx++, field_idx++);
 
-    declare_snr_getset("_snr_name", field_idx++);
-    declare_snr_getset("_snr_epoch_gpsSeconds", field_idx++);
-    declare_snr_getset("_snr_epoch_gpsNanoSeconds", field_idx++);
-    declare_snr_getset("_snr_f0", field_idx++);
-    declare_snr_getset("_snr_deltaT", field_idx++);
-    declare_snr_getset("_snr_sampleUnits", field_idx++);
-    declare_snr_getset("_snr_data_length", field_idx++);
-    declare_snr_getset("_snr_data", field_idx++);
+    set_field_name("_snr_name", field_idx);
+    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    set_field_name("_snr_epoch_gpsSeconds", field_idx);
+    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    set_field_name("_snr_epoch_gpsNanoSeconds", field_idx);
+    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    set_field_name("_snr_f0", field_idx);
+    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    set_field_name("_snr_deltaT", field_idx);
+    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    set_field_name("_snr_sampleUnits", field_idx);
+    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    set_field_name("_snr_data_length", field_idx);
+    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    set_field_name("_snr_data", field_idx);
+    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
 
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         set_ifo_field_name("chisq", ifo_id, field_idx);
-        declare_float_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.chisq[ifo_id]),
+          postcohtable_py__get_float, postcohtable_py__set_float,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("snglsnr", ifo_id, field_idx);
-        declare_float_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.snglsnr[ifo_id]),
+          postcohtable_py__get_float, postcohtable_py__set_float,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("coaphase", ifo_id, field_idx);
-        declare_float_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.coaphase[ifo_id]),
+          postcohtable_py__get_float, postcohtable_py__set_float,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("far_sngl", ifo_id, field_idx);
-        declare_float_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.far_sngl[ifo_id]),
+          postcohtable_py__get_float, postcohtable_py__set_float,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("far_1d_sngl", ifo_id, field_idx);
-        declare_float_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.far_1d_sngl[ifo_id]),
+          postcohtable_py__get_float, postcohtable_py__set_float,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("far_1w_sngl", ifo_id, field_idx);
-        declare_float_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.far_1w_sngl[ifo_id]),
+          postcohtable_py__get_float, postcohtable_py__set_float,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("far_2h_sngl", ifo_id, field_idx);
-        declare_float_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.far_2h_sngl[ifo_id]),
+          postcohtable_py__get_float, postcohtable_py__set_float,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("deff", ifo_id, field_idx);
-        declare_double_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.deff[ifo_id]),
+          postcohtable_py__get_double, postcohtable_py__set_double,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("end_time_sngl", ifo_id, field_idx);
-        declare_int_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id]),
+          postcohtable_py__get_int, postcohtable_py__set_int,
           offset_closure_idx++, field_idx++);
 
         set_ifo_field_name("end_time_ns_sngl", ifo_id, field_idx);
-        declare_int_getset(
+        declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id])
             + offsetof(LIGOTimeGPS, gpsNanoSeconds),
+          postcohtable_py__get_int, postcohtable_py__set_int,
           offset_closure_idx++, field_idx++);
     }
     getset[field_idx] = (PyGetSetDef) { NULL };
@@ -645,7 +639,7 @@ static struct PyMethodDef methods[] = {
  */
 
 static PyTypeObject PostcohInspiralWrapper_Type = {
-    PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma.
+    PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
       .tp_basicsize = sizeof(PostcohInspiralWrapper),
     .tp_doc         = "LAL's PostcohInspiral structure",
     .tp_flags =
