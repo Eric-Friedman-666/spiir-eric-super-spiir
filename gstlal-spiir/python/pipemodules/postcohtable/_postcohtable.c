@@ -242,7 +242,7 @@ static PyObject *postcohtable_py__snr_series_get(PyObject *obj, void *closure) {
 static struct PyGetSetDef
   getset[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO + 1] = { { NULL } };
 static char field_names[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO]
-                       [MAX_FIELD_NAME_LENGTH + 1 + MAX_IFO_LEN];
+                       [MAX_FIELD_NAME_LENGTH] = { 0 };
 
 #define NUM_STRING_FIELDS 3
 static PostcohPyStringClosure attr_string_closures[NUM_STRING_FIELDS];
@@ -312,12 +312,13 @@ static int
 }
 
 static __inline__ void set_field_name(char *name, int field_idx) {
-    assert((Py_ssize_t)strlen(name) <= MAX_FIELD_NAME_LENGTH);
+    assert(strlen(name) <= MAX_FIELD_NAME_LENGTH);
     strcpy(field_names[field_idx], name);
 }
 
 static __inline__ void
   set_ifo_field_name(char *name, int ifo_id, int field_idx) {
+    assert(strlen(name) + 1 + MAX_IFO_LEN <= MAX_FIELD_NAME_LENGTH);
     set_field_name(name, field_idx);
     strncat(field_names[field_idx], "_", 1);
     strncat(field_names[field_idx], IFOMap[ifo_id], MAX_IFO_LEN);
@@ -325,6 +326,8 @@ static __inline__ void
 
 static __inline__ void
   declare_getset(getter get, setter set, void *closure, int field_idx) {
+    assert(strlen(field_names[field_idx]) > 0
+           && strlen(field_names[field_idx]) <= MAX_FIELD_NAME_LENGTH);
     getset[field_idx] = (PyGetSetDef) { field_names[field_idx], get, set,
                                         field_names[field_idx], closure };
 }
@@ -344,7 +347,7 @@ static __inline__ void declare_offset_getset(
     declare_getset(get, set, &attr_offsets[closure_idx], field_idx);
 }
 
-static __inline void
+static __inline__ void
   declare_name_getset(getter get, setter set, int field_idx) {
     declare_getset(get, set, field_names[field_idx], field_idx);
 }
@@ -538,19 +541,19 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
     if (!result) return NULL;
 
     while (data < end) {
-        PyObject *py_trigger_wrapper =
+        PyObject *py_trigger =
           PyType_GenericNew((PyTypeObject *)cls, NULL, NULL);
-        if (!py_trigger_wrapper) {
+        if (!py_trigger) {
             Py_DECREF(result);
             return NULL;
         }
         /* memcpy postcoh row */
-        const PostcohInspiralTable *trigger =
+        const PostcohInspiralTable *postcohtable_trigger =
           (const PostcohInspiralTable *)data;
         data += sizeof(PostcohInspiralTable);
         /* if the data read in is less then expected amount */
         if (data > end) {
-            Py_DECREF(py_trigger_wrapper);
+            Py_DECREF(py_trigger);
             Py_DECREF(result);
             PyErr_SetString(PyExc_ValueError,
                             "overran end of buffer while deserializing a "
@@ -558,59 +561,59 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        PostcohInspiralWrapper *trigger_wrapper =
-          (PostcohInspiralWrapper *)py_trigger_wrapper;
+        PostcohInspiralWrapper *py_trigger_typed =
+          (PostcohInspiralWrapper *)py_trigger;
 
-        trigger_wrapper->row = *trigger;
+        py_trigger_typed->row = *postcohtable_trigger;
 
-        trigger_wrapper->end_time_sngl = PyArray_SimpleNewFromData(
-          2, end_time_dims, NPY_INT, trigger_wrapper->row.end_time_sngl);
-        trigger_wrapper->snglsnr = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, trigger_wrapper->row.snglsnr);
-        trigger_wrapper->coaphase = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, trigger_wrapper->row.coaphase);
-        trigger_wrapper->chisq = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, trigger_wrapper->row.chisq);
-        trigger_wrapper->far_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, trigger_wrapper->row.far_sngl);
-        trigger_wrapper->far_1w_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, trigger_wrapper->row.far_1w_sngl);
-        trigger_wrapper->far_1d_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, trigger_wrapper->row.far_1d_sngl);
-        trigger_wrapper->far_2h_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, trigger_wrapper->row.far_2h_sngl);
-        trigger_wrapper->deff = PyArray_SimpleNewFromData(
-          1, dims, NPY_DOUBLE, trigger_wrapper->row.deff);
+        py_trigger_typed->end_time_sngl = PyArray_SimpleNewFromData(
+          2, end_time_dims, NPY_INT, py_trigger_typed->row.end_time_sngl);
+        py_trigger_typed->snglsnr = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, py_trigger_typed->row.snglsnr);
+        py_trigger_typed->coaphase = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, py_trigger_typed->row.coaphase);
+        py_trigger_typed->chisq = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, py_trigger_typed->row.chisq);
+        py_trigger_typed->far_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, py_trigger_typed->row.far_sngl);
+        py_trigger_typed->far_1w_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, py_trigger_typed->row.far_1w_sngl);
+        py_trigger_typed->far_1d_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, py_trigger_typed->row.far_1d_sngl);
+        py_trigger_typed->far_2h_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, py_trigger_typed->row.far_2h_sngl);
+        py_trigger_typed->deff = PyArray_SimpleNewFromData(
+          1, dims, NPY_DOUBLE, py_trigger_typed->row.deff);
 
         /* duplicate the SNR time series if we have length? */
-        if (trigger_wrapper->row.snr_length) {
-            const size_t nbytes = sizeof(trigger_wrapper->row.snr[0])
-                                  * trigger_wrapper->row.snr_length;
+        if (py_trigger_typed->row.snr_length) {
+            const size_t nbytes = sizeof(py_trigger_typed->row.snr[0])
+                                  * py_trigger_typed->row.snr_length;
             if (data + nbytes > end) {
-                Py_DECREF(py_trigger_wrapper);
+                Py_DECREF(py_trigger);
                 Py_DECREF(result);
                 PyErr_SetString(PyExc_ValueError,
                                 "buffer overrun while copying SNR time series");
                 return NULL;
             }
             COMPLEX8TimeSeries *series = XLALCreateCOMPLEX8TimeSeries(
-              "snr", &trigger_wrapper->row.epoch, 0.,
-              trigger_wrapper->row.deltaT, &lalDimensionlessUnit,
-              trigger_wrapper->row.snr_length);
+              "snr", &py_trigger_typed->row.epoch, 0.,
+              py_trigger_typed->row.deltaT, &lalDimensionlessUnit,
+              py_trigger_typed->row.snr_length);
             if (!series) {
-                Py_DECREF(py_trigger_wrapper);
+                Py_DECREF(py_trigger);
                 Py_DECREF(result);
                 PyErr_SetString(PyExc_MemoryError, "out of memory");
                 return NULL;
             }
-            memcpy(series->data->data, trigger_wrapper->row.snr, nbytes);
+            memcpy(series->data->data, py_trigger_typed->row.snr, nbytes);
             data += nbytes;
-            trigger_wrapper->snr = series;
+            py_trigger_typed->snr = series;
         } else
-            trigger_wrapper->snr = NULL;
+            py_trigger_typed->snr = NULL;
 
-        if (PyList_Append(result, py_trigger_wrapper)) printf("append failure");
-        Py_DECREF(py_trigger_wrapper);
+        if (PyList_Append(result, py_trigger)) printf("append failure");
+        Py_DECREF(py_trigger);
     }
 
     if (data != end) {
