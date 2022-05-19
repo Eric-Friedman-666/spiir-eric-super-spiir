@@ -50,7 +50,7 @@
 
 typedef struct {
     PyObject_HEAD // PyObject_HEAD includes a trailing semicolon
-      PostcohInspiralTable row;
+    PostcohInspiralTable row;
     COMPLEX8TimeSeries *snr;
     PyObject *end_time_sngl;
     PyObject *snglsnr;
@@ -642,9 +642,10 @@ static struct PyMethodDef methods[] = {
  */
 
 static PyTypeObject PostcohInspiralWrapper_Type = {
+    // clang-format off
     PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
-      .tp_basicsize = sizeof(PostcohInspiralWrapper),
-    .tp_doc         = "LAL's PostcohInspiral structure",
+    .tp_basicsize = sizeof(PostcohInspiralWrapper), // clang-format on
+    .tp_doc = "LAL's PostcohInspiral structure",
     .tp_flags =
       Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
     .tp_members = members,
