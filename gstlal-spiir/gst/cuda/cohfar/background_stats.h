@@ -87,7 +87,6 @@ typedef struct {
     char *ifos;
     RankingStats *rank;
     FeatureStats *feature;
-    int hist_trials;
     long nevent;
     long livetime;
 } TriggerStats;
@@ -96,8 +95,7 @@ typedef struct {
     TriggerStats **multistats;
     GString *rank_xmlname;
     GString *feature_xmlname;
-    int icombo;
-	int nifo;
+    ifo_set_type enabled_ifos;
 } TriggerStatsXML;
 
 #endif /* __BACKGROUND_STATS_H__ */

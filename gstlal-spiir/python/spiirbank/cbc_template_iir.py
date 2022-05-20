@@ -24,13 +24,14 @@ import numpy
 import scipy
 import cmath
 import math
-import lal
-import lalsimulation
 import logging
 import tempfile
-from gstlal import cbc_template_fir
+
+import lal
+import lalsimulation
 from glue.ligolw import ligolw, lsctables, array, param, utils, types
 from gstlal.pipeio import repack_complex_array_to_real, repack_real_array_to_complex
+from gstlal import cbc_template_fir
 from gstlal.spiirbank.optimizer import optimize_a1
 
 Attributes = ligolw.sax.xmlreader.AttributesImpl
@@ -840,7 +841,7 @@ class Bank(object):
             "coa_phase", "mass1", "mass2", "mchirp", "mtotal", "eta", "kappa",
             "chi", "tau0", "tau2", "tau3", "tau4", "tau5", "ttotal", "psi0",
             "psi3", "alpha", "alpha1", "alpha2", "alpha3", "alpha4", "alpha5",
-            "alpha6", "beta", "f_final", "snr", "chisq", "chisq_dof", #KAGRA
+            "alpha6", "beta", "f_final", "snr", "chisq", "chisq_dof", # "alpha7", #KAGRA
             "bank_chisq", "bank_chisq_dof", "cont_chisq", "cont_chisq_dof",
             "sigmasq", "rsqveto_duration", "Gamma0", "Gamma1", "Gamma2",
             "Gamma3", "Gamma4", "Gamma5", "Gamma6", "Gamma7", "Gamma8",
@@ -1111,7 +1112,6 @@ class Bank(object):
 
                 # h_pad is just the padded cut template
                 h_pad = pad_data(data, pad_length)
-
                 # sigmasq is based on cut template
                 fs = float(sampleRate)
                 df = 1.0 / (pad_length / fs)
@@ -1142,7 +1142,6 @@ class Bank(object):
                     # compute the SNR
                     spiir_match = abs(numpy.dot(u_rev_pad,
                                                 numpy.conj(h_pad))) / 2.0
-
                     optimizer_state = None
                     if (nround == 1):
                         original_match = spiir_match
@@ -1165,6 +1164,7 @@ class Bank(object):
                         remote_log_df.loc[tmp, 'n_filters'] = n_filters
 
                     nround += 1
+
                     epsilon_dir = 0
                     if n_filters_max is not None and n_filters > n_filters_max:
                         # we need to increase epsilon to decrease filters
@@ -1182,7 +1182,6 @@ class Bank(object):
                                 spiir_match_max = b0_optimized_overlap_max
                                 if verbose:
                                     print >> sys.stderr, "Pass -1, overlap %f" % spiir_match
-
                                 a1, \
                                 b0, \
                                 spiir_match, \
@@ -1192,9 +1191,7 @@ class Bank(object):
                                                               passes=0,
                                                               verbose=verbose,
                                                               return_state=True)
-
                                 b0 *= numpy.sqrt(2)
-
                                 if spiir_match >= b0_optimized_overlap_min and (
                                         final_overlap_min > 0):
                                     spiir_match_min = final_overlap_min
@@ -1206,7 +1203,6 @@ class Bank(object):
                                                               h_pad / numpy.sqrt(2),
                                                               state=optimizer_state,
                                                               **optimizer_options)
-
                                     b0 *= numpy.sqrt(2)
 
                         if n_filters < n_filters_min or spiir_match < spiir_match_min:
@@ -1273,7 +1269,6 @@ class Bank(object):
                                               h_pad / numpy.sqrt(2),
                                               state=optimizer_state,
                                               **optimizer_options)
-
                     b0 *= numpy.sqrt(2)
 
                 # get the final SPIIR approximated waveform
@@ -1282,7 +1277,6 @@ class Bank(object):
                 # This is actually the cross correlation between the original waveform and this approximation
                 # h_full_pad is just the padded original template
                 h_full_pad = pad_data(data_full, pad_length)
-
                 # normalize the cut waveform so its inner-product is 2
                 norm_h_full = abs(numpy.dot(h_full_pad,
                                             numpy.conj(h_full_pad)))

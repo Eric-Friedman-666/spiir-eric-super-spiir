@@ -1,42 +1,42 @@
 #ifndef __PIPE_MACRO_H__
 #define __PIPE_MACRO_H__
+
+#include <stdbool.h>
+
 /* FIXME: upgrade to include more detectors like KAGRA */
 #ifndef IFO_LEN
 #define IFO_LEN     2
 #define MAX_IFO_LEN 4
 #endif
 
-typedef struct _IFOType {
-    const char *name;
-    int index;
-} IFOType;
-
-#define H1_IFO_ID 0
-#define L1_IFO_ID 1
-#define V1_IFO_ID 2
-#define MAX_NIFO  4
+#define MAX_NIFO 4
 #ifdef __cplusplus
 constexpr
 #endif
-  static const IFOType IFOMap[MAX_NIFO] = {
-      { "H1", 0 }, // 1 << 0 = 1
-      { "L1", 1 }, // 1 << 1 = 2
-      { "V1", 2 }, // 1 << 2 = 4
-      { "K1", 3 }, // 1 << 2 = 8
+  static const char *IFOMap[MAX_NIFO] = {
+      "H1", // 1 << 0 = 1
+      "L1", // 1 << 1 = 2
+      "V1", // 1 << 2 = 4
+      "K1", // 1 << 3 = 8
   };
-#define MAX_IFO_COMBOS 15 // 2^4-1
-// A combination is sum(1 << index) - 1
-// This gives us some nice mathematical properties that we can use to check
-// if an IFO exists in a given ComboMap
-static const IFOType IFOComboMap[MAX_IFO_COMBOS] = {
-    { "H1", 0 },      { "L1", 1 },      { "H1L1", 2 },      { "V1", 3 },
-    { "H1V1", 4 },    { "L1V1", 5 },    { "H1L1V1", 6 },    { "K1", 7 },
-    { "H1K1", 8 },    { "L1K1", 9 },    { "H1L1K1", 10 },   { "V1K1", 11 },
-    { "H1V1K1", 12 }, { "L1V1K1", 13 }, { "H1L1V1K1", 14 },
+#define MAX_IFO_SET 0b1111 // { H1, L1, V1, K1 } bitset
+
+typedef unsigned int ifo_set_type;
+
+/* function to encapsulate IFOComboMap, such that ifo_set isn't directly
+ *  used as an index */
+const char *ifo_set__get_string(ifo_set_type ifo_set);
+
+// Parse IFO set from string representation. See implementation for details.
+bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos);
+ifo_set_type ifo_set__parse_or_empty(const char *ifos_str);
+
+// Mapping from IFO set to string representation
+// Index is one less than the bitset representation of the set
+static const char *IFOComboMap[MAX_IFO_SET] = {
+    "H1",   "L1",   "H1L1",   "V1",   "H1V1",   "L1V1",   "H1L1V1",   "K1",
+    "H1K1", "L1K1", "H1L1K1", "V1K1", "H1V1K1", "L1V1K1", "H1L1V1K1",
 };
-/* function given a random ifo, output the index in the IFOComboMap list,
- * implemented in background_stats_utils.c */
-int get_icombo(char *ifos);
 
 #ifndef MAX_ALLIFO_LEN
 #define MAX_ALLIFO_LEN 14

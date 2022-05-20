@@ -25790,7 +25790,7 @@
 		<Column Type="real_4" Name="sim_inspiralgroup:sim_inspiral:alpha4"/>
 		<Column Type="real_4" Name="sim_inspiralgroup:sim_inspiral:alpha5"/>
 		<Column Type="real_4" Name="sim_inspiralgroup:sim_inspiral:alpha6"/>
-		<Column Type="real_4" Name="sim_inspiralgroup:sim_inspiral:alpha7"/>
+		<!-- <Column Type="real_4" Name="sim_inspiralgroup:sim_inspiral:alpha7"/> KAGRA -->
 		<Column Type="real_4" Name="sim_inspiralgroup:sim_inspiral:beta"/>
 		<Column Type="real_4" Name="sim_inspiralgroup:sim_inspiral:spin1x"/>
 		<Column Type="real_4" Name="sim_inspiralgroup:sim_inspiral:spin1y"/>

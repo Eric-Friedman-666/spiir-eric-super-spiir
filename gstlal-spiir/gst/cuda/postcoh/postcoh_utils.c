@@ -21,7 +21,7 @@
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
 #include <gst/gst.h>
-#include <pipe_macro.h> // for IFOComboMap
+#include <pipe_macro.h> // for ifo_set__get_string
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
 
@@ -143,15 +143,14 @@ void cuda_device_print(int deviceCount) {
     }
 }
 
-/* get ifo indices of a given combo in IFOMap
+/* get ifo indices of a given set of ifos in IFOMap
  * e.g. HV: 0, 2
  */
-void get_write_ifo_mapping(char *ifo_combo, int nifo, int *write_ifo_mapping) {
+void get_write_ifo_mapping(char *ifos, int nifo, int *write_ifo_mapping) {
     int iifo, jifo;
     for (iifo = 0; iifo < nifo; iifo++)
         for (jifo = 0; jifo < MAX_NIFO; jifo++)
-            if (strncmp(ifo_combo + iifo * IFO_LEN, IFOMap[jifo].name, IFO_LEN)
-                == 0) {
+            if (strncmp(ifos + iifo * IFO_LEN, IFOMap[jifo], IFO_LEN) == 0) {
                 write_ifo_mapping[iifo] = jifo;
                 break;
             }
@@ -169,21 +168,39 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
 #endif
     PeakList *pklist = (PeakList *)malloc(sizeof(PeakList));
 
-    // 1 => npeak
-    // max_npeak * 4 => peak_pos, len_idx, d_tmplt_idx, pix_idx
-    // max_npeak * hist_trials => pix_idx_bg
-    // max_npeak * MAX_NIFO => ntoff
+    // FIXME: Remove these comments once issue #5 is resolved:
+    //        https://git.ligo.org/lscsoft/spiir/-/issues/5
+    //        It should ensure the following calculations are automated
+    //
+    // This calculation is the sum of the sizes of the following variables
+    // peak_pos    => max_npeak
+    // len_idx     => max_npeak
+    // d_tmplt_idx => max_npeak
+    // pix_idx     => max_npeak
+    // ntoff       => max_npeak * MAX_NIFO
+    // pix_idx_bg  => max_npeak * hist_trials
+    // npeak       => 1
     int peak_intlen = (4 + MAX_NIFO + hist_trials) * max_npeak + 1;
-    // max_npeak * 3 * MAX_NIFO => snglsnr, coaphase, chisq
-    // max_npeak * 3 => cohsnr, nullsnr, cmbchisq
-    // max_npeak * hist_trials * 3 * MAX_NIFO => snglsnr_bg, coaphase_bg, chisq_bg
-    // max_npeak * hist_trials * 3 => cohsnr_bg, nullsnr_bg, cmbchisq_bg
+
+    // This calculation is the sum of the sizes of the following variables
+    // snglsnr     => max_npeak * MAX_NIFO
+    // coaphase    => max_npeak * MAX_NIFO
+    // chisq       => max_npeak * MAX_NIFO
+    // cohsnr      => max_npeak
+    // nullsnr     => max_npeak
+    // cmbchisq    => max_npeak
+    // snglsnr_bg  => max_npeak * hist_trials * MAX_NIFO
+    // coaphase_bg => max_npeak * hist_trials * MAX_NIFO
+    // chisq_bg    => max_npeak * hist_trials * MAX_NIFO
+    // cohsnr_bg   => max_npeak * hist_trials
+    // nullsnr_bg  => max_npeak * hist_trials
+    // cmbchisq_bg => max_npeak * hist_trials
     int peak_floatlen =
-      ((3 * MAX_NIFO + 3) + (hist_trials * (3 + 3 * MAX_NIFO))) * max_npeak;
+      ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 3))) * max_npeak;
     pklist->peak_intlen   = peak_intlen;
     pklist->peak_floatlen = peak_floatlen;
 
-    // [THA]: Why do we use `cudaMallocManaged()` sometimes below? Well, a large
+    // Why do we use `cudaMallocManaged()` sometimes below? Well, a large
     // number of the below pointers are to 2D arrays that we won't be accessing
     // after setting up, but whilst we're setting them up they need to be able
     // to be accessed on the CPU. `cudaMallocManaged()` allows us to access the
@@ -246,9 +263,10 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
                                sizeof(float) * peak_floatlen, stream));
 
     for (int i = 0; i < MAX_NIFO; ++i) {
-        pklist->d_snglsnr[i] = pklist->d_snglsnr[0] + (max_npeak * i);
+        pklist->d_snglsnr[i] =
+          pklist->d_snglsnr[0] + (max_npeak * (i + 0 * MAX_NIFO));
         pklist->d_coaphase[i] =
-          pklist->d_snglsnr[0] + (max_npeak * (i + MAX_NIFO));
+          pklist->d_snglsnr[0] + (max_npeak * (i + 1 * MAX_NIFO));
         pklist->d_chisq[i] =
           pklist->d_snglsnr[0] + (max_npeak * (i + 2 * MAX_NIFO));
     }
@@ -260,13 +278,16 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
     for (int i = 0; i < MAX_NIFO; ++i) {
         pklist->d_snglsnr_bg[i] =
           pklist->d_snglsnr[0]
-          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 0 * MAX_NIFO))));
+          + (max_npeak
+             * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 0 * MAX_NIFO))));
         pklist->d_coaphase_bg[i] =
           pklist->d_snglsnr[0]
-          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 1 * MAX_NIFO))));
+          + (max_npeak
+             * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 1 * MAX_NIFO))));
         pklist->d_chisq_bg[i] =
           pklist->d_snglsnr[0]
-          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 2 * MAX_NIFO))));
+          + (max_npeak
+             * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 2 * MAX_NIFO))));
     }
 
     pklist->d_cohsnr_bg =
@@ -297,10 +318,11 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
     CUDA_CHECK(cudaMallocHost((void **)&(pklist->snglsnr[0]),
                               sizeof(float) * peak_floatlen));
     memset(pklist->snglsnr[0], 0, sizeof(float) * peak_floatlen);
-
     for (int i = 0; i < MAX_NIFO; ++i) {
-        pklist->snglsnr[i]  = pklist->snglsnr[0] + (max_npeak * i);
-        pklist->coaphase[i] = pklist->snglsnr[0] + (max_npeak * (i + MAX_NIFO));
+        pklist->snglsnr[i] =
+          pklist->snglsnr[0] + (max_npeak * (i + 0 * MAX_NIFO));
+        pklist->coaphase[i] =
+          pklist->snglsnr[0] + (max_npeak * (i + 1 * MAX_NIFO));
         pklist->chisq[i] =
           pklist->snglsnr[0] + (max_npeak * (i + 2 * MAX_NIFO));
     }
@@ -312,19 +334,21 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
     for (int i = 0; i < MAX_NIFO; ++i) {
         pklist->snglsnr_bg[i] =
           pklist->snglsnr[0]
-          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 0 * MAX_NIFO))));
+          + (max_npeak
+             * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 0 * MAX_NIFO))));
         pklist->coaphase_bg[i] =
           pklist->snglsnr[0]
-          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 1 * MAX_NIFO))));
+          + (max_npeak
+             * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 1 * MAX_NIFO))));
         pklist->chisq_bg[i] =
           pklist->snglsnr[0]
-          + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 2 * MAX_NIFO))));
+          + (max_npeak
+             * ((3 * MAX_NIFO + 3) + (hist_trials * (i + 2 * MAX_NIFO))));
     }
 
     pklist->cohsnr_bg =
       pklist->snglsnr[0]
       + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 0))));
-
     pklist->nullsnr_bg =
       pklist->snglsnr[0]
       + (max_npeak * ((3 * MAX_NIFO + 3) + (hist_trials * (3 * MAX_NIFO + 1))));
@@ -391,7 +415,7 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
         gchar **this_ifo_split = g_strsplit(*isigma, ":", -1);
 
         for (int i = 0; i < nifo; i++) {
-            if (strncmp(this_ifo_split[0], IFOMap[i].name, IFO_LEN) == 0) {
+            if (strncmp(this_ifo_split[0], IFOMap[i], IFO_LEN) == 0) {
                 match_ifo = i;
                 break;
             }
@@ -400,8 +424,8 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
         parseFile(this_ifo_split[1], xns, 1);
 
         ntmplt = array_sigmasq[0].dim[0];
-// combos like HL, match_ifo will still be like 0:H,1:L
-// combos like HV, match_ifo will still be like 0:H,1:V
+// ifo sets like HL, match_ifo will still be like 0:H,1:L
+// ifo sets like HV, match_ifo will still be like 0:H,1:V
 #ifdef __DEBUG__
         printf("this sigma %s, this ifo %s, match ifo %d,ntmplt %d \n", *isigma,
                this_ifo_split[0], match_ifo, ntmplt);
@@ -618,7 +642,7 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
         gchar **this_ifo_split = g_strsplit(*iauto, ":", -1);
 
         for (int i = 0; i < nifo; i++) {
-            if (strncmp(this_ifo_split[0], IFOMap[i].name, IFO_LEN) == 0) {
+            if (strncmp(this_ifo_split[0], IFOMap[i], IFO_LEN) == 0) {
                 match_ifo = i;
                 break;
             }

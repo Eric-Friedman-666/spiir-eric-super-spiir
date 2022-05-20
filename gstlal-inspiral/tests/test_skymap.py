@@ -20,7 +20,7 @@ import random
 class TestSkymap(PipelineTestFixture):
 
 	def runTest(self):
-		ifos = ("H1", "L1", "V1", "K1")
+		ifos = ("H1", "L1", "V1","K1")
 		start_time = 963704084
 		stop_time = start_time + 8
 

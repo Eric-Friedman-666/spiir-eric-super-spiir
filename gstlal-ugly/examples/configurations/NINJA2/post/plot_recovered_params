@@ -26,7 +26,7 @@ eff_dist_getter_map = {'H1':lambda x: x.eff_dist_h,
                        'K1':lambda x: x.eff_dist_k}
 
 time_getters = {'H1':lambda x: x.h_end_time + x.h_end_time_ns * 1e-9,
-                'L1':lambda x: x.l_end_time + x.h_end_time_ns * 1e-9, #KAGRA
+                'L1':lambda x: x.l_end_time + x.h_end_time_ns * 1e-9,
                 'V1':lambda x: x.v_end_time + x.h_end_time_ns * 1e-9,
                 'K1':lambda x: x.k_end_time + x.h_end_time_ns * 1e-9}
 

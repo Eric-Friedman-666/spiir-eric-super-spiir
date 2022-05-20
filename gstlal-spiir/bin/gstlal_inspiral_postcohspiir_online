@@ -528,9 +528,9 @@ def parse_command_line():
 
     # Get the banks and make the detectors
 
-    # format of iir_banks :    [{'H1': <H1Bank0>; 'L1': <L1Bank0>..;}
-    #             {'H1': <H1Bank1>; 'L1': <L1Bank1>..;}
-    #             ...]
+    # format of iir_banks :	[{'H1': <H1Bank0>; 'L1': <L1Bank0>..;}
+    #			 {'H1': <H1Bank1>; 'L1': <L1Bank1>..;}
+    #			 ...]
 
     iir_banks = [
         spiir_utils.parse_iirbank_string(iirbank)

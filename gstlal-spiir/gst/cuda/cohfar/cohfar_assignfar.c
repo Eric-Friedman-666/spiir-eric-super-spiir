@@ -104,9 +104,9 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *base,
 static void cohfar_assignfar_dispose(GObject *object);
 
 static void update_trigger_fars(PostcohInspiralTable *table,
-                                int icombo,
+                                int num_stats,
                                 CohfarAssignfar *element) {
-    TriggerStats *cur_stats = element->bgstats_1w->multistats[icombo];
+    TriggerStats *cur_stats = element->bgstats_1w->multistats[num_stats - 1];
     int hist_trials         = element->hist_trials;
     double rank_1w, rank_2h, rank_1d;
     double stat = (double)table->cohsnr; // - table->nullsnr
@@ -117,14 +117,14 @@ static void update_trigger_fars(PostcohInspiralTable *table,
     table->far_1w = far;
     rank_1w   = trigger_stats_get_val_from_map(stat, (double)table->cmbchisq,
                                              cur_stats->rank->rank_map);
-    cur_stats = element->bgstats_1d->multistats[icombo];
+    cur_stats     = element->bgstats_1d->multistats[num_stats - 1];
     far       = BOUND(FLT_MIN,
                 gen_fap_from_feature(stat, (double)table->cmbchisq, cur_stats)
                   * cur_stats->nevent / (cur_stats->livetime * hist_trials));
     table->far_1d = far;
     rank_1d   = trigger_stats_get_val_from_map(stat, (double)table->cmbchisq,
                                              cur_stats->rank->rank_map);
-    cur_stats = element->bgstats_2h->multistats[icombo];
+    cur_stats     = element->bgstats_2h->multistats[num_stats - 1];
     far       = BOUND(FLT_MIN,
                 gen_fap_from_feature(stat, (double)table->cmbchisq, cur_stats)
                   * cur_stats->nevent / (cur_stats->livetime * hist_trials));
@@ -133,33 +133,33 @@ static void update_trigger_fars(PostcohInspiralTable *table,
                                              cur_stats->rank->rank_map);
     table->rank = MAX(MAX(rank_1w, rank_1d), rank_2h);
 
-    for (int i = 0; i < MAX_NIFO; ++i) {
-        cur_stats = element->bgstats_1w->multistats[i];
+    for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+        cur_stats = element->bgstats_1w->multistats[ifo_id];
         far       = BOUND(
-          FLT_MIN, gen_fap_from_feature((double)table->snglsnr[i],
-                                        (double)table->chisq[i], cur_stats)
+          FLT_MIN, gen_fap_from_feature((double)table->snglsnr[ifo_id],
+                                        (double)table->chisq[ifo_id], cur_stats)
                      * cur_stats->nevent / (cur_stats->livetime * hist_trials));
-        table->far_1w_sngl[i] = far;
+        table->far_1w_sngl[ifo_id] = far;
 
-        cur_stats = element->bgstats_1d->multistats[i];
+        cur_stats = element->bgstats_1d->multistats[ifo_id];
         far       = BOUND(
-          FLT_MIN, gen_fap_from_feature((double)table->snglsnr[i],
-                                        (double)table->chisq[i], cur_stats)
+          FLT_MIN, gen_fap_from_feature((double)table->snglsnr[ifo_id],
+                                        (double)table->chisq[ifo_id], cur_stats)
                      * cur_stats->nevent / (cur_stats->livetime * hist_trials));
-        table->far_1d_sngl[i] = far;
+        table->far_1d_sngl[ifo_id] = far;
 
-        cur_stats = element->bgstats_2h->multistats[i];
+        cur_stats = element->bgstats_2h->multistats[ifo_id];
         if (cur_stats->livetime > 0) {
-            far                   = BOUND(FLT_MIN,
-                        gen_fap_from_feature((double)table->snglsnr[i],
-                                             (double)table->chisq[i], cur_stats)
-                          * cur_stats->nevent
-                          / (cur_stats->livetime * hist_trials));
-            table->far_2h_sngl[i] = far;
+            far = BOUND(
+              FLT_MIN,
+              gen_fap_from_feature((double)table->snglsnr[ifo_id],
+                                   (double)table->chisq[ifo_id], cur_stats)
+                * cur_stats->nevent / (cur_stats->livetime * hist_trials));
+            table->far_2h_sngl[ifo_id] = far;
         }
     }
     GST_DEBUG_OBJECT(
-      element, "this long-scale far %f, mid-scale far %f, short-scale far %f",
+      element, "The long-scale FAR %f, mid-scale FAR %f, short-scale FAR %f",
       table->far_1w, table->far_1d, table->far_2h);
 }
 
@@ -241,22 +241,30 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
 
     TriggerStats *cur_stats;
     if (element->pass_silent_time) {
-        int icombo;
+        ifo_set_type enabled_ifos;
         PostcohInspiralTable *table =
           (PostcohInspiralTable *)GST_BUFFER_DATA(buf);
         PostcohInspiralTable *table_end =
           (PostcohInspiralTable *)(GST_BUFFER_DATA(buf) + GST_BUFFER_SIZE(buf));
         for (; table < table_end; table++) {
             if (table->is_background == FLAG_EMPTY) continue;
-            icombo = get_icombo(table->ifos);
-            icombo = scan_trigger_ifos(icombo, table);
-            if (icombo < 0) {
-                fprintf(stderr, "icombo not found, cohfar_assignfar\n");
+            if (!ifo_set__try_parse(table->ifos, &enabled_ifos)) {
+                fprintf(stderr,
+                        "cohfar_assign_transform_ip: failed to parse ifo set "
+                        "\"%.16s\" (truncated to 16 characters)\n",
+                        table->ifos);
                 exit(0);
             }
-            cur_stats = element->bgstats_1w->multistats[element->nifo];
-            if (icombo > -1 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
-                update_trigger_fars(table, element->nifo, element);
+            enabled_ifos = scan_trigger_ifos(enabled_ifos, table);
+            if (ifo_set__is_empty(enabled_ifos)) {
+                fprintf(stderr, "enabled_ifos not found, cohfar_assignfar\n");
+                exit(0);
+            }
+            int num_stats = trigger_stats_num_stats(enabled_ifos);
+            cur_stats     = element->bgstats_1w->multistats[num_stats - 1];
+            if (!ifo_set__is_empty(enabled_ifos)
+                && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
+                update_trigger_fars(table, num_stats, element);
             }
         }
     }
@@ -282,7 +290,7 @@ static gboolean cohfar_assignfar_event(GstBaseTransform *base,
         //      if (fflush (sink->file))
         //        goto flush_failed;
 
-        GST_LOG_OBJECT(element, "EVENT EOS. Finish assign far");
+        GST_LOG_OBJECT(element, "EVENT EOS. Finish assign FAR");
         break;
     default: break;
     }
@@ -305,7 +313,8 @@ static void cohfar_assignfar_set_property(GObject *object,
     case PROP_IFOS:
         element->ifos   = g_value_dup_string(value);
         element->nifo   = strlen(element->ifos) / IFO_LEN;
-        element->icombo = get_icombo(element->ifos);
+        // TODO: Consider using ifo_set__try_parse to check for errors
+        element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);
         element->bgstats_1w =
           trigger_stats_xml_create(element->ifos, STATS_XML_TYPE_BACKGROUND);
         element->bgstats_1d =
@@ -320,13 +329,14 @@ static void cohfar_assignfar_set_property(GObject *object,
         element->input_fnames = g_strsplit(g_value_dup_string(value), ",", -1);
         element->ninput       = g_strv_length(element->input_fnames);
         if (element->ninput != 3) {
-            fprintf(stderr,
-                    "Number of input files for zerolag FAR assignment is not 3 "
-                    "but %d,"
-                    " your cohfar-assignfar-input-fname option %s might not "
-                    "provide the right place"
-                    " for the input files. exiting \n",
-                    element->ninput, g_value_dup_string(value));
+            fprintf(
+              stderr,
+              "Expected 3 input files for zerolag FAR assignment, "
+              " but '%d' were provided."
+              " Your cohfar-assignfar-input-fname option \"%s\" might not "
+              "provide the right path"
+              " for the input files. Exiting \n",
+              element->ninput, g_value_dup_string(value));
             exit(0);
         }
         break;
@@ -397,8 +407,8 @@ static void cohfar_assignfar_base_init(gpointer gclass) {
     GstBaseTransformClass *transform_class = GST_BASE_TRANSFORM_CLASS(gclass);
 
     gst_element_class_set_details_simple(
-      element_class, "assign far to postcoh triggers", "assign far",
-      "assign far to postcoh triggers according to a given stats file.\n",
+      element_class, "assign FAR to postcoh triggers", "assign FAR",
+      "assign FAR to postcoh triggers according to a given stats file.\n",
       "Qi Chu <qi.chu at ligo dot org>");
     gst_element_class_add_pad_template(
       element_class,

@@ -25,11 +25,11 @@
  * gst-plugin-good collect data and alignment, and flag gap reference: postcoh
  */
 
+#include <LIGOLwHeader.h>
 #include <lal/TimeSeries.h>
 #include <lal/Units.h>
 #include <math.h>
 #include <triggerjointer/triggerjointer.h>
-#include <LIGOLwHeader.h>
 
 /* ceil the maximum time lag to the second digit. the original max time lag is
  * obtained from find_timelag.py code in gst/lal/triggerjointer/test/ */
@@ -437,11 +437,13 @@ static GstPad *trigger_jointer_request_new_pad(GstElement *element,
         /* gap segments */
         data->flag_segments = g_array_new(FALSE, FALSE, sizeof(FlagSegment));
         data->ifo_name      = (gchar *)malloc(IFO_LEN * sizeof(gchar));
-        fflush(stdout); // Without this, a buffer overflow is detected on the next line, only when running the dockerfile. TODO fix this hack.
+        fflush(stdout); // Without this, a buffer overflow is detected on the
+                        // next line, only when running the dockerfile. TODO fix
+                        // this hack.
         strncpy(data->ifo_name, req_name + 4,
                 sizeof(data->ifo_name)); // 4 for snr_
         for (j = 0; j < MAX_NIFO; j++) {
-            if (strncmp(data->ifo_name, IFOMap[j].name, IFO_LEN) == 0)
+            if (strncmp(data->ifo_name, IFOMap[j], IFO_LEN) == 0)
                 data->ifo_mapping = j;
         }
     } else {
@@ -766,8 +768,8 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
 
     for (snrdata = jointer->collect_snrdata; snrdata;
          snrdata = g_slist_next(snrdata)) {
-        data     = snrdata->data;
-        exe_size = round(exe_dur * data->rate * data->bps);
+        data          = snrdata->data;
+        exe_size      = round(exe_dur * data->rate * data->bps);
         one_take_size = exe_size + data->preserved_len * data->bps;
         // one_take_size =
         //   exe_size + data->ntimelag * 2 * data->bps; // bps: bypes per sample
@@ -865,7 +867,7 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
             trigger->coaphase[data->ifo_mapping] =
               atan2(this_snr.im, this_snr.re);
             end_time = cur_buftime; // end time from the triggering
-                                          // single-ifo trigger
+                                    // single-ifo trigger
             XLALGPSAdd(&(end_time),
                        (double)(this_sample + max_isample - data->ntimelag)
                          / data->rate); // adjust for the start
@@ -877,21 +879,19 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
             /* epoch is the GPS time of the first sample */
             LIGOTimeGPS epoch = trigger->end_time_sngl[data->ifo_mapping];
             g_assert(trigger->autochisq_len % 2 == 1);
-            XLALGPSAdd(&epoch, -1.0 / data->rate
-                        * (trigger->autochisq_len - 1) / 2);
+            XLALGPSAdd(&epoch,
+                       -1.0 / data->rate * (trigger->autochisq_len - 1) / 2);
             // g_assert(data->ntimelag % 2 == 1);
             // XLALGPSAdd(&epoch, -1.0 / data->rate
             //             * ((data->ntimelag) / 2));
 
+            this_sec  = epoch.gpsSeconds - cur_buftime.gpsSeconds;
+            this_nano = epoch.gpsNanoSeconds - cur_buftime.gpsNanoSeconds;
 
-            this_sec = epoch.gpsSeconds
-                        - cur_buftime.gpsSeconds;
-            this_nano = epoch.gpsNanoSeconds
-                        - cur_buftime.gpsNanoSeconds;
-                        
             series_sample =
               round(((double)this_sec + (double)(this_nano) / GST_SECOND)
-                    * data->rate) + data->ntimelag;
+                    * data->rate)
+              + data->ntimelag;
 
             // Allocate the memory
             // epoch = epoch
@@ -905,9 +905,14 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
                                            jointer->autochisq_len);
 
             int j = 0;
-            if(series_sample < 0) {
-                fprintf(stderr, "Missing start of snr_series, series_sample: %d", series_sample);
-                for (; series_sample < 0 && j < trigger->snr_series[data->ifo_mapping]->data->length; series_sample++) {
+            if (series_sample < 0) {
+                GST_DEBUG_OBJECT(
+                  jointer, "Missing start of snr_series, series_sample: %d",
+                  series_sample);
+                for (; series_sample < 0
+                       && j < trigger->snr_series[data->ifo_mapping]
+                                ->data->length;
+                     series_sample++) {
                     trigger->snr_series[data->ifo_mapping]->data->data[j] = 0.0;
                     j++;
                 }
@@ -919,37 +924,38 @@ static GstFlowReturn trigger_jointer_append_coinc_snr(TriggerJointer *jointer,
 
             /* FIXME: speedup. Load snglsnr data into snr_series->data->data
              */
-            for (;
-                 j < trigger->snr_series[data->ifo_mapping]->data->length && j + series_sample <= one_take_len;
+            for (; j < trigger->snr_series[data->ifo_mapping]->data->length
+                   && j + series_sample <= one_take_len;
                  j++) {
-                
+
                 trigger->snr_series[data->ifo_mapping]->data->data[j] =
                   *curr_snglsnr;
                 curr_snglsnr += data->ntmplt;
-
             }
 
             if (j < trigger->snr_series[data->ifo_mapping]->data->length) {
-                fprintf(stderr, "Missing end of snr_series, series_sample: %d", series_sample);
-                for (;
-                    j < trigger->snr_series[data->ifo_mapping]->data->length;
-                    j++) {
-                    
+                GST_DEBUG_OBJECT(jointer,
+                                 "Missing end of snr_series, series_sample: %d",
+                                 series_sample);
+                for (; j < trigger->snr_series[data->ifo_mapping]->data->length;
+                     j++) {
+
                     trigger->snr_series[data->ifo_mapping]->data->data[j] = 0.0;
                 }
             }
-
 
             GST_DEBUG_OBJECT(
               jointer,
               "new ifos -> %s, this ifo %d, sample %d, tmplt_idx %d,"
               "coinc ifo time %d, %d, max snr.re %f, snr.im %f, snr %f"
-              "series epoch %d, %d, sample %d, series sample %d, series length %d, one_take_len %d",
+              "series epoch %d, %d, sample %d, series sample %d, series length "
+              "%d, one_take_len %d",
               trigger->ifos, data->ifo_mapping, max_isample, tmplt_idx,
               end_time.gpsSeconds, end_time.gpsNanoSeconds, this_snr.re,
               this_snr.im,
               sqrt(this_snr.re * this_snr.re + this_snr.im * this_snr.im),
-              epoch.gpsSeconds, epoch.gpsNanoSeconds, this_sample, series_sample, jointer->autochisq_len, one_take_len);
+              epoch.gpsSeconds, epoch.gpsNanoSeconds, this_sample,
+              series_sample, jointer->autochisq_len, one_take_len);
         }
         gst_adapter_flush(data->adapter, exe_size);
     }
@@ -1112,20 +1118,19 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
     return ret;
 }
 
-enum {
-    PROP_0,
-    PROP_AUTOCHISQ_LEN
-};
+enum { PROP_0, PROP_AUTOCHISQ_LEN };
 
 static void trigger_jointer_set_property(GObject *object,
-                                      guint id,
-                                      const GValue *value,
-                                      GParamSpec *pspec) {
+                                         guint id,
+                                         const GValue *value,
+                                         GParamSpec *pspec) {
     TriggerJointer *element = TRIGGER_JOINTER(object);
 
     GST_OBJECT_LOCK(element);
     switch (id) {
-    case PROP_AUTOCHISQ_LEN: element->autochisq_len = g_value_get_int(value); break;
+    case PROP_AUTOCHISQ_LEN:
+        element->autochisq_len = g_value_get_int(value);
+        break;
 
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
     }
@@ -1133,14 +1138,16 @@ static void trigger_jointer_set_property(GObject *object,
 }
 
 static void trigger_jointer_get_property(GObject *object,
-                                      guint id,
-                                      GValue *value,
-                                      GParamSpec *pspec) {
+                                         guint id,
+                                         GValue *value,
+                                         GParamSpec *pspec) {
     TriggerJointer *element = TRIGGER_JOINTER(object);
 
     GST_OBJECT_LOCK(element);
     switch (id) {
-    case PROP_AUTOCHISQ_LEN: g_value_set_int(value, element->autochisq_len); break;
+    case PROP_AUTOCHISQ_LEN:
+        g_value_set_int(value, element->autochisq_len);
+        break;
 
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
     }
@@ -1188,8 +1195,10 @@ static void trigger_jointer_class_init(TriggerJointerClass *klass) {
 
     parent_class = g_type_class_ref(GST_TYPE_ELEMENT);
 
-    gobject_class->get_property = GST_DEBUG_FUNCPTR(trigger_jointer_get_property);
-    gobject_class->set_property = GST_DEBUG_FUNCPTR(trigger_jointer_set_property);
+    gobject_class->get_property =
+      GST_DEBUG_FUNCPTR(trigger_jointer_get_property);
+    gobject_class->set_property =
+      GST_DEBUG_FUNCPTR(trigger_jointer_set_property);
     gobject_class->dispose = GST_DEBUG_FUNCPTR(trigger_jointer_dispose);
     gstelement_class->request_new_pad =
       GST_DEBUG_FUNCPTR(trigger_jointer_request_new_pad);
@@ -1197,7 +1206,7 @@ static void trigger_jointer_class_init(TriggerJointerClass *klass) {
       GST_DEBUG_FUNCPTR(trigger_jointer_release_pad);
     gstelement_class->change_state =
       GST_DEBUG_FUNCPTR(trigger_jointer_change_state);
-    
+
     g_object_class_install_property(
       gobject_class, PROP_AUTOCHISQ_LEN,
       g_param_spec_int("autochisq-len", "autochisq length", "autochisq length",
@@ -1225,5 +1234,5 @@ static void trigger_jointer_init(TriggerJointer *jointer,
     jointer->is_snr_info_set    = FALSE;
     jointer->is_all_aligned     = FALSE;
     jointer->is_next_tstart_set = FALSE;
-    jointer->autochisq_len = JOINTER_PARAMS_NOT_INIT;
+    jointer->autochisq_len      = JOINTER_PARAMS_NOT_INIT;
 }

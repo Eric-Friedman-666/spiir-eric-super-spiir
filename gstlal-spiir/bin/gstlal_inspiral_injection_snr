@@ -247,6 +247,6 @@ for idx, inj in enumerate(sim_inspiral_table):
     inj.alpha4 = snr[idx]["H1"]
     inj.alpha5 = snr[idx]["L1"]
     inj.alpha6 = snr[idx]["V1"]
-    inj.alpha7 = snr[idx]["K1"]
+    # inj.alpha7 = snr[idx]["K1"] #KAGRA
 
 ligolw_utils.write_filename(new_xmldoc, options.output, verbose=True)

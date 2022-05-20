@@ -516,7 +516,7 @@ void spiir_state_load_bank(SpiirState **spstate,
             // printf("%d - d_dim: (%d, %d) a_dim: (%d, %d) b_dim: (%d, %d)\n",
             // i, d_array[i].dim[0], d_array[i].dim[1],
             //		a_array[i].dim[0], a_array[i].dim[1], b_array[i].dim[0],
-            //b_array[i].dim[1]);
+            // b_array[i].dim[1]);
 
             // printf("eff_len %d\n", eff_len);
             spstate[i]->num_filters   = num_filters;
@@ -568,7 +568,8 @@ void spiir_state_load_bank(SpiirState **spstate,
             freeArray(b_array + i);
 
             // printf("2st a: (%.3f + %.3fi) 2st b: (%.3f + %.3fi) 2st d: %d\n",
-            // tmp_a1[1].re, tmp_a1[1].im, 	tmp_b0[1].re, tmp_b0[1].im, tmp_d[1]);
+            // tmp_a1[1].re, tmp_a1[1].im, 	tmp_b0[1].re, tmp_b0[1].im,
+            // tmp_d[1]);
             CUDA_CHECK(cudaPeekAtLastError());
         }
     }

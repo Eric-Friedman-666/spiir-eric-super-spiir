@@ -127,13 +127,14 @@ instruments = input_fname.split('/')[-1].split('_')[0]
 nifo = len(instruments) / 2  # ifo e.g. H1, L1, len is 2
 
 # read cohsnr^2, and nullsnr^2 for each sky direction
+# The input file is assumed to be of the correct format.
 f = open(input_fname, 'rb')
 for chunk in iter(lambda: f.read(4), b''):
     allread_skymap.append(struct.unpack('f', chunk)[0])
 f.close()
 
 # load cohsnrsq, and nullsnrsq
-npix = int(len(allread_skymap) / 2)
+npix = len(allread_skymap) // 2
 cohsnrsq_skymap = allread_skymap[0:npix]
 nullsnrsq_skymap = allread_skymap[npix:]
 

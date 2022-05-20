@@ -906,8 +906,8 @@ void ssvkernel(gsl_vector *x,
     //		gsl_vector * xb = gsl_vector_alloc(Nb);
     //		for (j = 0; j < Nb; j++) {
     //			gsl_vector_set(xb, j,
-    //					gsl_vector_get(x_ab, floor(gsl_ran_flat(r,
-    //0, N))));
+    //					gsl_vector_get(x_ab,
+    // floor(gsl_ran_flat(r, 0, N))));
     //		}
     //
     //		gsl_vector_histc(xb, t_dt2, y_histb);
@@ -924,8 +924,8 @@ void ssvkernel(gsl_vector *x,
     //		for (j = 0; j < tin->size; j++) {
     //			gsl_matrix_set(yb, i, j,
     //					gsl_interp_eval(linear, t->data,
-    // yb_buf->data, 							gsl_vector_get(tin, j),
-    // acc));
+    // yb_buf->data,
+    // gsl_vector_get(tin, j), acc));
     //		}
     //		gsl_vector_free(xb);
     //	}

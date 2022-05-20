@@ -21,12 +21,12 @@ from glue.ligolw import lsctables
 import lal
 from . import _postcohtable
 
-__all__ = ["PostcohInspiralWrapper", "ifo_map"]
+__all__ = ["GSTLALPostcohInspiral", "ifo_map"]
 
 ifo_map = _postcohtable.ifo_map
 
 
-class PostcohInspiralWrapper(_postcohtable.PostcohInspiralWrapper):
+class GSTLALPostcohInspiral(_postcohtable.GSTLALPostcohInspiral):
     __slots__ = ()
 
     process_id_type = ilwd.get_ilwdchar_class("process", "process_id")

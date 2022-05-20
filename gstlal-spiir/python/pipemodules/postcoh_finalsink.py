@@ -51,7 +51,6 @@ except ImportError:
 
 from glue import iterutils
 from glue import segments
-from glue import gpstime
 from glue.ligolw import ligolw
 from glue.ligolw import dbtables
 from glue.ligolw import ilwd
@@ -81,7 +80,7 @@ lsctables.LIGOTimeGPS = LIGOTimeGPS
 #
 # =============================================================================
 #
-#                         glue.ligolw Content Handlers
+#						 glue.ligolw Content Handlers
 #
 # =============================================================================
 #
@@ -262,7 +261,7 @@ class FAPUpdater(object):
                 self.rm_fnames)
             return None
 
-        ls_fnames = os.listdir(str(self.path))
+        ls_fnames = sorted(os.listdir(str(self.path)))
         grep_fnames = [fname for fname in ls_fnames if keyword in fname]
         # remove file names that contain "next" which are temporary files
         valid_fnames = [
@@ -578,6 +577,7 @@ class FinalSink(object):
                      i for (i, v) in zip(self.candidate.chisq, ifo_active) if v
                  ]))
 
+    # TODO: Refactor/rewrite appsink_new_buffer() and cluster()
     def appsink_new_buffer(self, elem):
         with self.lock:
             buf = elem.emit("pull-buffer")
@@ -585,7 +585,7 @@ class FinalSink(object):
                 logging.info("buf gap at %d" % buf.timestamp)
                 return
             buf_timestamp = LIGOTimeGPS(0, buf.timestamp)
-            newevents = postcohtable.PostcohInspiralWrapper.from_buffer(buf)
+            newevents = postcohtable.GSTLALPostcohInspiral.from_buffer(buf)
             self.need_candidate_check = False
 
             if len(newevents) == 0:
@@ -616,33 +616,24 @@ class FinalSink(object):
                 self.t_start = buf_timestamp
                 self.is_first_buf = False
 
-            headevent_endtime = buf_timestamp + self.negative_latency
+            # The maximum (upper) bound of any cluster we are willing to process
+            # We assume we have all buffers from before the start of this buffer
+            # Event end times are offset by negative latency if running early warning
+            max_cluster_boundary = buf_timestamp + self.negative_latency
             if self.is_first_event and nevent > 0:
-                self.cluster_boundary = headevent_endtime + self.cluster_window
+                self.cluster_boundary = max_cluster_boundary + self.cluster_window
                 self.is_first_event = False
-
-            # extend newevents to cur_event_table
-            self.cur_event_table.extend(newevents)
-
-            if self.cluster_window == 0:
-                # self.postcoh_table.extend(newevents)
-                for event in newevents:
-                    event.delete_all_snr_series()
-                    self.postcoh_table.append(event)
-
-                del self.cur_event_table[:]
 
             # NOTE: only consider clustered trigger for uploading to gracedb
             # check if the newevents is over boundary
-            # this loop will exit when the cluster_boundary is incremented to be > the headevent_endtime, see diagram in self.cluster()
+            # this loop will exit when the cluster_boundary is incremented to be > the max_cluster_boundary, see diagram in self.cluster()
 
-            while self.cluster_window > 0 and self.cluster_boundary and headevent_endtime > self.cluster_boundary:
+            while self.cluster_window > 0 and self.cluster_boundary and max_cluster_boundary > self.cluster_boundary:
                 self.cluster(self.cluster_window)
 
                 if self.need_candidate_check:
                     self.nevent_clustered += 1
                     self.__set_far(self.candidate)
-
                     if self.gracedb_far_threshold and self.__pass_test(
                             self.candidate):
                         self.__do_gracedb_alert(self.candidate)
@@ -654,6 +645,19 @@ class FinalSink(object):
                         self.onperformer.update_eye_candy(self.candidate)
                     self.candidate = None
                     self.need_candidate_check = False
+
+            # extend newevents to cur_event_table
+            # Has to be done after processing pre-existing events, because this
+            # buffer may contain events with end time before the buffer start
+            self.cur_event_table.extend(newevents)
+
+            if self.cluster_window == 0:
+                # self.postcoh_table.extend(newevents)
+                for event in newevents:
+                    event.delete_all_snr_series()
+                    self.postcoh_table.append(event)
+
+                del self.cur_event_table[:]
 
             # dump zerolag candidates when interval is reached
             self.snapshot_duration = buf_timestamp - self.t_snapshot_start
@@ -675,68 +679,56 @@ class FinalSink(object):
                 self.fapupdater.update_fap_stats(buf_timestamp)
                 self.t_fapupdater_start = buf_timestamp
 
-    def __select_head_event(self):
-        # last event should have the smallest timestamp
-        #assert len(self.cur_event_table) != 0
-        if len(self.cur_event_table) == 0:
-            return None
-
-        head_event = self.cur_event_table[0]
-        for row in self.cur_event_table:
-            if row.end < head_event.end:
-                head_event = row
-        return head_event
-
     def cluster(self, cluster_window):
         # send candidate to be gracedb checked only when:
         # timestamp small ->->->-> large
-        #                     |headevent_endtime
+        #                     |max_cluster_boundary
         #          ___________(cur_table)
         #                |boundary
         #           |candidate to be gracedb checked = end time of the peak of cur_table < boundary
         #                  |candidate remain = end time of the peak of cur_table > boundary
         # afterwards:
-        #                     |headevent_endtime
+        #                     |max_cluster_boundary
         #                 ____(cur_table cleaned)
         #                           |boundary incremented
 
-        # always choose the head event to test its end against boundary
-        if self.candidate is None:
-            self.candidate = self.__select_head_event()
+        # This may be a rare source of nondeterminism, as we may consider different events equal
+        def is_better_event(lhs, rhs):
+            # If both end and cohsnr are equal, lhs is not considered better (because it is the same)
+            if lhs.cohsnr == rhs.cohsnr:
+                return lhs.end < rhs.end
+            return lhs.cohsnr > rhs.cohsnr
 
-        # make sure the candidate is within the boundary
-        if self.candidate is None or self.candidate.end > self.cluster_boundary:
-            self.cluster_boundary = self.cluster_boundary + cluster_window
-            self.candidate = None  # so we can reselect a candidate next time
-            return
-        # the first event in cur_event_table
-        # FIXME: SPEEDUP
-        peak_event = self.__select_head_event()
+        peak_event = None
         # find the max cohsnr event within the boundary of cur_event_table
         # FIXME: SPEEDUP
-        for row in self.cur_event_table:
-            if row.end <= self.cluster_boundary and row.cohsnr > peak_event.cohsnr:
+        for row in filter(lambda row: row.end <= self.cluster_boundary,
+                          self.cur_event_table):
+            if peak_event is None or is_better_event(row, peak_event):
                 peak_event = row
 
         # cur_table is empty and we do have a candidate, so need to check the candidate
         if peak_event is None:
             # no event within the boundary, candidate is the peak, update boundary
             self.cluster_boundary = self.cluster_boundary + cluster_window
-            self.need_candidate_check = True
+            self.need_candidate_check = self.candidate is not None
             return
 
-        if peak_event.end <= self.cluster_boundary and peak_event.cohsnr > self.candidate.cohsnr:
-            # if peak_event.cohsnr > candidate.cohsnr, slide window so the centre
+        if self.candidate is None or is_better_event(peak_event,
+                                                     self.candidate):
+            # slide window so the centre
             # becomes the peak_event
             self.candidate = peak_event
             iterutils.inplace_filter(
                 lambda row: row.end > self.cluster_boundary,
                 self.cur_event_table)
             # update boundary
+            # Note: cluster boundary does not necessarily align with buffer boundary
             self.cluster_boundary = self.candidate.end + cluster_window
             self.need_candidate_check = False
         else:
-            # if peak_event.cohsnr < candidate.cohsnr, pop out candidate for gracedb uploading
+            # FIXME: This seems to assume buffer length >= cluster_window
+            # pop out candidate for gracedb uploading
             iterutils.inplace_filter(
                 lambda row: row.end > self.cluster_boundary,
                 self.cur_event_table)
@@ -747,24 +739,24 @@ class FinalSink(object):
     def __set_far(self, candidate):
         candidate.far = (max(candidate.far_2h, candidate.far_1d,
                              candidate.far_1w)) * self.far_factor
-        candidate.far_sngl = [
+        far_sngl = [
             (max(fars) * self.far_factor)
             for fars in zip(candidate.far_2h_sngl, candidate.far_1d_sngl,
                             candidate.far_1w_sngl)
         ]
         for i, ifo in enumerate(pipe_macro.IFO_MAP):
-            setattr(candidate, "far_sngl_%s" % ifo, candidate.far_sngl[i])
+            setattr(candidate, "far_sngl_%s" % ifo, far_sngl[i])
 
     # def __lookback_far(self, candidate):
     # FIXME: hard-code to check event that's < 5e-7
     # if candidate.far > 5e-7:
-    #     return
+    #	 return
     # else:
-    #     count_events = sum((lookback_event.far < 1e-4) for lookback_event in self.lookback_event_table)
-    #     if count_events > 1:
-    #         # FAR estimation is not valide for this period, increase the FAR
-    #         # FIXME: should derive FAR from count_events
-    #          candidate.far = 9.99e-6
+    #	 count_events = sum((lookback_event.far < 1e-4) for lookback_event in self.lookback_event_table)
+    #	 if count_events > 1:
+    #		 # FAR estimation is not valide for this period, increase the FAR
+    #		 # FIXME: should derive FAR from count_events
+    #		  candidate.far = 9.99e-6
 
     # all_snr_H = self.lookback_event_table.getColumnByName('snglsnr_H')
     # all_snr_L = self.lookback_event_table.getColumnByName('snglsnr_L')
@@ -776,7 +768,7 @@ class FinalSink(object):
     # count_better_L = sum((snr > candidate.snglsnr_L && chisq < candidate.chisq_L) for (snr, chisq) in zip(all_snr_L, allchisq_L))
     # count_better_V = sum((snr > candidate.snglsnr_V && chisq < candidate.chisq_V) for (snr, chisq) in zip(all_snr_V, allchisq_V))
     # if count_better_H > 0 or count_better_L > 0 or count_better_V > 0:
-    #     candidate.far = 9.99e-6
+    #	 candidate.far = 9.99e-6
 
     def __need_trigger_control(self, trigger):
         # do trigger control
@@ -1235,7 +1227,7 @@ class CoincsDocFromPostcoh(object):
                 "amplitude", "eff_distance", "coa_phase", "mass1", "mass2",
                 "mchirp", "mtotal", "eta", "kappa", "chi", "tau0", "tau2",
                 "tau3", "tau4", "tau5", "ttotal", "psi0", "psi3", "alpha",
-                "alpha1", "alpha2", "alpha3", "alpha4", "alpha5", "alpha6", # KAGRA
+                "alpha1", "alpha2", "alpha3", "alpha4", "alpha5", "alpha6", #KAGRA
                 "beta", "f_final", "snr", "chisq", "chisq_dof", "bank_chisq",
                 "bank_chisq_dof", "cont_chisq", "cont_chisq_dof", "sigmasq",
                 "rsqveto_duration", "Gamma0", "Gamma1", "Gamma2", "Gamma3",
@@ -1288,7 +1280,7 @@ class CoincsDocFromPostcoh(object):
             row.alpha4 = 0
             row.alpha5 = 0
             row.alpha6 = 0
-            row.alpha7 = 0
+            # row.alpha7 = 0 #KAGRA
             row.beta = 0
             row.f_final = trigger.f_final
             row.snr = getattr(trigger, "snglsnr_%s" % ifo)

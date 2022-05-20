@@ -328,7 +328,7 @@ class GWDataSourceInfo(object):
 		""" 
 
 		## A list of possible, valid data sources ("frames", "framexmit", "lvshm", "nds", "white", "silence", "AdvVirgo", "LIGO", "AdvLIGO")
-		self.data_sources = set(("frames", "framexmit", "lvshm", "nds", "white", "silence", "AdvVirgo", "LIGO", "AdvLIGO")) ## Do I add Kagra here?, LIGO = L1, AdvLIGO = H1?
+		self.data_sources = set(("frames", "framexmit", "lvshm", "nds", "white", "silence", "AdvVirgo", "LIGO", "AdvLIGO")) #KAGRA
 		self.live_sources = set(("framexmit", "lvshm"))
 		assert self.live_sources <= self.data_sources
 
@@ -413,7 +413,7 @@ class GWDataSourceInfo(object):
 #		self.state_channel_dict = { "H1": "LLD-DQ_VECTOR", "H2": "LLD-DQ_VECTOR","L1": "LLD-DQ_VECTOR", "V1": "LLD-DQ_VECTOR" }
 #		self.dq_channel_dict = { "H1": "DMT-DQ_VECTOR", "H2": "DMT-DQ_VECTOR","L1": "DMT-DQ_VECTOR", "V1": None }
 
-		self.state_channel_dict = { "H1": None, "H2": "LLD-DQ_VECTOR","L1": None, "V1": None, "K1": None } # KAGRA
+		self.state_channel_dict = { "H1": None, "H2": "LLD-DQ_VECTOR","L1": None, "V1": None, "K1": None } #KAGRA
 		self.dq_channel_dict = { "H1": None, "H2": "DMT-DQ_VECTOR","L1": None, "V1": None, "K1": None }
 
 		if options.state_channel_name is not None:
@@ -739,7 +739,7 @@ def mkbasicsrc(pipeline, gw_data_source_info, instrument, nxydump_segment = None
 	elif gw_data_source_info.data_source == "frames":
 		if instrument == "V1":
 			#FIXME Hack because virgo often just uses "V" in the file names rather than "V1".  We need to sieve on "V"
-			src = pipeparts.mklalcachesrc(pipeline, location = gw_data_source_info.frame_cache, cache_src_regex = "V") # TODO KAGRA maybe
+			src = pipeparts.mklalcachesrc(pipeline, location = gw_data_source_info.frame_cache, cache_src_regex = "V") #KAGRA
 		else:
 			src = pipeparts.mklalcachesrc(pipeline, location = gw_data_source_info.frame_cache, cache_src_regex = instrument[0], cache_dsc_regex = instrument)
 

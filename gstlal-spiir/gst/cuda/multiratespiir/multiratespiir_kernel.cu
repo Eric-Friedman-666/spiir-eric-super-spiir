@@ -139,7 +139,7 @@ __global__ void downsample2x(const float amplifier,
 
         queue_out[(tid + last_sample_out) % len_out] = tmp * amplifier;
         //		printf("in device %d, mem %f in %f\n", tx_loc+1,
-        //mem[filt_len-1+tx_loc+1], queue_in[tx_loc+1]);
+        // mem[filt_len-1+tx_loc+1], queue_in[tx_loc+1]);
     }
 
     // copy last to first (filt_len-1) mem data
@@ -187,7 +187,9 @@ __global__ void
     // has numFilters filters. There are numTemplate blocks launched, each block
     // has at least numFilters threads, and block size is a multiple of WARPSIZE
 
+    // Compute which warp and which lane in that warp the thread is in
     int tLane = threadIdx.x & (WARPSIZE - 1);
+    int tWarp = threadIdx.x >> LOGWARPSIZE;
 
     float fltrOutptReal;
     float fltrOutptImag;
@@ -196,6 +198,15 @@ __global__ void
 
     COMPLEX_F a1, b0;
     COMPLEX_F previousSnr;
+
+    // Shared memory for partial reduction results
+    // Note this assumes that the number of warps is at most the warp size.
+    // This is (currently) a safe assumption as CUDA fixes the warp size at 32
+    // and number of threads per block at at most 1024 = 32^2. Otherwise we
+    // would have to do more than two warp reductions.
+    // See https://developer.nvidia.com/blog/faster-parallel-reductions-kepler/
+    static __shared__ float partialSumsReal[WARPSIZE];
+    static __shared__ float partialSumsImag[WARPSIZE];
 
     a1.re          = 0.0f;
     a1.im          = 0.0f;
@@ -235,13 +246,41 @@ __global__ void
         }
 
         if (tLane == 0) {
-            atomicAdd(cudaSnr + (2 * blockIdx.x + 0) * mem_len + filt_len - 1
-                        + i,
-                      fltrOutptReal);
-            atomicAdd(cudaSnr + (2 * blockIdx.x + 1) * mem_len + filt_len - 1
-                        + i,
-                      fltrOutptImag);
+            // Store the per-warp partial sum in shared memory
+            partialSumsReal[tWarp] = fltrOutptReal;
+            partialSumsImag[tWarp] = fltrOutptImag;
         }
+
+        // Wait for all partial sums to be done
+        __syncthreads();
+
+        // Warp-reduce partial sums to get final sum
+        if (tWarp == 0) {
+            // Load each partial sum (if that warp existed) into a lane-local
+            // value in warp 0
+            float sum_real = (threadIdx.x<blockDim.x>> LOGWARPSIZE)
+                               ? partialSumsReal[tLane]
+                               : 0;
+            float sum_imag = (threadIdx.x<blockDim.x>> LOGWARPSIZE)
+                               ? partialSumsImag[tLane]
+                               : 0;
+
+            for (int off = WARPSIZE >> 1; off > 0; off = off >> 1) {
+                sum_real += __shfl_down(sum_real, off);
+                sum_imag += __shfl_down(sum_imag, off);
+            }
+
+            if (threadIdx.x == 0) {
+                cudaSnr[(2 * blockIdx.x + 0) * mem_len + filt_len - 1 + i] =
+                  sum_real;
+                cudaSnr[(2 * blockIdx.x + 1) * mem_len + filt_len - 1 + i] =
+                  sum_imag;
+            }
+        }
+
+        // Don't let other threads mutate shared memory until we are done with
+        // it
+        __syncthreads();
     }
 
     if (threadIdx.x < numFilters)
@@ -398,8 +437,8 @@ __global__ void cuda_iir_filter_kernel(COMPLEX_F *cudaA1,
         for (i = 0; i < len; i += nb) {
             for (j = 0; j < nb; ++j) {
                 // data = 0.01f;
-                // data = tex1Dfetch(texRef, shift+i+j);		//use texture,
-                // abandon now
+                // data = tex1Dfetch(texRef, shift+i+j);		//use
+                // texture, abandon now
                 data =
                   cudaData[(shift + i + j + queue_first_sample) % queue_len];
                 // printf ("channelid %d, data %d %f\n", by, i+j, data);
@@ -502,8 +541,8 @@ __global__ void upsample2x_and_add_reshape(
     unsigned int by = blockIdx.y, channels = gridDim.y;
     int pos, pos_in_start                  = mem_in_len * by + last_sample,
              mem_out_start = mem_out_len * by + filt_len - 1;
-    // int	pos, pos_in_start = mem_in_len * by + last_sample, pos_out_start =
-    // by;
+    // int	pos, pos_in_start = mem_in_len * by + last_sample, pos_out_start
+    // = by;
     float *in, *out;
     int i;
     for (i = tx; i < filt_len * 2; i += tdx) tmp_sinc[i] = sinc[i];

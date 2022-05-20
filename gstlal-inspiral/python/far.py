@@ -142,7 +142,7 @@ class ThincaCoincParamsDistributions():
 		# check input
 		#
 
-		assert "V1" not in instruments	# disallow Virgo from initialization FIXME:  remove after O2 #TODO maybe KAGRA?
+		assert "V1" not in instruments	# disallow Virgo from initialization FIXME:  remove after O2 #KAGRA
 		if min_instruments < 1:
 			raise ValueError("min_instruments=%d must be >= 1" % min_instruments)
 		if min_instruments > len(instruments):

@@ -110,7 +110,7 @@ typedef struct _PeakList {
     float *nullsnr_skymap;
 
     /* structure on GPU device */
-    // [THA]: It is important to note that pointers on the host device are not
+    // It is important to note that pointers on the host device are not
     // exposed to the GPU device. For this reason, we can't allocate d_ntoff,
     // d_snglsnr, etc. here on the stack with sized arrays. Instead, we need
     // to malloc is when PeakList is built.
@@ -203,7 +203,6 @@ typedef struct _PostcohState {
     int skymap_peakcur[MAX_NIFO];
     gint cur_ifo_bits;
     char *all_ifos;
-    gint ifo_combo_idx;
     gint is_member_init;
     float snglsnr_max[MAX_NIFO];
     float *tmp_maxsnr;

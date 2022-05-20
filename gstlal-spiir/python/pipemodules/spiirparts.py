@@ -146,7 +146,7 @@ def mkSPIIRmulti(pipeline,
     # construct trigger generators
     #
     # format of banklist : {'H1': <H1Bank0>, <H1Bank1>..;
-    #            'L1': <L1Bank0>, <L1Bank1>..;..}
+    #			'L1': <L1Bank0>, <L1Bank1>..;..}
     # format of bank: <H1bank0>
 
     triggersrcs = dict((instrument, set()) for instrument in hoftdicts)
@@ -280,7 +280,7 @@ def mkSPIIRhoftToSnrSlices(pipeline,
             head.link(adder)
             prehead.link(adder)
             head = adder
-        #    head = pipeparts.mkadder(pipeline, (head, prehead))
+        #	head = pipeparts.mkadder(pipeline, (head, prehead))
         # FIXME:  this should get a nofakedisconts after it until the resampler is patched
         head = pipeparts.mkresample(pipeline, head, quality=1)
         if sr == max_rate:
@@ -386,10 +386,10 @@ def mkBuildBossSPIIR(pipeline,
 
     triggersrcs = dict((instrument, set()) for instrument in hoftdicts)
     # format of banklist : {'H1': <H1Bank0>, <H1Bank1>..;
-    #            'L1': <L1Bank0>, <L1Bank1>..;..}
+    #			'L1': <L1Bank0>, <L1Bank1>..;..}
     # format of bank: <H1bank0>
 
-    #    pdb.set_trace()
+    #	pdb.set_trace()
     for instrument, bank_name in [(instrument, bank_name)
                                   for instrument, banklist in banks.items()
                                   for bank_name in banklist]:
@@ -407,7 +407,7 @@ def mkBuildBossSPIIR(pipeline,
                 "audio/x-raw-float, rate=%d" % max_bank_rate)
         snr = pipeparts.mkreblock(pipeline, head)
 
-        #        bank_struct = build_bank_struct(bank, max_rates[instrument])
+        #		bank_struct = build_bank_struct(bank, max_rates[instrument])
         snr = pipemodules.mkcudamultiratespiir(
             pipeline, snr, bank_name, gap_handle=0,
             stream_id=bankid)  # treat gap as zeros
@@ -470,14 +470,196 @@ def mkBuildBossSPIIR(pipeline,
     return triggersrcs
 
 
+def mkPostcohSPIIR(pipeline,
+                   detectors,
+                   banks,
+                   psd,
+                   psd_fft_length=8,
+                   ht_gate_threshold=None,
+                   veto_segments=None,
+                   verbose=False,
+                   nxydump_segment=None,
+                   chisq_type='autochisq',
+                   track_psd=False,
+                   block_duration=gst.SECOND,
+                   blind_injections=None,
+                   cuda_postcoh_snglsnr_thresh=4,
+                   cuda_postcoh_detrsp_fname=None,
+                   cuda_postcoh_hist_trials=1,
+                   output_prefix=None,
+                   cuda_postcoh_output_skymap=0):
+    #	pdb.set_trace()
+    #
+    # check for recognized value of chisq_type
+    #
+
+    if chisq_type not in ['autochisq']:
+        raise ValueError("chisq_type must be either 'autochisq', given %s" %
+                         chisq_type)
+
+    #
+    # extract segments from the injection file for selected reconstruction
+    #
+
+    if detectors.injection_filename is not None:
+        inj_seg_list = simulation.sim_inspiral_to_segment_list(
+            detectors.injection_filename)
+    else:
+        inj_seg_list = None
+        #
+        # Check to see if we are specifying blind injections now that we know
+        # we don't want real injections. Setting this
+        # detectors.injection_filename will ensure that injections are added
+        # but won't only reconstruct injection segments.
+        #
+        detectors.injection_filename = blind_injections
+
+    #
+    # construct dictionaries of whitened, conditioned, down-sampled
+    # h(t) streams
+
+    #
+    #
+
+    hoftdicts = {}
+    max_instru_rates = {}
+    sngl_max_rate = 0
+    for instrument in detectors.channel_dict:
+        for instrument_from_bank, bank_list in [
+            (instrument_from_bank, bank_list) for bank_dict in banks
+                for instrument_from_bank, bank_list in bank_dict.items()
+        ]:
+            if instrument_from_bank == instrument:
+                sngl_max_rate = max(
+                    spiir_utils.get_maxrate_from_xml(bank_list[0]),
+                    sngl_max_rate)
+        max_instru_rates[instrument] = sngl_max_rate
+        src, statevector, dqvector = datasource.mkbasicsrc(pipeline,
+                                                           detectors,
+                                                           instrument,
+                                                           verbose=verbose)
+        if veto_segments is not None:
+            hoftdicts[instrument] = snglrate_datasource.mkwhitened_src(
+                pipeline,
+                src,
+                sngl_max_rate,
+                instrument,
+                psd=psd[instrument],
+                psd_fft_length=psd_fft_length,
+                ht_gate_threshold=ht_gate_threshold,
+                veto_segments=veto_segments[instrument],
+                seekevent=detectors.seekevent,
+                nxydump_segment=nxydump_segment,
+                track_psd=track_psd,
+                zero_pad=0,
+                width=32)
+        else:
+            hoftdicts[instrument] = snglrate_datasource.mkwhitened_src(
+                pipeline,
+                src,
+                sngl_max_rate,
+                instrument,
+                psd=psd[instrument],
+                psd_fft_length=psd_fft_length,
+                ht_gate_threshold=ht_gate_threshold,
+                veto_segments=None,
+                seekevent=detectors.seekevent,
+                nxydump_segment=nxydump_segment,
+                track_psd=track_psd,
+                zero_pad=0,
+                width=32)
+
+    #
+    # construct trigger generators
+    #
+    triggersrcs = []
+
+    # format of banks :	[{'H1': <H1Bank0>; 'L1': <L1Bank0>..;}
+    #			 {'H1': <H1Bank1>; 'L1': <L1Bank1>..;}
+    #			 ...]
+    # format of bank_dict: {'H1': <H1Bank1>; 'L1': <L1Bank1>..;}
+    autocorrelation_fname_list = []
+    for bank_dict in banks:
+        autocorrelation_fname = ""
+        for instrument, bank_list in bank_dict.items():
+            autocorrelation_fname += str(instrument)
+            autocorrelation_fname += ":"
+            autocorrelation_fname += str(bank_list[0])
+            autocorrelation_fname += ","
+            if len(bank_list) != 1:
+                raise ValueError(
+                    "%s instrument: number of banks is not equal to 1, can not do coherent analysis"
+                    % instrument)
+        autocorrelation_fname = autocorrelation_fname.rstrip(',')
+        autocorrelation_fname_list.append(autocorrelation_fname)
+
+    for instrument in banks[0].keys():
+        hoftdicts[instrument] = pipeparts.mktee(pipeline,
+                                                hoftdicts[instrument])
+
+    for i_dict, bank_dict in enumerate(banks):
+        postcoh = None
+        head = None
+
+        for instrument, bank_list in bank_dict.items():
+            bankname = bank_list[0]
+            bankid = spiir_utils.get_bankid_from_bankname(bankname)
+            max_bank_rate = spiir_utils.get_maxrate_from_xml(bankname)
+            head = pipeparts.mkqueue(pipeline,
+                                     hoftdicts[instrument],
+                                     max_size_time=gst.SECOND * 10,
+                                     max_size_buffers=0,
+                                     max_size_bytes=0)
+            if max_bank_rate < max_instru_rates[instrument]:
+                head = pipeparts.mkcapsfilter(
+                    pipeline, pipeparts.mkresample(pipeline, head, quality=9),
+                    "audio/x-raw-float, rate=%d" % max_bank_rate)
+            suffix = "%s_%d" % (instrument, bankid)
+
+            head = pipeparts.mkreblock(pipeline, head)
+            snr = pipeparts.mkcudamultiratespiir(
+                pipeline, head, bankname, gap_handle=0,
+                stream_id=bankid)  # treat gap as zeros
+            if verbose:
+                snr = pipeparts.mkprogressreport(
+                    pipeline, snr, "progress_done_gpu_filtering_%s" % suffix)
+
+            if postcoh is None:
+                postcoh = pipemodules.mkcudapostcoh(
+                    pipeline,
+                    snr,
+                    instrument,
+                    cuda_postcoh_detrsp_fname,
+                    autocorrelation_fname_list[i_dict],
+                    bank_list[0],
+                    hist_trials=cuda_postcoh_hist_trials,
+                    snglsnr_thresh=cuda_postcoh_snglsnr_thresh,
+                    output_skymap=cuda_postcoh_output_skymap,
+                    stream_id=bankid)
+            else:
+                snr.link_pads(None, postcoh, instrument)
+
+        # FIXME: hard-coded to do compression
+        if verbose:
+            postcoh = pipeparts.mkprogressreport(
+                pipeline, postcoh, "progress_xml_dump_bank_stream%d" % i_dict)
+        head = mkpostcohfilesink(pipeline,
+                                 postcoh,
+                                 location=output_prefix,
+                                 compression=1,
+                                 snapshot_interval=0)
+        triggersrcs.append(head)
+    return triggersrcs
+
+
 def parse_shift_string(shift_string):
     """
-    parses strings of form 
+	parses strings of form 
 
-    det1:shift1, det2:shift2
-    
-    into a dictionary of lists of shifts.
-    """
+	det1:shift1, det2:shift2
+	
+	into a dictionary of lists of shifts.
+	"""
     out = {}
     if shift_string is None:
         return out
@@ -604,9 +786,9 @@ def mkPostcohSPIIROnline(pipeline,
     for instrument in banks[0].keys():
         ifos += str(instrument)
 
-    # format of banks :    [{'H1': <H1Bank0>; 'L1': <L1Bank0>..;}
-    #             {'H1': <H1Bank1>; 'L1': <L1Bank1>..;}
-    #             ...]
+    # format of banks :	[{'H1': <H1Bank0>; 'L1': <L1Bank0>..;}
+    #			 {'H1': <H1Bank1>; 'L1': <L1Bank1>..;}
+    #			 ...]
     # format of bank_dict: {'H1': <H1Bank1>; 'L1': <L1Bank1>..;}
 
     # assemble autocorrelation_fname for postcoh chisq calculation
@@ -632,7 +814,6 @@ def mkPostcohSPIIROnline(pipeline,
                                                 hoftdicts[instrument])
 
     for i_dict, bank_dict in enumerate(banks):
-        postcohdict = {}
         postcoh = None
         head = None
         #
@@ -669,7 +850,6 @@ def mkPostcohSPIIROnline(pipeline,
             snr = pipemodules.mkcudamultiratespiir(
                 pipeline, head, bank_list[0], gap_handle=0,
                 stream_id=bankid)  # treat gap as zeros
-
             if verbose:
                 snr = pipeparts.mkprogressreport(
                     pipeline, snr, "progress_done_gpu_filtering_%s" % suffix)
@@ -689,24 +869,6 @@ def mkPostcohSPIIROnline(pipeline,
                                     max_size_buffers=10,
                                     max_size_bytes=100000000)
 
-            #TODO KAFKA Insert Dynamic Pipeline switch here
-            # for combination in ['H1L1V1K1']:#, 'H1L1V1']:#, 'H1L1K1', 'H1V1K1', 'H1L1', 'H1V1', 'H1K1', 'L1V1K1', 'L1V1', 'L1K1']:
-            #     if instrument in cuda_postcoh_parti_ifos and instrument in combination:
-            #         if combination not in postcohdict:
-            #             postcohdict[combination] = pipemodules.mkcudapostcoh(
-            #                 pipeline,
-            #                 snr,
-            #                 instrument,
-            #                 cuda_postcoh_detrsp_fname,
-            #                 autocorrelation_fname_list[i_dict],
-            #                 bank_list[0],
-            #                 hist_trials=cuda_postcoh_hist_trials,
-            #                 snglsnr_thresh=cuda_postcoh_snglsnr_thresh,
-            #                 output_skymap=cuda_postcoh_output_skymap,
-            #                 stream_id=bankid)
-            #         else:
-            #             snr.link_pads(None, postcohdict[combination], instrument)
-            
             if instrument in cuda_postcoh_parti_ifos:
                 if postcoh is None:
                     postcoh = pipemodules.mkcudapostcoh(
@@ -737,13 +899,6 @@ def mkPostcohSPIIROnline(pipeline,
                 this_name = "snr_%s" % instrument
                 snr.link_pads(None, jointer, this_name)
 
-        # for combination in ['H1L1V1K1']:#, 'H1L1V1']:#, 'H1L1K1', 'H1V1K1', 'H1L1', 'H1V1', 'H1K1', 'L1V1K1', 'L1V1', 'L1K1']:
-        #     if postcoh is None:
-        #         postcoh = pipemodules.mkmax_postcoh(
-        #             pipeline,
-        #         )
-        #     postcohdict[combination].link_pads(None, postcohdict[combination], combination)
-
         # FIXME: hard-coded to do compression
         if verbose:
             postcoh = pipeparts.mkprogressreport(
@@ -767,7 +922,6 @@ def mkPostcohSPIIROnline(pipeline,
                 output_prefix=cohfar_accumbackground_output_prefix[i_dict],
                 output_name=None,
                 snapshot_interval=cohfar_accumbackground_snapshot_interval)
-
         postcoh = pipemodules.mkcohfar_assignfar(
             pipeline,
             postcoh,
@@ -777,7 +931,7 @@ def mkPostcohSPIIROnline(pipeline,
             input_fname=cohfar_assignfar_input_fname)
         #head = mkpostcohfilesink(pipeline, postcoh, location = output_prefix[i_dict], compression = 1, snapshot_interval = snapshot_interval)
 
-        # link the cohfar_assignfar plubin to the jointer
+        # link the cohfar_assignfar plugin to the jointer
         if is_jointer_created:
             this_name = "postcoh_%s" % cuda_postcoh_parti_ifos
             postcoh.link_pads(None, jointer, this_name)
@@ -812,7 +966,7 @@ def mkPostcohSPIIROffline(pipeline,
                           cuda_postcoh_output_skymap=0,
                           cuda_postcohfilesink_output_prefix=None,
                           cuda_postcohfilesink_snapshot_interval=14400):
-    #    pdb.set_trace()
+    #	pdb.set_trace()
     #
     # check for recognized value of chisq_type
     #
@@ -891,9 +1045,9 @@ def mkPostcohSPIIROffline(pipeline,
     for instrument in banks[0].keys():
         ifos += str(instrument)
 
-    # format of banks :    [{'h1': <h1bank0>; 'l1': <l1bank0>..;}
-    #             {'h1': <h1bank1>; 'l1': <l1bank1>..;}
-    #             ...]
+    # format of banks :	[{'h1': <h1bank0>; 'l1': <l1bank0>..;}
+    #			 {'h1': <h1bank1>; 'l1': <l1bank1>..;}
+    #			 ...]
     # format of bank_dict: {'h1': <h1bank1>; 'l1': <l1bank1>..;}
 
     autocorrelation_fname_list = []

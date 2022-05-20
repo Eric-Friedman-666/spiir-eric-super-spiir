@@ -44,6 +44,7 @@ except AttributeError:
 import sys
 if sys.version_info[0] == 2:
     import pygst
+
     pygst.require('0.10')
     import gst
 
@@ -194,6 +195,7 @@ def mkcohfar_accumbackground(pipeline,
     if output_name is not None:
         properties["output_name"] = output_name
 
+    print("source type %d" % source_type)
     if "name" in properties:
         elem = gst.element_factory_make("cohfar_accumbackground",
                                         properties.pop("name"))

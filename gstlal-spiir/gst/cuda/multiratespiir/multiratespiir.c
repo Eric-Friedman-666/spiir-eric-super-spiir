@@ -85,8 +85,8 @@ static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
 
         this_segment = &((FlagSegment *)flag_segments->data)[i];
         /*		| start				| stop
-         *									| this_start
-         *(1) | s | e (2)
+         *									|
+         *this_start (1) | s | e (2)
          * | s							| e
          * | s		| e
          *            |s | e
@@ -1456,7 +1456,7 @@ static void cuda_multiratespiir_set_property(GObject *object,
          * signal ready of the bank
          */
         element->outchannels = element->spstate[0]->num_templates * 2;
-        element->width = 32; // FIXME: only can process float data
+        element->width       = 32; // FIXME: only can process float data
         GST_DEBUG_OBJECT(
           element, "spiir bank available, number of depths %d, outchannels %d",
           element->num_depths, element->outchannels);
