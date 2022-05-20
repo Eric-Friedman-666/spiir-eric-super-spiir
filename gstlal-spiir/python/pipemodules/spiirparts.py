@@ -693,7 +693,6 @@ def mkPostcohSPIIROnline(pipeline,
                          cuda_postcoh_hist_trials=1,
                          cuda_postcoh_output_skymap=0,
                          cuda_postcoh_detrsp_refresh_interval=0,
-                         cuda_postcoh_parti_ifos=None,
                          cohfar_file_path=None,
                          cohfar_accumbackground_output_prefix=None,
                          cohfar_accumbackground_output_name=None,
@@ -816,19 +815,11 @@ def mkPostcohSPIIROnline(pipeline,
     for i_dict, bank_dict in enumerate(banks):
         postcoh = None
         head = None
-        #
-        # IFOs that do not participate in the coherent search (the postcoh plugin)
-        # will be linked to the trigger_jointer plugin
-        #
-
-        # initialize jointer flag
-        is_jointer_created = False
 
         for instrument, bank_list in bank_dict.items():
             bankname = bank_list[0]
             bankid = spiir_utils.get_bankid_from_bankname(bankname)
             max_bank_rate = spiir_utils.get_maxrate_from_xml(bankname)
-            autochisq_len = spiir_utils.get_autochisq_len_from_xml(bankname)
             head = pipeparts.mkqueue(pipeline,
                                      hoftdicts[instrument],
                                      max_size_time=gst.SECOND * 10,
@@ -854,8 +845,9 @@ def mkPostcohSPIIROnline(pipeline,
                 snr = pipeparts.mkprogressreport(
                     pipeline, snr, "progress_done_gpu_filtering_%s" % suffix)
 
+            snr = pipeparts.mktee(pipeline, snr)
+
             if nxydump_segment is not None:
-                snr = pipeparts.mktee(pipeline, snr)
                 pipeparts.mknxydumpsink(
                     pipeline,
                     pipeparts.mkqueue(pipeline, snr),
@@ -869,35 +861,24 @@ def mkPostcohSPIIROnline(pipeline,
                                     max_size_buffers=10,
                                     max_size_bytes=100000000)
 
-            if instrument in cuda_postcoh_parti_ifos:
-                if postcoh is None:
-                    postcoh = pipemodules.mkcudapostcoh(
-                        pipeline,
-                        snr,
-                        instrument,
-                        cuda_postcoh_detrsp_fname,
-                        autocorrelation_fname_list[i_dict],
-                        bank_list[0],
-                        hist_trials=cuda_postcoh_hist_trials,
-                        snglsnr_thresh=cuda_postcoh_snglsnr_thresh,
-                        output_skymap=cuda_postcoh_output_skymap,
-                        stream_id=bankid)
-                else:
-                    snr.link_pads(None, postcoh, instrument)
+            if postcoh is None:
+                # make a queue for postcoh, otherwise it will be in the same thread with the first bank
+                postcoh = pipemodules.mkcudapostcoh(
+                    pipeline,
+                    snr,
+                    instrument,
+                    cuda_postcoh_detrsp_fname,
+                    autocorrelation_fname_list[i_dict],
+                    bank_list[0],
+                    hist_trials=cuda_postcoh_hist_trials,
+                    snglsnr_thresh=cuda_postcoh_snglsnr_thresh,
+                    cohsnr_thresh=cuda_postcoh_cohsnr_thresh,
+                    output_skymap=cuda_postcoh_output_skymap,
+                    detrsp_refresh_interval=
+                    cuda_postcoh_detrsp_refresh_interval,
+                    stream_id=bankid)
             else:
-                #
-                # create the jointer plugin and attach this SNR plugin to the jointer
-                # the postcoh plugin will be linked to the jointer later
-                #
-                if not is_jointer_created:
-                    if verbose:
-                        print(
-                            "creating jointer and attach %s SNR series to this jointer"
-                            % instrument)
-                    jointer = pipemodules.mktrigger_jointer(pipeline, snr, autochisq_len)
-                    is_jointer_created = True
-                this_name = "snr_%s" % instrument
-                snr.link_pads(None, jointer, this_name)
+                snr.link_pads(None, postcoh, instrument)
 
         # FIXME: hard-coded to do compression
         if verbose:
@@ -908,7 +889,7 @@ def mkPostcohSPIIROnline(pipeline,
             postcoh = pipemodules.mkcohfar_accumbackground(
                 pipeline,
                 postcoh,
-                ifos=cuda_postcoh_parti_ifos,
+                ifos=ifos,
                 hist_trials=cuda_postcoh_hist_trials,
                 output_prefix=None,
                 output_name=cohfar_accumbackground_output_name[i_dict],
@@ -917,7 +898,7 @@ def mkPostcohSPIIROnline(pipeline,
             postcoh = pipemodules.mkcohfar_accumbackground(
                 pipeline,
                 postcoh,
-                ifos=cuda_postcoh_parti_ifos,
+                ifos=ifos,
                 hist_trials=cuda_postcoh_hist_trials,
                 output_prefix=cohfar_accumbackground_output_prefix[i_dict],
                 output_name=None,
@@ -925,26 +906,15 @@ def mkPostcohSPIIROnline(pipeline,
         postcoh = pipemodules.mkcohfar_assignfar(
             pipeline,
             postcoh,
-            ifos=cuda_postcoh_parti_ifos,
+            ifos=ifos,
             assignfar_refresh_interval=cohfar_assignfar_refresh_interval,
             silent_time=cohfar_assignfar_silent_time,
             input_fname=cohfar_assignfar_input_fname)
         #head = mkpostcohfilesink(pipeline, postcoh, location = output_prefix[i_dict], compression = 1, snapshot_interval = snapshot_interval)
-
-        # link the cohfar_assignfar plugin to the jointer
-        if is_jointer_created:
-            this_name = "postcoh_%s" % cuda_postcoh_parti_ifos
-            postcoh.link_pads(None, jointer, this_name)
-            postcoh = jointer
-
         triggersrcs.append(postcoh)
     return triggersrcs
 
 
-#
-# the assembly of a pipeline that will process archived data
-# and output both foreground and background triggers, i.e. no FAR estimation involved.
-#
 def mkPostcohSPIIROffline(pipeline,
                           detectors,
                           banks,

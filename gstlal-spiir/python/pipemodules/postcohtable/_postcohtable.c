@@ -51,6 +51,7 @@
 typedef struct {
     PyObject_HEAD;
     PostcohInspiralTable row;
+    COMPLEX8TimeSeries *snr;
     PyObject *end_time_sngl;
     PyObject *snglsnr;
     PyObject *coaphase;
@@ -60,7 +61,6 @@ typedef struct {
     PyObject *far_1d_sngl;
     PyObject *far_2h_sngl;
     PyObject *deff;
-    COMPLEX8TimeSeries **snr_series;
 } gstlal_GSTLALPostcohInspiral;
 
 // static PyObject *row_event_id_type = NULL;
@@ -78,13 +78,6 @@ static PyMemberDef members[] = {
     { "end_time_ns", T_INT,
       offsetof(gstlal_GSTLALPostcohInspiral, row.end_time.gpsNanoSeconds), 0,
       "end_time_ns" },
-    // Not dependent on the number of detectors
-    { "ringdown_dur", T_INT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.ringdown_dur.gpsSeconds), 0,
-      "ringdown_dur" },
-    { "ringdown_dur_ns", T_INT,
-      offsetof(gstlal_GSTLALPostcohInspiral, row.ringdown_dur.gpsNanoSeconds),
-      0, "ringdown_dur_ns" },
     { "is_background", T_INT,
       offsetof(gstlal_GSTLALPostcohInspiral, row.is_background), 0,
       "is_background" },
@@ -186,6 +179,7 @@ static PyObject *pylal_inline_string_get(PyObject *obj, void *data) {
     char *s = (char *)obj + desc->offset;
 
     if ((ssize_t)strlen(s) >= desc->length) {
+        // FIXME: Handle this edge case or remove the test.
         /* something's wrong, obj probably isn't a valid address */
     }
 
@@ -209,69 +203,46 @@ static int pylal_inline_string_set(PyObject *obj, PyObject *val, void *data) {
     return 0;
 }
 
-static PyObject *snr_component_get_helper(COMPLEX8TimeSeries *snr,
-                                          const char *name) {
-    // A helper function that extract and return an attribute from snr, whose
-    // type is COMPLEX8TimeSeries, by name.
+static PyObject *snr_component_get(PyObject *obj, void *data) {
+    COMPLEX8TimeSeries *snr = ((gstlal_GSTLALPostcohInspiral *)obj)->snr;
+    const char *name        = (const char *)data;
 
-    if (!strcmp(name, "name_")) {
+    if (!snr) {
+        PyErr_SetString(PyExc_ValueError, "no snr time series available");
+        return NULL;
+    }
+    if (!strcmp(name, "_snr_name")) {
         return PyString_FromString(snr->name);
-    } else if (!strcmp(name, "epoch_gpsSeconds_")) {
+    } else if (!strcmp(name, "_snr_epoch_gpsSeconds")) {
         return PyInt_FromLong(snr->epoch.gpsSeconds);
-    } else if (!strcmp(name, "epoch_gpsNanoSeconds_")) {
+    } else if (!strcmp(name, "_snr_epoch_gpsNanoSeconds")) {
         return PyInt_FromLong(snr->epoch.gpsNanoSeconds);
-    } else if (!strcmp(name, "f0_")) {
+    } else if (!strcmp(name, "_snr_f0")) {
         return PyFloat_FromDouble(snr->f0);
-    } else if (!strcmp(name, "deltaT_")) {
+    } else if (!strcmp(name, "_snr_deltaT")) {
         return PyFloat_FromDouble(snr->deltaT);
-    } else if (!strcmp(name, "sampleUnits_")) {
+    } else if (!strcmp(name, "_snr_sampleUnits")) {
         char *s          = XLALUnitToString(&snr->sampleUnits);
         PyObject *result = PyString_FromString(s);
         XLALFree(s);
         return result;
-    } else if (!strcmp(name, "data_length_")) {
+    } else if (!strcmp(name, "_snr_data_length")) {
         return PyInt_FromLong(snr->data->length);
-    } else if (!strcmp(name, "data_")) {
+    } else if (!strcmp(name, "_snr_data")) {
         npy_intp dims[] = { snr->data->length };
         PyObject *array =
           PyArray_SimpleNewFromData(1, dims, NPY_CFLOAT, snr->data->data);
         if (!array) return NULL;
+        Py_INCREF(obj);
+        PyArray_SetBaseObject((PyArrayObject *)array, obj);
         return array;
     }
     PyErr_BadArgument();
     return NULL;
 }
 
-struct Closure_for_snr_series { // a struct for snr_series get function closure
-    Py_ssize_t index;
-    char *closure_str;
-};
-
-static PyObject *snr_series_get(PyObject *obj, void *_closure) {
-    if (!((gstlal_GSTLALPostcohInspiral *)obj)->snr_series) {
-        PyErr_SetString(PyExc_ValueError, "no snr time series available");
-        return NULL;
-    }
-    struct Closure_for_snr_series *closure =
-      (struct Closure_for_snr_series *)_closure;
-    int index        = closure->index;
-    const char *name = closure->closure_str;
-    COMPLEX8TimeSeries *snr =
-      ((gstlal_GSTLALPostcohInspiral *)obj)->snr_series[index];
-    if (!snr) {
-        PyErr_SetString(PyExc_ValueError,
-                        "no snr time series for this detector is available");
-        return NULL;
-    }
-    return snr_component_get_helper(snr, name);
-}
-
-#define VAR    18 // the number of attributes in each IFO
-#define SINGLE 3 // number of single attributes independent on IFOs
-
-// IFO-independent attributes defined first as follows
-
-static struct PyGetSetDef getset[SINGLE + VAR * MAX_NIFO + 1] = {
+#define SINGLE 11
+static struct PyGetSetDef getset[SINGLE + 10 * MAX_NIFO + 1] = {
     { "ifos", pylal_inline_string_get, pylal_inline_string_set, "ifos",
       &(struct pylal_inline_string_description) {
         offsetof(gstlal_GSTLALPostcohInspiral, row.ifos), MAX_ALLIFO_LEN } },
@@ -285,6 +256,19 @@ static struct PyGetSetDef getset[SINGLE + VAR * MAX_NIFO + 1] = {
       &(struct pylal_inline_string_description) {
         offsetof(gstlal_GSTLALPostcohInspiral, row.skymap_fname),
         MAX_SKYMAP_FNAME_LEN } },
+    { "_snr_name", snr_component_get, NULL, ".snr.name", "_snr_name" },
+    { "_snr_epoch_gpsSeconds", snr_component_get, NULL, ".snr.epoch.gpsSeconds",
+      "_snr_epoch_gpsSeconds" },
+    { "_snr_epoch_gpsNanoSeconds", snr_component_get, NULL,
+      ".snr.epoch.gpsNanoSeconds", "_snr_epoch_gpsNanoSeconds" },
+    { "_snr_f0", snr_component_get, NULL, ".snr.f0", "_snr_f0" },
+    { "_snr_deltaT", snr_component_get, NULL, ".snr.deltaT", "_snr_deltaT" },
+    { "_snr_sampleUnits", snr_component_get, NULL, ".snr.sampleUnits",
+      "_snr_sampleUnits" },
+    { "_snr_data_length", snr_component_get, NULL, ".snr.data.length",
+      "_snr_data_length" },
+    { "_snr_data", snr_component_get, NULL, ".snr.data", "_snr_data" },
+
     { NULL }
 };
 
@@ -358,8 +342,6 @@ static int pylal_int_array_set(PyObject *obj, PyObject *val, void *data) {
     *i = (int)v;
     return 0;
 }
-
-// IFO-dependent attributes defined here
 
 void prepare_getset() {
     int offset = SINGLE;
@@ -491,153 +473,6 @@ void prepare_getset() {
         def.doc          = name;
         def.closure      = data;
         getset[offset++] = def;
-
-        // ****************************
-        // Set def for snr_series data
-        // ****************************
-
-        struct Closure_for_snr_series *closure;
-        char *head = "snr_series_";
-
-        var = "name_";
-        name =
-          (char *)malloc(strlen(head) + strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct Closure_for_snr_series *)malloc(
-          sizeof(struct Closure_for_snr_series));
-        strcpy(name, head);
-        strcat(name, var);
-        strcat(name, IFOMap[i]);
-        closure->index       = i;
-        closure->closure_str = var;
-        def.name             = name;
-        def.get              = snr_series_get;
-        def.set              = NULL;
-        def.doc              = name;
-        def.closure          = closure;
-        getset[offset++]     = def;
-
-        var = "epoch_gpsSeconds_";
-        name =
-          (char *)malloc(strlen(head) + strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct Closure_for_snr_series *)malloc(
-          sizeof(struct Closure_for_snr_series));
-        strcpy(name, head);
-        strcat(name, var);
-        strcat(name, IFOMap[i]);
-        closure->index       = i;
-        closure->closure_str = var;
-        def.name             = name;
-        def.get              = snr_series_get;
-        def.set              = NULL;
-        def.doc              = name;
-        def.closure          = closure;
-        getset[offset++]     = def;
-
-        var = "epoch_gpsNanoSeconds_";
-        name =
-          (char *)malloc(strlen(head) + strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct Closure_for_snr_series *)malloc(
-          sizeof(struct Closure_for_snr_series));
-        strcpy(name, head);
-        strcat(name, var);
-        strcat(name, IFOMap[i]);
-        closure->index       = i;
-        closure->closure_str = var;
-        def.name             = name;
-        def.get              = snr_series_get;
-        def.set              = NULL;
-        def.doc              = name;
-        def.closure          = closure;
-        getset[offset++]     = def;
-
-        var = "f0_";
-        name =
-          (char *)malloc(strlen(head) + strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct Closure_for_snr_series *)malloc(
-          sizeof(struct Closure_for_snr_series));
-        strcpy(name, head);
-        strcat(name, var);
-        strcat(name, IFOMap[i]);
-        closure->index       = i;
-        closure->closure_str = var;
-        def.name             = name;
-        def.get              = snr_series_get;
-        def.set              = NULL;
-        def.doc              = name;
-        def.closure          = closure;
-        getset[offset++]     = def;
-
-        var = "deltaT_";
-        name =
-          (char *)malloc(strlen(head) + strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct Closure_for_snr_series *)malloc(
-          sizeof(struct Closure_for_snr_series));
-        strcpy(name, head);
-        strcat(name, var);
-        strcat(name, IFOMap[i]);
-        closure->index       = i;
-        closure->closure_str = var;
-        def.name             = name;
-        def.get              = snr_series_get;
-        def.set              = NULL;
-        def.doc              = name;
-        def.closure          = closure;
-        getset[offset++]     = def;
-
-        var = "sampleUnits_";
-        name =
-          (char *)malloc(strlen(head) + strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct Closure_for_snr_series *)malloc(
-          sizeof(struct Closure_for_snr_series));
-        strcpy(name, head);
-        strcat(name, var);
-        strcat(name, IFOMap[i]);
-        closure->index       = i;
-        closure->closure_str = var;
-        def.name             = name;
-        def.get              = snr_series_get;
-        def.set              = NULL;
-        def.doc              = name;
-        def.closure          = closure;
-        getset[offset++]     = def;
-
-        var = "data_length_";
-        name =
-          (char *)malloc(strlen(head) + strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct Closure_for_snr_series *)malloc(
-          sizeof(struct Closure_for_snr_series));
-        strcpy(name, head);
-        strcat(name, var);
-        strcat(name, IFOMap[i]);
-        closure->index       = i;
-        closure->closure_str = var;
-        def.name             = name;
-        def.get              = snr_series_get;
-        def.set              = NULL;
-        def.doc              = name;
-        def.closure          = closure;
-        getset[offset++]     = def;
-
-        var = "data_";
-        name =
-          (char *)malloc(strlen(head) + strlen(IFOMap[i]) + strlen(var) + 1);
-        closure = (struct Closure_for_snr_series *)malloc(
-          sizeof(struct Closure_for_snr_series));
-        strcpy(name, head);
-        strcat(name, var);
-        strcat(name, IFOMap[i]);
-        closure->index       = i;
-        closure->closure_str = var;
-        def.name             = name;
-        def.get              = snr_series_get;
-        def.set              = NULL;
-        def.doc              = name;
-        def.closure          = closure;
-        getset[offset++]     = def;
-
-        // ***************************************
-        // End of setting def for snr_series data
-        // ***************************************
     }
     PyGetSetDef def = { NULL };
     getset[offset]  = def;
@@ -695,6 +530,7 @@ static PyObject *__new__(PyTypeObject *type, PyObject *args, PyObject *kwds) {
 static void __del__(PyObject *self) {
     gstlal_GSTLALPostcohInspiral *self_typed =
       (gstlal_GSTLALPostcohInspiral *)self;
+    if (self_typed->snr) XLALDestroyCOMPLEX8TimeSeries(self_typed->snr);
     Py_DECREF(self_typed->end_time_sngl);
     Py_DECREF(self_typed->snglsnr);
     Py_DECREF(self_typed->coaphase);
@@ -704,21 +540,6 @@ static void __del__(PyObject *self) {
     Py_DECREF(self_typed->far_1d_sngl);
     Py_DECREF(self_typed->far_2h_sngl);
     Py_DECREF(self_typed->deff);
-
-    // Free snr_series related memory
-    if (self_typed->snr_series) {
-        // Destroy COMPLEX8TimeSeries objects
-        for (int i = 0; i < MAX_NIFO; i++) {
-            if (self_typed->snr_series[i]) {
-                XLALDestroyCOMPLEX8TimeSeries(self_typed->snr_series[i]);
-            }
-        }
-
-        // free snr_series array
-        free(self_typed->snr_series);
-        self_typed->snr_series = NULL;
-    }
-
     Py_TYPE(self)->tp_free(self);
 }
 
@@ -780,28 +601,32 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
         item_typed->deff =
           PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, item_typed->row.deff);
 
-        // Shallow copy snr_series data to avoid memory leaking
-        if (gstlal_postcohinspiral->snr_series) {
-            item_typed->snr_series =
-              malloc(sizeof(COMPLEX8TimeSeries *) * MAX_NIFO);
-            if (!item_typed->snr_series) {
+        /* duplicate the SNR time series if we have length? */
+        if (item_typed->row.snr_length) {
+            const size_t nbytes = sizeof(item_typed->row.snr[0])
+                                  * item_typed->row.snr_length;
+            if (data + nbytes > end) {
+                Py_DECREF(item);
+                Py_DECREF(result);
+                PyErr_SetString(PyExc_ValueError,
+                                "buffer overrun while copying SNR time series");
+                return NULL;
+            }
+            COMPLEX8TimeSeries *series = XLALCreateCOMPLEX8TimeSeries(
+              "snr", &item_typed->row.epoch, 0.,
+              item_typed->row.deltaT, &lalDimensionlessUnit,
+              item_typed->row.snr_length);
+            if (!series) {
                 Py_DECREF(item);
                 Py_DECREF(result);
                 PyErr_SetString(PyExc_MemoryError, "out of memory");
                 return NULL;
             }
-            for (int i = 0; i < MAX_NIFO; i++) {
-                if (gstlal_postcohinspiral->snr_series[i]
-                    && gstlal_postcohinspiral->snr_series[i]->data->length
-                         > 0) {
-                    item_typed->snr_series[i] =
-                      gstlal_postcohinspiral->snr_series[i];
-                } else {
-                    item_typed->snr_series[i] = NULL;
-                }
-            }
+            memcpy(series->data->data, item_typed->row.snr, nbytes);
+            data += nbytes;
+            item_typed->snr = series;
         } else
-            item_typed->snr_series = NULL;
+            item_typed->snr = NULL;
 
         if (PyList_Append(result, item)) printf("append failure");
         Py_DECREF(item);
@@ -818,31 +643,11 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
     return tuple;
 }
 
-static PyObject *delete_all_snr_series(PyObject *self, PyObject *args) {
-    COMPLEX8TimeSeries **snr_series =
-      ((gstlal_GSTLALPostcohInspiral *)self)->snr_series;
-    if (snr_series) {
-        for (int i = 0; i < MAX_NIFO; i++) {
-            if (snr_series[i]) {
-                XLALDestroyCOMPLEX8TimeSeries(snr_series[i]);
-                snr_series[i] = NULL;
-            }
-        }
-    }
-    free(((gstlal_GSTLALPostcohInspiral *)self)->snr_series);
-    ((gstlal_GSTLALPostcohInspiral *)self)->snr_series = NULL;
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
 static struct PyMethodDef methods[] = {
     { "from_buffer", from_buffer, METH_VARARGS | METH_CLASS,
       "Construct a tuple of PostcohInspiralTable objects from a buffer object. "
       " The buffer is interpreted as a C array of PostcohInspiralTable "
       "structures." },
-    { "delete_all_snr_series", delete_all_snr_series, METH_NOARGS,
-      "Release all SNR time series attached to the GSTLALSnglInspiral "
-      "object." },
     {
       NULL,
     }
@@ -855,7 +660,7 @@ static struct PyMethodDef methods[] = {
 static PyTypeObject gstlal_GSTLALPostcohInspiral_Type = {
     PyObject_HEAD_INIT(NULL).tp_basicsize =
       sizeof(gstlal_GSTLALPostcohInspiral),
-    .tp_doc = "LAL's PostcohInspiral structure with SNR series",
+    .tp_doc = "LAL's PostcohInspiral structure",
     .tp_flags =
       Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
     .tp_members = members,

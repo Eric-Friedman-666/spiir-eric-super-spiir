@@ -25,8 +25,7 @@ AC_CONFIG_FILES([ \
 	lib/Makefile \
 	bin/Makefile \
 	gst/Makefile \
-	gst/cuda/Makefile \
-	gst/lal/Makefile
+	gst/cuda/Makefile
 ])
 
 
@@ -373,7 +372,7 @@ AC_SUBST([XML_LIBS])
 # custom cflags and libs
 #
 GSTLAL_SPIIR_CFLAGS="-I\$(top_srcdir)/include -I\$(top_srcdir)/lib/include"
-GSTLAL_SPIIR_LIBS="-L\$(top_srcdir)/lib"
+GSTLAL_SPIIR_LIBS="-L\$(top_srcdir)/lib -lgstlalspiir"
 AC_SUBST([GSTLAL_SPIIR_CFLAGS])
 AC_SUBST([GSTLAL_SPIIR_LIBS])
 #

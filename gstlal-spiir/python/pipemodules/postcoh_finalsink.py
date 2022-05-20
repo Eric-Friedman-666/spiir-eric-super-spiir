@@ -409,7 +409,6 @@ class FinalSink(object):
                  far_factor,
                  cluster_window=0.5,
                  snapshot_interval=None,
-                 fapupdater_ifos="H1L1V1K1",
                  fapupdater_interval=None,
                  cohfar_accumbackground_output_prefix=None,
                  cohfar_accumbackground_output_name=None,
@@ -439,7 +438,6 @@ class FinalSink(object):
         self.channel_dict = channel_dict
         self.ifos = lsctables.ifos_from_instrument_set(
             channel_dict.keys()).replace(",", "")  # format: "H1L1V1K1"
-        self.fapupdater_ifos = fapupdater_ifos; # ifos that are used for significance estimation
 
         # cluster parameters
         self.cluster_window = cluster_window
@@ -524,7 +522,7 @@ class FinalSink(object):
             input_prefix_list=cohfar_accumbackground_output_prefix,
             output_list_string=fapupdater_output_fname,
             collect_walltime_string=fapupdater_collect_walltime_string,
-            ifos=self.fapupdater_ifos,
+            ifos=self.ifos,
             verbose=self.verbose)
 
         # online information performer
@@ -545,8 +543,6 @@ class FinalSink(object):
         self.thread_upload_skymap = None
 
     def __pass_test(self, candidate):
-        if (self.candidate.cohsnr > 20):
-            return True
         if self.candidate.far <= 0.0:
             return False
 
@@ -634,13 +630,10 @@ class FinalSink(object):
                 if self.need_candidate_check:
                     self.nevent_clustered += 1
                     self.__set_far(self.candidate)
+                    self.postcoh_table.append(self.candidate)
                     if self.gracedb_far_threshold and self.__pass_test(
                             self.candidate):
                         self.__do_gracedb_alert(self.candidate)
-
-                    self.candidate.delete_all_snr_series()
-                    self.postcoh_table.append(self.candidate)
-
                     if self.need_online_perform:
                         self.onperformer.update_eye_candy(self.candidate)
                     self.candidate = None
@@ -652,11 +645,7 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
             if self.cluster_window == 0:
-                # self.postcoh_table.extend(newevents)
-                for event in newevents:
-                    event.delete_all_snr_series()
-                    self.postcoh_table.append(event)
-
+                self.postcoh_table.extend(newevents)
                 del self.cur_event_table[:]
 
             # dump zerolag candidates when interval is reached
@@ -801,7 +790,7 @@ class FinalSink(object):
         # if it is not one order of magnitude more significant than the last trigger
         # or if it not more significant the last submitted trigger
         # FIXME: what if there are two adjacent significant events
-        if ((abs(float(trigger.end) - last_time) < 50 and last_far > 0 # NOTE: last_far > 0 is for testing
+        if ((abs(float(trigger.end) - last_time) < 50
              and abs(trigger.far / last_far) > 0.5)) or (
                  abs(float(trigger.end) - float(last_submitted_time)) < 100
                  and trigger.far > last_submitted_far * 0.5):
@@ -840,7 +829,7 @@ class FinalSink(object):
 
         self.coincs_document.assemble_tables(trigger)
         xmldoc = self.coincs_document.xmldoc
-        filename = "%s/%s_%s_%d_%d.xml" % (self.path, trigger.ifos, trigger.end_time,
+        filename = "%s_%s_%d_%d.xml" % (trigger.ifos, trigger.end_time,
                                         trigger.bankid, trigger.tmplt_idx)
         #
         # construct message and send to gracedb.
@@ -1241,7 +1230,8 @@ class CoincsDocFromPostcoh(object):
                 pass
 
         # FIXME: hard-coded ifo len == 2
-        for iifo, ifo in enumerate(re.findall('..', trigger.ifos)):
+        iifo = 0
+        for ifo in re.findall('..', trigger.ifos):
             row = sngl_inspiral_table.RowType()
             # Setting the individual row
             row.process_id = self.process.process_id
@@ -1310,29 +1300,7 @@ class CoincsDocFromPostcoh(object):
             row.spin2z = trigger.spin2z
             row.event_id = "sngl_inspiral:event_id:%d" % iifo
             sngl_inspiral_table.append(row)
-
-            # Append snr_series data into XML document
-            epoch_second = getattr(trigger,
-                                   "snr_series_epoch_gpsSeconds_" + ifo)
-            epoch_nanoSeconds = getattr(
-                trigger, "snr_series_epoch_gpsNanoSeconds_" + ifo)
-            epoch = LIGOTimeGPS(epoch_second, epoch_nanoSeconds)
-            snr_time_series = lal.CreateCOMPLEX8TimeSeries(
-                name=getattr(trigger, "snr_series_name_" + ifo),
-                epoch=epoch,
-                f0=getattr(trigger, "snr_series_f0_" + ifo),
-                deltaT=getattr(trigger, "snr_series_deltaT_" + ifo),
-                sampleUnits=getattr(trigger, "snr_series_sampleUnits_" + ifo),
-                length=getattr(trigger, "snr_series_data_length_" + ifo))
-            snr_time_series.data.data = getattr(
-                trigger, "snr_series_data_" + ifo)
-            snr_time_series_element = lal.series.build_COMPLEX8TimeSeries(
-                snr_time_series)
-            # Add event_id into the snr_time_series_element
-            snr_time_series_element.appendChild(
-                ligolw_param.Param.build(
-                    u"event_id", u"ilwd:char", row.event_id))
-            self.xmldoc.childNodes[-1].appendChild(snr_time_series_element)
+            iifo += 1
 
 
 def call_plot_fits_func(pngname,

@@ -33,8 +33,7 @@ typedef struct tagPostcohInspiralTable {
     struct tagPostcohInspiralTable *next;
     long process_id;
     long event_id;
-    LIGOTimeGPS ringdown_dur; // ring-down duration
-    LIGOTimeGPS end_time; // merger time
+    LIGOTimeGPS end_time;
     LIGOTimeGPS end_time_sngl[MAX_NIFO];
     INT4 is_background;
     INT4 livetime;
@@ -43,7 +42,6 @@ typedef struct tagPostcohInspiralTable {
     INT4 tmplt_idx;
     INT4 bankid;
     INT4 pix_idx;
-    INT4 autochisq_len;
     REAL4 snglsnr[MAX_NIFO];
     REAL4 coaphase[MAX_NIFO];
     REAL4 chisq[MAX_NIFO];
@@ -78,6 +76,9 @@ typedef struct tagPostcohInspiralTable {
     REAL8 deff[MAX_NIFO];
     REAL8 rank;
     REAL4 f_final;
-    COMPLEX8TimeSeries *snr_series[MAX_NIFO]; // snr series data around peak
+    LIGOTimeGPS epoch;
+    double deltaT;
+    size_t snr_length;
+    float complex *snr;
 } PostcohInspiralTable;
 #endif /* __POSTCOH_TABLE_H */
