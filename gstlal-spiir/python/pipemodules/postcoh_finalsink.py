@@ -545,8 +545,6 @@ class FinalSink(object):
         self.thread_upload_skymap = None
 
     def __pass_test(self, candidate):
-        if (self.candidate.cohsnr > 20):
-            return True
         if self.candidate.far <= 0.0:
             return False
 
@@ -801,7 +799,7 @@ class FinalSink(object):
         # if it is not one order of magnitude more significant than the last trigger
         # or if it not more significant the last submitted trigger
         # FIXME: what if there are two adjacent significant events
-        if ((abs(float(trigger.end) - last_time) < 50 and last_far > 0 # NOTE: last_far > 0 is for testing
+        if ((abs(float(trigger.end) - last_time) < 50
              and abs(trigger.far / last_far) > 0.5)) or (
                  abs(float(trigger.end) - float(last_submitted_time)) < 100
                  and trigger.far > last_submitted_far * 0.5):

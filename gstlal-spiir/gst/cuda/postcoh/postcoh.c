@@ -1433,7 +1433,6 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                     curr_snglsnr += state->ntmplt;
                 }
             }
-            output->autochisq_len = state->autochisq_len;
             /* fill in the attributes related to the coherent part */
             output->is_background = FLAG_FOREGROUND;
             output->livetime      = livetime;

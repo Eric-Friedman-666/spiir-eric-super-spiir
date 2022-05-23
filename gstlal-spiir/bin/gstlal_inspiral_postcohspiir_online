@@ -460,11 +460,6 @@ def parse_command_line():
                       type="int",
                       default=800,
                       help="interval to refresh detrsp map.")
-    parser.add_option(
-        "--cuda-postcoh-parti-ifos",
-        metavar="name",
-        default="H1L1",
-        help="IFOs that will not be used in coherent search. E.g. V1K1")
 
     # gpu acceleartion support
     parser.add_option("--gpu-acc",
@@ -740,7 +735,6 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     cuda_postcoh_output_skymap=options.cuda_postcoh_output_skymap,
     cuda_postcoh_detrsp_refresh_interval=options.
     cuda_postcoh_detrsp_refresh_interval,
-    cuda_postcoh_parti_ifos=options.cuda_postcoh_parti_ifos,
     cohfar_file_path=options.job_tag,
     cohfar_accumbackground_output_prefix=options.
     cohfar_accumbackground_output_prefix,
@@ -775,7 +769,6 @@ finalsink = postcoh_finalsink.FinalSink(
     cohfar_accumbackground_output_prefix,
     cohfar_accumbackground_output_name=options.
     cohfar_accumbackground_output_name,
-    fapupdater_ifos=options.cuda_postcoh_parti_ifos,
     fapupdater_interval=options.finalsink_fapupdater_interval,
     fapupdater_output_fname=options.finalsink_fapupdater_output_fname,
     fapupdater_collect_walltime_string=options.
