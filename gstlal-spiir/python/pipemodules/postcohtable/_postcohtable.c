@@ -240,7 +240,7 @@ static PyObject *get_snr_series(PyObject *obj, void *closure) {
 #define NUM_SINGLE_FIELDS     11
 #define NUM_FIELDS_PER_IFO    10
 #define MAX_FIELD_NAME_LENGTH 40
-#define NUM_FIELDS            NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO
+#define NUM_FIELDS            NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO *MAX_NIFO
 static struct PyGetSetDef getset[NUM_FIELDS + 1] = { { NULL } };
 
 static PyObject *read_double_from_field(PyObject *obj, void *closure) {
@@ -306,7 +306,7 @@ static int write_int_to_field(PyObject *obj, PyObject *value, void *closure) {
 
 static void declare_getset(char *name, void *closure, getter get, setter set) {
     static char field_names[NUM_FIELDS][MAX_FIELD_NAME_LENGTH] = { 0 };
-    static int field_idx = 0;
+    static int field_idx                                       = 0;
     assert(strlen(name) > 0 && strlen(name) < MAX_FIELD_NAME_LENGTH);
 
     strcpy(field_names[field_idx], name);
