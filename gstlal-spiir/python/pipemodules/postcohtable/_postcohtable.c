@@ -240,14 +240,8 @@ static PyObject *get_snr_series(PyObject *obj, void *closure) {
 #define NUM_SINGLE_FIELDS     11
 #define NUM_FIELDS_PER_IFO    10
 #define MAX_FIELD_NAME_LENGTH 40
-static struct PyGetSetDef
-  getset[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO + 1] = { { NULL } };
-static char field_names[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO]
-                       [MAX_FIELD_NAME_LENGTH] = { 0 };
-
-#define NUM_STRING_FIELDS 3
-static StringField attr_string_closures[NUM_STRING_FIELDS];
-static size_t attr_offsets[NUM_FIELDS_PER_IFO * MAX_NIFO];
+#define NUM_FIELDS            NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO
+static struct PyGetSetDef getset[NUM_FIELDS + 1] = { { NULL } };
 
 static PyObject *read_double_from_field(PyObject *obj, void *closure) {
     assert(obj);
@@ -310,142 +304,162 @@ static int write_int_to_field(PyObject *obj, PyObject *value, void *closure) {
     return 0;
 }
 
-static void set_field_name(char *name, int field_idx) {
-    assert(strnlen(name, MAX_FIELD_NAME_LENGTH) < MAX_FIELD_NAME_LENGTH);
+static void declare_getset(char *name, void *closure, getter get, setter set) {
+    static char field_names[NUM_FIELDS][MAX_FIELD_NAME_LENGTH] = { 0 };
+    static int field_idx = 0;
+    assert(strlen(name) > 0 && strlen(name) < MAX_FIELD_NAME_LENGTH);
+
     strcpy(field_names[field_idx], name);
-}
-
-static void set_ifo_field_name(char *name, int ifo_id, int field_idx) {
-    assert(strnlen(name, MAX_FIELD_NAME_LENGTH) + 1 + MAX_IFO_LEN
-           < MAX_FIELD_NAME_LENGTH);
-    set_field_name(name, field_idx);
-    strncat(field_names[field_idx], "_", 1);
-    strncat(field_names[field_idx], IFOMap[ifo_id], MAX_IFO_LEN);
-}
-
-static void
-  declare_getset(getter get, setter set, void *closure, int field_idx) {
-    assert(strnlen(field_names[field_idx], MAX_FIELD_NAME_LENGTH) > 0
-           && strnlen(field_names[field_idx], MAX_FIELD_NAME_LENGTH)
-                < MAX_FIELD_NAME_LENGTH);
     getset[field_idx] = (PyGetSetDef) { field_names[field_idx], get, set,
                                         field_names[field_idx], closure };
+
+    field_idx++;
 }
 
-static void declare_string_getset(StringField closure,
-                                  getter get,
-                                  setter set,
-                                  int field_idx) {
-    static int closure_idx            = 0;
+#define NUM_STRING_FIELDS 3
+static StringField *get_static_string_closure(StringField closure) {
+    static StringField attr_string_closures[NUM_STRING_FIELDS];
+    static int closure_idx = 0;
+
     attr_string_closures[closure_idx] = closure;
-    declare_getset(get, set, &attr_string_closures[closure_idx++], field_idx);
+    return &attr_string_closures[closure_idx++];
 }
 
-static void
-  declare_offset_getset(size_t offset, getter get, setter set, int field_idx) {
-    static int closure_idx    = 0;
+static size_t *get_static_offset_closure(size_t offset) {
+    static size_t attr_offsets[NUM_FIELDS_PER_IFO * MAX_NIFO];
+    static int closure_idx = 0;
+
     attr_offsets[closure_idx] = offset;
-    declare_getset(get, set, &attr_offsets[closure_idx++], field_idx);
+    return &attr_offsets[closure_idx++];
 }
 
-static void declare_name_getset(getter get, setter set, int field_idx) {
-    declare_getset(get, set, field_names[field_idx], field_idx);
+#define NUM_NAME_FIELDS 8
+static char *get_static_name_closure(char *name) {
+    static char attr_name_closures[NUM_NAME_FIELDS][MAX_FIELD_NAME_LENGTH];
+    static int closure_idx = 0;
+    assert(strlen(name) < MAX_FIELD_NAME_LENGTH);
+
+    strcpy(attr_name_closures[closure_idx], name);
+
+    return attr_name_closures[closure_idx++];
+}
+
+static void declare_getset_ifo_getset(
+  char *base_name, void *closure, getter get, setter set, int ifo_id) {
+    assert(strlen(base_name) + 1 + strlen(IFOMap[ifo_id])
+           < MAX_FIELD_NAME_LENGTH);
+    char *name = malloc(strlen(base_name) + 1 + strlen(IFOMap[ifo_id]));
+
+    strcpy(name, base_name);
+    strcat(name, "_");
+    strcat(name, IFOMap[ifo_id]);
+
+    declare_getset(name, closure, get, set);
+    free(name);
 }
 
 static void prepare_getset() {
-    int field_idx              = 0;
     StringField string_closure = { 0, 0 };
 
-    set_field_name("ifos", field_idx);
     string_closure = (StringField) { offsetof(PostcohInspiralWrapper, row.ifos),
                                      MAX_ALLIFO_LEN };
-    declare_string_getset(string_closure, read_string_from_field,
-                          write_string_to_field, field_idx++);
-
-    set_field_name("pivotal_ifo", field_idx);
+    declare_getset("ifos", get_static_string_closure(string_closure),
+                   read_string_from_field, write_string_to_field);
     string_closure =
       (StringField) { offsetof(PostcohInspiralWrapper, row.pivotal_ifo),
                       MAX_ALLIFO_LEN };
-    declare_string_getset(string_closure, read_string_from_field,
-                          write_string_to_field, field_idx++);
-
-    set_field_name("skymap_fname", field_idx);
+    declare_getset("pivotal_ifo", get_static_string_closure(string_closure),
+                   read_string_from_field, write_string_to_field);
     string_closure =
       (StringField) { offsetof(PostcohInspiralWrapper, row.skymap_fname),
                       MAX_ALLIFO_LEN };
-    declare_string_getset(string_closure, read_string_from_field,
-                          write_string_to_field, field_idx++);
+    declare_getset("skymap_fname", get_static_string_closure(string_closure),
+                   read_string_from_field, write_string_to_field);
 
-    set_field_name("_snr_name", field_idx);
-    declare_name_getset(get_snr_series, NULL, field_idx++);
-    set_field_name("_snr_epoch_gpsSeconds", field_idx);
-    declare_name_getset(get_snr_series, NULL, field_idx++);
-    set_field_name("_snr_epoch_gpsNanoSeconds", field_idx);
-    declare_name_getset(get_snr_series, NULL, field_idx++);
-    set_field_name("_snr_f0", field_idx);
-    declare_name_getset(get_snr_series, NULL, field_idx++);
-    set_field_name("_snr_deltaT", field_idx);
-    declare_name_getset(get_snr_series, NULL, field_idx++);
-    set_field_name("_snr_sampleUnits", field_idx);
-    declare_name_getset(get_snr_series, NULL, field_idx++);
-    set_field_name("_snr_data_length", field_idx);
-    declare_name_getset(get_snr_series, NULL, field_idx++);
-    set_field_name("_snr_data", field_idx);
-    declare_name_getset(get_snr_series, NULL, field_idx++);
+    declare_getset("_snr_name", get_static_name_closure("_snr_name"),
+                   get_snr_series, NULL);
+    declare_getset("_snr_epoch_gpsSeconds",
+                   get_static_name_closure("_snr_epoch_gpsSeconds"),
+                   get_snr_series, NULL);
+    declare_getset("_snr_epoch_gpsNanoSeconds",
+                   get_static_name_closure("_snr_epoch_gpsNanoSeconds"),
+                   get_snr_series, NULL);
+    declare_getset("_snr_f0", get_static_name_closure("_snr_f0"),
+                   get_snr_series, NULL);
+    declare_getset("_snr_deltaT", get_static_name_closure("_snr_deltaT"),
+                   get_snr_series, NULL);
+    declare_getset("_snr_sampleUnits",
+                   get_static_name_closure("_snr_sampleUnits"), get_snr_series,
+                   NULL);
+    declare_getset("_snr_data_length",
+                   get_static_name_closure("_snr_data_length"), get_snr_series,
+                   NULL);
+    declare_getset("_snr_data", get_static_name_closure("_snr_data"),
+                   get_snr_series, NULL);
 
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        set_ifo_field_name("chisq", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.chisq[ifo_id]),
-          read_float_from_field, write_float_to_field, field_idx++);
+        declare_getset_ifo_getset("chisq",
+                                  get_static_offset_closure(offsetof(
+                                    PostcohInspiralWrapper, row.chisq[ifo_id])),
+                                  read_float_from_field, write_float_to_field,
+                                  ifo_id);
 
-        set_ifo_field_name("snglsnr", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.snglsnr[ifo_id]),
-          read_float_from_field, write_float_to_field, field_idx++);
+        declare_getset_ifo_getset(
+          "snglsnr",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, row.snglsnr[ifo_id])),
+          read_float_from_field, write_float_to_field, ifo_id);
 
-        set_ifo_field_name("coaphase", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.coaphase[ifo_id]),
-          read_float_from_field, write_float_to_field, field_idx++);
+        declare_getset_ifo_getset(
+          "coaphase",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, row.coaphase[ifo_id])),
+          read_float_from_field, write_float_to_field, ifo_id);
 
-        set_ifo_field_name("far_sngl", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.far_sngl[ifo_id]),
-          read_float_from_field, write_float_to_field, field_idx++);
+        declare_getset_ifo_getset(
+          "far_sngl",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, row.far_sngl[ifo_id])),
+          read_float_from_field, write_float_to_field, ifo_id);
 
-        set_ifo_field_name("far_1d_sngl", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.far_1d_sngl[ifo_id]),
-          read_float_from_field, write_float_to_field, field_idx++);
+        declare_getset_ifo_getset(
+          "far_1d_sngl",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, row.far_1d_sngl[ifo_id])),
+          read_float_from_field, write_float_to_field, ifo_id);
 
-        set_ifo_field_name("far_1w_sngl", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.far_1w_sngl[ifo_id]),
-          read_float_from_field, write_float_to_field, field_idx++);
+        declare_getset_ifo_getset(
+          "far_1w_sngl",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, row.far_1w_sngl[ifo_id])),
+          read_float_from_field, write_float_to_field, ifo_id);
 
-        set_ifo_field_name("far_2h_sngl", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.far_2h_sngl[ifo_id]),
-          read_float_from_field, write_float_to_field, field_idx++);
+        declare_getset_ifo_getset(
+          "far_2h_sngl",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, row.far_2h_sngl[ifo_id])),
+          read_float_from_field, write_float_to_field, ifo_id);
 
-        set_ifo_field_name("deff", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.deff[ifo_id]),
-          read_double_from_field, write_double_to_field, field_idx++);
+        declare_getset_ifo_getset("deff",
+                                  get_static_offset_closure(offsetof(
+                                    PostcohInspiralWrapper, row.deff[ifo_id])),
+                                  read_double_from_field, write_double_to_field,
+                                  ifo_id);
 
-        set_ifo_field_name("end_time_sngl", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id]),
-          read_int_from_field, write_int_to_field, field_idx++);
+        declare_getset_ifo_getset(
+          "end_time_sngl",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id])),
+          read_int_from_field, write_int_to_field, ifo_id);
 
-        set_ifo_field_name("end_time_ns_sngl", ifo_id, field_idx);
-        declare_offset_getset(
-          offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id])
+        declare_getset_ifo_getset(
+          "end_time_ns_sngl",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id]))
             + offsetof(LIGOTimeGPS, gpsNanoSeconds),
-          read_int_from_field, write_int_to_field, field_idx++);
+          read_int_from_field, write_int_to_field, ifo_id);
     }
-    getset[field_idx] = (PyGetSetDef) { NULL };
+    getset[NUM_FIELDS] = (PyGetSetDef) { NULL };
 }
 
 // static Py_ssize_t getreadbuffer(PyObject *self, Py_ssize_t segment, void
