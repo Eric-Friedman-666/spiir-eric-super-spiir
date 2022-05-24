@@ -49,7 +49,7 @@
  */
 
 typedef struct {
-    PyObject_HEAD // PyObject_HEAD includes a trailing semicolon
+    PyObject_HEAD
     PostcohInspiralTable row;
     COMPLEX8TimeSeries *snr;
     PyObject *end_time_sngl;
@@ -161,43 +161,44 @@ static PyMemberDef members[] = {
     { NULL },
 };
 
-typedef struct postcohtable_py__string_closure {
-    Py_ssize_t offset;
-    Py_ssize_t length;
-} PostcohPyStringClosure;
+typedef struct {
+    size_t offset;
+    size_t max_length;
+} StringField;
 
-static PyObject *postcohtable_py__get_string(PyObject *obj, void *closure) {
+static PyObject *read_string_from_field(PyObject *obj, void *closure) {
     assert(obj);
-    const PostcohPyStringClosure *closure_typed = closure;
+    const StringField string_field = *(StringField *)closure;
 
-    char *field = (char *)((void *)obj + closure_typed->offset);
-    assert((Py_ssize_t)strlen(field) < closure_typed->length);
+    char *field = (char *)((void *)obj + string_field.offset);
+    assert(strnlen(field, string_field.max_length) < string_field.max_length);
 
     return PyString_FromString(field);
 }
 
 static int
-  postcohtable_py__set_string(PyObject *obj, PyObject *value, void *closure) {
+  write_string_to_field(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
     assert(value);
-    const PostcohPyStringClosure *closure_typed = closure;
-    char *value_as_string                       = PyString_AsString(value);
+    const StringField string_field = *(StringField *)closure;
+    char *value_as_string          = PyString_AsString(value);
     if (PyErr_Occurred()) return -1;
-    if ((Py_ssize_t)strlen(value_as_string) >= closure_typed->length) {
+    if (strnlen(value_as_string, string_field.max_length)
+        >= string_field.max_length) {
         PyErr_Format(PyExc_ValueError, "string too long \'%s\'",
                      value_as_string);
         return -1;
     }
 
-    char *field = (char *)((void *)obj + closure_typed->offset);
-    assert((Py_ssize_t)strlen(field) < closure_typed->length);
+    char *field = (char *)((void *)obj + string_field.offset);
+    assert(strnlen(field, string_field.max_length) < string_field.max_length);
 
     strcpy(field, value_as_string);
     return 0;
 }
 
 // FIXME: This should follow the same format as our other get functions.
-static PyObject *postcohtable_py__snr_series_get(PyObject *obj, void *closure) {
+static PyObject *get_snr_series(PyObject *obj, void *closure) {
     assert(obj);
     COMPLEX8TimeSeries *snr = ((PostcohInspiralWrapper *)obj)->snr;
     const char *name        = closure;
@@ -245,218 +246,204 @@ static char field_names[NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO * MAX_NIFO]
                        [MAX_FIELD_NAME_LENGTH] = { 0 };
 
 #define NUM_STRING_FIELDS 3
-static PostcohPyStringClosure attr_string_closures[NUM_STRING_FIELDS];
-static Py_ssize_t attr_offsets[NUM_FIELDS_PER_IFO * MAX_NIFO];
+static StringField attr_string_closures[NUM_STRING_FIELDS];
+static size_t attr_offsets[NUM_FIELDS_PER_IFO * MAX_NIFO];
 
-static PyObject *postcohtable_py__get_double(PyObject *obj, void *closure) {
+static PyObject *read_double_from_field(PyObject *obj, void *closure) {
     assert(obj);
-    const Py_ssize_t *offset = closure;
+    const size_t offset = *(size_t *)closure;
 
-    double *field = (double *)((void *)obj + *offset);
+    double *field = (double *)((void *)obj + offset);
     return PyFloat_FromDouble(*field);
 }
 
 static int
-  postcohtable_py__set_double(PyObject *obj, PyObject *value, void *closure) {
+  write_double_to_field(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
     assert(value);
-    const Py_ssize_t *offset = closure;
-    double value_as_double   = PyFloat_AsDouble(value);
+    const size_t offset    = *(size_t *)closure;
+    double value_as_double = PyFloat_AsDouble(value);
     if (PyErr_Occurred()) return -1;
 
-    double *field = (double *)((void *)obj + *offset);
+    double *field = (double *)((void *)obj + offset);
     *field        = value_as_double;
     return 0;
 }
 
-static PyObject *postcohtable_py__get_float(PyObject *obj, void *closure) {
+static PyObject *read_float_from_field(PyObject *obj, void *closure) {
     assert(obj);
-    const Py_ssize_t *offset = closure;
+    const size_t offset = *(size_t *)closure;
 
-    float *field = (float *)((void *)obj + *offset);
+    float *field = (float *)((void *)obj + offset);
     return PyFloat_FromDouble((double)*field);
 }
 
-static int
-  postcohtable_py__set_float(PyObject *obj, PyObject *value, void *closure) {
+static int write_float_to_field(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
     assert(value);
-    const Py_ssize_t *offset = closure;
-    double value_as_double   = PyFloat_AsDouble(value);
+    const size_t offset    = *(size_t *)closure;
+    double value_as_double = PyFloat_AsDouble(value);
     if (PyErr_Occurred()) return -1;
 
-    float *field = (float *)((void *)obj + *offset);
+    float *field = (float *)((void *)obj + offset);
     *field       = (float)value_as_double;
     return 0;
 }
 
-static PyObject *postcohtable_py__get_int(PyObject *obj, void *closure) {
+static PyObject *read_int_from_field(PyObject *obj, void *closure) {
     assert(obj);
-    const Py_ssize_t *offset = closure;
+    const size_t offset = *(size_t *)closure;
 
-    int *field = (int *)((void *)obj + *offset);
+    int *field = (int *)((void *)obj + offset);
     return PyInt_FromLong((long)*field);
 }
 
-static int
-  postcohtable_py__set_int(PyObject *obj, PyObject *value, void *closure) {
+static int write_int_to_field(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
     assert(value);
-    const Py_ssize_t *offset = closure;
-    int value_as_long        = (int)PyInt_AsLong(value);
+    const size_t offset = *(size_t *)closure;
+    int value_as_long   = (int)PyInt_AsLong(value);
     if (PyErr_Occurred()) return -1;
 
-    int *field = (int *)((void *)obj + *offset);
+    int *field = (int *)((void *)obj + offset);
     *field     = (int)value_as_long;
     return 0;
 }
 
-static __inline__ void set_field_name(char *name, int field_idx) {
-    assert(strlen(name) <= MAX_FIELD_NAME_LENGTH);
+static void set_field_name(char *name, int field_idx) {
+    assert(strnlen(name, MAX_FIELD_NAME_LENGTH) < MAX_FIELD_NAME_LENGTH);
     strcpy(field_names[field_idx], name);
 }
 
-static __inline__ void
-  set_ifo_field_name(char *name, int ifo_id, int field_idx) {
-    assert(strlen(name) + 1 + MAX_IFO_LEN <= MAX_FIELD_NAME_LENGTH);
+static void set_ifo_field_name(char *name, int ifo_id, int field_idx) {
+    assert(strnlen(name, MAX_FIELD_NAME_LENGTH) + 1 + MAX_IFO_LEN
+           < MAX_FIELD_NAME_LENGTH);
     set_field_name(name, field_idx);
     strncat(field_names[field_idx], "_", 1);
     strncat(field_names[field_idx], IFOMap[ifo_id], MAX_IFO_LEN);
 }
 
-static __inline__ void
+static void
   declare_getset(getter get, setter set, void *closure, int field_idx) {
-    assert(strlen(field_names[field_idx]) > 0
-           && strlen(field_names[field_idx]) <= MAX_FIELD_NAME_LENGTH);
+    assert(strnlen(field_names[field_idx], MAX_FIELD_NAME_LENGTH) > 0
+           && strnlen(field_names[field_idx], MAX_FIELD_NAME_LENGTH)
+                < MAX_FIELD_NAME_LENGTH);
     getset[field_idx] = (PyGetSetDef) { field_names[field_idx], get, set,
                                         field_names[field_idx], closure };
 }
 
-static __inline__ void declare_string_getset(PostcohPyStringClosure closure,
-                                             getter get,
-                                             setter set,
-                                             int closure_idx,
-                                             int field_idx) {
+static void declare_string_getset(StringField closure,
+                                  getter get,
+                                  setter set,
+                                  int field_idx) {
+    static int closure_idx            = 0;
     attr_string_closures[closure_idx] = closure;
-    declare_getset(get, set, &attr_string_closures[closure_idx], field_idx);
+    declare_getset(get, set, &attr_string_closures[closure_idx++], field_idx);
 }
 
-static __inline__ void declare_offset_getset(
-  Py_ssize_t offset, getter get, setter set, int closure_idx, int field_idx) {
+static void
+  declare_offset_getset(size_t offset, getter get, setter set, int field_idx) {
+    static int closure_idx    = 0;
     attr_offsets[closure_idx] = offset;
-    declare_getset(get, set, &attr_offsets[closure_idx], field_idx);
+    declare_getset(get, set, &attr_offsets[closure_idx++], field_idx);
 }
 
-static __inline__ void
-  declare_name_getset(getter get, setter set, int field_idx) {
+static void declare_name_getset(getter get, setter set, int field_idx) {
     declare_getset(get, set, field_names[field_idx], field_idx);
 }
 
-void prepare_getset() {
-    int field_idx          = 0;
-    int string_closure_idx = 0;
-    int offset_closure_idx = 0;
+static void prepare_getset() {
+    int field_idx              = 0;
+    StringField string_closure = { 0, 0 };
 
     set_field_name("ifos", field_idx);
-    declare_string_getset(
-      (PostcohPyStringClosure) { offsetof(PostcohInspiralWrapper, row.ifos),
-                                 MAX_ALLIFO_LEN },
-      postcohtable_py__get_string, postcohtable_py__set_string,
-      string_closure_idx++, field_idx++);
+    string_closure = (StringField) { offsetof(PostcohInspiralWrapper, row.ifos),
+                                     MAX_ALLIFO_LEN };
+    declare_string_getset(string_closure, read_string_from_field,
+                          write_string_to_field, field_idx++);
 
     set_field_name("pivotal_ifo", field_idx);
-    declare_string_getset(
-      (PostcohPyStringClosure) {
-        offsetof(PostcohInspiralWrapper, row.pivotal_ifo), MAX_IFO_LEN },
-      postcohtable_py__get_string, postcohtable_py__set_string,
-      string_closure_idx++, field_idx++);
+    string_closure =
+      (StringField) { offsetof(PostcohInspiralWrapper, row.pivotal_ifo),
+                      MAX_ALLIFO_LEN };
+    declare_string_getset(string_closure, read_string_from_field,
+                          write_string_to_field, field_idx++);
 
     set_field_name("skymap_fname", field_idx);
-    declare_string_getset(
-      (PostcohPyStringClosure) {
-        offsetof(PostcohInspiralWrapper, row.skymap_fname),
-        MAX_SKYMAP_FNAME_LEN },
-      postcohtable_py__get_string, postcohtable_py__set_string,
-      string_closure_idx++, field_idx++);
+    string_closure =
+      (StringField) { offsetof(PostcohInspiralWrapper, row.skymap_fname),
+                      MAX_ALLIFO_LEN };
+    declare_string_getset(string_closure, read_string_from_field,
+                          write_string_to_field, field_idx++);
 
     set_field_name("_snr_name", field_idx);
-    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    declare_name_getset(get_snr_series, NULL, field_idx++);
     set_field_name("_snr_epoch_gpsSeconds", field_idx);
-    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    declare_name_getset(get_snr_series, NULL, field_idx++);
     set_field_name("_snr_epoch_gpsNanoSeconds", field_idx);
-    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    declare_name_getset(get_snr_series, NULL, field_idx++);
     set_field_name("_snr_f0", field_idx);
-    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    declare_name_getset(get_snr_series, NULL, field_idx++);
     set_field_name("_snr_deltaT", field_idx);
-    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    declare_name_getset(get_snr_series, NULL, field_idx++);
     set_field_name("_snr_sampleUnits", field_idx);
-    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    declare_name_getset(get_snr_series, NULL, field_idx++);
     set_field_name("_snr_data_length", field_idx);
-    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    declare_name_getset(get_snr_series, NULL, field_idx++);
     set_field_name("_snr_data", field_idx);
-    declare_name_getset(postcohtable_py__snr_series_get, NULL, field_idx++);
+    declare_name_getset(get_snr_series, NULL, field_idx++);
 
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         set_ifo_field_name("chisq", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.chisq[ifo_id]),
-          postcohtable_py__get_float, postcohtable_py__set_float,
-          offset_closure_idx++, field_idx++);
+          read_float_from_field, write_float_to_field, field_idx++);
 
         set_ifo_field_name("snglsnr", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.snglsnr[ifo_id]),
-          postcohtable_py__get_float, postcohtable_py__set_float,
-          offset_closure_idx++, field_idx++);
+          read_float_from_field, write_float_to_field, field_idx++);
 
         set_ifo_field_name("coaphase", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.coaphase[ifo_id]),
-          postcohtable_py__get_float, postcohtable_py__set_float,
-          offset_closure_idx++, field_idx++);
+          read_float_from_field, write_float_to_field, field_idx++);
 
         set_ifo_field_name("far_sngl", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.far_sngl[ifo_id]),
-          postcohtable_py__get_float, postcohtable_py__set_float,
-          offset_closure_idx++, field_idx++);
+          read_float_from_field, write_float_to_field, field_idx++);
 
         set_ifo_field_name("far_1d_sngl", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.far_1d_sngl[ifo_id]),
-          postcohtable_py__get_float, postcohtable_py__set_float,
-          offset_closure_idx++, field_idx++);
+          read_float_from_field, write_float_to_field, field_idx++);
 
         set_ifo_field_name("far_1w_sngl", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.far_1w_sngl[ifo_id]),
-          postcohtable_py__get_float, postcohtable_py__set_float,
-          offset_closure_idx++, field_idx++);
+          read_float_from_field, write_float_to_field, field_idx++);
 
         set_ifo_field_name("far_2h_sngl", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.far_2h_sngl[ifo_id]),
-          postcohtable_py__get_float, postcohtable_py__set_float,
-          offset_closure_idx++, field_idx++);
+          read_float_from_field, write_float_to_field, field_idx++);
 
         set_ifo_field_name("deff", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.deff[ifo_id]),
-          postcohtable_py__get_double, postcohtable_py__set_double,
-          offset_closure_idx++, field_idx++);
+          read_double_from_field, write_double_to_field, field_idx++);
 
         set_ifo_field_name("end_time_sngl", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id]),
-          postcohtable_py__get_int, postcohtable_py__set_int,
-          offset_closure_idx++, field_idx++);
+          read_int_from_field, write_int_to_field, field_idx++);
 
         set_ifo_field_name("end_time_ns_sngl", ifo_id, field_idx);
         declare_offset_getset(
           offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id])
             + offsetof(LIGOTimeGPS, gpsNanoSeconds),
-          postcohtable_py__get_int, postcohtable_py__set_int,
-          offset_closure_idx++, field_idx++);
+          read_int_from_field, write_int_to_field, field_idx++);
     }
     getset[field_idx] = (PyGetSetDef) { NULL };
 }
