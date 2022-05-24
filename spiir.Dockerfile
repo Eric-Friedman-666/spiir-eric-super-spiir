@@ -258,11 +258,13 @@ COPY <<-EOF "$PREFIX/lib/pkgconfig/hdf5.pc"
 	Libs: -L\${libdir} -lhdf5
 EOF
 
+ARG IGWN_SOURCE=http://software.igwn.org/lscsoft/source
+
 RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	p=libframe-8.30
 	echo -e "\\n\\n>> [`date`] building $p"
-	wget $wget_opts http://software.ligo.org/lscsoft/source/$p.tar.gz
+	wget $wget_opts $IGWN_SOURCE/$p.tar.gz
 	tar -xzf $p.tar.gz
 	cd $p
 	# make sure frame files are opened in binary mode
@@ -281,7 +283,7 @@ RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	p=metaio-8.3.0
 	echo -e "\\n\\n>> [`date`] building $p"
-	wget $wget_opts http://software.ligo.org/lscsoft/source/$p.tar.gz
+	wget $wget_opts $IGWN_SOURCE/$p.tar.gz
 	tar -xzf $p.tar.gz
 	cd $p
 	./configure --prefix=$PREFIX
@@ -404,7 +406,7 @@ RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	p=ldas-tools-al-2.5.7
 	echo -e "\\n\\n>> [`date`] building $p"
-	wget $wget_opts http://software.igwn.org/lscsoft/source/$p.tar.gz
+	wget $wget_opts $IGWN_SOURCE/$p.tar.gz
 	tar -xzf $p.tar.gz
 	cd $p
 	./configure --prefix=$PREFIX \
@@ -421,7 +423,7 @@ RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	p=ldas-tools-framecpp-2.5.8
 	echo -e "\\n\\n>> [`date`] building $p"
-	wget $wget_opts http://software.igwn.org/lscsoft/source/$p.tar.gz
+	wget $wget_opts $IGWN_SOURCE/$p.tar.gz
 	tar -xzf $p.tar.gz
 	cd $p
 	./configure --prefix=$PREFIX \
@@ -625,14 +627,17 @@ RUN --mount=type=cache,target=/root/ccache \
 	rm -r $p
 EOF
 
+ARG LIGO_GIT=https://git.ligo.org/lscsoft
+
 COPY lalsuite_0000_cleanup.patch .
 COPY lalsuite_0001_variable_epsilon.patch .
 RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	p=lalsuite
 	echo -e "\\n\\n>> [`date`] Cloning $p"
-	git clone https://git.ligo.org/lscsoft/$p.git
+	git clone $LIGO_GIT/$p.git
 	cd $p
+	# Known working commit as of 23/5/2022
 	git checkout aee3feddee701355506c109029fd1ae574ae56c5
 	git apply ../lalsuite_0000_cleanup.patch
 	git apply ../lalsuite_0001_variable_epsilon.patch
@@ -649,8 +654,9 @@ RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	p=lalsuite-extra
 	echo -e "\\n\\n>> [`date`] Cloning $p"
-	git clone https://git.ligo.org/lscsoft/$p.git
+	git clone $LIGO_GIT/$p.git
 	cd $p
+	# Known working commit as of 23/5/2022
 	git checkout 9d8b175df5348ee27159b669f9fe34693386c60c
 	./00boot
 	./configure --prefix=$PREFIX
@@ -665,7 +671,7 @@ RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	p=glue
 	echo -e "\\n\\n>> [`date`] Cloning $p"
-	git clone https://git.ligo.org/lscsoft/$p.git
+	git clone $LIGO_GIT/$p.git
 	cd $p
 	git checkout glue-release-1.59.2
 	git apply ../glue_0000_zipsafe.patch
@@ -722,7 +728,7 @@ RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	p=spiir
 	echo -e "\\n\\n>> [`date`] Cloning $p"
-	git clone --no-checkout https://git.ligo.org/lscsoft/$p.git
+	git clone --no-checkout $LIGO_GIT/$p.git
 EOF
 
 ARG DEBUG
