@@ -316,6 +316,20 @@ static void declare_getset(char *name, void *closure, getter get, setter set) {
     field_idx++;
 }
 
+static void declare_getset_ifo_getset(
+  char *base_name, void *closure, getter get, setter set, int ifo_id) {
+    assert(strlen(base_name) + 1 + strlen(IFOMap[ifo_id])
+           < MAX_FIELD_NAME_LENGTH);
+    char *name = malloc(strlen(base_name) + 1 + strlen(IFOMap[ifo_id]));
+
+    strcpy(name, base_name);
+    strcat(name, "_");
+    strcat(name, IFOMap[ifo_id]);
+
+    declare_getset(name, closure, get, set);
+    free(name);
+}
+
 #define NUM_STRING_FIELDS 3
 static StringField *get_static_string_closure(StringField closure) {
     static StringField attr_string_closures[NUM_STRING_FIELDS];
@@ -342,20 +356,6 @@ static char *get_static_name_closure(char *name) {
     strcpy(attr_name_closures[closure_idx], name);
 
     return attr_name_closures[closure_idx++];
-}
-
-static void declare_getset_ifo_getset(
-  char *base_name, void *closure, getter get, setter set, int ifo_id) {
-    assert(strlen(base_name) + 1 + strlen(IFOMap[ifo_id])
-           < MAX_FIELD_NAME_LENGTH);
-    char *name = malloc(strlen(base_name) + 1 + strlen(IFOMap[ifo_id]));
-
-    strcpy(name, base_name);
-    strcat(name, "_");
-    strcat(name, IFOMap[ifo_id]);
-
-    declare_getset(name, closure, get, set);
-    free(name);
 }
 
 static void prepare_getset() {
@@ -455,8 +455,8 @@ static void prepare_getset() {
         declare_getset_ifo_getset(
           "end_time_ns_sngl",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id]))
-            + offsetof(LIGOTimeGPS, gpsNanoSeconds),
+            offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id])
+            + offsetof(LIGOTimeGPS, gpsNanoSeconds)),
           read_int_from_field, write_int_to_field, ifo_id);
     }
     getset[NUM_FIELDS] = (PyGetSetDef) { NULL };
