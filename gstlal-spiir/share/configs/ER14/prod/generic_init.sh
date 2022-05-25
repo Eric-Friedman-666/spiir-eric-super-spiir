@@ -68,7 +68,7 @@ ifplayground=0
 #  --request-data=${mytag} 
 ######################################################
 #
-if (( ${iflive} == 1 )); then #KAGRA
+if (( ${iflive} == 1 )); then
 	mytag="Live_H1_L1_V1"
 else
 	mytag="O2Replay_H1_L1_V1"
@@ -423,3 +423,5 @@ JOB lvalert_listen_0001 lvalert_listen_${user}.sub
 RETRY lvalert_listen_0001 1
 
 EOF
+
+# TODO: Investigate KAGRA implementation, see !36

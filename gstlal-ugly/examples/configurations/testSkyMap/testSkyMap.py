@@ -47,7 +47,7 @@ class SkymapHandler(object):
 ra_deg = int(sys.argv[1]) 
 codec_deg = int(sys.argv[2])
 
-ifos = ("H1", "L1", "V1", "K1")
+ifos = ("H1", "L1", "V1")
 start_time = 963704084
 stop_time = start_time + 8
 mid_time = (start_time + stop_time) / 2

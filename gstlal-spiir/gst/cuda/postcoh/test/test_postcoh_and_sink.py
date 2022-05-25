@@ -25,7 +25,7 @@ src2 = pipeparts.mkcapsfilter(
 src3 = pipeparts.mkaudiotestsrc(pipeline, wave=9)
 src3 = pipeparts.mkcapsfilter(
     pipeline, src3, "audio/x-raw-float, width=32, channels=1, rate=4096")
-src4 = pipeparts.mkaudiotestsrc(pipeline, wave=9)
+src4 = pipeparts.mkaudiotestsrc(pipeline, wave=9) # TODO: Test with Kagra enabled/disabled, see !36
 src4 = pipeparts.mkcapsfilter(
     pipeline, src4, "audio/x-raw-float, width=32, channels=1, rate=4096")
 
@@ -51,9 +51,9 @@ src4 = pipeparts.mkcudamultiratespiir(pipeline,
                                       stream_id=3)
 
 postcoh = gst.element_factory_make("cuda_postcoh")
-postcoh.set_property("detrsp-fname", "L1H1V1_skymap.xml") #KAGRA
+postcoh.set_property("detrsp-fname", "H1L1V1K1_skymap.xml")
 postcoh.set_property("autocorrelation-fname",
-                     "L1:H1bank.xml.gz,H1:H1bank.xml.gz,V1:H1bank.xml.gz,K1:H1bank.xml.gz")
+                     "L1:H1bank.xml.gz,H1:H1bank.xml.gz,V1:H1bank.xml.gz,K1:H1bank.xml.gz") 
 postcoh.set_property("hist-trials", 1)
 postcoh.set_property("snglsnr-thresh", 1.0)
 pipeline.add(postcoh)

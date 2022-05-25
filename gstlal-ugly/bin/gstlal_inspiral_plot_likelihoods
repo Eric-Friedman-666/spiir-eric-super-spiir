@@ -97,7 +97,7 @@ else:
 bgcol = (224/255.,224/255.,224/255.)
 
 likely = copy.deepcopy(inj)
-for i, ifo in enumerate(['H1','L1', 'V1', 'K1']):
+for i, ifo in enumerate(['H1','L1', 'V1']):
 	if form.getfirst(ifo):
 		snrm, chisqm = [float(v) for v in form.getfirst(ifo).split(",")]
 	else:

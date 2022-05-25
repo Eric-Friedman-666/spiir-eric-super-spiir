@@ -1,4 +1,4 @@
-UPDATE coinc_event SET instruments = "H1,L1,V1,K1";
+UPDATE coinc_event SET instruments = "H1,L1,V1";
 
 --
 -- coinc_definer clean up

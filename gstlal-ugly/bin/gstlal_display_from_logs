@@ -53,7 +53,7 @@ for col in ("start_time_ns",  "end_time_ns"):
 		column[i] = 0
 
 out = sys.stderr
-colordict = {"H1": "r", "L1": "g", "V1": "m"} #KAGRA
+colordict = {"H1": "r", "L1": "g", "V1": "m"}
 segdictdict = {}
 
 # ASSUME we can combine everything by the name in the segment_definer table

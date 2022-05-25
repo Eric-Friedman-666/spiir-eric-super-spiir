@@ -239,7 +239,7 @@ def livetime_plot(disconturl, livetimeurl, xlabel="", ylabel="", title=""):
     lt = livetimedata[1]
     discont = discontdata[1]
     # FIXME Hack to adjust for high sample rate L1 and H1 state vector
-    if "V1" not in title: #KAGRA
+    if "V1" not in title: # NOTE: Investigate sample rate of KAGRA state vector
         dt /= 16
         lt /= 16
         discont /= 16
@@ -367,7 +367,7 @@ print "</div>"
 
 # Pie table
 print "<h1> Live time </h1><div>"
-for ifo in ("H1", "L1", "V1", "K1"):
+for ifo in ("H1", "L1", "V1", "K1"): # TODO: Test with Kagra enabled/disabled, see !36
     try:
         livetime_plot(baseurl + '/%s/strain_add_drop.txt' % ifo,
                       baseurl + '/%s/state_vector_on_off_gap.txt' % ifo,
@@ -412,7 +412,7 @@ else:
 bgcol = (224 / 255., 224 / 255., 224 / 255.)
 
 likely = copy.deepcopy(inj)
-for i, ifo in enumerate(['H1', 'L1', 'V1', 'K1']):
+for i, ifo in enumerate(['H1', 'L1', 'V1', 'K1']): # TODO: Test with Kagra enabled/disabled, see !36
     print "<h1>%s SNR / CHISQ stats</h1>" % ifo
     print "<div>"
     likely[ifo + "_snr_chi"].array /= counts[ifo + "_snr_chi"].array

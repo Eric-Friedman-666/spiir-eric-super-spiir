@@ -841,7 +841,8 @@ class Bank(object):
             "coa_phase", "mass1", "mass2", "mchirp", "mtotal", "eta", "kappa",
             "chi", "tau0", "tau2", "tau3", "tau4", "tau5", "ttotal", "psi0",
             "psi3", "alpha", "alpha1", "alpha2", "alpha3", "alpha4", "alpha5",
-            "alpha6", "beta", "f_final", "snr", "chisq", "chisq_dof", # "alpha7", #KAGRA
+            "alpha6", "beta", "f_final", "snr", "chisq", "chisq_dof",
+            # TODO: Investigate KAGRA use with a possible alpha7 column, see !36
             "bank_chisq", "bank_chisq_dof", "cont_chisq", "cont_chisq_dof",
             "sigmasq", "rsqveto_duration", "Gamma0", "Gamma1", "Gamma2",
             "Gamma3", "Gamma4", "Gamma5", "Gamma6", "Gamma7", "Gamma8",

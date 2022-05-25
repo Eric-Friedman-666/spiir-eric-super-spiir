@@ -203,7 +203,7 @@ for src in srcs:
 		row.inclination = inc[i]
 		row.polarization = pol[i]
 		# set effective distances
-		for det,s in (("H1","h"), ("L1","l"), ("V1","v"), ("G1","g"), ("T1","t")): #KAGRA
+		for det,s in (("H1","h"), ("L1","l"), ("V1","v"), ("G1","g"), ("T1","t")):
 			hp, hc, ha, q =  response(row.geocent_end_time, row.longitude, row.latitude, row.inclination, row.polarization, "radians", det)
 			setattr(row, "eff_dist_%s" % s, row.distance / q)
 
@@ -221,7 +221,7 @@ for src in srcs:
 
 		# misc
 		row.amp_order = -1
-		row.alpha = row.alpha1 = row.alpha2 = row.alpha3 = row.alpha4 = row.alpha5 = row.alpha6 = row.beta = row.theta0 = row.phi0 = row.numrel_mode_min = row.numrel_mode_max = row.bandpass = 0 #KAGRA
+		row.alpha = row.alpha1 = row.alpha2 = row.alpha3 = row.alpha4 = row.alpha5 = row.alpha6 = row.beta = row.theta0 = row.phi0 = row.numrel_mode_min = row.numrel_mode_max = row.bandpass = 0
 		row.simulation_id = sim.get_next_id()
 		row.process_id = procrow.process_id	
 		sim.append(row)

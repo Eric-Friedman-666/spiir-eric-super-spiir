@@ -54,7 +54,7 @@ queue 1" >> get_url_${user}.sub
 #  this is to update the detector reponse map 
 #  to capture the movement of Earch every day for the coherent search
 ##################################################################
-if (( ${ndet} == 2 )); then #KAGRA
+if (( ${ndet} == 2 )); then
 	ifo_horizons=H1:${dhH},L1:${dhL} 
 else
 	ifo_horizons=H1:${dhH},L1:${dhL},V1:${dhV} 
@@ -197,3 +197,5 @@ notification = never
 queue 1
 " >>gstlal_inspiral_postcohspiir_${user}.sub
 
+
+# TODO: Investigate KAGRA implementation, see !36

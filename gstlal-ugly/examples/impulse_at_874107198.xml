@@ -39,8 +39,7 @@
 			"H1",0.0,"process:process_id:0","time_slide:time_slide_id:0",
 			"H2",0.0,"process:process_id:0","time_slide:time_slide_id:0",
 			"L1",0.0,"process:process_id:0","time_slide:time_slide_id:0",
-			"V1",0.0,"process:process_id:0","time_slide:time_slide_id:0",
-			"K1",0.0,"process:process_id:0","time_slide:time_slide_id:0"
+			"V1",0.0,"process:process_id:0","time_slide:time_slide_id:0"
 		</Stream>
 	</Table>
 	<Table Name="sim_burst:table">

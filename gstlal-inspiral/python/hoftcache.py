@@ -135,7 +135,7 @@ def mkbasicsrc(pipeline, gw_data_source_info, instrument, verbose = False):
 
 	if gw_data_source_info.data_source == "frames":
 		if instrument == "V1":
-			#FIXME Hack because virgo often just uses "V" in the file names rather than "V1".  We need to sieve on "V" #KAGRA
+			#FIXME Hack because virgo often just uses "V" in the file names rather than "V1".  We need to sieve on "V"
 			src = pipeparts.mklalcachesrc(pipeline, location = gw_data_source_info.frame_cache, use_mmap = True, cache_src_regex = "V")
 		else:
 			src = pipeparts.mklalcachesrc(pipeline, location = gw_data_source_info.frame_cache, use_mmap = True, cache_src_regex = instrument[0], cache_dsc_regex = instrument)
