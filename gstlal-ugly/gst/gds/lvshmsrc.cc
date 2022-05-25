@@ -767,7 +767,7 @@ static void gds_lvshmsrc_class_init(GDSLVSHMSrcClass *klass)
 		g_param_spec_string(
 			"shm-name",
 			"Name",
-			"Shared memory partition name.  Suggestions:  \"LHO_Data\", \"LLO_Data\", \"VIRGO_Data\", \"KAGRA_Data\".",
+			"Shared memory partition name.  Suggestions:  \"LHO_Data\", \"LLO_Data\", \"VIRGO_Data\".",
 			DEFAULT_SHM_NAME,
 			(GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)
 		)

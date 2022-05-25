@@ -170,7 +170,7 @@ def axes_plot_psds(axes, psds, coinc_xmldoc = None):
 			alpha = 0.6
 			linestyle = ":"
 			label = "%s (Off, Last Seen With %s Horizon)" % (instrument, latex_horizon_distance(horizon_distance(psd, 8.)[0]))
-		axes.loglog(f, psd_data, color = plotutil.colour_from_instruments([instrument]), alpha = alpha, linestyle = linestyle, label = label)
+		axes.loglog(f, psd_data, color = plotutil.([instrument]), alpha = alpha, linestyle = linestyle, label = label)
 		if instrument in sngl_inspirals:
 			logging.info("found %s event with SNR %g" % (instrument, sngl_inspirals[instrument].snr))
 			inspiral_spectrum = horizon_distance(psd, sngl_inspirals[instrument].snr)[1]

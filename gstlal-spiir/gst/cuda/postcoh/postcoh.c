@@ -33,7 +33,7 @@
 #include <postcoh/postcohtable_utils.h>
 #include <string.h>
 
-#define DEFAULT_DETRSP_FNAME      "H1L1V1_detrsp.xml" // KAGRA
+#define DEFAULT_DETRSP_FNAME      "H1L1V1K1_detrsp.xml"
 #define EPSILON                   5
 #define PEAKFINDER_CLUSTER_WINDOW 5
 #define RAD2DEG                   57.2957795

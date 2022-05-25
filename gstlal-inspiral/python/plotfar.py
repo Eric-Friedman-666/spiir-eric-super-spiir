@@ -289,7 +289,7 @@ def plot_likelihood_ratio_ccdf(fapfar, (xlo, xhi), tag, zerolag_ln_likelihood_ra
 	except AttributeError:
 		return fig
 
-def plot_horizon_distance_vs_time(coinc_param_distributions, (tlo,thi), tbins, colours = {"H1": "r", "H2": "b", "L1": "g", "V1": "m"}): #KAGRA
+def plot_horizon_distance_vs_time(coinc_param_distributions, (tlo,thi), tbins, colours = {"H1": "r", "H2": "b", "L1": "g", "V1": "m"}):
 	horizon_history = coinc_param_distributions.horizon_history
 
 	fig, axes = init_plot((8., 8. / plotutil.golden_ratio))

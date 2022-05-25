@@ -137,12 +137,12 @@ class ThincaCoincParamsDistributions():
 	binnings = {}
 	pdf_from_rates_func = {}
 
-	def __init__(self, instruments = frozenset(("H1", "L1", "V1", "K1")), min_instruments = 2, signal_rate = 1.0, delta_t = 0.005, process_id = None, **kwargs):
+	def __init__(self, instruments = frozenset(("H1", "L1", "V1")), min_instruments = 2, signal_rate = 1.0, delta_t = 0.005, process_id = None, **kwargs):
 		#
 		# check input
 		#
 
-		assert "V1" not in instruments	# disallow Virgo from initialization FIXME:  remove after O2 #KAGRA
+		assert "V1" not in instruments	# disallow Virgo from initialization FIXME:  remove after O2
 		if min_instruments < 1:
 			raise ValueError("min_instruments=%d must be >= 1" % min_instruments)
 		if min_instruments > len(instruments):
@@ -275,11 +275,11 @@ class ThincaCoincParamsDistributions():
 
 	def coinc_params(self, events, offsetvector, mode = "ranking"):
 		#
-		# strip Virgo triggers.  FIXME:  remove after O2 #KAGRA
+		# strip Virgo triggers.  FIXME:  remove after O2
 		#
 
 		assert len(events) != 0, "no triggers in candidate"
-		events = tuple(event for event in events if event.ifo != "V1") #KAGRA
+		events = tuple(event for event in events if event.ifo != "V1")
 		assert len(events) != 0, "no triggers from allowed instruments in candidate"
 
 		#
@@ -521,7 +521,7 @@ class ThincaCoincParamsDistributions():
 			# add to raw counts
 			binarr += new_binarr
 
-	def add_background_prior(self, n = {"H1": 10000, "L1": 10000, "V1": 10000, "K1": 10000}, prefactors_range = (0.5, 20.), df = 40, inv_snr_pow = 2., ba = "background_rates", verbose = False):
+	def add_background_prior(self, n = {"H1": 10000, "L1": 10000, "V1": 10000}, prefactors_range = (0.5, 20.), df = 40, inv_snr_pow = 2., ba = "background_rates", verbose = False):
 		#
 		# populate snr,chi2 binnings with a slope to force
 		# higher-SNR events to be assesed to be more significant
@@ -719,7 +719,7 @@ class ThincaCoincParamsDistributions():
 
 		if verbose:
 			print >>sys.stderr, "synthesizing background-like instrument combination probabilities ..."
-		assert "V1" not in segs	# disallow Virgo.  FIXME:  remove after O2 #KAGRA
+		assert "V1" not in segs	# disallow Virgo.  FIXME:  remove after O2
 		self.background_rates["instruments"].array[:] = 0.
 		singles_counts = dict(zip(self.background_rates["singles"].bins[0].centres(), self.background_rates["singles"].array))
 		num_templates = int(round(sum(singles_counts[instrument] / (float(livetime) / 1.0) for instrument, livetime in abs(segs).items()) / len(segs)))
@@ -893,7 +893,7 @@ class ThincaCoincParamsDistributions():
 		"""
 		if len(instruments) < self.min_instruments:
 			raise ValueError("cannot simulate candidates for < %d instruments" % self.min_instruments)
-		assert "V1" not in instruments	# disallow Virgo.  FIXME:  remove after O2 #KAGRA
+		assert "V1" not in instruments	# disallow Virgo.  FIXME:  remove after O2
 
 		snr_slope = 0.8 / len(instruments)**3
 

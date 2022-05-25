@@ -178,7 +178,7 @@ print "<tr><td><div id='canvasd'>"
 plot(form.getvalue("dir"), '_snr_history.txt', idrange, reg, plottype = "timestamp", ylabel = "Time (s)", scale = "log", xlabel = "Time before now (s)", title = "Time since last event (s), red means data is missing")
 print "</div></td></tr>"
 
-for ifo in ["H1", "H2", "L1", "V1", "K1"]:
+for ifo in ["H1", "H2", "L1", "V1"]:
 	# fault samples
 	print "<tr><td><div id='canvasd'>"
 	plot(form.getvalue("dir"), '_%saudiorate.txt' % ifo, idrange, reg, datatype = "max", ylabel = "Samples", scale = "log", title = " %s : Number of discontinuous samples, red means no data" % ifo)

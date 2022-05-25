@@ -60,7 +60,7 @@ def parse_segments_xml(path):
 	return seglistdicts
 	
 
-def plot_segments_history(seglistdicts, segments_to_plot = ['trigger buffers', 'h(t) gate', 'state vector'], t_max = None, length = 86400., labelspacing = 10800., colors = {'H1': numpy.array((1.0, 0.0, 0.0)), 'L1':  numpy.array((0.0, 0.8, 0.0)), 'V1':  numpy.array((1.0, 0.0, 1.0)), 'H1L1': numpy.array((.5, .5, .5))}, fig = None, axes = None): #KAGRA
+def plot_segments_history(seglistdicts, segments_to_plot = ['trigger buffers', 'h(t) gate', 'state vector'], t_max = None, length = 86400., labelspacing = 10800., colors = {'H1': numpy.array((1.0, 0.0, 0.0)), 'L1':  numpy.array((0.0, 0.8, 0.0)), 'V1':  numpy.array((1.0, 0.0, 1.0)), 'H1L1': numpy.array((.5, .5, .5))}, fig = None, axes = None):
 	if fig is None:
 		fig = plt.figure(figsize=(15,5),)
 	if axes is None:
@@ -81,7 +81,7 @@ def plot_segments_history(seglistdicts, segments_to_plot = ['trigger buffers', '
 	y_ticks = []
 	y_tick_labels = []
 	color_list = []
-	color_dict = {'H1': numpy.array((1.0, 0.0, 0.0)), 'L1':  numpy.array((0.0, 0.8, 0.0)), 'V1':  numpy.array((1.0, 0.0, 1.0)), 'H1L1': numpy.array((.5, .5, .5))} #KAGRA
+	color_dict = {'H1': numpy.array((1.0, 0.0, 0.0)), 'L1':  numpy.array((0.0, 0.8, 0.0)), 'V1':  numpy.array((1.0, 0.0, 1.0)), 'H1L1': numpy.array((.5, .5, .5))}
 	x_format = tkr.FuncFormatter(lambda x, pos: datetime.datetime(*GPSToUTC(int(x))[:7]).strftime('%Y-%m-%d, %H:%M:%S UTC'))
 	x_ticks = numpy.arange(t_min,t_max+labelspacing, labelspacing)
 

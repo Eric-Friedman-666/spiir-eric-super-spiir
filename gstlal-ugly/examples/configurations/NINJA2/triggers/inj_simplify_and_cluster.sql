@@ -1,7 +1,7 @@
-UPDATE coinc_event SET instruments = "H1,L1,V1,K1";
+UPDATE coinc_event SET instruments = "H1,L1,V1";
 
 DROP table sim_inspiral;
-UPDATE coinc_event SET instruments = "H1,L1,V1,K1";
+UPDATE coinc_event SET instruments = "H1,L1,V1";
 
 --
 -- coinc_definer clean up

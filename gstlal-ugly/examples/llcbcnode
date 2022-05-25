@@ -53,7 +53,7 @@ def plotsnrchisq(url, name = "gstlal_inspiral_likelihood"):
 	fig = plt.figure(figsize = (10.5,7))
 	plt.gray()
 	fig.patch.set_alpha(0.0)
-	for i, ifo in enumerate(['H1','H2','L1', 'V1', 'K1']):
+	for i, ifo in enumerate(['H1','H2','L1', 'V1']):
 		ax = fig.add_subplot(2,2,i+1)
 		H1 = coincparamsdistributions.background_rates[ifo+"_snr_chi"].array
 		snr = coincparamsdistributions.background_rates[ifo+"_snr_chi"].bins[0].centres()[1:-1]
