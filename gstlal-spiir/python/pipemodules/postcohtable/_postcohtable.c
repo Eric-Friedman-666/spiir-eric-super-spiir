@@ -50,7 +50,7 @@
 
 typedef struct {
     PyObject_HEAD
-    PostcohInspiralTable row;
+    PostcohInspiralTable postcohtable;
     COMPLEX8TimeSeries *snr;
     PyObject *end_time_sngl;
     PyObject *snglsnr;
@@ -73,69 +73,80 @@ typedef struct {
 static PyMemberDef members[] = {
     // Not dependent on the number of detectors
     { "end_time", T_INT,
-      offsetof(PostcohInspiralWrapper, row.end_time.gpsSeconds), 0,
+      offsetof(PostcohInspiralWrapper, postcohtable.end_time.gpsSeconds), 0,
       "end_time" },
     { "end_time_ns", T_INT,
-      offsetof(PostcohInspiralWrapper, row.end_time.gpsNanoSeconds), 0,
+      offsetof(PostcohInspiralWrapper, postcohtable.end_time.gpsNanoSeconds), 0,
       "end_time_ns" },
     { "is_background", T_INT,
-      offsetof(PostcohInspiralWrapper, row.is_background), 0, "is_background" },
-    { "livetime", T_INT, offsetof(PostcohInspiralWrapper, row.livetime), 0,
-      "livetime" },
-    { "tmplt_idx", T_INT, offsetof(PostcohInspiralWrapper, row.tmplt_idx), 0,
+      offsetof(PostcohInspiralWrapper, postcohtable.is_background), 0,
+      "is_background" },
+    { "livetime", T_INT,
+      offsetof(PostcohInspiralWrapper, postcohtable.livetime), 0, "livetime" },
+    { "tmplt_idx", T_INT,
+      offsetof(PostcohInspiralWrapper, postcohtable.tmplt_idx), 0,
       "tmplt_idx" },
-    { "bankid", T_INT, offsetof(PostcohInspiralWrapper, row.bankid), 0,
+    { "bankid", T_INT, offsetof(PostcohInspiralWrapper, postcohtable.bankid), 0,
       "bankid" },
-    { "pix_idx", T_INT, offsetof(PostcohInspiralWrapper, row.pix_idx), 0,
-      "pix_idx" },
-    { "cohsnr", T_FLOAT, offsetof(PostcohInspiralWrapper, row.cohsnr), 0,
-      "cohsnr" },
-    { "nullsnr", T_FLOAT, offsetof(PostcohInspiralWrapper, row.nullsnr), 0,
-      "nullsnr" },
-    { "cmbchisq", T_FLOAT, offsetof(PostcohInspiralWrapper, row.cmbchisq), 0,
-      "cmbchisq" },
+    { "pix_idx", T_INT, offsetof(PostcohInspiralWrapper, postcohtable.pix_idx),
+      0, "pix_idx" },
+    { "cohsnr", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.cohsnr),
+      0, "cohsnr" },
+    { "nullsnr", T_FLOAT,
+      offsetof(PostcohInspiralWrapper, postcohtable.nullsnr), 0, "nullsnr" },
+    { "cmbchisq", T_FLOAT,
+      offsetof(PostcohInspiralWrapper, postcohtable.cmbchisq), 0, "cmbchisq" },
     { "spearman_pval", T_FLOAT,
-      offsetof(PostcohInspiralWrapper, row.spearman_pval), 0, "spearman_pval" },
-    { "fap", T_FLOAT, offsetof(PostcohInspiralWrapper, row.fap), 0, "fap" },
-    { "far_2h", T_FLOAT, offsetof(PostcohInspiralWrapper, row.far_2h), 0,
-      "far_2h" },
-    { "far_1d", T_FLOAT, offsetof(PostcohInspiralWrapper, row.far_1d), 0,
-      "far_1d" },
-    { "far_1w", T_FLOAT, offsetof(PostcohInspiralWrapper, row.far_1w), 0,
-      "far_1w" },
-    { "far", T_FLOAT, offsetof(PostcohInspiralWrapper, row.far), 0, "far" },
-    { "rank", T_DOUBLE, offsetof(PostcohInspiralWrapper, row.rank), 0, "rank" },
+      offsetof(PostcohInspiralWrapper, postcohtable.spearman_pval), 0,
+      "spearman_pval" },
+    { "fap", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.fap), 0,
+      "fap" },
+    { "far_2h", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.far_2h),
+      0, "far_2h" },
+    { "far_1d", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.far_1d),
+      0, "far_1d" },
+    { "far_1w", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.far_1w),
+      0, "far_1w" },
+    { "far", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.far), 0,
+      "far" },
+    { "rank", T_DOUBLE, offsetof(PostcohInspiralWrapper, postcohtable.rank), 0,
+      "rank" },
     { "template_duration", T_DOUBLE,
-      offsetof(PostcohInspiralWrapper, row.template_duration), 0,
+      offsetof(PostcohInspiralWrapper, postcohtable.template_duration), 0,
       "template_duration" },
-    { "mass1", T_FLOAT, offsetof(PostcohInspiralWrapper, row.mass1), 0,
+    { "mass1", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.mass1), 0,
       "mass1" },
-    { "mass2", T_FLOAT, offsetof(PostcohInspiralWrapper, row.mass2), 0,
+    { "mass2", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.mass2), 0,
       "mass2" },
-    { "mchirp", T_FLOAT, offsetof(PostcohInspiralWrapper, row.mchirp), 0,
-      "mchirp" },
-    { "mtotal", T_FLOAT, offsetof(PostcohInspiralWrapper, row.mtotal), 0,
-      "mtotal" },
-    { "eta", T_FLOAT, offsetof(PostcohInspiralWrapper, row.eta), 0, "eta" },
-    { "spin1x", T_FLOAT, offsetof(PostcohInspiralWrapper, row.spin1x), 0,
-      "spin1x" },
-    { "spin1y", T_FLOAT, offsetof(PostcohInspiralWrapper, row.spin1y), 0,
-      "spin1y" },
-    { "spin1z", T_FLOAT, offsetof(PostcohInspiralWrapper, row.spin1z), 0,
-      "spin1z" },
-    { "spin2x", T_FLOAT, offsetof(PostcohInspiralWrapper, row.spin2x), 0,
-      "spin2x" },
-    { "spin2y", T_FLOAT, offsetof(PostcohInspiralWrapper, row.spin2y), 0,
-      "spin2y" },
-    { "spin2z", T_FLOAT, offsetof(PostcohInspiralWrapper, row.spin2z), 0,
-      "spin2z" },
-    { "ra", T_DOUBLE, offsetof(PostcohInspiralWrapper, row.ra), 0, "ra" },
-    { "dec", T_DOUBLE, offsetof(PostcohInspiralWrapper, row.dec), 0, "dec" },
-    { "f_final", T_FLOAT, offsetof(PostcohInspiralWrapper, row.f_final), 0,
-      "f_final" },
-    { "_process_id", T_LONG, offsetof(PostcohInspiralWrapper, row.process_id),
-      0, "process_id (long)" },
-    { "_event_id", T_LONG, offsetof(PostcohInspiralWrapper, row.event_id), 0,
+    { "mchirp", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.mchirp),
+      0, "mchirp" },
+    { "mtotal", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.mtotal),
+      0, "mtotal" },
+    { "eta", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.eta), 0,
+      "eta" },
+    { "spin1x", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.spin1x),
+      0, "spin1x" },
+    { "spin1y", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.spin1y),
+      0, "spin1y" },
+    { "spin1z", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.spin1z),
+      0, "spin1z" },
+    { "spin2x", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.spin2x),
+      0, "spin2x" },
+    { "spin2y", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.spin2y),
+      0, "spin2y" },
+    { "spin2z", T_FLOAT, offsetof(PostcohInspiralWrapper, postcohtable.spin2z),
+      0, "spin2z" },
+    { "ra", T_DOUBLE, offsetof(PostcohInspiralWrapper, postcohtable.ra), 0,
+      "ra" },
+    { "dec", T_DOUBLE, offsetof(PostcohInspiralWrapper, postcohtable.dec), 0,
+      "dec" },
+    { "f_final", T_FLOAT,
+      offsetof(PostcohInspiralWrapper, postcohtable.f_final), 0, "f_final" },
+    { "_process_id", T_LONG,
+      offsetof(PostcohInspiralWrapper, postcohtable.process_id), 0,
+      "process_id (long)" },
+    { "_event_id", T_LONG,
+      offsetof(PostcohInspiralWrapper, postcohtable.event_id), 0,
       "event_id (long)" },
 
     // Things that are done single detector are ndarrays
@@ -163,15 +174,15 @@ static PyMemberDef members[] = {
 
 typedef struct {
     size_t offset;
-    size_t max_length;
+    size_t capacity;
 } StringField;
 
 static PyObject *read_string_from_field(PyObject *obj, void *closure) {
     assert(obj);
-    const StringField string_field = *(StringField *)closure;
+    const StringField *string_field = (StringField *)closure;
 
-    char *field = (char *)((void *)obj + string_field.offset);
-    assert(strnlen(field, string_field.max_length) < string_field.max_length);
+    char *field = (char *)((void *)obj + string_field->offset);
+    assert(strnlen(field, string_field->capacity) < string_field->capacity);
 
     return PyString_FromString(field);
 }
@@ -180,18 +191,17 @@ static int
   write_string_to_field(PyObject *obj, PyObject *value, void *closure) {
     assert(obj);
     assert(value);
-    const StringField string_field = *(StringField *)closure;
-    char *value_as_string          = PyString_AsString(value);
+    const StringField *string_field = (StringField *)closure;
+    char *value_as_string           = PyString_AsString(value);
     if (PyErr_Occurred()) return -1;
-    if (strnlen(value_as_string, string_field.max_length)
-        >= string_field.max_length) {
+    if (strnlen(value_as_string, string_field->capacity)
+        >= string_field->capacity) {
         PyErr_Format(PyExc_ValueError, "string too long \'%s\'",
                      value_as_string);
         return -1;
     }
 
-    char *field = (char *)((void *)obj + string_field.offset);
-    assert(strnlen(field, string_field.max_length) < string_field.max_length);
+    char *field = (char *)((void *)obj + string_field->offset);
 
     strcpy(field, value_as_string);
     return 0;
@@ -237,11 +247,11 @@ static PyObject *get_snr_series(PyObject *obj, void *closure) {
     return NULL;
 }
 
-#define NUM_SINGLE_FIELDS     11
-#define NUM_FIELDS_PER_IFO    10
-#define MAX_FIELD_NAME_LENGTH 40
-#define NUM_FIELDS            NUM_SINGLE_FIELDS + NUM_FIELDS_PER_IFO *MAX_NIFO
-static struct PyGetSetDef getset[NUM_FIELDS + 1] = { { NULL } };
+#define NUM_SINGLE_GETSETS     11
+#define NUM_GETSETS_PER_IFO    10
+#define MAX_GETSET_NAME_LENGTH 40
+#define NUM_GETSETS            (NUM_SINGLE_GETSETS + NUM_GETSETS_PER_IFO * MAX_NIFO)
+static struct PyGetSetDef getset[NUM_GETSETS + 1] = { { NULL } };
 
 static PyObject *read_double_from_field(PyObject *obj, void *closure) {
     assert(obj);
@@ -305,21 +315,21 @@ static int write_int_to_field(PyObject *obj, PyObject *value, void *closure) {
 }
 
 static void declare_getset(char *name, void *closure, getter get, setter set) {
-    static char field_names[NUM_FIELDS][MAX_FIELD_NAME_LENGTH] = { 0 };
-    static int field_idx                                       = 0;
-    assert(strlen(name) > 0 && strlen(name) < MAX_FIELD_NAME_LENGTH);
+    static char getset_names[NUM_GETSETS][MAX_GETSET_NAME_LENGTH] = { 0 };
+    static int getset_idx                                        = 0;
+    assert(strlen(name) > 0 && strlen(name) < MAX_GETSET_NAME_LENGTH);
 
-    strcpy(field_names[field_idx], name);
-    getset[field_idx] = (PyGetSetDef) { field_names[field_idx], get, set,
-                                        field_names[field_idx], closure };
+    strcpy(getset_names[getset_idx], name);
+    getset[getset_idx] = (PyGetSetDef) { getset_names[getset_idx], get, set,
+                                        getset_names[getset_idx], closure };
 
-    field_idx++;
+    getset_idx++;
 }
 
-static void declare_getset_ifo_getset(
+static void declare_ifo_getset(
   char *base_name, void *closure, getter get, setter set, int ifo_id) {
     assert(strlen(base_name) + 1 + strlen(IFOMap[ifo_id])
-           < MAX_FIELD_NAME_LENGTH);
+           < MAX_GETSET_NAME_LENGTH);
     char *name = malloc(strlen(base_name) + 1 + strlen(IFOMap[ifo_id]));
 
     strcpy(name, base_name);
@@ -330,9 +340,9 @@ static void declare_getset_ifo_getset(
     free(name);
 }
 
-#define NUM_STRING_FIELDS 3
+#define NUM_STRING_GETSETS 3
 static StringField *get_static_string_closure(StringField closure) {
-    static StringField attr_string_closures[NUM_STRING_FIELDS];
+    static StringField attr_string_closures[NUM_STRING_GETSETS];
     static int closure_idx = 0;
 
     attr_string_closures[closure_idx] = closure;
@@ -340,18 +350,18 @@ static StringField *get_static_string_closure(StringField closure) {
 }
 
 static size_t *get_static_offset_closure(size_t offset) {
-    static size_t attr_offsets[NUM_FIELDS_PER_IFO * MAX_NIFO];
+    static size_t attr_offsets[NUM_GETSETS_PER_IFO * MAX_NIFO];
     static int closure_idx = 0;
 
     attr_offsets[closure_idx] = offset;
     return &attr_offsets[closure_idx++];
 }
 
-#define NUM_NAME_FIELDS 8
+#define NUM_NAME_GETSETS 8
 static char *get_static_name_closure(char *name) {
-    static char attr_name_closures[NUM_NAME_FIELDS][MAX_FIELD_NAME_LENGTH];
+    static char attr_name_closures[NUM_NAME_GETSETS][MAX_GETSET_NAME_LENGTH];
     static int closure_idx = 0;
-    assert(strlen(name) < MAX_FIELD_NAME_LENGTH);
+    assert(strlen(name) < MAX_GETSET_NAME_LENGTH);
 
     strcpy(attr_name_closures[closure_idx], name);
 
@@ -361,18 +371,19 @@ static char *get_static_name_closure(char *name) {
 static void prepare_getset() {
     StringField string_closure = { 0, 0 };
 
-    string_closure = (StringField) { offsetof(PostcohInspiralWrapper, row.ifos),
-                                     MAX_ALLIFO_LEN };
+    string_closure =
+      (StringField) { offsetof(PostcohInspiralWrapper, postcohtable.ifos),
+                      MAX_ALLIFO_LEN };
     declare_getset("ifos", get_static_string_closure(string_closure),
                    read_string_from_field, write_string_to_field);
-    string_closure =
-      (StringField) { offsetof(PostcohInspiralWrapper, row.pivotal_ifo),
-                      MAX_ALLIFO_LEN };
+    string_closure = (StringField) { offsetof(PostcohInspiralWrapper,
+                                              postcohtable.pivotal_ifo),
+                                     MAX_ALLIFO_LEN };
     declare_getset("pivotal_ifo", get_static_string_closure(string_closure),
                    read_string_from_field, write_string_to_field);
-    string_closure =
-      (StringField) { offsetof(PostcohInspiralWrapper, row.skymap_fname),
-                      MAX_ALLIFO_LEN };
+    string_closure = (StringField) { offsetof(PostcohInspiralWrapper,
+                                              postcohtable.skymap_fname),
+                                     MAX_ALLIFO_LEN };
     declare_getset("skymap_fname", get_static_string_closure(string_closure),
                    read_string_from_field, write_string_to_field);
 
@@ -398,68 +409,68 @@ static void prepare_getset() {
                    get_snr_series, NULL);
 
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        declare_getset_ifo_getset("chisq",
-                                  get_static_offset_closure(offsetof(
-                                    PostcohInspiralWrapper, row.chisq[ifo_id])),
-                                  read_float_from_field, write_float_to_field,
-                                  ifo_id);
+        declare_ifo_getset(
+          "chisq",
+          get_static_offset_closure(
+            offsetof(PostcohInspiralWrapper, postcohtable.chisq[ifo_id])),
+          read_float_from_field, write_float_to_field, ifo_id);
 
-        declare_getset_ifo_getset(
+        declare_ifo_getset(
           "snglsnr",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.snglsnr[ifo_id])),
+            offsetof(PostcohInspiralWrapper, postcohtable.snglsnr[ifo_id])),
           read_float_from_field, write_float_to_field, ifo_id);
 
-        declare_getset_ifo_getset(
+        declare_ifo_getset(
           "coaphase",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.coaphase[ifo_id])),
+            offsetof(PostcohInspiralWrapper, postcohtable.coaphase[ifo_id])),
           read_float_from_field, write_float_to_field, ifo_id);
 
-        declare_getset_ifo_getset(
+        declare_ifo_getset(
           "far_sngl",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.far_sngl[ifo_id])),
+            offsetof(PostcohInspiralWrapper, postcohtable.far_sngl[ifo_id])),
           read_float_from_field, write_float_to_field, ifo_id);
 
-        declare_getset_ifo_getset(
+        declare_ifo_getset(
           "far_1d_sngl",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.far_1d_sngl[ifo_id])),
+            offsetof(PostcohInspiralWrapper, postcohtable.far_1d_sngl[ifo_id])),
           read_float_from_field, write_float_to_field, ifo_id);
 
-        declare_getset_ifo_getset(
+        declare_ifo_getset(
           "far_1w_sngl",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.far_1w_sngl[ifo_id])),
+            offsetof(PostcohInspiralWrapper, postcohtable.far_1w_sngl[ifo_id])),
           read_float_from_field, write_float_to_field, ifo_id);
 
-        declare_getset_ifo_getset(
+        declare_ifo_getset(
           "far_2h_sngl",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.far_2h_sngl[ifo_id])),
+            offsetof(PostcohInspiralWrapper, postcohtable.far_2h_sngl[ifo_id])),
           read_float_from_field, write_float_to_field, ifo_id);
 
-        declare_getset_ifo_getset("deff",
-                                  get_static_offset_closure(offsetof(
-                                    PostcohInspiralWrapper, row.deff[ifo_id])),
-                                  read_double_from_field, write_double_to_field,
-                                  ifo_id);
-
-        declare_getset_ifo_getset(
-          "end_time_sngl",
+        declare_ifo_getset(
+          "deff",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id])),
+            offsetof(PostcohInspiralWrapper, postcohtable.deff[ifo_id])),
+          read_double_from_field, write_double_to_field, ifo_id);
+
+        declare_ifo_getset(
+          "end_time_sngl",
+          get_static_offset_closure(offsetof(
+            PostcohInspiralWrapper, postcohtable.end_time_sngl[ifo_id])),
           read_int_from_field, write_int_to_field, ifo_id);
 
-        declare_getset_ifo_getset(
+        declare_ifo_getset(
           "end_time_ns_sngl",
           get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, row.end_time_sngl[ifo_id])
+            offsetof(PostcohInspiralWrapper, postcohtable.end_time_sngl[ifo_id])
             + offsetof(LIGOTimeGPS, gpsNanoSeconds)),
           read_int_from_field, write_int_to_field, ifo_id);
     }
-    getset[NUM_FIELDS] = (PyGetSetDef) { NULL };
+    getset[NUM_GETSETS] = (PyGetSetDef) { NULL };
 }
 
 // static Py_ssize_t getreadbuffer(PyObject *self, Py_ssize_t segment, void
@@ -469,15 +480,15 @@ static void prepare_getset() {
 //		PyErr_SetString(PyExc_SystemError, "bad segment");
 //		return -1;
 //	}
-//	*ptrptr = &((PostcohInspiralWrapper*)self)->row;
-//	return sizeof(((PostcohInspiralWrapper*)self)->row);
+//	*ptrptr = &((PostcohInspiralWrapper*)self)->postcohtable;
+//	return sizeof(((PostcohInspiralWrapper*)self)->postcohtable);
 //}
 //
 //
 // static Py_ssize_t getsegcount(PyObject *self, Py_ssize_t *lenp)
 //{
 //	if(lenp)
-//		*lenp = sizeof(((PostcohInspiralWrapper*)self)->row);
+//		*lenp = sizeof(((PostcohInspiralWrapper*)self)->postcohtable);
 //	return 1;
 //}
 //
@@ -500,9 +511,9 @@ static PyObject *__new__(PyTypeObject *type, PyObject *args, PyObject *kwds) {
 
     if (!instance) return NULL;
 
-    /* link the event_id pointer in the row table structure
+    /* link the event_id pointer in the postcohtable table structure
      * to the event_id structure */
-    // new->row->event_id = new->event_id_i;
+    // new->postcohtable->event_id = new->event_id_i;
 
     // new->process_id_i = 0;
     // new->event_id_i = 0;
@@ -542,19 +553,20 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
     if (!result) return NULL;
 
     while (data < end) {
-        PyObject *py_trigger =
-          PyType_GenericNew((PyTypeObject *)cls, NULL, NULL);
-        if (!py_trigger) {
+        PostcohInspiralWrapper *wrapped_postcohtable =
+          (PostcohInspiralWrapper *)PyType_GenericNew((PyTypeObject *)cls, NULL,
+                                                      NULL);
+        if (!wrapped_postcohtable) {
             Py_DECREF(result);
             return NULL;
         }
-        /* memcpy postcoh row */
-        const PostcohInspiralTable *postcohtable_trigger =
+        /* memcpy postcoh postcohtable */
+        const PostcohInspiralTable *buffer_postcohtable =
           (const PostcohInspiralTable *)data;
         data += sizeof(PostcohInspiralTable);
         /* if the data read in is less then expected amount */
         if (data > end) {
-            Py_DECREF(py_trigger);
+            Py_DECREF((PyObject *)wrapped_postcohtable);
             Py_DECREF(result);
             PyErr_SetString(PyExc_ValueError,
                             "overran end of buffer while deserializing a "
@@ -562,59 +574,60 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        PostcohInspiralWrapper *py_trigger_typed =
-          (PostcohInspiralWrapper *)py_trigger;
+        wrapped_postcohtable->postcohtable = *buffer_postcohtable;
 
-        py_trigger_typed->row = *postcohtable_trigger;
-
-        py_trigger_typed->end_time_sngl = PyArray_SimpleNewFromData(
-          2, end_time_dims, NPY_INT, py_trigger_typed->row.end_time_sngl);
-        py_trigger_typed->snglsnr = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, py_trigger_typed->row.snglsnr);
-        py_trigger_typed->coaphase = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, py_trigger_typed->row.coaphase);
-        py_trigger_typed->chisq = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, py_trigger_typed->row.chisq);
-        py_trigger_typed->far_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, py_trigger_typed->row.far_sngl);
-        py_trigger_typed->far_1w_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, py_trigger_typed->row.far_1w_sngl);
-        py_trigger_typed->far_1d_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, py_trigger_typed->row.far_1d_sngl);
-        py_trigger_typed->far_2h_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, py_trigger_typed->row.far_2h_sngl);
-        py_trigger_typed->deff = PyArray_SimpleNewFromData(
-          1, dims, NPY_DOUBLE, py_trigger_typed->row.deff);
+        wrapped_postcohtable->end_time_sngl = PyArray_SimpleNewFromData(
+          2, end_time_dims, NPY_INT,
+          wrapped_postcohtable->postcohtable.end_time_sngl);
+        wrapped_postcohtable->snglsnr = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.snglsnr);
+        wrapped_postcohtable->coaphase = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.coaphase);
+        wrapped_postcohtable->chisq = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.chisq);
+        wrapped_postcohtable->far_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_sngl);
+        wrapped_postcohtable->far_1w_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_1w_sngl);
+        wrapped_postcohtable->far_1d_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_1d_sngl);
+        wrapped_postcohtable->far_2h_sngl = PyArray_SimpleNewFromData(
+          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_2h_sngl);
+        wrapped_postcohtable->deff = PyArray_SimpleNewFromData(
+          1, dims, NPY_DOUBLE, wrapped_postcohtable->postcohtable.deff);
 
         /* duplicate the SNR time series if we have length? */
-        if (py_trigger_typed->row.snr_length) {
-            const size_t nbytes = sizeof(py_trigger_typed->row.snr[0])
-                                  * py_trigger_typed->row.snr_length;
+        if (wrapped_postcohtable->postcohtable.snr_length) {
+            const size_t nbytes =
+              sizeof(wrapped_postcohtable->postcohtable.snr[0])
+              * wrapped_postcohtable->postcohtable.snr_length;
             if (data + nbytes > end) {
-                Py_DECREF(py_trigger);
+                Py_DECREF((PyObject *)wrapped_postcohtable);
                 Py_DECREF(result);
                 PyErr_SetString(PyExc_ValueError,
                                 "buffer overrun while copying SNR time series");
                 return NULL;
             }
             COMPLEX8TimeSeries *series = XLALCreateCOMPLEX8TimeSeries(
-              "snr", &py_trigger_typed->row.epoch, 0.,
-              py_trigger_typed->row.deltaT, &lalDimensionlessUnit,
-              py_trigger_typed->row.snr_length);
+              "snr", &wrapped_postcohtable->postcohtable.epoch, 0.,
+              wrapped_postcohtable->postcohtable.deltaT, &lalDimensionlessUnit,
+              wrapped_postcohtable->postcohtable.snr_length);
             if (!series) {
-                Py_DECREF(py_trigger);
+                Py_DECREF((PyObject *)wrapped_postcohtable);
                 Py_DECREF(result);
                 PyErr_SetString(PyExc_MemoryError, "out of memory");
                 return NULL;
             }
-            memcpy(series->data->data, py_trigger_typed->row.snr, nbytes);
+            memcpy(series->data->data, wrapped_postcohtable->postcohtable.snr,
+                   nbytes);
             data += nbytes;
-            py_trigger_typed->snr = series;
+            wrapped_postcohtable->snr = series;
         } else
-            py_trigger_typed->snr = NULL;
+            wrapped_postcohtable->snr = NULL;
 
-        if (PyList_Append(result, py_trigger)) printf("append failure");
-        Py_DECREF(py_trigger);
+        if (PyList_Append(result, (PyObject *)wrapped_postcohtable))
+            printf("append failure");
+        Py_DECREF((PyObject *)wrapped_postcohtable);
     }
 
     if (data != end) {
