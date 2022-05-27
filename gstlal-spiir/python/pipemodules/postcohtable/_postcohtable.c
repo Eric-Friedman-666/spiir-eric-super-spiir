@@ -247,12 +247,6 @@ static PyObject *get_snr_series(PyObject *obj, void *closure) {
     return NULL;
 }
 
-#define NUM_SINGLE_GETSETS     11
-#define NUM_GETSETS_PER_IFO    10
-#define MAX_GETSET_NAME_LENGTH 40
-#define NUM_GETSETS            (NUM_SINGLE_GETSETS + NUM_GETSETS_PER_IFO * MAX_NIFO)
-static struct PyGetSetDef getset[NUM_GETSETS + 1] = { { NULL } };
-
 static PyObject *read_double_from_field(PyObject *obj, void *closure) {
     assert(obj);
     const size_t offset = *(size_t *)closure;
@@ -314,163 +308,192 @@ static int write_int_to_field(PyObject *obj, PyObject *value, void *closure) {
     return 0;
 }
 
-static void declare_getset(char *name, void *closure, getter get, setter set) {
-    static char getset_names[NUM_GETSETS][MAX_GETSET_NAME_LENGTH] = { 0 };
-    static int getset_idx                                        = 0;
-    assert(strlen(name) > 0 && strlen(name) < MAX_GETSET_NAME_LENGTH);
+#define NUM_STRING_GETSETS  3
+#define NUM_KEY_GETSETS     8
+#define NUM_GETSETS_PER_IFO 10
+#define NUM_GETSETS                                                            \
+    (NUM_STRING_GETSETS + NUM_KEY_GETSETS + NUM_GETSETS_PER_IFO * MAX_NIFO)
+#define MAX_GETSET_NAME_LENGTH 40
 
-    strcpy(getset_names[getset_idx], name);
-    getset[getset_idx] = (PyGetSetDef) { getset_names[getset_idx], get, set,
-                                        getset_names[getset_idx], closure };
+typedef struct {
+    char names[NUM_GETSETS][MAX_GETSET_NAME_LENGTH];
+    StringField string_fields[NUM_STRING_GETSETS];
+    size_t offsets[NUM_GETSETS_PER_IFO * MAX_NIFO];
+    char keys[NUM_KEY_GETSETS][MAX_GETSET_NAME_LENGTH];
+    struct PyGetSetDef getsets[NUM_GETSETS + 1];
+} PostcohtableGetSet;
 
-    getset_idx++;
+typedef struct {
+    int getset_idx;
+    int string_field_idx;
+    int offset_idx;
+    int key_idx;
+    PostcohtableGetSet *postcohtable_getset;
+} GetSetBuilder;
+
+static GetSetBuilder *
+  construct_getset_builder(PostcohtableGetSet *postcohtable_getset) {
+    static GetSetBuilder builder = { 0 };
+    builder.getset_idx           = 0;
+    builder.string_field_idx     = 0;
+    builder.offset_idx           = 0;
+    builder.key_idx              = 0;
+    builder.postcohtable_getset  = postcohtable_getset;
+    return &builder;
 }
 
-static void declare_ifo_getset(
-  char *base_name, void *closure, getter get, setter set, int ifo_id) {
+static void build_getset(GetSetBuilder *builder) {
+    builder->postcohtable_getset->getsets[builder->getset_idx] =
+      (PyGetSetDef) { NULL };
+}
+
+static void _declare_getset(
+  GetSetBuilder *builder, char *name, void *closure, getter get, setter set) {
+    assert(strlen(name) > 0 && strlen(name) < MAX_GETSET_NAME_LENGTH);
+    char *getset_name =
+      builder->postcohtable_getset->names[builder->getset_idx];
+
+    strcpy(getset_name, name);
+    builder->postcohtable_getset->getsets[builder->getset_idx++] =
+      (PyGetSetDef) { getset_name, get, set, getset_name, closure };
+}
+
+static void declare_string_getset(GetSetBuilder *builder,
+                                  char *name,
+                                  StringField string_field,
+                                  getter get,
+                                  setter set) {
+    StringField *getset_string_field =
+      &builder->postcohtable_getset->string_fields[builder->string_field_idx++];
+
+    *getset_string_field = string_field;
+    _declare_getset(builder, name, getset_string_field, get, set);
+}
+
+static void declare_offset_getset(
+  GetSetBuilder *builder, char *name, size_t offset, getter get, setter set) {
+    size_t *getset_offset =
+      &builder->postcohtable_getset->offsets[builder->offset_idx++];
+
+    *getset_offset = offset;
+    _declare_getset(builder, name, getset_offset, get, set);
+}
+
+static void declare_key_getset(
+  GetSetBuilder *builder, char *name, char *key, getter get, setter set) {
+    assert(strlen(key) < MAX_GETSET_NAME_LENGTH);
+    char *getset_key = builder->postcohtable_getset->keys[builder->key_idx++];
+
+    strcpy(getset_key, key);
+    _declare_getset(builder, name, getset_key, get, set);
+}
+
+static void format_name(char *output_name, char *base_name, int ifo_id) {
     assert(strlen(base_name) + 1 + strlen(IFOMap[ifo_id])
            < MAX_GETSET_NAME_LENGTH);
-    char *name = malloc(strlen(base_name) + 1 + strlen(IFOMap[ifo_id]));
-
-    strcpy(name, base_name);
-    strcat(name, "_");
-    strcat(name, IFOMap[ifo_id]);
-
-    declare_getset(name, closure, get, set);
-    free(name);
+    sprintf(output_name, "%s_%s", base_name, IFOMap[ifo_id]);
 }
 
-#define NUM_STRING_GETSETS 3
-static StringField *get_static_string_closure(StringField closure) {
-    static StringField attr_string_closures[NUM_STRING_GETSETS];
-    static int closure_idx = 0;
+static void prepare_getset(PostcohtableGetSet *postcohtable_getset) {
+    GetSetBuilder *builder   = construct_getset_builder(postcohtable_getset);
+    StringField string_field = { 0 };
 
-    attr_string_closures[closure_idx] = closure;
-    return &attr_string_closures[closure_idx++];
-}
-
-static size_t *get_static_offset_closure(size_t offset) {
-    static size_t attr_offsets[NUM_GETSETS_PER_IFO * MAX_NIFO];
-    static int closure_idx = 0;
-
-    attr_offsets[closure_idx] = offset;
-    return &attr_offsets[closure_idx++];
-}
-
-#define NUM_NAME_GETSETS 8
-static char *get_static_name_closure(char *name) {
-    static char attr_name_closures[NUM_NAME_GETSETS][MAX_GETSET_NAME_LENGTH];
-    static int closure_idx = 0;
-    assert(strlen(name) < MAX_GETSET_NAME_LENGTH);
-
-    strcpy(attr_name_closures[closure_idx], name);
-
-    return attr_name_closures[closure_idx++];
-}
-
-static void prepare_getset() {
-    StringField string_closure = { 0, 0 };
-
-    string_closure =
+    string_field =
       (StringField) { offsetof(PostcohInspiralWrapper, postcohtable.ifos),
                       MAX_ALLIFO_LEN };
-    declare_getset("ifos", get_static_string_closure(string_closure),
-                   read_string_from_field, write_string_to_field);
-    string_closure = (StringField) { offsetof(PostcohInspiralWrapper,
-                                              postcohtable.pivotal_ifo),
-                                     MAX_ALLIFO_LEN };
-    declare_getset("pivotal_ifo", get_static_string_closure(string_closure),
-                   read_string_from_field, write_string_to_field);
-    string_closure = (StringField) { offsetof(PostcohInspiralWrapper,
-                                              postcohtable.skymap_fname),
-                                     MAX_ALLIFO_LEN };
-    declare_getset("skymap_fname", get_static_string_closure(string_closure),
-                   read_string_from_field, write_string_to_field);
+    declare_string_getset(builder, "ifos", string_field, read_string_from_field,
+                          write_string_to_field);
+    string_field = (StringField) {
+        offsetof(PostcohInspiralWrapper, postcohtable.pivotal_ifo), MAX_IFO_LEN
+    };
+    declare_string_getset(builder, "pivotal_ifo", string_field,
+                          read_string_from_field, write_string_to_field);
+    string_field = (StringField) { offsetof(PostcohInspiralWrapper,
+                                            postcohtable.skymap_fname),
+                                   MAX_SKYMAP_FNAME_LEN };
+    declare_string_getset(builder, "skymap_fname", string_field,
+                          read_string_from_field, write_string_to_field);
 
-    declare_getset("_snr_name", get_static_name_closure("_snr_name"),
-                   get_snr_series, NULL);
-    declare_getset("_snr_epoch_gpsSeconds",
-                   get_static_name_closure("_snr_epoch_gpsSeconds"),
-                   get_snr_series, NULL);
-    declare_getset("_snr_epoch_gpsNanoSeconds",
-                   get_static_name_closure("_snr_epoch_gpsNanoSeconds"),
-                   get_snr_series, NULL);
-    declare_getset("_snr_f0", get_static_name_closure("_snr_f0"),
-                   get_snr_series, NULL);
-    declare_getset("_snr_deltaT", get_static_name_closure("_snr_deltaT"),
-                   get_snr_series, NULL);
-    declare_getset("_snr_sampleUnits",
-                   get_static_name_closure("_snr_sampleUnits"), get_snr_series,
-                   NULL);
-    declare_getset("_snr_data_length",
-                   get_static_name_closure("_snr_data_length"), get_snr_series,
-                   NULL);
-    declare_getset("_snr_data", get_static_name_closure("_snr_data"),
-                   get_snr_series, NULL);
+    declare_key_getset(builder, "_snr_name", "_snr_name", get_snr_series, NULL);
+    declare_key_getset(builder, "_snr_epoch_gpsSeconds",
+                       "_snr_epoch_gpsSeconds", get_snr_series, NULL);
+    declare_key_getset(builder, "_snr_epoch_gpsNanoSeconds",
+                       "_snr_epoch_gpsNanoSeconds", get_snr_series, NULL);
+    declare_key_getset(builder, "_snr_f0", "_snr_f0", get_snr_series, NULL);
+    declare_key_getset(builder, "_snr_deltaT", "_snr_deltaT", get_snr_series,
+                       NULL);
+    declare_key_getset(builder, "_snr_sampleUnits", "_snr_sampleUnits",
+                       get_snr_series, NULL);
+    declare_key_getset(builder, "_snr_data_length", "_snr_data_length",
+                       get_snr_series, NULL);
+    declare_key_getset(builder, "_snr_data", "_snr_data", get_snr_series, NULL);
 
+    char *name = malloc(MAX_GETSET_NAME_LENGTH);
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        declare_ifo_getset(
-          "chisq",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.chisq[ifo_id])),
-          read_float_from_field, write_float_to_field, ifo_id);
+        format_name(name, "chisq", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.chisq[ifo_id]),
+          read_float_from_field, write_float_to_field);
 
-        declare_ifo_getset(
-          "snglsnr",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.snglsnr[ifo_id])),
-          read_float_from_field, write_float_to_field, ifo_id);
+        format_name(name, "snglsnr", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.snglsnr[ifo_id]),
+          read_float_from_field, write_float_to_field);
 
-        declare_ifo_getset(
-          "coaphase",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.coaphase[ifo_id])),
-          read_float_from_field, write_float_to_field, ifo_id);
+        format_name(name, "coaphase", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.coaphase[ifo_id]),
+          read_float_from_field, write_float_to_field);
 
-        declare_ifo_getset(
-          "far_sngl",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.far_sngl[ifo_id])),
-          read_float_from_field, write_float_to_field, ifo_id);
+        format_name(name, "far_sngl", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.far_sngl[ifo_id]),
+          read_float_from_field, write_float_to_field);
 
-        declare_ifo_getset(
-          "far_1d_sngl",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.far_1d_sngl[ifo_id])),
-          read_float_from_field, write_float_to_field, ifo_id);
+        format_name(name, "far_1d_sngl", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.far_1d_sngl[ifo_id]),
+          read_float_from_field, write_float_to_field);
 
-        declare_ifo_getset(
-          "far_1w_sngl",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.far_1w_sngl[ifo_id])),
-          read_float_from_field, write_float_to_field, ifo_id);
+        format_name(name, "far_1w_sngl", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.far_1w_sngl[ifo_id]),
+          read_float_from_field, write_float_to_field);
 
-        declare_ifo_getset(
-          "far_2h_sngl",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.far_2h_sngl[ifo_id])),
-          read_float_from_field, write_float_to_field, ifo_id);
+        format_name(name, "far_2h_sngl", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.far_2h_sngl[ifo_id]),
+          read_float_from_field, write_float_to_field);
 
-        declare_ifo_getset(
-          "deff",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.deff[ifo_id])),
-          read_double_from_field, write_double_to_field, ifo_id);
+        format_name(name, "deff", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.deff[ifo_id]),
+          read_double_from_field, write_double_to_field);
 
-        declare_ifo_getset(
-          "end_time_sngl",
-          get_static_offset_closure(offsetof(
-            PostcohInspiralWrapper, postcohtable.end_time_sngl[ifo_id])),
-          read_int_from_field, write_int_to_field, ifo_id);
+        format_name(name, "end_time_sngl", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.end_time_sngl[ifo_id]),
+          read_int_from_field, write_int_to_field);
 
-        declare_ifo_getset(
-          "end_time_ns_sngl",
-          get_static_offset_closure(
-            offsetof(PostcohInspiralWrapper, postcohtable.end_time_sngl[ifo_id])
-            + offsetof(LIGOTimeGPS, gpsNanoSeconds)),
-          read_int_from_field, write_int_to_field, ifo_id);
+        format_name(name, "end_time_ns_sngl", ifo_id);
+        declare_offset_getset(
+          builder, name,
+          offsetof(PostcohInspiralWrapper, postcohtable.end_time_sngl[ifo_id])
+            + offsetof(LIGOTimeGPS, gpsNanoSeconds),
+          read_int_from_field, write_int_to_field);
     }
-    getset[NUM_GETSETS] = (PyGetSetDef) { NULL };
+
+    free(name);
+    build_getset(builder);
 }
 
 // static Py_ssize_t getreadbuffer(PyObject *self, Py_ssize_t segment, void
@@ -651,24 +674,6 @@ static struct PyMethodDef methods[] = {
     }
 };
 
-/*
- * Type
- */
-
-static PyTypeObject PostcohInspiralWrapper_Type = {
-    // clang-format off
-    PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
-    .tp_basicsize = sizeof(PostcohInspiralWrapper), // clang-format on
-    .tp_doc = "LAL's PostcohInspiral structure",
-    .tp_flags =
-      Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
-    .tp_members = members,
-    .tp_methods = methods,
-    .tp_getset  = getset,
-    .tp_name    = MODULE_NAME ".GSTLALPostcohInspiral",
-    .tp_new     = __new__,
-    .tp_dealloc = __del__,
-};
 
 /*
  * ============================================================================
@@ -679,10 +684,27 @@ static PyTypeObject PostcohInspiralWrapper_Type = {
  */
 
 PyMODINIT_FUNC init_postcohtable(void) {
+    static PyTypeObject postcoh_inspiral_wrapper_type = {
+        // clang-format off
+        PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
+        .tp_basicsize = sizeof(PostcohInspiralWrapper), // clang-format on
+        .tp_doc = "LAL's PostcohInspiral structure",
+        .tp_flags =
+          Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
+        .tp_members = members,
+        .tp_methods = methods,
+        .tp_getset  = NULL,
+        .tp_name    = MODULE_NAME ".GSTLALPostcohInspiral",
+        .tp_new     = __new__,
+        .tp_dealloc = __del__,
+    };
+    static PostcohtableGetSet postcohtable_getset = { 0 };
+
     PyObject *module = Py_InitModule3(
       MODULE_NAME, NULL, "Wrapper for LAL's PostcohInspiralTable type.");
 
-    prepare_getset();
+    prepare_getset(&postcohtable_getset);
+    postcoh_inspiral_wrapper_type.tp_getset = postcohtable_getset.getsets;
     import_array();
 
     PyObject *ifo_map = PyList_New(MAX_NIFO);
@@ -704,8 +726,8 @@ PyMODINIT_FUNC init_postcohtable(void) {
     /* PostcohInspiralTable */
     //_PostcohInspiralWrapper_Type =
     //&postcohtable_py__postcohinspiraltable_type;
-    if (PyType_Ready(&PostcohInspiralWrapper_Type) < 0) return;
-    Py_INCREF(&PostcohInspiralWrapper_Type);
+    if (PyType_Ready(&postcoh_inspiral_wrapper_type) < 0) return;
+    Py_INCREF(&postcoh_inspiral_wrapper_type);
     PyModule_AddObject(module, "GSTLALPostcohInspiral",
-                       (PyObject *)&PostcohInspiralWrapper_Type);
+                       (PyObject *)&postcoh_inspiral_wrapper_type);
 }
