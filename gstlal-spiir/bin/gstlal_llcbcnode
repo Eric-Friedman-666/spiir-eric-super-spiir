@@ -239,7 +239,7 @@ def livetime_plot(disconturl, livetimeurl, xlabel="", ylabel="", title=""):
     lt = livetimedata[1]
     discont = discontdata[1]
     # FIXME Hack to adjust for high sample rate L1 and H1 state vector
-    if "V1" not in title: # NOTE: Investigate sample rate of KAGRA state vector
+    if "V1" not in title: # TODO: Once KAGRA's sample rate is known, it may require special handling here
         dt /= 16
         lt /= 16
         discont /= 16

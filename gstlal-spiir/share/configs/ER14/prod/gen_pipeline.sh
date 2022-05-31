@@ -197,5 +197,3 @@ notification = never
 queue 1
 " >>gstlal_inspiral_postcohspiir_${user}.sub
 
-
-# TODO: Investigate KAGRA implementation, see !36

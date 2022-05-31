@@ -423,5 +423,3 @@ JOB lvalert_listen_0001 lvalert_listen_${user}.sub
 RETRY lvalert_listen_0001 1
 
 EOF
-
-# TODO: Investigate KAGRA implementation, see !36

@@ -1226,7 +1226,6 @@ class CoincsDocFromPostcoh(object):
                 "mchirp", "mtotal", "eta", "kappa", "chi", "tau0", "tau2",
                 "tau3", "tau4", "tau5", "ttotal", "psi0", "psi3", "alpha",
                 "alpha1", "alpha2", "alpha3", "alpha4", "alpha5", "alpha6",
-                # TODO: Investigate KAGRA use with a possible alpha7 column, see !36
                 "beta", "f_final", "snr", "chisq", "chisq_dof", "bank_chisq",
                 "bank_chisq_dof", "cont_chisq", "cont_chisq_dof", "sigmasq",
                 "rsqveto_duration", "Gamma0", "Gamma1", "Gamma2", "Gamma3",
@@ -1279,7 +1278,6 @@ class CoincsDocFromPostcoh(object):
             row.alpha4 = 0
             row.alpha5 = 0
             row.alpha6 = 0
-            # TODO: Investigate KAGRA use with a possible alpha7 column, see !36
             row.beta = 0
             row.f_final = trigger.f_final
             row.snr = getattr(trigger, "snglsnr_%s" % ifo)

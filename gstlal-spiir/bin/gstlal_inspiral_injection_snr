@@ -242,11 +242,10 @@ pool.close()
 pool.join()
 
 # FIXME:  get proper columns
-# FIXME:  broken for KAGRA
 for idx, inj in enumerate(sim_inspiral_table):
     inj.alpha4 = snr[idx]["H1"]
     inj.alpha5 = snr[idx]["L1"]
     inj.alpha6 = snr[idx]["V1"]
-    # TODO: Investigate KAGRA use with a possible alpha7 column, see !36
+    inj.alpha1 = snr[idx]["K1"]
 
 ligolw_utils.write_filename(new_xmldoc, options.output, verbose=True)
