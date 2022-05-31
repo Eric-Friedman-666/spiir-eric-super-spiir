@@ -178,7 +178,7 @@ def plot_livetime(found, missed, ids, registry, ifo):
     off_y = numpy.log10(numpy.array([max(found[k][0][2], 1) for k in found_x]))
     gap_y = numpy.log10(numpy.array([max(found[k][0][3], 1) for k in found_x]))
     # FIXME Hack to adjust for high sample rate L1 and V1 state vector
-    if ifo != "V1": # NOTE: Investigate sample rate of KAGRA state vector
+    if ifo != "V1": # TODO: Once KAGRA's sample rate is known, it may require special handling here
         on_y -= numpy.log10(16)
         off_y -= numpy.log10(16)
         gap_y -= numpy.log10(16)

@@ -23,7 +23,7 @@ do
 
    echo  " (HLV)         time  on  off gap "
 
-   for sfile in `ls ${dirf}/000/*[HLVK]1/state*`
+   for sfile in `ls ${dirf}/000/*[HLV]1/state*`
    do 
 
        more   ${sfile}
