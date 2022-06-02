@@ -308,6 +308,7 @@ static int write_int_to_field(PyObject *obj, PyObject *value, void *closure) {
     return 0;
 }
 
+// These are upper bounds for memory storage and do not need to be exact.
 #define NUM_STRING_GETSETS  3
 #define NUM_KEY_GETSETS     8
 #define NUM_GETSETS_PER_IFO 10
@@ -315,47 +316,46 @@ static int write_int_to_field(PyObject *obj, PyObject *value, void *closure) {
     (NUM_STRING_GETSETS + NUM_KEY_GETSETS + NUM_GETSETS_PER_IFO * MAX_NIFO)
 #define MAX_GETSET_NAME_LENGTH 40
 
+// NOTE: This structure includes pointers to its own fields, so it requires a
+// deep copy to duplicate. See !35
 typedef struct {
     char names[NUM_GETSETS][MAX_GETSET_NAME_LENGTH];
     StringField string_fields[NUM_STRING_GETSETS];
     size_t offsets[NUM_GETSETS_PER_IFO * MAX_NIFO];
     char keys[NUM_KEY_GETSETS][MAX_GETSET_NAME_LENGTH];
     struct PyGetSetDef getsets[NUM_GETSETS + 1];
-} PostcohtableGetSet;
+} PostcohtableGetSets;
 
 typedef struct {
     int getset_idx;
     int string_field_idx;
     int offset_idx;
     int key_idx;
-    PostcohtableGetSet *postcohtable_getset;
+    PostcohtableGetSets *postcohtable_getsets;
 } GetSetBuilder;
 
 static GetSetBuilder *
-  construct_getset_builder(PostcohtableGetSet *postcohtable_getset) {
+  construct_getset_builder(PostcohtableGetSets *postcohtable_getsets) {
     static GetSetBuilder builder = { 0 };
     builder.getset_idx           = 0;
     builder.string_field_idx     = 0;
     builder.offset_idx           = 0;
     builder.key_idx              = 0;
-    builder.postcohtable_getset  = postcohtable_getset;
+    builder.postcohtable_getsets = postcohtable_getsets;
     return &builder;
-}
-
-static void build_getset(GetSetBuilder *builder) {
-    builder->postcohtable_getset->getsets[builder->getset_idx] =
-      (PyGetSetDef) { NULL };
 }
 
 static void _declare_getset(
   GetSetBuilder *builder, char *name, void *closure, getter get, setter set) {
     assert(strlen(name) > 0 && strlen(name) < MAX_GETSET_NAME_LENGTH);
     char *getset_name =
-      builder->postcohtable_getset->names[builder->getset_idx];
+      builder->postcohtable_getsets->names[builder->getset_idx];
 
     strcpy(getset_name, name);
-    builder->postcohtable_getset->getsets[builder->getset_idx++] =
+    builder->postcohtable_getsets->getsets[builder->getset_idx++] =
       (PyGetSetDef) { getset_name, get, set, getset_name, closure };
+    builder->postcohtable_getsets->getsets[builder->getset_idx] =
+      (PyGetSetDef) { NULL };
 }
 
 static void declare_string_getset(GetSetBuilder *builder,
@@ -364,7 +364,8 @@ static void declare_string_getset(GetSetBuilder *builder,
                                   getter get,
                                   setter set) {
     StringField *getset_string_field =
-      &builder->postcohtable_getset->string_fields[builder->string_field_idx++];
+      &builder->postcohtable_getsets
+         ->string_fields[builder->string_field_idx++];
 
     *getset_string_field = string_field;
     _declare_getset(builder, name, getset_string_field, get, set);
@@ -373,7 +374,7 @@ static void declare_string_getset(GetSetBuilder *builder,
 static void declare_offset_getset(
   GetSetBuilder *builder, char *name, size_t offset, getter get, setter set) {
     size_t *getset_offset =
-      &builder->postcohtable_getset->offsets[builder->offset_idx++];
+      &builder->postcohtable_getsets->offsets[builder->offset_idx++];
 
     *getset_offset = offset;
     _declare_getset(builder, name, getset_offset, get, set);
@@ -382,7 +383,7 @@ static void declare_offset_getset(
 static void declare_key_getset(
   GetSetBuilder *builder, char *name, char *key, getter get, setter set) {
     assert(strlen(key) < MAX_GETSET_NAME_LENGTH);
-    char *getset_key = builder->postcohtable_getset->keys[builder->key_idx++];
+    char *getset_key = builder->postcohtable_getsets->keys[builder->key_idx++];
 
     strcpy(getset_key, key);
     _declare_getset(builder, name, getset_key, get, set);
@@ -394,23 +395,22 @@ static void format_name(char *output_name, char *base_name, int ifo_id) {
     sprintf(output_name, "%s_%s", base_name, IFOMap[ifo_id]);
 }
 
-static void prepare_getset(PostcohtableGetSet *postcohtable_getset) {
-    GetSetBuilder *builder   = construct_getset_builder(postcohtable_getset);
+static void prepare_getset(PostcohtableGetSets *postcohtable_getsets) {
+    GetSetBuilder *builder   = construct_getset_builder(postcohtable_getsets);
     StringField string_field = { 0 };
 
-    string_field =
-      (StringField) { offsetof(PostcohInspiralWrapper, postcohtable.ifos),
-                      MAX_ALLIFO_LEN };
+    string_field.offset   = offsetof(PostcohInspiralWrapper, postcohtable.ifos);
+    string_field.capacity = MAX_ALLIFO_LEN;
     declare_string_getset(builder, "ifos", string_field, read_string_from_field,
                           write_string_to_field);
-    string_field = (StringField) {
-        offsetof(PostcohInspiralWrapper, postcohtable.pivotal_ifo), MAX_IFO_LEN
-    };
+    string_field.offset =
+      offsetof(PostcohInspiralWrapper, postcohtable.pivotal_ifo);
+    string_field.capacity = MAX_IFO_LEN;
     declare_string_getset(builder, "pivotal_ifo", string_field,
                           read_string_from_field, write_string_to_field);
-    string_field = (StringField) { offsetof(PostcohInspiralWrapper,
-                                            postcohtable.skymap_fname),
-                                   MAX_SKYMAP_FNAME_LEN };
+    string_field.offset =
+      offsetof(PostcohInspiralWrapper, postcohtable.skymap_fname);
+    string_field.capacity = MAX_SKYMAP_FNAME_LEN;
     declare_string_getset(builder, "skymap_fname", string_field,
                           read_string_from_field, write_string_to_field);
 
@@ -428,8 +428,8 @@ static void prepare_getset(PostcohtableGetSet *postcohtable_getset) {
                        get_snr_series, NULL);
     declare_key_getset(builder, "_snr_data", "_snr_data", get_snr_series, NULL);
 
-    char *name = malloc(MAX_GETSET_NAME_LENGTH);
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+        char *name[MAX_GETSET_NAME_LENGTH];
         format_name(name, "chisq", ifo_id);
         declare_offset_getset(
           builder, name,
@@ -491,9 +491,6 @@ static void prepare_getset(PostcohtableGetSet *postcohtable_getset) {
             + offsetof(LIGOTimeGPS, gpsNanoSeconds),
           read_int_from_field, write_int_to_field);
     }
-
-    free(name);
-    build_getset(builder);
 }
 
 // static Py_ssize_t getreadbuffer(PyObject *self, Py_ssize_t segment, void
@@ -684,6 +681,7 @@ static struct PyMethodDef methods[] = {
  */
 
 PyMODINIT_FUNC init_postcohtable(void) {
+    static PostcohtableGetSets postcohtable_getsets   = { 0 };
     static PyTypeObject postcoh_inspiral_wrapper_type = {
         // clang-format off
         PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
@@ -693,18 +691,16 @@ PyMODINIT_FUNC init_postcohtable(void) {
           Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
         .tp_members = members,
         .tp_methods = methods,
-        .tp_getset  = NULL,
+        .tp_getset  = postcohtable_getsets.getsets,
         .tp_name    = MODULE_NAME ".GSTLALPostcohInspiral",
         .tp_new     = __new__,
         .tp_dealloc = __del__,
     };
-    static PostcohtableGetSet postcohtable_getset = { 0 };
 
     PyObject *module = Py_InitModule3(
       MODULE_NAME, NULL, "Wrapper for LAL's PostcohInspiralTable type.");
 
-    prepare_getset(&postcohtable_getset);
-    postcoh_inspiral_wrapper_type.tp_getset = postcohtable_getset.getsets;
+    prepare_getset(&postcohtable_getsets);
     import_array();
 
     PyObject *ifo_map = PyList_New(MAX_NIFO);
