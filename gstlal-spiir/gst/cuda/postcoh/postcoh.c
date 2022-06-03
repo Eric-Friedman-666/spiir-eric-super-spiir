@@ -1240,9 +1240,14 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
 static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                                            GstBuffer *outbuf) {
     PostcohState *state = postcoh->state;
+    int out_size = GST_BUFFER_SIZE(outbuf);
+
+    if (out_size == 0) return 0;
 
     PostcohInspiralTable *output =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
+    memset(output, 0, out_size);
+    
     int nifo         = state->nifo;
     int ifos_size    = sizeof(char) * IFO_LEN * state->cur_nifo,
         one_ifo_size = sizeof(char) * IFO_LEN;
@@ -1492,13 +1497,13 @@ static GstFlowReturn cuda_postcoh_new_buffer_and_push(CudaPostcoh *postcoh,
 
     int out_size = sizeof(PostcohInspiralTable) * left_entries;
 
+    // Buffer data is initialized in cuda_postcoh_write_table_to_buf
     ret = gst_pad_alloc_buffer(srcpad, 0, out_size, caps, &outbuf);
     if (ret != GST_FLOW_OK) {
         GST_ERROR_OBJECT(srcpad,
                          "Could not allocate postcoh-inspiral buffer %d", ret);
         return ret;
     }
-    memset(GST_BUFFER_DATA(outbuf), 0, out_size);
 
     /* set the time stamps */
     GstClockTime ts = postcoh->t0
@@ -1515,9 +1520,7 @@ static GstFlowReturn cuda_postcoh_new_buffer_and_push(CudaPostcoh *postcoh,
 
     GST_BUFFER_SIZE(outbuf) = out_size;
 
-    int write_entries = 0;
-    if (left_entries >= 1)
-        write_entries = cuda_postcoh_write_table_to_buf(postcoh, outbuf);
+    int write_entries = cuda_postcoh_write_table_to_buf(postcoh, outbuf);
 
     /* make sure output entries equals estimation */
     g_assert(write_entries == left_entries);
