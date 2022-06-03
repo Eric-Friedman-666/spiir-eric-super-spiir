@@ -143,7 +143,6 @@ static void _update_fars(PostcohInspiralTable *table,
 
     for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         if (ifo_set__contains(element->enabled_ifos, ifo_id)) {
-            // FIXME: Ensure this memory is initialized (not in this function)
             table->far_1w_sngl[ifo_id] = _calculate_far(
               stats_1w->multistats[stats_idx], table->snglsnr[ifo_id],
               table->chisq[ifo_id], hist_trials);
