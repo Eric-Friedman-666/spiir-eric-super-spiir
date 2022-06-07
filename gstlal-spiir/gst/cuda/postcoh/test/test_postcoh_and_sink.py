@@ -53,8 +53,9 @@ src4 = pipeparts.mkcudamultiratespiir(pipeline,
 
 postcoh = gst.element_factory_make("cuda_postcoh")
 postcoh.set_property("detrsp-fname", "H1L1V1K1_skymap.xml")
-postcoh.set_property("autocorrelation-fname",
-                     "L1:H1bank.xml.gz,H1:H1bank.xml.gz,V1:H1bank.xml.gz,K1:H1bank.xml.gz") 
+postcoh.set_property(
+    "autocorrelation-fname",
+    "L1:H1bank.xml.gz,H1:H1bank.xml.gz,V1:H1bank.xml.gz,K1:H1bank.xml.gz")
 postcoh.set_property("hist-trials", 1)
 postcoh.set_property("snglsnr-thresh", 1.0)
 pipeline.add(postcoh)
