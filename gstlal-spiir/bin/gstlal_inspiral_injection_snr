@@ -98,7 +98,7 @@ def parse_command_line():
 
 def calc_expected_snr(premerger_cut, inj):
     # FIXME:  don't hard-code detectors
-    snr = dict.fromkeys(("H1", "L1", "V1", "K1"), 0.0) # TODO: Test with Kagra enabled/disabled, see !36
+    snr = dict.fromkeys(("H1", "L1", "V1", "K1"), 0.0)
 
     injtime = inj.time_geocent
 

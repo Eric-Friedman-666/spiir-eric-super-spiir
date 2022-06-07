@@ -370,7 +370,7 @@ for (( i=0; i<${njob}; i++ )); do
 	for bank in $(seq -f "%04g" $(( ${start}+${bpj}*${i} )) $(( ${start}+${bpj}*($i) )) ); do
 	    H1bank=${bankdir}/iir_H1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
 	    L1bank=${bankdir}/iir_L1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz            
-	    V1bank=${bankdir}/iir_V1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz												
+	    V1bank=${bankdir}/iir_V1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz            
 	    if ((${ndet} == 2)); then
 		echo -n " macroiirbank=\"H1:${H1bank},L1:${L1bank}"
 	    else

@@ -94,8 +94,6 @@ class SimInspiral(lsctables.SimInspiral):
             return self.alpha5
         if instrument == "V1":
             return self.alpha6
-        if instrument == "K1":
-            return self.alpha1
         return 0.0
 
 
@@ -960,8 +958,6 @@ FROM
                         return sim.alpha5
                     if ifo == 'V1':
                         return sim.alpha6
-                    if ifo == 'K1':
-                        return sim.alpha1
                 if len(oninstruments) > 3:
                     raise ValueError(
                         "More than 3 instruments not supported for injection snr calculation at this time."
@@ -975,8 +971,6 @@ FROM
                             return sim.alpha5
                         if ifo == 'V1':
                             return sim.alpha6
-                        if ifo == 'K1':
-                            return sim.alpha1
                     else:
                         return sorted([sim.alpha4, sim.alpha5, sim.alpha6])[1]
 
@@ -989,8 +983,6 @@ FROM
                         return sim.alpha5
                     if ifo == 'V1':
                         return sim.alpha6
-                    if ifo == 'K1':
-                        return sim.alpha1
                 if len(oninstruments) > 3:
                     raise ValueError(
                         "More than 3 instruments not supported for injection snr calculation at this time."
