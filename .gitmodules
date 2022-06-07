@@ -1,0 +1,3 @@
+[submodule "share/gwdc_utils"]
+	path = gstlal-spiir/share/gwdc_utils
+	url = https://git.ligo.org/alex.codoreanu/gwdc_utils.git
