@@ -15,6 +15,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+from datetime import datetime
 from collections import deque
 import threading
 import sys
@@ -825,12 +826,35 @@ class FinalSink(object):
 
         # do alerts
         gracedb_ids = []
-        common_messages = []
 
         self.coincs_document.assemble_tables(trigger)
         xmldoc = self.coincs_document.xmldoc
         filename = "%s_%s_%d_%d.xml" % (trigger.ifos, trigger.end_time,
                                         trigger.bankid, trigger.tmplt_idx)
+
+        if self.verbose:
+            print("retrieving PSDs from whiteners and generating psd.xml.gz ...")
+
+        psddict = {}
+        instruments = re.findall('..', trigger.ifos)  #FIXME: for more complex ifo name
+        for instrument in instruments:
+            elem = self.pipeline.get_by_name("lal_whiten_%s" % instrument)
+            data = numpy.array(elem.get_property("mean-psd"))
+            psddict[instrument] = lal.CreateREAL8FrequencySeries(
+                name="PSD",
+                epoch=LIGOTimeGPS(lal.UTCToGPS(time.gmtime()), 0),
+                f0=0.0,
+                deltaF=elem.get_property("delta-f"),
+                sampleUnits=lal.Unit("s strain^2"),
+                length=len(data)
+            )
+            psddict[instrument].data.data = data
+            psd_element = lal.series.build_REAL8FrequencySeries(psddict[instrument])
+            psd_element.appendChild(
+                ligolw_param.Param.build(u"instrument", u"lstring", instrument)
+            )
+            xmldoc.childNodes[-1].appendChild(psd_element)
+
         #
         # construct message and send to gracedb.
         # we go through the intermediate step of
@@ -841,14 +865,10 @@ class FinalSink(object):
         # into gracedb's input pipe and crashing
         # part way through.
         #
+
         message = StringIO.StringIO()
-        #message2 = file(filename, "w")
-        #pdb.set_trace()
         ligolw_utils.write_fileobj(xmldoc, message, gz=False)
-        ligolw_utils.write_filename(xmldoc,
-                                    filename,
-                                    gz=False,
-                                    trap_signals=None)
+        ligolw_utils.write_filename(xmldoc, filename, gz=False, trap_signals=None)
         xmldoc.unlink()
 
         print >> sys.stderr, "sending %s to gracedb ..." % filename
@@ -874,17 +894,14 @@ class FinalSink(object):
             except Exception as e:
                 print(e)
                 gracedb_upload_itrial += 1
-        #else:
-        #  proc = subprocess.Popen(("/bin/cp", "/dev/stdin", filename), stdin = subprocess.PIPE)
-        #  proc.stdin.write(message.getvalue())
-        #  proc.stdin.flush()
-        #  proc.stdin.close()
+
         message.close()
 
         gracedb_upload_itrial = 1
         # write a log to explain far
         #for gid in gracedb_ids:
 
+        # FIXME: Refactor coinc xmldoc handling to be more pythonic & less error prone
         # delete the xmldoc and get a new empty one for next upload
         coincs_document = self.coincs_document.get_another()
         del self.coincs_document
@@ -908,76 +925,6 @@ class FinalSink(object):
             except:
                 gracedb_upload_itrial += 1
 
-        # upload skymap if skymap_fname of the triggers is not empty
-        #if len(trigger.skymap_fname) > 0:
-        if False:
-            # make sure the last round of output dumping is finished
-            if self.thread_upload_skymap is not None and self.thread_upload_skymap.isAlive(
-            ):
-                self.thread_upload_skymap.join()
-
-            # free the last used memory
-            del self.thread_upload_skymap
-            # start new thread
-            self.thread_upload_skymap = threading.Thread(
-                target=upload_skymap,
-                args=(
-                    self.gracedb_client,
-                    gid,
-                    trigger.ifos,
-                    trigger.skymap_fname,
-                    trigger.end_time,
-                    self.output_skymap,
-                    self.cuda_postcoh_detrsp_fname,
-                    self.verbose,
-                ))
-            self.thread_upload_skymap.start()
-
-        if self.verbose:
-            print >> sys.stderr, "retrieving PSDs from whiteners and generating psd.xml.gz ..."
-        psddict = {}
-        #FIXME: for more complex detector names
-        instruments = re.findall('..', trigger.ifos)
-        for instrument in instruments:
-            elem = self.pipeline.get_by_name("lal_whiten_%s" % instrument)
-            data = numpy.array(elem.get_property("mean-psd"))
-            psddict[instrument] = lal.CreateREAL8FrequencySeries(
-                name="PSD",
-                epoch=LIGOTimeGPS(lal.UTCToGPS(time.gmtime()), 0),
-                f0=0.0,
-                deltaF=elem.get_property("delta-f"),
-                sampleUnits=lal.Unit(
-                    "s strain^2"),  # FIXME:  don't hard-code this
-                length=len(data))
-            psddict[instrument].data.data = data
-        fobj = StringIO.StringIO()
-        reference_psd.write_psd_fileobj(fobj, psddict, gz=True)
-        common_messages.append(("strain spectral densities", "psd.xml.gz",
-                                "psd", fobj.getvalue()))
-
-        #
-        # do PSD and ranking data file uploads
-        #
-
-        while common_messages:
-            message, filename, tag, contents = common_messages.pop()
-            gracedb_upload_itrial = 1
-            gid = gracedb_ids[0]
-            while gracedb_upload_itrial < 10:
-                try:
-                    resp = self.gracedb_client.writeLog(gid,
-                                                        message,
-                                                        filename=filename,
-                                                        filecontents=contents,
-                                                        tagname=tag)
-                    resp_json = resp.json()
-                    if resp.status != httplib.CREATED:
-                        print >> sys.stderr, "gracedb upload of %s for ID %s failed" % (
-                            filename, gid)
-                    else:
-                        break
-                except:
-                    gracedb_upload_itrial += 1
 
     def get_output_filename(self, output_prefix, output_name, t_snapshot_start,
                             snapshot_duration):
