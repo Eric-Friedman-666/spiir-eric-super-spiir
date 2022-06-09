@@ -832,10 +832,12 @@ class FinalSink(object):
                                         trigger.bankid, trigger.tmplt_idx)
 
         if self.verbose:
-            print("retrieving PSDs from whiteners and generating psd.xml.gz ...")
+            print(
+                "retrieving PSDs from whiteners and generating psd.xml.gz ...")
 
         psddict = {}
-        instruments = re.findall('..', trigger.ifos)  #FIXME: for more complex ifo name
+        instruments = re.findall(
+            '..', trigger.ifos)  #FIXME: for more complex ifo name
         for instrument in instruments:
             elem = self.pipeline.get_by_name("lal_whiten_%s" % instrument)
             data = numpy.array(elem.get_property("mean-psd"))
@@ -845,13 +847,13 @@ class FinalSink(object):
                 f0=0.0,
                 deltaF=elem.get_property("delta-f"),
                 sampleUnits=lal.Unit("s strain^2"),
-                length=len(data)
-            )
+                length=len(data))
             psddict[instrument].data.data = data
-            psd_element = lal.series.build_REAL8FrequencySeries(psddict[instrument])
+            psd_element = lal.series.build_REAL8FrequencySeries(
+                psddict[instrument])
             psd_element.appendChild(
-                ligolw_param.Param.build(u"instrument", u"lstring", instrument)
-            )
+                ligolw_param.Param.build(u"instrument", u"lstring",
+                                         instrument))
             xmldoc.childNodes[-1].appendChild(psd_element)
 
         #
@@ -867,7 +869,10 @@ class FinalSink(object):
 
         message = StringIO.StringIO()
         ligolw_utils.write_fileobj(xmldoc, message, gz=False)
-        ligolw_utils.write_filename(xmldoc, filename, gz=False, trap_signals=None)
+        ligolw_utils.write_filename(xmldoc,
+                                    filename,
+                                    gz=False,
+                                    trap_signals=None)
         xmldoc.unlink()
 
         print >> sys.stderr, "sending %s to gracedb ..." % filename
@@ -923,7 +928,6 @@ class FinalSink(object):
                     break
             except:
                 gracedb_upload_itrial += 1
-
 
     def get_output_filename(self, output_prefix, output_name, t_snapshot_start,
                             snapshot_duration):
