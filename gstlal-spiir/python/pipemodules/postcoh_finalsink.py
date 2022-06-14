@@ -855,8 +855,9 @@ class FinalSink(object):
         gracedb_ids = []
 
         if self.verbose:
-            print("retrieving PSDs from whiteners and generating psd.xml.gz ...")
-        
+            print(
+                "retrieving PSDs from whiteners and generating psd.xml.gz ...")
+
         # obtain psd from pipeline object before passing to CoincsDocFromPostcoh
         psd_dict = {
             ifo: self.get_current_lal_psd_frequency_series(ifo)
@@ -1091,7 +1092,7 @@ class CoincsDocFromPostcoh(object):
             lsctables.New(postcoh_table_def.PostcohInspiralTable))
 
     # path here is the job id
-    def assemble_tables(self, trigger, psd_dict = None):
+    def assemble_tables(self, trigger, psd_dict=None):
         self.assemble_snglinspiral_table(trigger)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
         coinc_table = lsctables.CoincTable.get_table(self.xmldoc)
