@@ -821,15 +821,15 @@ class FinalSink(object):
         return False
 
     def get_current_lal_psd_frequency_series(self, ifo):
-        """Retrives the mean-psd element from the pipeline for a
+        """Retrieves the mean-psd element from the pipeline for a
         given ifo and constructs a lal.REAL8FrequencySeries
         python object to store the array data.
         
-        Paramters
+        Parameters
         ---------
         ifo: str
             The interferometer string name for the mean-psd array
-            we will retrieve from the pipeline.
+            to be retrieved from the pipeline.
 
         Returns
         -------
@@ -1277,7 +1277,7 @@ class CoincsDocFromPostcoh(object):
 
     def assemble_psd_frequency_series_arrays(self, psd_dict):
         """Assembles a LIGO_LW REAL8FrequencySeries Array from a
-        dictionarywhere keys are ifo strings and values are a
+        dictionary where keys are ifo strings and values are a
         lal.REAL8FrequencySeries object of the mean-psd for each
         ifo already retrieved from the pipeline.
 
