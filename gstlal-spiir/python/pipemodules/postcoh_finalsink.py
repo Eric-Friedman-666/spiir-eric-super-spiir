@@ -426,6 +426,7 @@ class FinalSink(object):
                  superevent_thresh=3.8e-7,
                  opa_cohsnr_thresh=8,
                  negative_latency=0,
+                 add_psd_initial_coinc=False,
                  verbose=False):
         #
         # initialize
@@ -489,6 +490,7 @@ class FinalSink(object):
         # self.lookback_window = 30
         # self.lookback_boundary = None
         # coinc doc to be uploaded to gracedb
+        self.add_psd_initial_coinc = add_psd_initial_coinc
         self.coincs_document = CoincsDocFromPostcoh(path, process_params,
                                                     channel_dict)
         # get the values needed for skymap uploads accompaning the trigger uploads
@@ -854,15 +856,20 @@ class FinalSink(object):
         # do alerts
         gracedb_ids = []
 
-        if self.verbose:
-            print(
-                "retrieving PSDs from whiteners and generating psd.xml.gz ...")
+        # TODO: Remove conditional bool here and in __init__ after network latency tests
+        if self.add_psd_initial_coinc:
+            if self.verbose:
+                print(
+                    "retrieving PSDs from whiteners and generating psd.xml.gz")
 
-        # obtain psd from pipeline object before passing to CoincsDocFromPostcoh
-        psd_dict = {
-            ifo: self.get_current_lal_psd_frequency_series(ifo)
-            for ifo in re.findall("..", trigger.ifos)
-        }
+            # obtain psd from pipeline object before passing to CoincsDocFromPostcoh
+            psd_dict = {
+                ifo: self.get_current_lal_psd_frequency_series(ifo)
+                for ifo in re.findall("..", trigger.ifos)
+            }
+        else:
+            # skip psd array addition on coinc xmldoc
+            psd_dict = None
 
         # assemble tables with PSD frequency series
         self.coincs_document.assemble_tables(trigger, psd_dict)
