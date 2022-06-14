@@ -818,6 +818,34 @@ class FinalSink(object):
 
         return False
 
+    def get_current_lal_psd_frequency_series(self, ifo):
+        """Retrives the mean-psd element from the pipeline for a
+        given ifo and constructs a lal.REAL8FrequencySeries
+        python object to store the array data.
+        
+        Paramters
+        ---------
+        ifo: str
+            The interferometer string name for the mean-psd array
+            we will retrieve from the pipeline.
+
+        Returns
+        -------
+        lal.REAL8FrequencySeries
+        """
+        elem = self.pipeline.get_by_name("lal_whiten_%s" % ifo)
+        data = numpy.array(elem.get_property("mean-psd"))
+        psd = lal.CreateREAL8FrequencySeries(
+            name="PSD",
+            epoch=LIGOTimeGPS(lal.UTCToGPS(time.gmtime()), 0),
+            f0=0.0,
+            deltaF=elem.get_property("delta-f"),
+            sampleUnits=lal.Unit("s strain^2"),
+            length=len(data))
+        psd.data.data = data
+
+        return psd
+
     def __do_gracedb_alert(self, trigger):
 
         if self.__need_trigger_control(trigger):
@@ -826,35 +854,20 @@ class FinalSink(object):
         # do alerts
         gracedb_ids = []
 
-        self.coincs_document.assemble_tables(trigger)
+        if self.verbose:
+            print("retrieving PSDs from whiteners and generating psd.xml.gz ...")
+        
+        # obtain psd from pipeline object before passing to CoincsDocFromPostcoh
+        psd_dict = {
+            ifo: self.get_current_lal_psd_frequency_series(ifo)
+            for ifo in re.findall("..", trigger.ifos)
+        }
+
+        # assemble tables with PSD frequency series
+        self.coincs_document.assemble_tables(trigger, psd_dict)
         xmldoc = self.coincs_document.xmldoc
         filename = "%s_%s_%d_%d.xml" % (trigger.ifos, trigger.end_time,
                                         trigger.bankid, trigger.tmplt_idx)
-
-        if self.verbose:
-            print(
-                "retrieving PSDs from whiteners and generating psd.xml.gz ...")
-
-        psddict = {}
-        instruments = re.findall(
-            '..', trigger.ifos)  #FIXME: for more complex ifo name
-        for instrument in instruments:
-            elem = self.pipeline.get_by_name("lal_whiten_%s" % instrument)
-            data = numpy.array(elem.get_property("mean-psd"))
-            psddict[instrument] = lal.CreateREAL8FrequencySeries(
-                name="PSD",
-                epoch=LIGOTimeGPS(lal.UTCToGPS(time.gmtime()), 0),
-                f0=0.0,
-                deltaF=elem.get_property("delta-f"),
-                sampleUnits=lal.Unit("s strain^2"),
-                length=len(data))
-            psddict[instrument].data.data = data
-            psd_element = lal.series.build_REAL8FrequencySeries(
-                psddict[instrument])
-            psd_element.appendChild(
-                ligolw_param.Param.build(u"instrument", u"lstring",
-                                         instrument))
-            xmldoc.childNodes[-1].appendChild(psd_element)
 
         #
         # construct message and send to gracedb.
@@ -1078,7 +1091,7 @@ class CoincsDocFromPostcoh(object):
             lsctables.New(postcoh_table_def.PostcohInspiralTable))
 
     # path here is the job id
-    def assemble_tables(self, trigger):
+    def assemble_tables(self, trigger, psd_dict = None):
         self.assemble_snglinspiral_table(trigger)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
         coinc_table = lsctables.CoincTable.get_table(self.xmldoc)
@@ -1128,6 +1141,9 @@ class CoincsDocFromPostcoh(object):
 
         self.assemble_coinc_map_table(trigger)
         self.assemble_time_slide_table(trigger)
+
+        if psd_dict is not None:
+            self.assemble_psd_frequency_series_arrays(psd_dict)
 
         postcoh_table.append(trigger)
 
@@ -1250,6 +1266,28 @@ class CoincsDocFromPostcoh(object):
             row.event_id = "sngl_inspiral:event_id:%d" % iifo
             sngl_inspiral_table.append(row)
             iifo += 1
+
+    def assemble_psd_frequency_series_arrays(self, psd_dict):
+        """Assembles a LIGO_LW REAL8FrequencySeries Array from a
+        dictionarywhere keys are ifo strings and values are a
+        lal.REAL8FrequencySeries object of the mean-psd for each
+        ifo already retrieved from the pipeline.
+
+        The PSD LIGO_LW element will then be appended to the xmldoc
+        with both the REAL8FrequencySeries Array object and a 
+        corresponding Param object that specifies the ifo string.
+
+        Parameters
+        ----------
+        psd_dict: dict[str, lal.REAL8FrequencySeries]
+            A dictionary of frequency series objects that refer to
+            the mean-psd for each ifo key.
+        """
+        for ifo, psd in psd_dict.items():
+            psd_element = lal.series.build_REAL8FrequencySeries(psd)
+            psd_element.appendChild(
+                ligolw_param.Param.build(u"instrument", u"lstring", ifo))
+            self.xmldoc.childNodes[-1].appendChild(psd_element)
 
 
 def call_plot_fits_func(pngname,
