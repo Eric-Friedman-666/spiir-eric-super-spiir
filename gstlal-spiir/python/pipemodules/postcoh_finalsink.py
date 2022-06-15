@@ -31,7 +31,6 @@ import fcntl
 import logging
 import pdb
 
-# The following snippet is taken from http://gstreamer.freedesktop.org/wiki/FAQ#Mypygstprogramismysteriouslycoredumping.2Chowtofixthis.3F
 import pygtk
 
 pygtk.require("2.0")
@@ -46,7 +45,8 @@ import gst
 try:
     from ligo.gracedb.rest import GraceDb
 except ImportError:
-    print >> sys.stderr, "warning: gracedb import failed, program will crash if gracedb uploads are attempted"
+    print >> sys.stderr, "warning: gracedb import failed, \
+        program will crash if gracedb uploads are attempted"
     GraceDb = None
 
 from glue import iterutils
@@ -222,15 +222,17 @@ class FAPUpdater(object):
         # FIXME: fixed number of banks per job
         self.max_nbank_perjob = 10
         # set the limit for maximum input string length
-        # when the number of banks reaches 140, it will give you a signal 7 error in OPA2
-        # FIXME: hard-codede, the first entry in collect_walltime is the longest
+        # when the number of banks reaches 140,
+        # it will give you a signal 7 error in OPA2
+        # FIXME: hard-coded, the first entry in collect_walltime is the longest
         self.max_nstats_formargi = (
             self.collect_walltime[0] / self.combine_duration +
             self.max_nstats_perbank + 1) * self.max_nbank_perjob
 
         if self.output and len(self.output) != len(self.collect_walltime):
             raise ValueError(
-                "number of input walltimes does match the number of input filenames: %s does not match %s"
+                "number of input walltimes does match the number of \
+                    input filenames: %s does not match %s"
                 % (collect_walltime_string, output_list_string))
 
         self.verbose = verbose
@@ -257,8 +259,8 @@ class FAPUpdater(object):
             map(lambda x: os.remove(x), self.rm_fnames)
             self.rm_fnames = []
         except:
-            print >> sys.stderr, "remove files failed, rm_fnames %s" % ', '.join(
-                self.rm_fnames)
+            print >> sys.stderr, "remove files failed, rm_fnames \
+                %s" % ', '.join(self.rm_fnames)
             return None
 
         ls_fnames = sorted(os.listdir(str(self.path)))
@@ -274,7 +276,8 @@ class FAPUpdater(object):
         valid_fnames = []
         for ifname in ls_fnames:
             ifname_split = ifname.split("_")
-            # FIXME: hard coded the stats name e.g. bank16_stats_1187008882_1800.xml.gz
+            # FIXME: hard coded the stats name
+            # e.g. bank16_stats_1187008882_1800.xml.gz
             if len(ifname_split) > 1 and ifname[
                     -4:] != "next" and ifname_split[-2].isdigit() and int(
                         ifname_split[-2]) > boundary:
@@ -287,7 +290,8 @@ class FAPUpdater(object):
         self.wait_last_process_finish(self.procs_update_fap_stats)
         # list all the files in the path
         #nprefix = len(self.input_prefix_list[0].split("_"))
-        # FIXME: hard-coded keyword, assuming name name e.g. bank16_stats_1187008882_1800.xml.gz
+        # FIXME: hard-coded keyword, assuming name name
+        # e.g. bank16_stats_1187008882_1800.xml.gz
         ls_fnames = self.get_fnames("stats")
         if ls_fnames is None or len(ls_fnames) == 0:
             return
@@ -298,10 +302,12 @@ class FAPUpdater(object):
             valid_fnames = self.get_valid_bankstats(ls_fnames, boundary)
 
             # reach the limit for maximum input string length
-            # when the number of banks reaches 140, it will give you a signal 7 error in OPA2
+            # when the number of banks reaches 140,
+            # it will give you a signal 7 error in OPA2
             while len(valid_fnames) > self.max_nstats_formargi:
                 logging.info(
-                    "update fap: %d stats files for marignalization, over the input string length limit, combining"
+                    "update fap: %d stats files for marignalization, \
+                        over the input string length limit, combining"
                     % len(valid_fnames))
                 self.combine_stats()
                 ls_fnames = self.get_fnames("stats")
@@ -347,7 +353,8 @@ class FAPUpdater(object):
         if ls_fnames is None or len(ls_fnames) == 0:
             return
 
-        # FIXME: decode information assuming fixed stats name e.g. bank16_stats_1187008882_1800.xml.gz
+        # FIXME: decode information assuming fixed stats name
+        # e.g. bank16_stats_1187008882_1800.xml.gz
         # decode to {'16', ['bank16_stats_1187008882_1800.xml.gz', ..]}
         stats_dict = {}
         for ifname in ls_fnames:
@@ -370,9 +377,10 @@ class FAPUpdater(object):
                 total_collected_walltime = sum(collected_walltimes)
                 if this_walltime >= self.combine_duration:
                     continue
-                elif len(
-                        collected_fnames
-                ) >= self.max_nstats_perbank or total_collected_walltime >= self.combine_duration:
+                elif (
+                    (len(collected_fnames) >= self.max_nstats_perbank)
+                    or (total_collected_walltime >= self.combine_duration)
+                ):
                     start_banktime = int(
                         os.path.split(collected_fnames[0])[-1].split('_')[-2])
                     fout = "%s/bank%s_stats_%d_%d.xml.gz" % (
@@ -449,7 +457,8 @@ class FinalSink(object):
             postcoh_table_def.PostcohInspiralTable)
         self.chisq_ratio_thresh = chisq_ratio_veto_thresh
         self.superevent_thresh = superevent_thresh
-        # FIXME: hard-coded the opa_thresh that all triggers less than this thresh will be tested
+        # FIXME: hard-coded the opa_thresh that all triggers less than
+        # this thresh will be tested
         # if their cohsnr SNRs are smaller than the given opa_cohsnr_snr
         # if smaller, no uploading.
         # opa_thresh is chosen as 1e-6 as to not launch lalinference jobs
@@ -483,16 +492,11 @@ class FinalSink(object):
         self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
             self.postcoh_document.xmldoc)
 
-        # deprecated: save the last 30s zerolags to help check the significance of current candidate
-        # hard-coded to be 30s to be consistent with iDQ range
-        # self.lookback_event_table = lsctables.New(postcoh_table_def.PostcohInspiralTable)
-        # self.lookback_window = 30
-        # self.lookback_boundary = None
         # coinc doc to be uploaded to gracedb
         self.add_psd_initial_coinc = add_psd_initial_coinc
         self.coincs_document = CoincsDocFromPostcoh(path, process_params,
                                                     channel_dict)
-        # get the values needed for skymap uploads accompaning the trigger uploads
+        # get  values needed for skymap accompanying the trigger uploads
         for param in process_params:
             if param == 'cuda_postcoh_detrsp_fname':
                 self.cuda_postcoh_detrsp_fname = process_params[param]
@@ -548,16 +552,23 @@ class FinalSink(object):
             return False
 
         # just submit it if is a low-significance trigger
-        if self.candidate.far < self.gracedb_far_threshold and self.candidate.far > self.superevent_thresh:
+        if (
+            (self.candidate.far < self.gracedb_far_threshold)
+            and (self.candidate.far > self.superevent_thresh)
+        ):
             return True
 
-        if self.candidate.far < self.opa_thresh and self.candidate.cohsnr < self.opa_cohsnr_thresh:
+        if (
+            (self.candidate.far < self.opa_thresh)
+            and (self.candidate.cohsnr < self.opa_cohsnr_thresh)
+        ):
             # print "suppressed", self.candidate.cohsnr, self.candidate.far
             return False
 
         # FIXME: any two of the sngl fars need to be < singlefar_veto_thresh
         # single far veto for high-significance trigger
-        # add an upper limit for the chisq for uploaded event compared to the last line, hardcoded to have uploaded event with chisq < 3
+        # add an upper limit for the chisq for uploaded event compared to the
+        # last line, hardcoded to have uploaded event with chisq < 3
         ifo_active = [
             chisq != 0 and chisq < 3 for chisq in self.candidate.chisq
         ]
@@ -588,7 +599,7 @@ class FinalSink(object):
             if len(newevents) == 0:
                 return
 
-            # NOTE: the first entry is used to add to the segments, not a really event
+            # first entry is used to add to the segments, not a really event
             participating_ifos = re.findall('..', newevents[0].ifos)
             buf_seg = segments.segment(
                 buf_timestamp, buf_timestamp + LIGOTimeGPS(0, buf.duration))
@@ -613,19 +624,25 @@ class FinalSink(object):
                 self.t_start = buf_timestamp
                 self.is_first_buf = False
 
-            # The maximum (upper) bound of any cluster we are willing to process
-            # We assume we have all buffers from before the start of this buffer
-            # Event end times are offset by negative latency if running early warning
+            # The maximum (upper) bound of any cluster we want to process
+            # Assume we have all buffers from before the start of this buffer
+            # End times are offset by negative latencyif running early warning
             max_cluster_boundary = buf_timestamp + self.negative_latency
             if self.is_first_event and nevent > 0:
-                self.cluster_boundary = max_cluster_boundary + self.cluster_window
+                self.cluster_boundary = (
+                    max_cluster_boundary + self.cluster_window)
                 self.is_first_event = False
 
             # NOTE: only consider clustered trigger for uploading to gracedb
             # check if the newevents is over boundary
-            # this loop will exit when the cluster_boundary is incremented to be > the max_cluster_boundary, see diagram in self.cluster()
+            # this loop will exit when the cluster_boundary is incremented
+            # to be > the max_cluster_boundary, see diagram in self.cluster()
 
-            while self.cluster_window > 0 and self.cluster_boundary and max_cluster_boundary > self.cluster_boundary:
+            while (
+                (self.cluster_window > 0)
+                and (self.cluster_boundary)
+                and (max_cluster_boundary > self.cluster_boundary)
+            ):
                 self.cluster(self.cluster_window)
 
                 if self.need_candidate_check:
@@ -651,7 +668,10 @@ class FinalSink(object):
 
             # dump zerolag candidates when interval is reached
             self.snapshot_duration = buf_timestamp - self.t_snapshot_start
-            if self.snapshot_interval is not None and self.snapshot_duration >= self.snapshot_interval:
+            if (
+                (self.snapshot_interval is not None)
+                and (self.snapshot_duration >= self.snapshot_interval)
+            ):
                 snapshot_filename = self.get_output_filename(
                     self.output_prefix, self.output_name,
                     self.t_snapshot_start, self.snapshot_duration)
@@ -660,31 +680,37 @@ class FinalSink(object):
                                            self.snapshot_duration)
                 self.t_snapshot_start = buf_timestamp
                 self.nevent_clustered = 0
-                # also combine background_stats files so we don't end up with too many files
+                # also combine background_stats files
+                # so we don't end up with too many files
                 self.fapupdater.combine_stats()
 
             # do calcfap when interval is reached
             fapupdater_duration = buf_timestamp - self.t_fapupdater_start
-            if self.fapupdater_interval is not None and fapupdater_duration >= self.fapupdater_interval:
+            if (
+                (self.fapupdater_interval is not None)
+                and (fapupdater_duration >= self.fapupdater_interval)
+            ):
                 self.fapupdater.update_fap_stats(buf_timestamp)
                 self.t_fapupdater_start = buf_timestamp
 
     def cluster(self, cluster_window):
         # send candidate to be gracedb checked only when:
         # timestamp small ->->->-> large
-        #                     |max_cluster_boundary
-        #          ___________(cur_table)
-        #                |boundary
-        #           |candidate to be gracedb checked = end time of the peak of cur_table < boundary
-        #                  |candidate remain = end time of the peak of cur_table > boundary
+        #                 |max_cluster_boundary
+        #      ___________(cur_table)
+        #          |boundary
+        #       |candidate to check = end time of cur_table peak < boundary
+        #            |candidate remain = end time of cur_table peak > boundary
         # afterwards:
         #                     |max_cluster_boundary
         #                 ____(cur_table cleaned)
         #                           |boundary incremented
 
-        # This may be a rare source of nondeterminism, as we may consider different events equal
+        # This may be a rare source of nondeterminism,
+        # as we may consider different events equal
         def is_better_event(lhs, rhs):
-            # If both end and cohsnr are equal, lhs is not considered better (because it is the same)
+            # If both end and cohsnr are equal,
+            # lhs is not considered better (because it is the same)
             if lhs.cohsnr == rhs.cohsnr:
                 return lhs.end < rhs.end
             return lhs.cohsnr > rhs.cohsnr
@@ -697,9 +723,10 @@ class FinalSink(object):
             if peak_event is None or is_better_event(row, peak_event):
                 peak_event = row
 
-        # cur_table is empty and we do have a candidate, so need to check the candidate
+        # cur_table is empty and we do have a candidate,
+        # so need to check the candidate
         if peak_event is None:
-            # no event within the boundary, candidate is the peak, update boundary
+            # no event within boundary, candidate is the peak, update boundary
             self.cluster_boundary = self.cluster_boundary + cluster_window
             self.need_candidate_check = self.candidate is not None
             return
@@ -713,7 +740,7 @@ class FinalSink(object):
                 lambda row: row.end > self.cluster_boundary,
                 self.cur_event_table)
             # update boundary
-            # Note: cluster boundary does not necessarily align with buffer boundary
+            # cluster boundary does not necessarily align with buffer boundary
             self.cluster_boundary = self.candidate.end + cluster_window
             self.need_candidate_check = False
         else:
@@ -736,29 +763,6 @@ class FinalSink(object):
         ]
         for i, ifo in enumerate(pipe_macro.IFO_MAP):
             setattr(candidate, "far_sngl_%s" % ifo, far_sngl[i])
-
-    # def __lookback_far(self, candidate):
-    # FIXME: hard-code to check event that's < 5e-7
-    # if candidate.far > 5e-7:
-    #	 return
-    # else:
-    #	 count_events = sum((lookback_event.far < 1e-4) for lookback_event in self.lookback_event_table)
-    #	 if count_events > 1:
-    #		 # FAR estimation is not valide for this period, increase the FAR
-    #		 # FIXME: should derive FAR from count_events
-    #		  candidate.far = 9.99e-6
-
-    # all_snr_H = self.lookback_event_table.getColumnByName('snglsnr_H')
-    # all_snr_L = self.lookback_event_table.getColumnByName('snglsnr_L')
-    # all_snr_V = self.lookback_event_table.getColumnByName('snglsnr_V')
-    # all_chisq_H = self.lookback_event_table.getColumnByName('chisq_H')
-    # all_chisq_L = self.lookback_event_table.getColumnByName('chisq_L')
-    # all_chisq_V = self.lookback_event_table.getColumnByName('chisq_V')
-    # count_better_H = sum((snr > candidate.snglsnr_H && chisq < candidate.chisq_H) for (snr, chisq) in zip(all_snr_H, allchisq_H))
-    # count_better_L = sum((snr > candidate.snglsnr_L && chisq < candidate.chisq_L) for (snr, chisq) in zip(all_snr_L, allchisq_L))
-    # count_better_V = sum((snr > candidate.snglsnr_V && chisq < candidate.chisq_V) for (snr, chisq) in zip(all_snr_V, allchisq_V))
-    # if count_better_H > 0 or count_better_L > 0 or count_better_V > 0:
-    #	 candidate.far = 9.99e-6
 
     def __need_trigger_control(self, trigger):
         # do trigger control
@@ -788,14 +792,15 @@ class FinalSink(object):
         trigger_is_submitted = 0
 
         # suppress the trigger
-        # if it is not one order of magnitude more significant than the last trigger
-        # or if it not more significant the last submitted trigger
+        # if it is not one order of magnitude more significant than the last 
+        # trigger or if it not more significant the last submitted trigger
         # FIXME: what if there are two adjacent significant events
         if ((abs(float(trigger.end) - last_time) < 50
              and abs(trigger.far / last_far) > 0.5)) or (
                  abs(float(trigger.end) - float(last_submitted_time)) < 100
                  and trigger.far > last_submitted_far * 0.5):
-            print >> sys.stderr, "trigger controled, time %f, FAR %f, last_far %f, last_submitted time %f, last_submitted far %f" % (
+            print >> sys.stderr, "trigger controled, time %f, FAR %f, \
+                last_far %f, last_submitted time %f, last_submitted far %f" % (
                 float(trigger.end), trigger.far, last_far, last_submitted_time,
                 last_submitted_far)
             self.last_trigger.append((trigger.end, trigger.far))
@@ -805,7 +810,8 @@ class FinalSink(object):
                 f.write(line)
             return True
 
-        print >> sys.stderr, "trigger passed, time %f, FAR %f, last_far %f, last_submitted time %f, last_submitted_far %f" % (
+        print >> sys.stderr, "trigger passed, time %f, FAR %f, \
+            last_far %f, last_submitted time %f, last_submitted_far %f" % (
             float(trigger.end), trigger.far, last_far, last_submitted_time,
             last_submitted_far)
 
@@ -856,14 +862,14 @@ class FinalSink(object):
 
         # TODO: Remove conditional bool here and in __init__ after tests
         if self.add_psd_initial_coinc:
-            ligolw_psd_arrays = {
+            psds = {
                 ifo: self.get_current_lal_psd_frequency_series(ifo)
                 for ifo in re.findall("..", trigger.ifos)
             }
         else:
-            ligolw_psd_arrays = None
+            psds = None
 
-        self.coincs_document.assemble_ligolw_xmldoc(trigger, ligolw_psd_arrays)
+        self.coincs_document.assemble_ligolw_xmldoc(trigger, psds)
         xmldoc = self.coincs_document.xmldoc
         filename = "%s_%s_%d_%d.xml" % (trigger.ifos, trigger.end_time,
                                         trigger.bankid, trigger.tmplt_idx)
@@ -901,11 +907,11 @@ class FinalSink(object):
                     offline=self.gracedb_offline_annote)
                 resp_json = resp.json()
                 if resp.status != httplib.CREATED:
-                    print >> sys.stderr, "gracedb upload of %s failed" % filename
+                    print >> sys.stderr, "upload of %s failed" % filename
                 else:
-                    print >> sys.stderr, "event assigned grace ID %s" % resp_json[
-                        "graceid"]
-                    gracedb_ids.append(resp_json["graceid"])
+                    grace_id = resp_json["graceid"]
+                    print >> sys.stderr, "upload of %s succeeded" % grace_id
+                    gracedb_ids.append(grace_id)
                     break
             except Exception as e:
                 print(e)
@@ -914,10 +920,8 @@ class FinalSink(object):
         message.close()
 
         gracedb_upload_itrial = 1
-        # write a log to explain far
-        #for gid in gracedb_ids:
 
-        # FIXME: Refactor coinc xmldoc handling to be more pythonic & less error prone
+        # TODO: Refactor xmldoc handling to be more pythonic
         # delete the xmldoc and get a new empty one for next upload
         coincs_document = self.coincs_document.get_another()
         del self.coincs_document
@@ -926,8 +930,8 @@ class FinalSink(object):
             print "gracedb upload of %s failed completely" % filename
             return
         gid = gracedb_ids[0]
-        log_message = "Optimal ra and dec from this coherent pipeline: (%f, %f) in degrees" % (
-            trigger.ra, trigger.dec)
+        log_message = "Optimal ra and dec from this coherent pipeline: \
+            (%f, %f) in degrees" % (trigger.ra, trigger.dec)
         while gracedb_upload_itrial < 10:
             try:
                 resp = self.gracedb_client.writeLog(gid,
@@ -955,7 +959,9 @@ class FinalSink(object):
                                                     t_snapshot_start, duration)
         logging.info("snapshotting %s" % filename)
         # make sure the last round of output dumping is finished
-        if self.thread_snapshot_segment is not None and self.thread_snapshot_segment.isAlive(
+        if (
+            (self.thread_snapshot_segment is not None)
+            and (self.thread_snapshot_segment.isAlive())
         ):
             self.thread_snapshot_segment.join()
 
@@ -1006,11 +1012,15 @@ class FinalSink(object):
         if self.thread_snapshot is not None and self.thread_snapshot.isAlive():
             self.thread_snapshot.join()
 
-        if self.thread_snapshot_segment is not None and self.thread_snapshot_segment.isAlive(
+        if (
+            (self.thread_snapshot_segment is not None)
+            and (self.thread_snapshot_segment.isAlive())
         ):
             self.thread_snapshot_segment.join()
 
-        if self.thread_upload_skymap is not None and self.thread_upload_skymap.isAlive(
+        if (
+            (self.thread_upload_skymap is not None)
+            and (self.thread_upload_skymap.isAlive())
         ):
             self.thread_upload_skymap.join()
 
@@ -1089,7 +1099,6 @@ class CoincsDocFromPostcoh(object):
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(postcoh_table_def.PostcohInspiralTable))
 
-    # path here is the job id
     def assemble_ligolw_xmldoc(self, trigger, psd_dict=None):
         self.assemble_snglinspiral_table(trigger)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
@@ -1124,7 +1133,9 @@ class CoincsDocFromPostcoh(object):
         row.mass = trigger.mtotal
         row.end_time = trigger.end_time
         row.coinc_event_id = "coinc_event:coinc_event_id:1"
-        #Manoj: add Network SNR to sngl_inspiral table instead of Coherent SNR. Change is reflected on gracedb event page.
+        #Manoj: add Network SNR to sngl_inspiral table instead of Coherent SNR.
+        # Change is reflected on gracedb event page.
+        
         #row.snr = trigger.cohsnr
         ##network_snr = sqrt(H**2 + L**2 + V**2)
         network_snr2 = 0
@@ -1134,8 +1145,8 @@ class CoincsDocFromPostcoh(object):
         row.snr = network_snr
         row.end_time_ns = trigger.end_time_ns
         row.combined_far = trigger.far
-        row.ifos = ','.join(re.findall(
-            '..', trigger.ifos))  #FIXME: for more complex detector names
+        #FIXME: for more complex detector names
+        row.ifos = ','.join(re.findall('..', trigger.ifos))  
         coinc_inspiral_table.append(row)
 
         self.assemble_coinc_map_table(trigger)
@@ -1411,7 +1422,8 @@ def upload_skymap(gracedb_client, gid, ifos, skymap_fname, end_time,
         msg += " can not plot fits to pngs"
         gracedb_client.writeLog(
             gid,
-            "%s, check if it is due to that the trigger single SNR is below %s in the postcoh element for a skymap output"
+            "%s, check if it is due to that the trigger single SNR \
+                is below %s in the postcoh element for a skymap output"
             % (msg, str(cuda_postcoh_output_skymap)),
             filename=None,
             tag_name="sky_loc")
