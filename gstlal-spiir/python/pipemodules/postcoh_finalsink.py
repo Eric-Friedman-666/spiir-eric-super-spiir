@@ -432,7 +432,6 @@ class FinalSink(object):
         # initialize
         #
         self.lock = threading.Lock()
-        self.verbose = verbose
         self.pipeline = pipeline
         self.is_first_buf = True
         self.is_first_event = True
@@ -525,7 +524,7 @@ class FinalSink(object):
             output_list_string=fapupdater_output_fname,
             collect_walltime_string=fapupdater_collect_walltime_string,
             ifos=self.ifos,
-            verbose=self.verbose)
+            verbose=verbose)
 
         # online information performer
         self.need_online_perform = need_online_perform
@@ -858,10 +857,6 @@ class FinalSink(object):
 
         # TODO: Remove conditional bool here and in __init__ after network latency tests
         if self.add_psd_initial_coinc:
-            if self.verbose:
-                print(
-                    "retrieving PSDs from whiteners and generating psd.xml.gz")
-
             # obtain psd from pipeline object before passing to CoincsDocFromPostcoh
             psd_dict = {
                 ifo: self.get_current_lal_psd_frequency_series(ifo)
