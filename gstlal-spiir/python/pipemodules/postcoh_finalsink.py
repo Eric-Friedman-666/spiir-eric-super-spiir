@@ -855,9 +855,9 @@ class FinalSink(object):
         # do alerts
         gracedb_ids = []
 
-        # TODO: Remove conditional bool here and in __init__ after network latency tests
+        # TODO: Remove conditional bool here and in __init__ after tests
         if self.add_psd_initial_coinc:
-            # obtain psd from pipeline object before passing to CoincsDocFromPostcoh
+            # obtain psd from pipeline  before passing to CoincsDocFromPostcoh
             psd_dict = {
                 ifo: self.get_current_lal_psd_frequency_series(ifo)
                 for ifo in re.findall("..", trigger.ifos)
