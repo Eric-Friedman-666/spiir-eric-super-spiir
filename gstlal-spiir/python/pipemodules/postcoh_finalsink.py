@@ -842,7 +842,7 @@ class FinalSink(object):
             f0=0.0,
             deltaF=lal_whiten_element.get_property("delta-f"),
             sampleUnits=lal.Unit("s strain^2"),
-            length=len(data))
+            length=len(current_lal_psd))
         psd_frequency_series.data.data = current_lal_psd
 
         return psd_frequency_series
