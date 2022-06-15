@@ -25,7 +25,7 @@ import math
 import subprocess
 import re
 import time
-import numpy
+import numpy as np
 import os
 import fcntl
 import logging
@@ -835,7 +835,7 @@ class FinalSink(object):
         lal.REAL8FrequencySeries
         """
         lal_whiten_element = self.pipeline.get_by_name("lal_whiten_%s" % ifo)
-        current_lal_psd = numpy.array(lal_whiten_element.get_property("mean-psd"))
+        current_lal_psd = np.array(lal_whiten_element.get_property("mean-psd"))
         psd_frequency_series = lal.CreateREAL8FrequencySeries(
             name="PSD",
             epoch=LIGOTimeGPS(lal.UTCToGPS(time.gmtime()), 0),
@@ -1130,11 +1130,11 @@ class CoincsDocFromPostcoh(object):
         row.coinc_event_id = "coinc_event:coinc_event_id:1"
         #Manoj: add Network SNR to sngl_inspiral table instead of Coherent SNR. Change is reflected on gracedb event page.
         #row.snr = trigger.cohsnr
+        ##network_snr = sqrt(H**2 + L**2 + V**2)
         network_snr2 = 0
         for ifo in re.findall('..', trigger.ifos):
             network_snr2 += (getattr(trigger, "snglsnr_%s" % ifo))**2
-        network_snr = numpy.sqrt(
-            network_snr2)  ##network_snr = sqrt(H**2 + L**2 + V**2)
+        network_snr = np.sqrt(network_snr2)
         row.snr = network_snr
         row.end_time_ns = trigger.end_time_ns
         row.combined_far = trigger.far
