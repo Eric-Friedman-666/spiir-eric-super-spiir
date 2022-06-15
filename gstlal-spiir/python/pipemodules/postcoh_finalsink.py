@@ -1090,7 +1090,7 @@ class CoincsDocFromPostcoh(object):
             lsctables.New(postcoh_table_def.PostcohInspiralTable))
 
     # path here is the job id
-    def assemble_tables(self, trigger, psd_dict=None):
+    def assemble_ligolw_xmldoc(self, trigger, psd_dict=None):
         self.assemble_snglinspiral_table(trigger)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
         coinc_table = lsctables.CoincTable.get_table(self.xmldoc)
