@@ -834,18 +834,18 @@ class FinalSink(object):
         -------
         lal.REAL8FrequencySeries
         """
-        elem = self.pipeline.get_by_name("lal_whiten_%s" % ifo)
-        data = numpy.array(elem.get_property("mean-psd"))
-        psd = lal.CreateREAL8FrequencySeries(
+        lal_whiten_element = self.pipeline.get_by_name("lal_whiten_%s" % ifo)
+        current_lal_psd = numpy.array(lal_whiten_element.get_property("mean-psd"))
+        psd_frequency_series = lal.CreateREAL8FrequencySeries(
             name="PSD",
             epoch=LIGOTimeGPS(lal.UTCToGPS(time.gmtime()), 0),
             f0=0.0,
-            deltaF=elem.get_property("delta-f"),
+            deltaF=lal_whiten_element.get_property("delta-f"),
             sampleUnits=lal.Unit("s strain^2"),
             length=len(data))
-        psd.data.data = data
+        psd_frequency_series.data.data = current_lal_psd
 
-        return psd
+        return psd_frequency_series
 
     def __do_gracedb_alert(self, trigger):
 
