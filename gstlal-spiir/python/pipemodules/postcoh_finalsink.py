@@ -47,6 +47,7 @@ try:
 except ImportError:
     print >> sys.stderr, "warning: gracedb import failed, \
         program will crash if gracedb uploads are attempted"
+
     GraceDb = None
 
 from glue import iterutils
@@ -232,8 +233,8 @@ class FAPUpdater(object):
         if self.output and len(self.output) != len(self.collect_walltime):
             raise ValueError(
                 "number of input walltimes does match the number of \
-                    input filenames: %s does not match %s"
-                % (collect_walltime_string, output_list_string))
+                    input filenames: %s does not match %s" %
+                (collect_walltime_string, output_list_string))
 
         self.verbose = verbose
 
@@ -305,10 +306,9 @@ class FAPUpdater(object):
             # when the number of banks reaches 140,
             # it will give you a signal 7 error in OPA2
             while len(valid_fnames) > self.max_nstats_formargi:
-                logging.info(
-                    "update fap: %d stats files for marignalization, \
-                        over the input string length limit, combining"
-                    % len(valid_fnames))
+                logging.info("update fap: %d stats files for marignalization, \
+                        over the input string length limit, combining" %
+                             len(valid_fnames))
                 self.combine_stats()
                 ls_fnames = self.get_fnames("stats")
                 valid_fnames = self.get_valid_bankstats(ls_fnames, boundary)
@@ -377,10 +377,8 @@ class FAPUpdater(object):
                 total_collected_walltime = sum(collected_walltimes)
                 if this_walltime >= self.combine_duration:
                     continue
-                elif (
-                    (len(collected_fnames) >= self.max_nstats_perbank)
-                    or (total_collected_walltime >= self.combine_duration)
-                ):
+                elif ((len(collected_fnames) >= self.max_nstats_perbank)
+                      or (total_collected_walltime >= self.combine_duration)):
                     start_banktime = int(
                         os.path.split(collected_fnames[0])[-1].split('_')[-2])
                     fout = "%s/bank%s_stats_%d_%d.xml.gz" % (
@@ -552,16 +550,12 @@ class FinalSink(object):
             return False
 
         # just submit it if is a low-significance trigger
-        if (
-            (self.candidate.far < self.gracedb_far_threshold)
-            and (self.candidate.far > self.superevent_thresh)
-        ):
+        if ((self.candidate.far < self.gracedb_far_threshold)
+                and (self.candidate.far > self.superevent_thresh)):
             return True
 
-        if (
-            (self.candidate.far < self.opa_thresh)
-            and (self.candidate.cohsnr < self.opa_cohsnr_thresh)
-        ):
+        if ((self.candidate.far < self.opa_thresh)
+                and (self.candidate.cohsnr < self.opa_cohsnr_thresh)):
             # print "suppressed", self.candidate.cohsnr, self.candidate.far
             return False
 
@@ -629,8 +623,8 @@ class FinalSink(object):
             # End times are offset by negative latencyif running early warning
             max_cluster_boundary = buf_timestamp + self.negative_latency
             if self.is_first_event and nevent > 0:
-                self.cluster_boundary = (
-                    max_cluster_boundary + self.cluster_window)
+                self.cluster_boundary = (max_cluster_boundary +
+                                         self.cluster_window)
                 self.is_first_event = False
 
             # NOTE: only consider clustered trigger for uploading to gracedb
@@ -638,11 +632,8 @@ class FinalSink(object):
             # this loop will exit when the cluster_boundary is incremented
             # to be > the max_cluster_boundary, see diagram in self.cluster()
 
-            while (
-                (self.cluster_window > 0)
-                and (self.cluster_boundary)
-                and (max_cluster_boundary > self.cluster_boundary)
-            ):
+            while ((self.cluster_window > 0) and (self.cluster_boundary)
+                   and (max_cluster_boundary > self.cluster_boundary)):
                 self.cluster(self.cluster_window)
 
                 if self.need_candidate_check:
@@ -668,10 +659,8 @@ class FinalSink(object):
 
             # dump zerolag candidates when interval is reached
             self.snapshot_duration = buf_timestamp - self.t_snapshot_start
-            if (
-                (self.snapshot_interval is not None)
-                and (self.snapshot_duration >= self.snapshot_interval)
-            ):
+            if ((self.snapshot_interval is not None)
+                    and (self.snapshot_duration >= self.snapshot_interval)):
                 snapshot_filename = self.get_output_filename(
                     self.output_prefix, self.output_name,
                     self.t_snapshot_start, self.snapshot_duration)
@@ -686,10 +675,8 @@ class FinalSink(object):
 
             # do calcfap when interval is reached
             fapupdater_duration = buf_timestamp - self.t_fapupdater_start
-            if (
-                (self.fapupdater_interval is not None)
-                and (fapupdater_duration >= self.fapupdater_interval)
-            ):
+            if ((self.fapupdater_interval is not None)
+                    and (fapupdater_duration >= self.fapupdater_interval)):
                 self.fapupdater.update_fap_stats(buf_timestamp)
                 self.t_fapupdater_start = buf_timestamp
 
@@ -792,7 +779,7 @@ class FinalSink(object):
         trigger_is_submitted = 0
 
         # suppress the trigger
-        # if it is not one order of magnitude more significant than the last 
+        # if it is not one order of magnitude more significant than the last
         # trigger or if it not more significant the last submitted trigger
         # FIXME: what if there are two adjacent significant events
         if ((abs(float(trigger.end) - last_time) < 50
@@ -959,10 +946,8 @@ class FinalSink(object):
                                                     t_snapshot_start, duration)
         logging.info("snapshotting %s" % filename)
         # make sure the last round of output dumping is finished
-        if (
-            (self.thread_snapshot_segment is not None)
-            and (self.thread_snapshot_segment.isAlive())
-        ):
+        if ((self.thread_snapshot_segment is not None)
+                and (self.thread_snapshot_segment.isAlive())):
             self.thread_snapshot_segment.join()
 
         # free the last used memory
@@ -1012,16 +997,12 @@ class FinalSink(object):
         if self.thread_snapshot is not None and self.thread_snapshot.isAlive():
             self.thread_snapshot.join()
 
-        if (
-            (self.thread_snapshot_segment is not None)
-            and (self.thread_snapshot_segment.isAlive())
-        ):
+        if ((self.thread_snapshot_segment is not None)
+                and (self.thread_snapshot_segment.isAlive())):
             self.thread_snapshot_segment.join()
 
-        if (
-            (self.thread_upload_skymap is not None)
-            and (self.thread_upload_skymap.isAlive())
-        ):
+        if ((self.thread_upload_skymap is not None)
+                and (self.thread_upload_skymap.isAlive())):
             self.thread_upload_skymap.join()
 
         self.fapupdater.wait_last_process_finish(
@@ -1135,7 +1116,7 @@ class CoincsDocFromPostcoh(object):
         row.coinc_event_id = "coinc_event:coinc_event_id:1"
         #Manoj: add Network SNR to sngl_inspiral table instead of Coherent SNR.
         # Change is reflected on gracedb event page.
-        
+
         #row.snr = trigger.cohsnr
         ##network_snr = sqrt(H**2 + L**2 + V**2)
         network_snr2 = 0
@@ -1146,7 +1127,7 @@ class CoincsDocFromPostcoh(object):
         row.end_time_ns = trigger.end_time_ns
         row.combined_far = trigger.far
         #FIXME: for more complex detector names
-        row.ifos = ','.join(re.findall('..', trigger.ifos))  
+        row.ifos = ','.join(re.findall('..', trigger.ifos))
         coinc_inspiral_table.append(row)
 
         self.assemble_coinc_map_table(trigger)
@@ -1423,7 +1404,7 @@ def upload_skymap(gracedb_client, gid, ifos, skymap_fname, end_time,
         gracedb_client.writeLog(
             gid,
             "%s, check if it is due to that the trigger single SNR \
-                is below %s in the postcoh element for a skymap output"
-            % (msg, str(cuda_postcoh_output_skymap)),
+                is below %s in the postcoh element for a skymap output" %
+            (msg, str(cuda_postcoh_output_skymap)),
             filename=None,
             tag_name="sky_loc")
