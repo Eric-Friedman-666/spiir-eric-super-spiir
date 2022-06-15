@@ -852,21 +852,17 @@ class FinalSink(object):
         if self.__need_trigger_control(trigger):
             return
 
-        # do alerts
         gracedb_ids = []
 
         # TODO: Remove conditional bool here and in __init__ after tests
         if self.add_psd_initial_coinc:
-            # obtain psd from pipeline  before passing to CoincsDocFromPostcoh
             psd_dict = {
                 ifo: self.get_current_lal_psd_frequency_series(ifo)
                 for ifo in re.findall("..", trigger.ifos)
             }
         else:
-            # skip psd array addition on coinc xmldoc
             psd_dict = None
 
-        # assemble tables with PSD frequency series
         self.coincs_document.assemble_tables(trigger, psd_dict)
         xmldoc = self.coincs_document.xmldoc
         filename = "%s_%s_%d_%d.xml" % (trigger.ifos, trigger.end_time,
