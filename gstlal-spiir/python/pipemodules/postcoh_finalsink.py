@@ -856,14 +856,14 @@ class FinalSink(object):
 
         # TODO: Remove conditional bool here and in __init__ after tests
         if self.add_psd_initial_coinc:
-            psd_dict = {
+            ligolw_psd_arrays = {
                 ifo: self.get_current_lal_psd_frequency_series(ifo)
                 for ifo in re.findall("..", trigger.ifos)
             }
         else:
-            psd_dict = None
+            ligolw_psd_arrays = None
 
-        self.coincs_document.assemble_tables(trigger, psd_dict)
+        self.coincs_document.assemble_ligolw_xmldoc(trigger, ligolw_psd_arrays)
         xmldoc = self.coincs_document.xmldoc
         filename = "%s_%s_%d_%d.xml" % (trigger.ifos, trigger.end_time,
                                         trigger.bankid, trigger.tmplt_idx)
