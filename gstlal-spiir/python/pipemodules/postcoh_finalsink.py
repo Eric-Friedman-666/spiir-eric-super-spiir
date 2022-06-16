@@ -897,11 +897,12 @@ class FinalSink(object):
                     offline=self.gracedb_offline_annote)
                 resp_json = resp.json()
                 if resp.status != httplib.CREATED:
-                    print >> sys.stderr, "upload of gid '%s' failed" % filename
+                    error_message = "graceid upload '%s' failed" % filename
+                    print >> sys.stderr, error_message
                 else:
                     gid = resp_json["graceid"]
-                    print >> sys.stderr, "upload of graceid '%s' success" % gid
-                    gracedb_ids.append(grace_id)
+                    print >> sys.stderr, "graceid upload '%s' succeeded" % gid
+                    gracedb_ids.append(gid)
                     break
             except Exception as e:
                 print(e)
@@ -917,7 +918,7 @@ class FinalSink(object):
         del self.coincs_document
         self.coincs_document = coincs_document
         if not gracedb_ids:
-            print "gracedb upload of %s failed completely" % filename
+            print "gracedb upload of '%s' failed completely" % filename
             return
         gid = gracedb_ids[0]
         log_message = "Optimal ra and dec from this coherent pipeline: \
