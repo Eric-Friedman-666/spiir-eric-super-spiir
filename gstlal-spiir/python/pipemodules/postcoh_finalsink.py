@@ -278,8 +278,8 @@ class FAPUpdater(object):
         valid_fnames = []
         for ifname in ls_fnames:
             ifname_split = ifname.split("_")
-            # FIXME: hard coded the stats name
-            # e.g. bank16_stats_1187008882_1800.xml.gz
+            # FIXME: This assumes the format of the stats filename
+            #   e.g. bank16_stats_1187008882_1800.xml.gz
             if len(ifname_split) > 1 and ifname[
                     -4:] != "next" and ifname_split[-2].isdigit() and int(
                         ifname_split[-2]) > boundary:
@@ -290,10 +290,10 @@ class FAPUpdater(object):
 
         logging.info("update fap %d" % cur_buftime)
         self.wait_last_process_finish(self.procs_update_fap_stats)
+
         # list all the files in the path
-        #nprefix = len(self.input_prefix_list[0].split("_"))
-        # FIXME: hard-coded keyword, assuming name name
-        # e.g. bank16_stats_1187008882_1800.xml.gz
+        # FIXME: This assumes the format of the stats filename
+        #   e.g. bank16_stats_1187008882_1800.xml.gz
         ls_fnames = self.get_fnames("stats")
         if ls_fnames is None or len(ls_fnames) == 0:
             return
@@ -495,7 +495,7 @@ class FinalSink(object):
         self.add_psd_initial_coinc = add_psd_initial_coinc
         self.coincs_document = CoincsDocFromPostcoh(path, process_params,
                                                     channel_dict)
-        # get  values needed for skymap accompanying the trigger uploads
+        # get values needed for skymap accompanying the trigger uploads
         for param in process_params:
             if param == 'cuda_postcoh_detrsp_fname':
                 self.cuda_postcoh_detrsp_fname = process_params[param]
@@ -594,7 +594,8 @@ class FinalSink(object):
             if len(newevents) == 0:
                 return
 
-            # first entry is used to add to the segments, not a really event
+            # FIXME: the first entry is used to add to the segments,
+            #   but its not really an event
             participating_ifos = re.findall('..', newevents[0].ifos)
             buf_seg = segments.segment(
                 buf_timestamp, buf_timestamp + LIGOTimeGPS(0, buf.duration))
@@ -619,9 +620,10 @@ class FinalSink(object):
                 self.t_start = buf_timestamp
                 self.is_first_buf = False
 
-            # The maximum (upper) bound of any cluster we want to process
+            # The max (upper) bound of any cluster we are willing to process.
             # Assume we have all buffers from before the start of this buffer
-            # End times are offset by negative latencyif running early warning
+            # Event end times are offset by negative latency if we are
+            # running early warning
             max_cluster_boundary = buf_timestamp + self.negative_latency
             if self.is_first_event and nevent > 0:
                 self.cluster_boundary = (max_cluster_boundary +
@@ -721,14 +723,14 @@ class FinalSink(object):
 
         if self.candidate is None or is_better_event(peak_event,
                                                      self.candidate):
-            # slide window so the centre
-            # becomes the peak_event
+            # slide window so the centre becomes the peak_event
             self.candidate = peak_event
             iterutils.inplace_filter(
                 lambda row: row.end > self.cluster_boundary,
                 self.cur_event_table)
             # update boundary
-            # cluster boundary does not necessarily align with buffer boundary
+            # NOTE: cluster boundary does not necessarily align with
+            #   buffer boundary
             self.cluster_boundary = self.candidate.end + cluster_window
             self.need_candidate_check = False
         else:
@@ -1081,7 +1083,7 @@ class CoincsDocFromPostcoh(object):
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(postcoh_table_def.PostcohInspiralTable))
 
-    def assemble_ligolw_xmldoc(self, trigger, psd_dict=None):
+    def assemble_ligolw_xmldoc(self, trigger, psds=None):
         self.assemble_snglinspiral_table(trigger)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
         coinc_table = lsctables.CoincTable.get_table(self.xmldoc)
@@ -1129,8 +1131,8 @@ class CoincsDocFromPostcoh(object):
         self.assemble_coinc_map_table(trigger)
         self.assemble_time_slide_table(trigger)
 
-        if psd_dict is not None:
-            self.assemble_psd_frequency_series_arrays(psd_dict)
+        if psds is not None:
+            self.assemble_ligolw_psd_arrays(psds)
 
         postcoh_table.append(trigger)
 
@@ -1254,7 +1256,7 @@ class CoincsDocFromPostcoh(object):
             sngl_inspiral_table.append(row)
             iifo += 1
 
-    def assemble_psd_frequency_series_arrays(self, psd_dict):
+    def assemble_ligolw_psd_arrays(self, psds):
         """Assembles a LIGO_LW REAL8FrequencySeries Array from a
         dictionary where keys are ifo strings and values are a
         lal.REAL8FrequencySeries object of the mean-psd for each
@@ -1270,11 +1272,11 @@ class CoincsDocFromPostcoh(object):
             A dictionary of frequency series objects that refer to
             the mean-psd for each ifo key.
         """
-        for ifo, psd in psd_dict.items():
-            psd_element = lal.series.build_REAL8FrequencySeries(psd)
-            psd_element.appendChild(
+        for ifo, psd in psds.items():
+            ligolw_psd_element = lal.series.build_REAL8FrequencySeries(psd)
+            ligolw_psd_element.appendChild(
                 ligolw_param.Param.build(u"instrument", u"lstring", ifo))
-            self.xmldoc.childNodes[-1].appendChild(psd_element)
+            self.xmldoc.childNodes[-1].appendChild(ligolw_psd_element)
 
 
 def call_plot_fits_func(pngname,
