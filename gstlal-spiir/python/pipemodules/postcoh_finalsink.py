@@ -433,7 +433,7 @@ class FinalSink(object):
                  superevent_thresh=3.8e-7,
                  opa_cohsnr_thresh=8,
                  negative_latency=0,
-                 add_psd_initial_coinc=False,
+                 append_psd_to_coincs_doc=True,
                  verbose=False):
         #
         # initialize
@@ -492,7 +492,7 @@ class FinalSink(object):
             self.postcoh_document.xmldoc)
 
         # coinc doc to be uploaded to gracedb
-        self.add_psd_initial_coinc = add_psd_initial_coinc
+        self.append_psd_to_coincs_doc = append_psd_to_coincs_doc
         self.coincs_document = CoincsDocFromPostcoh(path, process_params,
                                                     channel_dict)
         # get values needed for skymap accompanying the trigger uploads
@@ -851,7 +851,7 @@ class FinalSink(object):
         gracedb_ids = []
 
         # TODO: Remove conditional bool here and in __init__ after tests
-        if self.add_psd_initial_coinc:
+        if self.append_psd_to_coincs_doc:
             psds = {
                 ifo: self.get_current_lal_psd_frequency_series(ifo)
                 for ifo in re.findall("..", trigger.ifos)
