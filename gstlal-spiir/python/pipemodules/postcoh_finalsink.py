@@ -897,10 +897,10 @@ class FinalSink(object):
                     offline=self.gracedb_offline_annote)
                 resp_json = resp.json()
                 if resp.status != httplib.CREATED:
-                    print >> sys.stderr, "upload of %s failed" % filename
+                    print >> sys.stderr, "upload of gid '%s' failed" % filename
                 else:
-                    grace_id = resp_json["graceid"]
-                    print >> sys.stderr, "upload of %s succeeded" % grace_id
+                    gid = resp_json["graceid"]
+                    print >> sys.stderr, "upload of graceid '%s' success" % gid
                     gracedb_ids.append(grace_id)
                     break
             except Exception as e:
@@ -911,7 +911,7 @@ class FinalSink(object):
 
         gracedb_upload_itrial = 1
 
-        # TODO: Refactor xmldoc handling to be more pythonic
+        # TODO: Refactor xmldoc handling to be more pythonic, see #35
         # delete the xmldoc and get a new empty one for next upload
         coincs_document = self.coincs_document.get_another()
         del self.coincs_document
@@ -1120,8 +1120,10 @@ class CoincsDocFromPostcoh(object):
 
         # add to sngl_inspiral table the network SNR = sqrt(H**2 + L**2 + V**2)
         row.snr = np.sqrt(
-            np.sum([(trigger, "snglsnr_%s" % ifo)**2
-                    for ifo in re.findall("..", trigger.ifos)]))
+            np.sum([
+                getattr(trigger, "snglsnr_%s" % ifo)**2
+                for ifo in re.findall("..", trigger.ifos)
+            ]))
         row.end_time_ns = trigger.end_time_ns
         row.combined_far = trigger.far
         #FIXME: for more complex detector names
@@ -1268,7 +1270,7 @@ class CoincsDocFromPostcoh(object):
 
         Parameters
         ----------
-        psd_dict: dict[str, lal.REAL8FrequencySeries]
+        psds: dict[str, lal.REAL8FrequencySeries]
             A dictionary of frequency series objects that refer to
             the mean-psd for each ifo key.
         """
