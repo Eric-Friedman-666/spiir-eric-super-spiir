@@ -378,8 +378,8 @@ class FAPUpdater(object):
                 total_collected_walltime = sum(collected_walltimes)
                 if this_walltime >= self.combine_duration:
                     continue
-                elif ((len(collected_fnames) >= self.max_nstats_perbank)
-                      or (total_collected_walltime >= self.combine_duration)):
+                elif (len(collected_fnames) >= self.max_nstats_perbank
+                      or total_collected_walltime >= self.combine_duration):
                     start_banktime = int(
                         os.path.split(collected_fnames[0])[-1].split('_')[-2])
                     fout = "%s/bank%s_stats_%d_%d.xml.gz" % (
