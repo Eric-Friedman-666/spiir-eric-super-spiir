@@ -244,7 +244,8 @@ class FAPUpdater(object):
                 if proc.poll() is None:
                     (stdoutdata, stderrdata) = proc.communicate()
                     if proc.returncode != 0:
-                        print >> sys.stderr, "last process return code", proc.returncode, stderrdata
+                        print >> sys.stderr, "last process return code", \
+                            proc.returncode, stderrdata
 
         # delete all update processes when they are finished
         del procs[:]
@@ -1114,16 +1115,11 @@ class CoincsDocFromPostcoh(object):
         row.mass = trigger.mtotal
         row.end_time = trigger.end_time
         row.coinc_event_id = "coinc_event:coinc_event_id:1"
-        #Manoj: add Network SNR to sngl_inspiral table instead of Coherent SNR.
-        # Change is reflected on gracedb event page.
 
-        #row.snr = trigger.cohsnr
-        ##network_snr = sqrt(H**2 + L**2 + V**2)
-        network_snr2 = 0
-        for ifo in re.findall('..', trigger.ifos):
-            network_snr2 += (getattr(trigger, "snglsnr_%s" % ifo))**2
-        network_snr = np.sqrt(network_snr2)
-        row.snr = network_snr
+        # add to sngl_inspiral table the network SNR = sqrt(H**2 + L**2 + V**2)
+        row.snr = np.sqrt(
+            np.sum([(trigger, "snglsnr_%s" % ifo)**2
+                    for ifo in re.findall("..", trigger.ifos)]))
         row.end_time_ns = trigger.end_time_ns
         row.combined_far = trigger.far
         #FIXME: for more complex detector names
