@@ -580,7 +580,7 @@ class FinalSink(object):
                      i for (i, v) in zip(self.candidate.chisq, ifo_active) if v
                  ]))
 
-    # TODO: Refactor/rewrite appsink_new_buffer() and cluster()
+    # TODO: Refactor/rewrite appsink_new_buffer() and cluster(), see #36
     def appsink_new_buffer(self, elem):
         with self.lock:
             buf = elem.emit("pull-buffer")
