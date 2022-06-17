@@ -645,6 +645,7 @@ LIMIT 100
 
     def write_candidate_json(self, candidates, fname):
         data = []
+        # FIXME: This has not been updated to support KAGRA. See !36
         # FIXME generalize for virgo
         description = [
             ("Rank", "number"),

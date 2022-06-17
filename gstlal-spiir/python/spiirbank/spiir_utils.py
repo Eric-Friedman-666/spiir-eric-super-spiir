@@ -39,7 +39,7 @@ lsctables.use_in(DefaultContentHandler)
 
 def get_bankid_from_bankname(bankname):
     tmp_name = os.path.split(bankname)[-1]
-    tmp_name = re.sub(r'[HLV]1', '', tmp_name)
+    tmp_name = re.sub(r'[HLVK]1', '', tmp_name)
     search_result = re.search(r'\d{1,4}', tmp_name)
     try:
         bankid = search_result.group()

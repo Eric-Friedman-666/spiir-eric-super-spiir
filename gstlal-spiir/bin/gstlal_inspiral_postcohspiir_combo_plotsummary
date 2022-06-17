@@ -76,7 +76,7 @@ def parse_command_line():
                       help="Set the name of the segment xml name (required).")
 
     parser.add_option("--ifos",
-                      metavar="H1L1V1",
+                      metavar="H1L1V1K1", # NOTE: This has not been tested with KAGRA enabled/disabled, see !36
                       help="Set the name of the inj xml name (required).")
     parser.add_option(
         "-t",

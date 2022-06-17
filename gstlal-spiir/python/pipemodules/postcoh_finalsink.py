@@ -444,7 +444,7 @@ class FinalSink(object):
         self.is_first_event = True
         self.channel_dict = channel_dict
         self.ifos = lsctables.ifos_from_instrument_set(
-            channel_dict.keys()).replace(",", "")  # format: "H1L1V1"
+            channel_dict.keys()).replace(",", "")  # format: "H1L1V1K1"
 
         # cluster parameters
         self.cluster_window = cluster_window
