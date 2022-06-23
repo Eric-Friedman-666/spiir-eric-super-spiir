@@ -3,11 +3,12 @@
 #include <stdio.h>
 
 // FIXME: Replace with a proper testing framework for c and cuda, see #38
-// NOTE: This function runs as device code in a cuda kernel (postcoh_kernel.cu)
+// NOTE: The production version of this function runs as device code in a cuda 
+//      kernel (postcoh_kernel.cu)
 //      assert is supported by devices with compute capability 2.x and higher
 static inline size_t ring_index(ptrdiff_t ind, ptrdiff_t len) {
-    assert(len > 0);
-    return ind % len + (ind % len < 0) * len;
+  assert(len > 0);
+  return ((ind % len) + len) % len;
 }
 
 int main() {

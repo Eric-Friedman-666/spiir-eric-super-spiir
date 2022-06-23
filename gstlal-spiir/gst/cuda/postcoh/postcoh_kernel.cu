@@ -55,7 +55,7 @@ __device__ static inline float atomicMax(float *address, float val) {
 // Returns a wrapped index that can be safely used by the ring buffer.
 __device__ static inline size_t ring_index(ptrdiff_t ind, ptrdiff_t len) {
     assert(len > 0);
-    return ind % len + (ind % len < 0) * len;
+    return ((ind % len) + len) % len;
 }
 
 __global__ void ker_max_snglsnr(COMPLEX_F **snr, // INPUT: snr
