@@ -12,6 +12,7 @@ dist_bin_SCRIPTS = \
 	gstlal_inspiral_postcohspiir_offline \
 	gstlal_inspiral_postcohspiir_extract_zerolag \
 	gstlal_inspiral_postcohspiir_plotsummary \
+	gstlal_inspiral_postcohspiir_plot_snr_series \
 	gstlal_inspiral_postcohspiir_summarypage \
 	gstlal_cohfar_plot_stats \
 	gstlal_cohfar_plot_ifar \

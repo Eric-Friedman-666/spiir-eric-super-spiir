@@ -77,8 +77,7 @@ def condition_imr_template(approximant, data, epoch_time, sample_rate_max,
     phase = numpy.arctan2(data[epoch_index].imag, data[epoch_index].real)
     data *= numpy.exp(-1.j * phase)
     data = numpy.roll(data, target_index - epoch_index)
-    print "epoch_index %d, target_index %d, roll index %d" % (
-        epoch_index, target_index, target_index - epoch_index)
+    print("epoch_index %d, target_index %d, roll index %d" % (epoch_index, target_index, target_index - epoch_index))
     # re-taper the ends of the waveform that got cyclically permuted
     # around the ring
     tukey_beta = 2. * abs(target_index - epoch_index) / float(len(data))
@@ -314,7 +313,7 @@ def normalized_crosscorr(a, b, autocorrelation_length=201):
             (corr[-half_len:], corr[:half_len + 1]))
         auto_bank /= corr[max_idx]
     else:
-        print "Warning: max of autocorrelation happen at position [%d]" % max_idx
+        print("Warning: max of autocorrelation happen at position [%d]" % max_idx)
         temp_idx = (n_temp - 1) // 2
         temp_corr = numpy.concatenate((corr[-temp_idx:], corr[:-temp_idx]))
         max_idx = numpy.where(abs(temp_corr) == max(abs(temp_corr)))[0][0]
@@ -741,7 +740,7 @@ def gen_whitened_amp_phase(psd,
     else:
         # FIXME: the hp, hc are now in frequency domain.
         # Need to transform them first into time domain to perform following whitening
-        print >> sys.stderr, "Time domain whitening not supported"
+        print("Time domain whitening not supported", sys.stderr)
         sys.exit()
 
     # Working length is initially doubled so we can avoid wraparound of templates
@@ -907,26 +906,26 @@ class Bank(object):
             """
         if remote_log:
             if remote_db_engine is None or remote_log_table_name is None:
-                print "you told me to keep a remote_log but" \
+                print("you told me to keep a remote_log but" \
                       "you did not provide me a remote database engine connection " \
-                      "or a table to write to."
+                      "or a table to write to.")
                 exit(0)
             else:
                 try:
                     from pandas import DataFrame
                     remote_log_df = DataFrame()
                 except Exception as local_exception:
-                    print "Failed to import from pandas import DataFrame\n"
-                    print "Exception is:\n{}".format(local_exception)
+                    print("Failed to import from pandas import DataFrame\n")
+                    print("Exception is:\n{}".format(local_exception))
 
         if keep_track:
             if output_file is None:
-                print "you told me to keep track of my status but" \
-                      "you did not provide the output file name"
+                print("you told me to keep track of my status but" \
+                      "you did not provide the output file name")
                 exit(0)
             else:
                 if '.xml.gz' not in output_file:
-                    print "the output file should end in '.xml.gz'"
+                    print("the output file should end in '.xml.gz'")
                     exit(0)
                 else:
                     track_file = output_file.replace('.xml.gz', '_status.txt')
@@ -934,9 +933,9 @@ class Bank(object):
                         with open(track_file, 'w') as w:
                             w.writelines('')
                     except IOError:
-                        print "I can't keep track of my run status. \n" \
+                        print("I can't keep track of my run status. \n" \
                               "Please check that you have permission to write to the" \
-                              "output directory."
+                              "output directory.")
 
         # Check various inputs are consistent
         assert epsilon_min <= epsilon_start
@@ -965,7 +964,7 @@ class Bank(object):
         self.negative_latency = negative_latency
 
         if debug:
-            print 'bank object created'
+            print('bank object created')
 
         if sampleRate is None:
             fFinal = max(sngl_inspiral_table.getColumnByName("f_final"))
@@ -998,8 +997,8 @@ class Bank(object):
                                                    sampleRate=sampleRate)
 
         if debug:
-            print 'working state generated'
-            print 'smoothing PSD'
+            print('working state generated')
+            print('smoothing PSD')
 
         # Smooth the PSD and interpolate to required resolution
         if psd is not None:
@@ -1030,13 +1029,13 @@ class Bank(object):
             templates = list(range(len(self.sngl_inspiral_table)))
 
         if debug:
-            print 'starting template generation'
-            print 'will create {} templates'.format(len(templates))
+            print('starting template generation')
+            print('will create {} templates'.format(len(templates)))
 
         for tmp, row in enumerate(self.sngl_inspiral_table):
             if tmp in templates:
                 if debug:
-                    print tmp
+                    print(tmp)
 
                 if keep_track:
                     with open(track_file, 'w') as w:
@@ -1181,7 +1180,7 @@ class Bank(object):
                                 spiir_match_min = b0_optimized_overlap_min
                                 spiir_match_max = b0_optimized_overlap_max
                                 if verbose:
-                                    print >> sys.stderr, "Pass -1, overlap %f" % spiir_match
+                                    print("Pass -1, overlap %f" % spiir_match, file=sys.stderr)
                                 a1, \
                                 b0, \
                                 spiir_match, \

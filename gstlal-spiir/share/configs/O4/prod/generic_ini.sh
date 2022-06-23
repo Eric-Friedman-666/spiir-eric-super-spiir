@@ -4,39 +4,14 @@
 #  please refer to the documentation in the gstlal-spiir
 #  package for the explanation of the options of the pipeline
 ######################################################
-
-######################################################
-#  --code-version, obtain the git commit hash for gstlal spiir branch
-#  e.g. spiir-review-O3 branch
-######################################################
-myrundir=`pwd`
-spiir_branch=spiir-review-O3
-spiir_src_dir=/home/spiir/src/gstlal_lvshm_patch
-cd ${spiir_src_dir}/gstlal
-version_spiir=`git log -b ${spiir_branch} | head -1 | awk '{print $2}'`
-cd ${myrundir}
-
-######################################################
-#  mylocation is used for all job executables
-#  e.g. in gstlal_inspiral_postcohspiir_${user}.sub:
-# executable = $mylocation/bin/gstlal_inspiral_postcohspiir_online
-######################################################
-mylocation=/home/spiir/opt/gstlocal_er13_lvshm_patch
-
-######################################################
-#  spiir is a shared account, specify job submitter
-######################################################
-user=spiir
-submitter=qi.chu
-
-######################################################
 #  search type and also gracedb trigger type, highmass or lowmass
 #  our lowmass includes only BNS (1-3),
 #  highmass includes NSBH and BBH (<100)
 #  --finalsink-gracedb-search ${SearchType}
 ######################################################
-
-SearchType=HighMass
+# You may also use LowMass, MDC, O2VirgoTest, and AllSky
+######################################################
+SearchType=AllSky
 
 ######################################################
 #  use banks with no cut-off (0), or early warning cut-off (5, 10)
@@ -55,46 +30,131 @@ iftest=0
 #  live streaming data (1) or O2replay data (0)
 ######################################################
 
-iflive=1
+iflive=0
+######################################################
+# raw data ?
+######################################################
+
+ifraw=0
+if (( ${iflive} == 0 )); then
+    ifraw=0
+fi
+
 
 ######################################################
 #  which GraceDB to submit the job
 #  triggers uploaded to the main grace (0), or gracedb-playground (1)
 ######################################################
+#  DO NOT CHANGE IF YOU ARE NOT RUNNING SPIIR PIPELINE FOR OPA
+######################################################
 
-ifplayground=0
+ifplayground=1
 
 ######################################################
 #  --request-data=${mytag} 
+######################################################
+#  --code-version, obtain the git commit hash for gstlal spiir branch
+#  e.g. spiir-review-O3 branch
+# source  ~spiir/.spiir_newrankrc
+# directory has been changed to ~spiir/software
+######################################################
+myrundir=`pwd`
+
+######################################################
+# my_installation=${HOME}/O3
+#   spiir_src_dir=${my_installation}/src/spiir
+#   spiir_src_dir=/home/spiir/src/gstlal_er14_v2
+#   spiir_src_dir=/home/spiir/src/gstlal_spiir_o3
+
+######################################################
+#  Use spiir installation
+
+#spiir_src_dir=/home/victor.oloworaran/O3/spiir
+#spiir_src_dir=/home/manoj.kovalam/src/spiir-review-O3
+#spiir_src_dir=/home/lwen/O3/src/spiir
+spiir_src_dir=/home/spiir/manoj/spiir-scripts/build/review/source
+
+######################################################
+#spiir_branch=spiir-review-newrank
+#spiir_tag=spiir-newrank-O3
+
+spiir_branch=spiir-O4-reviewed
+# 
+#spiir_branch=spiir-production-Oct27-dev
+#spiir_tag=spiir-newrank-O3
+
+cd ${spiir_src_dir}/gstlal
+
+# use branch when not tagged
+#version_spiir=`git log -b ${spiir_branch} | head -1 | awk '{print $2}'`
+version_spiir=`git log -b ${spiir_branch} | head -1 | awk '{print $2}'`
+# use tag if tag is available
+#version_spiir=`git log tags/${spiir_tag} | head -1 | awk '{print $2}'`
+cd ${myrundir}
+
+######################################################
+#  mylocation is used for all job executables
+#  e.g. in gstlal_inspiral_postcohspiir_${user}.sub:
+# executable = $mylocation/bin/gstlal_inspiral_postcohspiir_online
+######################################################
+#mylocation=/home/spiir/opt/gstlocal_er14_v2
+#mylocation=/home/spiir/opt/gstlocal_o3
+#mylocation=/home/spiir/opt/spiir_newrank
+# mylocation=${my_installation}/opt/spiir_sep9
+#
+# use spiir installation:
+
+#mylocation=/home/spiir/opt/spiir_sep9
+
+#mylocation=/home/victor.oloworaran/O3/opt/spiirOct25
+#mylocation=/home/manoj.kovalam/support/gstlocal_spiirfix_0.1T
+#mylocation=/home/lwen/O3/opt/spiir_prod_coh5_8
+#mylocation=/home/lwen/O3/opt/spiir_prod_coh4_8_chisq0.4_8
+#mylocation=/home/lwen/O3/opt/spiir_prod_noV_chisq_Oct24_dev
+#mylocation=/home/manoj.kovalam/opt/spiir-review-O3
+mylocation=/home/spiir/manoj/spiir-scripts/build/review/install
+
+######################################################
+# User Input
+######################################################
+#  spiir is a shared account, specify job submitter
+######################################################
+user=spiir
+submitter=manoj.kovalam
+
 ######################################################
 #
 if (( ${iflive} == 1 )); then
 	mytag="Live_H1_L1_V1"
 else
-	mytag="O2Replay_H1_L1_V1"
+	mytag="O3Replay_H1_L1_V1"
 fi
 
 ######################################################
 # number of detectors
 ######################################################
 
-ndet=2
+ndet=3
 
 ######################################################
 # set the location of the banks (O2 template placement with ER13 PSD)
 ######################################################
-bankdir=/home/manoj.kovalam/ER13/banks/ER13_${latency}
-
+bankdir=/home/spiir/pre-O4/banks/O3
+#bankdir=/home/manoj.kovalam/Early_Warning/O2_Replay/banks/O2_${latency}
+#bankdir=/home/manoj.kovalam/Negative_Latency/banks/gstlal_iir_bank_b0optmin98pc_ER14a_${latency}
+#bankdir=/home/anala.ks/O3_neg_lat/gstlal_iir_bank_b0optmin97pc_ER14a_10
 ######################################################
 #  --cohfar-assignfar-silent-time ${FAR_silent}
 ######################################################
-FAR_silent=43200
+FAR_silent=0
 
 ######################################################
 #  --finalsink-fapupdater-collect-walltime ${wtime1},${wtime2},${wtime3}
 #  background accum wall time
 ######################################################
+# Use longer background to ensure enough background data points
 wtime1=604800
+#wtime1=432000
 wtime2=86400
 wtime3=7200
 
@@ -111,38 +171,90 @@ wtime3=7200
 #  starting bank number
 #  the ID of last bank
 ######################################################
-if [ "${SearchType}" == "HighMass" ]; then # higmass
-	start=100
-	nbank=415
-	njob=79
-else
-	start=0
-	nbank=99
-	njob=25
-fi
+# default: two detector, fullbank
+######################################################
+# BBH [  384-415] [380 - 415] 32 banks = 8  /  6 nodes 
+# NSBH
+start=384
+njob=8
+nbank=415
+
+#if (( ${ndet} == 3 )); then # if 3-detector and main search
+#    if [ "${SearchType}" == "HighMass" ]; then # higmass
+#  	start=100
+#  	njob=79
+  #    else
+#  	if [ "${SearchType}" == "LowMass" ]; then # lowmass 
+#  	    start=0
+#  	    njob=25
+#  	fi
+   #   fi
+#  else # if two-detector and for the main search
+   #   if [ "${SearchType}" == "HighMass" ]; then # higmass                                                                  
+#          start=98
+  #        njob=53
+    #  else
+#  	if [ "${SearchType}" == "LowMass" ]; then # lowmass    
+   #           start=0   # 0-101
+      #        njob=17
+       #   fi
+   #   fi
+#  fi
+
 
 ######################################################
 # Horizon distances given a 1.4+ 1.4 source
 # in the gen_pipeline.sh: ifo_horizons=H1:${dhH},L1:${dhL},V1:${dhV} 
 ######################################################
 if (( ${iflive} == 0 )); then # O2replay psd
-    dhL=100
-    dhH=52
-    dhV=26
+    dhL=140
+    dhH=112
+    dhV=50
 else # ER14 psd
-    dhL=140                                                                              
-    dhH=100                                                                                
-    dhV=55                                                                                 
+    dhL=140
+    dhH=112                                                                               
+    dhV=50                                                                       
 fi
-
+# NEW for fix code
+#sense=`echo "H1:${dhH},L1:${dhL},V1:${dhV}"`
 #######################################################
 ##  gracedb uploading setting and lvalert settings
 ##  --finalsink-gracedb-service-url ${GraceDB_URL} 
 ##  --finalsink-gracedb-group ${GraceDB_Group}
 ##  lvalert.ini: ${gracedbgroupL}_spiir_${searchtypeL}
 #######################################################
+# following instruction I sent on spiir-discuss to get your lvalert certificate with password
+# please go on this website to create an account 
+#
+#             https://www.lsc-group.phys.uwm.edu/cgi-bin/jabber-acct.cgi
+#
+# for “Production” if you are submitting to the main GraceDB, or for “Playground” if you only need to submit to Gracedb-playground, and remember the password.
+#
+#              - Create  a .netrc file   
+#
+#(or get your own name for it, e.g., .LWnetrc) ,  it should contain the following two lines of text,  including your password  (changing my name to yours and your own password where you register at the website).
+#
+#           machine lvalert.cgca.uwm.edu login your_ligo_name password your_pass_wd
+#           machine lvalert-playground.cgca.uwm.edu login your_ligo_name password your_pass_wd
+#
+# - To check what kind of subscription you have, use:
+#
+#            lvalert_admin --username linqing.wen  --subscribe --node cbc_spiir_lowmass --netrc ~/.LWnetrc --server lvalert-playground.cgca.uwm.edu
+#
+# - You need to change the “—node” input to, say cbc_spiir_lowmass, cbc_spiir_highmass, ….mdc, …o2virgotes according the the SearchType in this file.  There are only a few labels you can use.  The same for lvalert.cgca.uwm.edu
+# - Use the following command to check what you have subscribed to :
+#
+#             lvalert_admin --username linqing.wen --subscriptions --netrc ~/.LWnetrc  --server lvalert-playground.cgca.uwm.edu
+#
+#   … do the same for lvalert.cgca.uwm.edu or the production.
+# 
+######################################################
+# User Input
+######################################################
 mylvcert=/home/${user}/.netrc
-mylvuser=qi.chu
+mylvuser=manoj.kovalam
+######################################################
+
 if (( ${ifplayground} == 1 )); then
     GraceDB_URL=https://gracedb-playground.ligo.org/api/
     lvalert_server=lvalert-playground.cgca.uwm.edu
@@ -187,7 +299,7 @@ newwhiten=0
 # --finalsink-far-factor == number of total jobs
 ######################################################
 
-nfac=$(( njob * 2 ))
+nfac=$(( njob )) # BBH on its own count.  3det8+2det6 = 15.  132 #3det79+2det53=132  #$(( njob * 2 ))
 
 ######################################################  
 #  --ht-gate-threshold
@@ -215,13 +327,13 @@ if (( ${iflive} == 0 )); then # run on o2replay
     if (( ${ndet} ==2)); then
 	mymem="H1=R1LHO_Data --shared-memory-partition=L1=R1LLO_Data --shared-memory-block-size 500000 --shared-memory-assumed-duration 1"
     else
-	mymem="L1=R1LLO_Data --shared-memory-partition=H1=R1LHO_Data --shared-memory-partition=V1=R1VIRGO_Data --shared-memory-block-size 500000 --shared-memory-assumed-duration 1"
+	mymem="L1=R6LLO_Data --shared-memory-partition=H1=R6LHO_Data --shared-memory-partition=V1=R6VIRGO_Data --shared-memory-block-size 1000000 --shared-memory-assumed-duration 1"
     fi
 else # run on live
     if (( ${ndet} ==2)); then
-	mymem="H1=X1LHO_Data --shared-memory-partition=L1=X1LLO_Data --shared-memory-block-size 500000 --shared-memory-assumed-duration 1"
+	mymem="H1=X1LHO_Data --shared-memory-partition=L1=X1LLO_Data --shared-memory-block-size 1000000 --shared-memory-assumed-duration 1"
     else
-	mymem="L1=X1LLO_Data --shared-memory-partition=H1=X1LHO_Data --shared-memory-partition=V1=X1VIRGO_Data --shared-memory-block-size 500000 --shared-memory-assumed-duration 1"
+	mymem="L1=X1LLO_Data --shared-memory-partition=H1=X1LHO_Data --shared-memory-partition=V1=X1VIRGO_Data --shared-memory-block-size 1000000 --shared-memory-assumed-duration 1"
     fi
 fi
 
@@ -233,7 +345,18 @@ fi
 # 
 ######################################################
 mynodename="postcohspiir"
-onbits=290
+if (( ${iflive} == 1 )); then
+    onbits=7
+    onbits_V=1027
+else
+    onbits=7 #7
+    onbits_V=1027  #1027
+fi
+
+if (( ${ifraw} == 1 )); then
+   onbits=0
+   onbits_V=0
+fi
 
 if (( ${iflive} == 1 )); then
     if (( ${ndet} == 2)); then
@@ -241,15 +364,15 @@ if (( ${iflive} == 1 )); then
         mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0"
 	else
         mychannel="H1=GDS-GATED_STRAIN --channel-name L1=GDS-GATED_STRAIN  --channel-name V1=Hrec_hoft_16384Hz_Gated"
-        mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-channel-name V1=DQ_ANALYSIS_STATE_VECTOR --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits} --state-vector-on-bits V1=${onbits}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0  --state-vector-off-bits V1=0"
+        mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-channel-name V1=DQ_ANALYSIS_STATE_VECTOR --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits} --state-vector-on-bits V1=${onbits_V}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0  --state-vector-off-bits V1=0"
 	fi
 else # O2 replay
     if (( ${ndet} == 2)); then
-		mychannel="H1=GDS-GATED_STRAIN_O2Replay --channel-name L1=GDS-GATED_STRAIN_O2Replay"
+		mychannel="H1=GDS-CALIB_STRAIN_O3Replay --channel-name L1=GDS-CALIB_STRAIN_O3Replay"
 		mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0"
 	else
-		mychannel="H1=GDS-GATED_STRAIN_O2Replay --channel-name L1=GDS-GATED_STRAIN_O2Replay  --channel-name V1=Hrec_hoft_16384Hz_O2Replay"
-		mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-channel-name V1=DQ_ANALYSIS_STATE_VECTOR --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits} --state-vector-on-bits V1=${onbits}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0  --state-vector-off-bits V1=0"
+		mychannel="H1=GDS-CALIB_STRAIN_O3Replay --channel-name L1=GDS-CALIB_STRAIN_O3Replay  --channel-name V1=Hrec_hoft_16384Hz_O3Replay"
+		mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-channel-name V1=DQ_ANALYSIS_STATE_VECTOR --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits} --state-vector-on-bits V1=${onbits_V}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0  --state-vector-off-bits V1=0"
    fi
 fi
 
@@ -289,8 +412,12 @@ far_thres=0.0001
 ######################################################
 #  --finalsink-singlefar-veto-thresh ${FAR_single_thres} 
 #  apply single-detector-veto threshold
+# fix code is different using 0.0001
+# change it to 0.5  for production code
 ######################################################
+#FAR_single_thres=0.02
 FAR_single_thres=0.5
+#FAR_single_thres=0.001
 
 ######################################################
 #  --finalsink-superevent-thresh ${FAR_event_thres}
@@ -330,9 +457,9 @@ else
     mymap_prob=H1L1V1_prob_map.xml
 fi
 Tmap=86400
-H1DataDir=${DataDir}/llhoft/H1
+H1DataDir=${DataDir}/kafka/H1
 npix=5
-MapUpdate_T=43200
+MapUpdate_T=43201
 
 ######################################################
 #  --cuda-postcoh-output-skymap ${SNRmap}
@@ -405,15 +532,9 @@ done
 
 cat <<EOF
 JOB get_url_0001 get_url_${user}.sub
-RETRY get_url_0001 1
+RETRY get_url_0001 2
 
 JOB update_map_0001 update_map_${user}.sub
-RETRY update_map_0001 1
-
-JOB clean_skymap_0001 clean_skymap_${user}.sub
-RETRY clean_skymap_0001 1
-
-JOB lvalert_listen_0001 lvalert_listen_${user}.sub
-RETRY lvalert_listen_0001 1
+RETRY update_map_0001 2
 
 EOF

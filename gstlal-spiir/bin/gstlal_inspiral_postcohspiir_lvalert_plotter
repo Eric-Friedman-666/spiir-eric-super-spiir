@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2015 Qi Chu
+# Copyright (C) 2015,2021 Qi Chu
 # Modified from :
 # Copyright (C) 2012	Kipp Cannon, Chad Hanna, Drew Keppel
 #
@@ -146,9 +146,9 @@ def call_fits_skymap_func(out_cohsnr_fits,
     return proc.returncode
 
 
-def call_plot_snr_series_fun(filename, verbose=False):
+def call_plot_snr_series_func(filename, verbose=False):
     cmd = []
-    cmd.append("gstlal_insprial_postcohspiir_plot_snr_series")
+    cmd.append("gstlal_inspiral_postcohspiir_plot_snr_series")
     if verbose:
         cmd.append("--verbose")
     cmd.append(filename)
@@ -323,7 +323,7 @@ else:
 # Upload snr_series chart
 #
 snr_series_png_filename = '.'.join(trigger_fname.split('.')[:-1])
-returncode = call_plot_snr_series_fun(trigger_fname, verbose=options.verbose)
+returncode = call_plot_snr_series_func(trigger_fname, verbose=options.verbose)
 if returncode == 0:
     if options.verbose:
         print("Uploading %s for %s, %s " % snr_series_png_filename, gid, msg)
@@ -428,21 +428,25 @@ gracedb.writeLog(
 
 
 def get_snglsnr(snr_name, postcoh_table_row):
-    if snr_name == 'snr_L':
-        return postcoh_table_row.snglsnr_L
-    if snr_name == 'snr_H':
-        return postcoh_table_row.snglsnr_H
-    if snr_name == 'snr_V':
-        return postcoh_table_row.snglsnr_V
+    if snr_name == 'snglsnr_L1':
+        return postcoh_table_row.snglsnr_L1
+    if snr_name == 'snglsnr_H1':
+        return postcoh_table_row.snglsnr_H1
+    if snr_name == 'snglsnr_V1':
+        return postcoh_table_row.snglsnr_V1
+    if snr_name == 'snglsnr_K1':
+        return postcoh_table_row.snglsnr_K1
 
 
 def get_chisq(chisq_name, postcoh_table_row):
-    if chisq_name == 'chisq_L':
-        return postcoh_table_row.chisq_L
-    if chisq_name == 'chisq_H':
-        return postcoh_table_row.chisq_H
-    if chisq_name == 'chisq_V':
-        return postcoh_table_row.chisq_V
+    if chisq_name == 'chisq_L1':
+        return postcoh_table_row.chisq_L1
+    if chisq_name == 'chisq_H1':
+        return postcoh_table_row.chisq_H1
+    if chisq_name == 'chisq_V1':
+        return postcoh_table_row.chisq_V1
+    if chisq_name == 'chisq_K1':
+        return postcoh_table_row.chisq_K1
 
 
 #
@@ -451,7 +455,7 @@ def get_chisq(chisq_name, postcoh_table_row):
 
 if far < 1e-4:
     for ifo in ifo_list:
-        snr_name = 'snr_%s' % ifo[0]
+        snr_name = 'snglsnr_%s' % ifo[0]
         snr = get_snglsnr(snr_name, postcoh_table_row)
         chisq_name = 'chisq_%s' % ifo[0]
         chisq = get_chisq(chisq_name, postcoh_table_row)

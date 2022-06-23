@@ -32,6 +32,7 @@ SortIncludes: 'true'
 SpaceBeforeAssignmentOperators: 'true'
 SpaceBeforeCpp11BracedList: 'true'
 SpaceBeforeParens: ControlStatements
+StatementMacros: [PyObject_HEAD]
 UseTab: Never
 
 ...

@@ -78,6 +78,10 @@ def parse_command_line():
         type="int",
         default=0,
         help="Set template truncation cut off. Defaults to full bandwidth.")
+    parser.add_option("-v",
+                      "--verbose",
+                      action="store_true",
+                      help="Be verbose (optional).")
 
     options, filenames = parser.parse_args()
 
@@ -96,14 +100,16 @@ def parse_command_line():
     return options, filenames
 
 
-def calc_expected_snr(premerger_cut, inj):
+def calc_expected_snr(premerger_cut, verbose, inj):
     # FIXME:  don't hard-code detectors
-    snr = dict.fromkeys(("H1", "L1", "V1", "K1"), 0.0) # TODO: Test with Kagra enabled/disabled, see !36
+    snr = dict.fromkeys(("H1", "L1", "V1", "K1"), 0.0)
 
     injtime = inj.time_geocent
+    if verbose:
+        print "injection time %d" % injtime
 
     # Determine which PSD files have GPS times covering the injection time.
-    psds = dict((seg, psd) for seg, psd in allPSDs.items() if injtime in seg)
+    psds = dict((seg, psd) for seg, psd in allPSDs.items())
 
     if len(psds) < 1:
         # We know no PSD covers the injection.
@@ -122,7 +128,14 @@ def calc_expected_snr(premerger_cut, inj):
 
     # FIXME have better scheme for calculating the needed sample_rate
     sample_rate = 16384.0
-    approximant = lalsimulation.GetApproximantFromString(str(inj.waveform))
+
+    if inj.mchirp > 1.73:
+        approximant = lalsimulation.GetApproximantFromString(
+            str('IMRPhenomPv2'))
+    else:
+        approximant = lalsimulation.GetApproximantFromString(
+            str('SpinTaylorT4threePointFivePN'))
+
     if approximant == lalsimulation.NR_hdf5:
         LALparams = lal.CreateDict()
         lalsimulation.SimInspiralWaveformParamsInsertNumRelData(
@@ -169,15 +182,20 @@ def calc_expected_snr(premerger_cut, inj):
         #print 'Length_struct: ',h.data.length
 
         new_length = len(h.data.data) - premerger_cut * int(sample_rate)
-        h_n = lal.CreateREAL8TimeSeries(h.name, h.epoch, h.f0, h.deltaT,
-                                        h.sampleUnits, new_length)
-        h_n.data.data = h.data.data[:new_length]
 
-        snr[instrument] = lalsimulation.MeasureSNR(h_n, chosenPSD[instrument],
-                                                   options.flow,
-                                                   0.85 * (sample_rate / 2.))
+        if new_length <= 0:
+            snr[instrument] = 0
+        else:
+            h_n = lal.CreateREAL8TimeSeries(h.name, h.epoch, h.f0, h.deltaT,
+                                            h.sampleUnits, new_length)
+            h_n.data.data = h.data.data[:new_length]
+
+            snr[instrument] = lalsimulation.MeasureSNR(
+                h_n, chosenPSD[instrument], options.flow,
+                0.85 * (sample_rate / 2.))
 
     #print premerger_cut
+    #print snr
     return snr
 
 
@@ -216,8 +234,8 @@ reference_psd_files = [
 ]
 
 #allPSDs = dict(
-#	(cacheentry.segment, read_psd_xmldoc(ligolw_utils.load_url(cacheentry.url, verbose = True, contenthandler = PSDContentHandler)))
-#	for cacheentry in map(CacheEntry, open(options.reference_psd_cache)) if inj_segment is not None and cacheentry.segment.intersects(inj_segment)
+#    (cacheentry.segment, read_psd_xmldoc(ligolw_utils.load_url(cacheentry.url, verbose = True, contenthandler = PSDContentHandler)))
+#    for cacheentry in map(CacheEntry, open(options.reference_psd_cache)) if inj_segment is not None and cacheentry.segment.intersects(inj_segment)
 #)
 
 # Load all PSDs so that they don't need to be loaded for every injection.
@@ -233,7 +251,7 @@ for cacheentry in reference_psd_files:
 pool = multiprocessing.Pool(options.npool)
 snr = []
 
-snr_func = partial(calc_expected_snr, options.premerger_cut)
+snr_func = partial(calc_expected_snr, options.premerger_cut, options.verbose)
 #print pool.map(calc_expected_snr,[inj for idx, inj in enumerate(sim_inspiral_table)])
 for simsnr in pool.map(snr_func,
                        [inj for idx, inj in enumerate(sim_inspiral_table)]):

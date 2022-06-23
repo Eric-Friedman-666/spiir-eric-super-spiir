@@ -2283,7 +2283,8 @@ if options.noninj_database:
     rate_plot = RateVsThreshold("noninj")
     plots.append(rate_plot)
     plots.append(
-        BackgroundPlots(options.background_ifos, options.background_xml, options.njob))
+        BackgroundPlots(options.background_ifos, options.background_xml,
+                        options.njob))
     plot_group = zip([11, 0, 5, 8], plots)
     dbname = options.noninj_database
     contents = setup_plot(dbname, plot_group, options, options.noninj_user_tag,

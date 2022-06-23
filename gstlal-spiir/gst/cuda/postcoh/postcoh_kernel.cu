@@ -331,9 +331,8 @@ __global__ void ker_coh_skymap(
                 NtOff = (j == iifo ? 0 : NtOff);
                 // dk[j] = snr[j][ring_index(start_exe + len_cur + NtOff,
                 // len) * ntmplt + tmplt_cur ];
-                dk[j] =
-                  snr[j][tmplt_cur * len
-                         + ring_index(start_exe + len_cur + NtOff, len)];
+                dk[j] = snr[j][tmplt_cur * len
+                               + ring_index(start_exe + len_cur + NtOff, len)];
             }
 
             for (int j = 0; j < nifo; ++j) {
@@ -464,9 +463,8 @@ __global__ void ker_coh_max_and_chisq_versatile(
                 NtOff = (j == iifo ? 0 : NtOff);
                 // dk[j] = snr[j][ring_index(start_exe + len_cur + NtOff,
                 // len) * ntmplt + tmplt_cur ];
-                dk[j] =
-                  snr[j][tmplt_cur * len
-                         + ring_index(start_exe + len_cur + NtOff, len)];
+                dk[j] = snr[j][tmplt_cur * len
+                               + ring_index(start_exe + len_cur + NtOff, len)];
             }
             if (cur_nifo == 2) {
                 for (int k = 0; k < nifo; ++k) {
@@ -580,9 +578,8 @@ __global__ void ker_coh_max_and_chisq_versatile(
 
             for (int ishift = threadIdx.x - autochisq_half_len;
                  ishift <= autochisq_half_len; ishift += blockDim.x) {
-                tmp_snr =
-                  snr[j][len * tmplt_cur
-                         + ring_index(peak_pos_tmp + ishift, len)];
+                tmp_snr = snr[j][len * tmplt_cur
+                                 + ring_index(peak_pos_tmp + ishift, len)];
                 tmp_autocorr =
                   autocorr_matrix[j][tmplt_cur * autochisq_len + ishift
                                      + autochisq_half_len];
@@ -659,9 +656,9 @@ __global__ void ker_coh_max_and_chisq_versatile(
                       (j == iifo ? 0 : NtOff - (trial_offset * (j - iifo)));
                     // dk[j] = snr[j][ring_index(start_exe + len_cur +
                     // offset, len) * ntmplt + tmplt_cur ];
-                    dk[j] = snr[j][len * tmplt_cur
-                                   + ring_index(
-                                     start_exe + len_cur + offset, len)];
+                    dk[j] =
+                      snr[j][len * tmplt_cur
+                             + ring_index(start_exe + len_cur + offset, len)];
                 }
                 if (cur_nifo == 2) {
                     for (int k = 0; k < nifo; ++k) {
@@ -778,9 +775,8 @@ __global__ void ker_coh_max_and_chisq_versatile(
                      ishift <= autochisq_half_len; ishift += WARP_SIZE) {
                     // tmp_snr = snr[j][ring_index(peak_pos_tmp + ishift,
                     // len) * ntmplt + tmplt_cur];
-                    tmp_snr =
-                      snr[j][len * tmplt_cur
-                             + ring_index(peak_pos_tmp + ishift, len)];
+                    tmp_snr = snr[j][len * tmplt_cur
+                                     + ring_index(peak_pos_tmp + ishift, len)];
                     tmp_autocorr =
                       autocorr_matrix[j][tmplt_cur * autochisq_len + ishift
                                          + autochisq_half_len];
