@@ -29,11 +29,14 @@
 #include <lal/LALStdlib.h> // for the datatypes
 #include <pipe_macro.h> // for MAX_IFO_LEN and macros
 
+// TODO: postcohtable is overloaded; it's both a buffer and a xml document 
+// format. It is used for data processing, used for outputting the significant
+// triggers schema AND the zerolags schema. It records data for both cohered 
+// values and per-ifo in the same table.
 typedef struct tagPostcohInspiralTable {
     struct tagPostcohInspiralTable *next;
     long process_id;
     long event_id;
-    LIGOTimeGPS ringdown_dur; // ring-down duration
     LIGOTimeGPS end_time; // merger time
     LIGOTimeGPS end_time_sngl[MAX_NIFO];
     INT4 is_background;

@@ -23,8 +23,6 @@ class PostcohInspiralTable(table.Table):
                 ("event_id", "ilwd:char"),
                 ("end_time", "int_4s"),
                 ("end_time_ns", "int_4s"),
-                ("ringdown_dur", "int_4s"),
-                ("ringdown_dur_ns", "int_4s"),
                 ("is_background", "int_4s"),
                 ("livetime", "int_4s"),
                 ("ifos", "lstring"),

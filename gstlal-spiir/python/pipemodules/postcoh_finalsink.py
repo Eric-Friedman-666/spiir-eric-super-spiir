@@ -440,7 +440,6 @@ class FinalSink(object):
         # initialize
         #
         self.lock = threading.Lock()
-        self.verbose = verbose
         self.pipeline = pipeline
         self.is_first_buf = True
         self.is_first_event = True
@@ -531,7 +530,7 @@ class FinalSink(object):
             output_list_string=fapupdater_output_fname,
             collect_walltime_string=fapupdater_collect_walltime_string,
             ifos=self.fapupdater_ifos,
-            verbose=self.verbose)
+            verbose=verbose)
 
         # online information performer
         self.need_online_perform = need_online_perform
@@ -1096,7 +1095,6 @@ class CoincsDocFromPostcoh(object):
 
     def assemble_ligolw_xmldoc(self, trigger, psds=None):
         self.assemble_snglinspiral_table(trigger)
-        self.assemble_ligolw_snr_series_arrays(trigger)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
         coinc_table = lsctables.CoincTable.get_table(self.xmldoc)
         coinc_inspiral_table = lsctables.CoincInspiralTable.get_table(
@@ -1144,6 +1142,7 @@ class CoincsDocFromPostcoh(object):
 
         self.assemble_coinc_map_table(trigger)
         self.assemble_time_slide_table(trigger)
+        self.assemble_ligolw_snr_series_arrays(trigger)
 
         if psds is not None:
             self.assemble_ligolw_psd_arrays(psds)
@@ -1198,8 +1197,7 @@ class CoincsDocFromPostcoh(object):
                 # already has it
                 pass
 
-        # FIXME: hard-coded ifo len == 2
-        for iifo, ifo in enumerate(re.findall('..', trigger.ifos)):
+        for ifo_id, ifo in enumerate(re.findall('..', trigger.ifos)):
             row = sngl_inspiral_table.RowType()
             # Setting the individual row
             row.process_id = self.process.process_id
@@ -1265,11 +1263,11 @@ class CoincsDocFromPostcoh(object):
             row.spin2x = trigger.spin2x
             row.spin2y = trigger.spin2y
             row.spin2z = trigger.spin2z
-            row.event_id = "sngl_inspiral:event_id:%d" % iifo
+            row.event_id = "sngl_inspiral:event_id:%d" % ifo_id
             sngl_inspiral_table.append(row)
 
     def assemble_ligolw_snr_series_arrays(self, trigger):
-        for iifo, ifo in enumerate(re.findall('..', trigger.ifos)):
+        for ifo in re.findall('..', trigger.ifos):
             # Append snr_series data into XML document
             epoch_second = getattr(trigger,
                                    "snr_series_epoch_gpsSeconds_" + ifo)

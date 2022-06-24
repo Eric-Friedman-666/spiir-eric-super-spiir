@@ -1374,10 +1374,6 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             len_cur = pklist->len_idx[peak_cur];
             XLALGPSAdd(&(end_time), (double)len_cur / exe_len);
             output->end_time = end_time;
-            output->ringdown_dur.gpsSeconds =
-              -sngl_table[cur_tmplt_idx].end.gpsSeconds;
-            output->ringdown_dur.gpsNanoSeconds =
-              -sngl_table[cur_tmplt_idx].end.gpsNanoSeconds;
             for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
                 XLALGPSAdd(&(end_time),
                            (double)pklist->ntoff[ifo_id][peak_cur] / exe_len);
