@@ -1267,6 +1267,26 @@ class CoincsDocFromPostcoh(object):
             sngl_inspiral_table.append(row)
 
     def assemble_ligolw_snr_series_arrays(self, trigger):
+        """Assembles LIGO_LW COMPLEX8TimeSeries arrays that
+        contain the SNR series for each ifo at the time
+        of the candidate trigger.
+        
+        We loop through each ifo present in the candidate
+        PostcohInspiralTable instance (trigger.ifos) and
+        construct a COMPLEX8TimeSeries Array object paired with
+        a corresponding Param object that points to an event_id
+        present in a previously constructed SnglInspiralTable 
+        in the same XML Document. Both the Array and Param
+        objects are contained together in their own LIGO_LW
+        element, separately for each ifo.
+
+
+        Parameters
+        ----------
+        trigger: PostcohInspiralTable
+            The PostcohInspiralTable candidate trigger instance.
+        """
+
         for ifo in re.findall('..', trigger.ifos):
             # Append snr_series data into XML document
             epoch_second = getattr(trigger,
