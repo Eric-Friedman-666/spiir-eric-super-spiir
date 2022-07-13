@@ -259,8 +259,6 @@ static PyObject *get_snr_series(PyObject *obj, void *closure) {
         PyObject *array =
           PyArray_SimpleNewFromData(1, dims, NPY_CFLOAT, snr_series->data->data);
         if (!array) return NULL;
-        Py_INCREF(obj);
-        PyArray_SetBaseObject((PyArrayObject *)array, obj);
         return array;
     }
     PyErr_BadArgument();
@@ -611,6 +609,21 @@ static void __del__(PyObject *self) {
     Py_DECREF(self_typed->far_1d_sngl);
     Py_DECREF(self_typed->far_2h_sngl);
     Py_DECREF(self_typed->deff);
+
+    // Free snr_series related memory
+    if (self_typed->snr_series) {
+        // Destroy COMPLEX8TimeSeries objects
+        for (int i = 0; i < MAX_NIFO; i++) {
+            if (self_typed->snr_series[i]) {
+                XLALDestroyCOMPLEX8TimeSeries(self_typed->snr_series[i]);
+            }
+        }
+
+        // free snr_series array
+        free(self_typed->snr_series);
+        self_typed->snr_series = NULL;
+    }
+
     Py_TYPE(self)->tp_free(self);
 }
 
@@ -735,6 +748,9 @@ static struct PyMethodDef methods[] = {
       "Construct a tuple of PostcohInspiralTable objects from a buffer object. "
       " The buffer is interpreted as a C array of PostcohInspiralTable "
       "structures." },
+    { "delete_all_snr_series", delete_all_snr_series, METH_NOARGS,
+      "Release all SNR time series attached to the GSTLALSnglInspiral "
+      "object." },
     {
       NULL,
     }

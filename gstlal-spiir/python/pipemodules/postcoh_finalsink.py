@@ -642,10 +642,13 @@ class FinalSink(object):
                 if self.need_candidate_check:
                     self.nevent_clustered += 1
                     self.__set_far(self.candidate)
-                    self.postcoh_table.append(self.candidate)
                     if self.gracedb_far_threshold and self.__pass_test(
                             self.candidate):
                         self.__do_gracedb_alert(self.candidate)
+
+                    self.candidate.delete_all_snr_series()
+                    self.postcoh_table.append(self.candidate)
+
                     if self.need_online_perform:
                         self.onperformer.update_eye_candy(self.candidate)
                     self.candidate = None
@@ -1142,23 +1145,17 @@ class CoincsDocFromPostcoh(object):
         if psds is not None:
             self.assemble_ligolw_psd_arrays(psds)
 
-        if psds is not None:
-            self.assemble_ligolw_psd_arrays(psds)
-
         postcoh_table.append(trigger)
 
     def assemble_coinc_map_table(self, trigger):
 
         coinc_map_table = lsctables.CoincMapTable.get_table(self.xmldoc)
-        iifo = 0
-        # FIXME: hard-coded ifo length
-        for ifo in re.findall('..', trigger.ifos):
+        for ifo_id, ifo in enumerate(re.findall('..', trigger.ifos)):
             row = coinc_map_table.RowType()
-            row.event_id = "sngl_inspiral:event_id:%d" % iifo
+            row.event_id = "sngl_inspiral:event_id:%d" % ifo_id
             row.table_name = "sngl_inspiral"
             row.coinc_event_id = "coinc_event:coinc_event_id:1"
             coinc_map_table.append(row)
-            iifo += 1
 
     def assemble_time_slide_table(self, trigger):
 
@@ -1263,7 +1260,6 @@ class CoincsDocFromPostcoh(object):
             row.spin2z = trigger.spin2z
             row.event_id = "sngl_inspiral:event_id:%d" % ifo_id
             sngl_inspiral_table.append(row)
-            iifo += 1
 
     def assemble_ligolw_psd_arrays(self, psds):
         """Assembles a LIGO_LW REAL8FrequencySeries Array from a
