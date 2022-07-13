@@ -425,6 +425,10 @@ def parse_command_line():
                       type="int",
                       default=0,
                       help="need online performer ? 1: yes, 0: no")
+    parser.add_option(
+        "--skip-psd-upload",
+        action="store_true",
+        help="Disable appending the PSD to the coinc.xml uploaded to GraceDB.")
 
     # set the postcoh parameters
     parser.add_option(
@@ -785,6 +789,7 @@ finalsink = postcoh_finalsink.FinalSink(
     gracedb_offline_annote=options.finalsink_gracedb_offline_annote,
     output_skymap=options.cuda_postcoh_output_skymap,
     negative_latency=neg_lat,
+    append_psd_to_coincs_doc=not options.skip_psd_upload,
     verbose=options.verbose)
 
 if options.verbose:

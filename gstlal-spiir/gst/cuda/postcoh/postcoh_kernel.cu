@@ -22,6 +22,7 @@ extern "C" {
 #endif
 #include "postcoh_utils.h"
 
+#include <assert.h>
 #include <cuda_debug.h>
 #include <stdio.h>
 
@@ -52,8 +53,9 @@ __device__ static inline float atomicMax(float *address, float val) {
 }
 
 // Returns a wrapped index that can be safely used by the ring buffer.
-__device__ static inline size_t ring_index(ptrdiff_t ind, size_t len) {
-    return ind % len + (ind < 0) * len;
+__device__ static inline size_t ring_index(ptrdiff_t ind, ptrdiff_t len) {
+    assert(len > 0);
+    return ((ind % len) + len) % len;
 }
 
 __global__ void ker_max_snglsnr(COMPLEX_F **snr, // INPUT: snr

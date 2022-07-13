@@ -207,7 +207,6 @@ typedef struct _PostcohState {
     float snglsnr_max[MAX_NIFO];
     float *tmp_maxsnr;
     int *tmp_tmpltidx;
-    COMPLEX_F *snr_list[MAX_NIFO];
 } PostcohState;
 
 /**
@@ -233,10 +232,7 @@ struct _CudaPostcoh {
     gint exe_size;
     gint one_take_len;
     gint one_take_size;
-    gint snglsnr_cpy_len;
-    gint snglsnr_cpy_size;
     gint preserved_len;
-    gint head_len;
     float max_dt;
     gboolean set_starttime;
     gboolean is_all_aligned;

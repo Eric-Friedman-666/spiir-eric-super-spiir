@@ -26,8 +26,6 @@
 #include <gst/gst.h>
 #include <lal/Date.h>
 #include <lal/LIGOMetadataTables.h>
-#include <lal/TimeSeries.h>
-#include <lal/Units.h>
 #include <math.h>
 #include <pipe_macro.h> // for ifo_set__parse_or_empty, ifo_set__get_string
 #include <postcoh/postcoh.h>
@@ -39,7 +37,6 @@
 #define EPSILON                   5
 #define PEAKFINDER_CLUSTER_WINDOW 5
 #define RAD2DEG                   57.2957795
-#define MAX_TIMELAG               70000000 // earth_radius *pi/light_speed in nanoseconds
 #define ACCELERATE_POSTCOH_MEMORY_COPY
 
 #define GST_CAT_DEFAULT cuda_postcoh_debug
@@ -613,27 +610,13 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     state->peak_list = (PeakList **)malloc(sizeof(PeakList *) * state->nifo);
     state->dt        = (float)1 / postcoh->rate;
 
-    /* preserved_len is used to allow history data and future data for chisq
-     * calculation plus a long enough buffering to account for time shifts */
-    postcoh->preserved_len =
-      state->autochisq_len
-      + 2 * floor(MAX_TIMELAG / (double)GST_SECOND * postcoh->rate);
-    postcoh->head_len =
-      postcoh->preserved_len / 2; // length to store history data
-    /* length for the current execution block (i.e. current data) */
-    postcoh->exe_len  = postcoh->rate;
-    postcoh->exe_size = postcoh->exe_len * postcoh->bps;
-    /* one_take_len is the length that considering history, current, and future
-     * data for chisq calculation */
-    postcoh->one_take_len  = postcoh->preserved_len + postcoh->exe_len;
-    postcoh->one_take_size = postcoh->one_take_len * postcoh->bps;
+    /* need to cover head and tail */
+    postcoh->preserved_len = state->autochisq_len + 160;
+    postcoh->exe_len       = postcoh->rate;
+    postcoh->exe_size      = postcoh->exe_len * postcoh->bps;
 
-    /* snglsnr_cpy_len is the length that only considers current and future data
-     * that to be copied to the GPU structure, the GPU structure is a ring
-     * buffer and already stored history data */
-    postcoh->snglsnr_cpy_len =
-      postcoh->preserved_len - postcoh->head_len + postcoh->exe_len;
-    postcoh->snglsnr_cpy_size = postcoh->snglsnr_cpy_len * postcoh->bps;
+    postcoh->one_take_len  = postcoh->preserved_len / 2 + postcoh->exe_len;
+    postcoh->one_take_size = postcoh->one_take_len * postcoh->bps;
 
     state->exe_len      = postcoh->rate;
     state->tmp_maxsnr   = (float *)malloc(sizeof(float) * state->exe_len);
@@ -651,13 +634,11 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     GST_DEBUG_OBJECT(
       postcoh,
       "hist_trials %d, autochisq_len %d, preserved_len %d, sngl_len %d, bps "
-      "%d, exe_len %d, one_take_len %d, one_take_size %d, snglsnr_cpy_len "
-      "%d, snglsnr_cpy_size %d, start_load %d, "
+      "%d, exe_len %d, one_take_len %d, one_take_size %d, start_load %d, "
       "start_exe %d, max_npeak %d",
       state->hist_trials, state->autochisq_len, postcoh->preserved_len,
       state->snglsnr_len, postcoh->bps, postcoh->exe_len, postcoh->one_take_len,
-      postcoh->one_take_size, postcoh->snglsnr_cpy_len,
-      postcoh->snglsnr_cpy_size, state->snglsnr_start_load,
+      postcoh->one_take_size, state->snglsnr_start_load,
       state->snglsnr_start_exe, state->max_npeak);
 
     state->ntmplt = postcoh->channels / 2;
@@ -747,10 +728,6 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     CUDA_CHECK(cudaStreamSynchronize(postcoh->stream));
 
     state->is_member_init = POSTCOH_PARAMS_INIT;
-
-    // Initialize snr_list
-    for (int i = 0; i < MAX_NIFO; i++) { state->snr_list[i] = NULL; }
-
     GST_OBJECT_UNLOCK(postcoh->collect);
     return TRUE;
 }
@@ -906,27 +883,6 @@ static gboolean
     return TRUE;
 }
 
-static gboolean cuda_postcoh_padding_adapter(GstCollectPads *pads,
-                                             CudaPostcoh *postcoh) {
-    GSList *collectlist;
-    GstPostcohCollectData *data;
-
-    /* sanity check for invalid pads have been performed in
-     * get_latest_start_time function thus omitted here */
-
-    /* padding a zero buffer for some fake history data */
-    guint zerobuf_size = postcoh->head_len * postcoh->bps;
-
-    for (collectlist = pads->data; collectlist;
-         collectlist = g_slist_next(collectlist)) {
-        data               = collectlist->data;
-        GstBuffer *zerobuf = gst_buffer_new_and_alloc(zerobuf_size);
-        memset(GST_BUFFER_DATA(zerobuf), 0, GST_BUFFER_SIZE(zerobuf));
-        gst_adapter_push(data->adapter, zerobuf);
-    }
-    return TRUE;
-}
-
 static gboolean cuda_postcoh_fillin_discont(GstCollectPads *pads,
                                             CudaPostcoh *postcoh) {
     GSList *collectlist;
@@ -1037,7 +993,7 @@ static gboolean cuda_postcoh_need_recollect(GstCollectPads *pads,
     /* expected end time for the run */
     GstClockTime ts_expect = postcoh->t0
                              + gst_util_uint64_scale_int_round(
-                               postcoh->samples_out + postcoh->snglsnr_cpy_len,
+                               postcoh->samples_out + postcoh->one_take_len,
                                GST_SECOND, postcoh->rate),
                  buf_end;
 
@@ -1179,54 +1135,28 @@ static int cuda_postcoh_select_background(PeakList *pklist,
                                           int hist_trials,
                                           int max_npeak,
                                           float cohsnr_thresh) {
-    int ipeak, npeak, peak_cur, itrial, background_cur, removed_bg,
-      left_backgrounds = 0;
-    removed_bg         = 0;
-    npeak              = pklist->npeak[0];
+    int ipeak, npeak, peak_cur, itrial, background_cur, left_backgrounds = 0;
+    npeak = pklist->npeak[0];
     for (ipeak = 0; ipeak < npeak; ipeak++) {
         peak_cur = pklist->peak_pos[ipeak];
-        if (sqrt(pklist->cohsnr[peak_cur]) > 8 && pklist->chisq[0][peak_cur] < 3
-            && pklist->chisq[1][peak_cur] < 3) {
-            printf("removed background: snr_h: %f chisq_h: %f \n snr_l: %f "
-                   "chisq_l: %f, check ifo: %d cohsnr: %f cohsnr_bg: %f \n",
-                   pklist->snglsnr[0][peak_cur], pklist->chisq[0][peak_cur],
-                   pklist->snglsnr[1][peak_cur], pklist->chisq[1][peak_cur],
-                   write_ifo, pklist->cohsnr[peak_cur],
-                   pklist->cohsnr_bg[peak_cur]);
-            printf("check backgrounds: fg H: %f bg H: %f \n ",
-                   pklist->snglsnr[0][peak_cur],
-                   pklist->snglsnr_bg[0][peak_cur]);
-            // if the peak fits the 'signal' critera, mark bg as invalid:
-            printf("marking bg as invalid: %f\n", pklist->cohsnr_bg[peak_cur]);
-            for (itrial = 0; itrial < hist_trials; itrial++) {
-                background_cur = itrial * max_npeak + peak_cur;
-                // printf("cohsnr_bg: %f \n",
-                // pklist->cohsnr_bg[background_cur]);
+        for (itrial = 1; itrial <= hist_trials; itrial++) {
+            background_cur = (itrial - 1) * max_npeak + peak_cur;
+            // FIXME: consider a different threshold for 3-detector
+            //			if (sqrt(pklist->cohsnr_bg[background_cur]) >
+            // cohsnr_thresh
+            //* pklist->snglsnr_H[iifo*max_npeak + peak_cur])
+            if (sqrt(pklist->cohsnr_bg[background_cur])
+                > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
+                left_backgrounds++;
+                GST_LOG("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
+                        ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
+                        pklist->snglsnr[write_ifo][peak_cur]);
+            } else {
+                GST_LOG(
+                  "no mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
+                  ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
+                  pklist->snglsnr[write_ifo][peak_cur]);
                 pklist->cohsnr_bg[background_cur] = -1;
-            }
-            removed_bg++;
-            printf("in remove loop, removed bgs now %d\n", removed_bg);
-        } else {
-            for (itrial = 1; itrial <= hist_trials; itrial++) {
-                background_cur = (itrial - 1) * max_npeak + peak_cur;
-                //  FIXME: consider a different threshold for 3-detector
-                //             if (sqrt(pklist->cohsnr_bg[background_cur]) >
-                //  cohsnr_thresh
-                //* pklist->snglsnr_H[iifo*max_npeak + peak_cur])
-                if (sqrt(pklist->cohsnr_bg[background_cur])
-                    > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
-                    left_backgrounds++;
-                    GST_LOG(
-                      "mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
-                      ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
-                      pklist->snglsnr[write_ifo][peak_cur]);
-                } else {
-                    GST_LOG(
-                      "no mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
-                      ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
-                      pklist->snglsnr[write_ifo][peak_cur]);
-                    pklist->cohsnr_bg[background_cur] = -1;
-                }
             }
         }
     }
@@ -1244,7 +1174,6 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
     int left_entries = 0;
 
     for (iifo = 0; iifo < nifo; iifo++) {
-        /* iifo refers to cur_ifo */
         if (state->cur_ifo_is_gap[iifo]) continue;
         final_peaks                 = 0;
         bubbled_peaks               = 0;
@@ -1352,7 +1281,6 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
      * and cmbchisq = single chisq */
     /* only output multi-detector events, cohsnr, cmbchisq only make sense when
      * cur_nifo >=2 */
-    int one_take_offset = postcoh->head_len - (state->autochisq_len - 1) / 2;
     for (int pivotal_ifo = 0; (pivotal_ifo < nifo) && (state->cur_nifo >= 2);
          pivotal_ifo++) {
         if (state->cur_ifo_is_gap[pivotal_ifo]) continue;
@@ -1385,54 +1313,11 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 output->chisq[ifo_id]    = pklist->chisq[ifo_id][peak_cur];
             }
 
-            /* fill in the attributes for single detectors first */
             for (int ifo_id = 0; ifo_id < nifo; ifo_id++) {
-                /* check if the detector is alive */
-                if (state->cur_ifo_is_gap[ifo_id]) continue;
                 int write_ifo = state->write_ifo_mapping[ifo_id];
-
-                XLALGPSAdd(&(end_time),
-                           (double)pklist->ntoff[write_ifo][peak_cur]
-                             / exe_len);
-                output->end_time_sngl[write_ifo] = end_time;
-                end_time = output->end_time; // restore it
-
-                output->snglsnr[write_ifo] =
-                  pklist->snglsnr[write_ifo][peak_cur];
-                output->coaphase[write_ifo] =
-                  pklist->coaphase[write_ifo][peak_cur];
-                output->chisq[write_ifo] = pklist->chisq[write_ifo][peak_cur];
                 output->deff[write_ifo] =
                   sqrt(state->sigmasq[ifo_id][cur_tmplt_idx])
                   / pklist->snglsnr[write_ifo][peak_cur]; // in MPC
-
-                /* epoch is the GPS time of the first sample */
-                LIGOTimeGPS epoch = output->end_time_sngl[write_ifo];
-                g_assert(state->autochisq_len % 2 == 1);
-                XLALGPSAdd(&epoch, -1.0 / postcoh->rate
-                                     * (state->autochisq_len - 1) / 2);
-
-                // Allocate the memory
-                output->snr_series[write_ifo] = XLALCreateCOMPLEX8TimeSeries(
-                  "snr", &epoch, 0., 1. / postcoh->rate, &lalDimensionlessUnit,
-                  state->autochisq_len);
-
-                // the first data sample
-                COMPLEX8 *curr_snglsnr =
-                  state->snr_list[ifo_id]
-                  + (pklist->len_idx[peak_cur]
-                     + pklist->ntoff[write_ifo][peak_cur] + one_take_offset)
-                      * state->ntmplt
-                  + pklist->tmplt_idx[peak_cur];
-
-                /* FIXME: speedup. Load snglsnr data into snr_series->data->data
-                 */
-                for (int j = 0; j < output->snr_series[write_ifo]->data->length;
-                     j++) {
-                    output->snr_series[write_ifo]->data->data[j] =
-                      *curr_snglsnr;
-                    curr_snglsnr += state->ntmplt;
-                }
             }
             /* fill in the attributes related to the coherent part */
             output->is_background = FLAG_FOREGROUND;
@@ -1504,20 +1389,23 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
             GST_LOG_OBJECT(
               postcoh,
-              "end_time_sngl_0 %d.%d, ipeak %d, peak_cur %d, len_cur %d, "
+              "end_time_sngl_0 %d, ipeak %d, peak_cur %d, len_cur %d, "
               "tmplt_idx %d, pix_idx %d \t,"
               "snglsnr_0 %f, snglsnr_1 %f, snglsnr_2 %f,"
               "coaphase_0 %f, coaphase_1 %f, coa_phase_2 %f,"
               "chisq_0 %f, chisq_1 %f, chisq_2 %f,"
               "cohsnr %f, nullsnr %f, cmbchisq %f\n",
-              output->end_time_sngl[0].gpsSeconds,
-              output->end_time_sngl[0].gpsNanoSeconds, ipeak, peak_cur, len_cur,
+              output->end_time_sngl[0].gpsSeconds, ipeak, peak_cur, len_cur,
               output->tmplt_idx, output->pix_idx, output->snglsnr[0],
               output->snglsnr[1], output->snglsnr[2], output->coaphase[0],
               output->coaphase[1], output->coaphase[2], output->chisq[0],
               output->chisq[1], output->chisq[2], output->cohsnr,
               output->nullsnr, output->cmbchisq);
 
+            XLALINT8NSToGPS(&output->epoch, ts);
+            output->deltaT = 1. / postcoh->rate;
+            /* set the snr length to 0, FIXME: dump snr series of single ifo */
+            output->snr_length = 0;
             output++;
             write_entries++;
         }
@@ -1781,13 +1669,11 @@ static void cuda_postcoh_process(GstCollectPads *pads,
                                  CudaPostcoh *postcoh) {
     GSList *collectlist;
     GstPostcohCollectData *data;
-    COMPLEX_F *one_take_snr, *snglsnr, *pos_dd_snglsnr, *pos_in_snglsnr;
+    COMPLEX_F *snglsnr, *pos_dd_snglsnr, *pos_in_snglsnr;
 
     int i = 0, cur_ifo = 0;
     PostcohState *state = postcoh->state;
-    gint one_take_size = postcoh->one_take_size, exe_size = postcoh->exe_size,
-         snglsnr_cpy_size = postcoh->snglsnr_cpy_size,
-         snglsnr_cpy_len  = postcoh->snglsnr_cpy_len;
+    gint one_take_size = postcoh->one_take_size, exe_size = postcoh->exe_size;
 
     GstFlowReturn ret;
 
@@ -1846,19 +1732,12 @@ static void cuda_postcoh_process(GstCollectPads *pads,
 
 #ifdef ACCELERATE_POSTCOH_MEMORY_COPY
             // temporal solution for low memory copy speed
-            /* pointer to history, current and future data */
-            one_take_snr =
+            snglsnr =
               (COMPLEX_F *)gst_adapter_peek_cuda(data->adapter, one_take_size);
 #else
-            one_take_snr =
+            snglsnr =
               (COMPLEX_F *)gst_adapter_peek(data->adapter, one_take_size);
 #endif
-            /* pointer to the current and future data
-             * this data will be copied to GPU as GPU structure already stored
-             * history data */
-            snglsnr =
-              (COMPLEX_F *)one_take_snr + postcoh->head_len * state->ntmplt;
-
             c_npeak =
               peaks_over_thresh(snglsnr, state, cur_ifo, postcoh->stream);
 
@@ -1899,28 +1778,26 @@ static void cuda_postcoh_process(GstCollectPads *pads,
             // this is necessory for new postcoh kernel
             // 1. expand temporal memory space if necessary
             g_assert(pklist->len_snglsnr_buffer >= 0);
-            if (snglsnr_cpy_len > pklist->len_snglsnr_buffer) {
+            if (one_take_size > pklist->len_snglsnr_buffer) {
                 // re-malloc pklist->d_snglsnr_buffer
                 if (pklist->d_snglsnr_buffer != NULL) {
                     cudaFree(pklist->d_snglsnr_buffer);
                 }
-                cudaMalloc((void **)&pklist->d_snglsnr_buffer,
-                           snglsnr_cpy_size);
-                pklist->len_snglsnr_buffer = snglsnr_cpy_len;
+                cudaMalloc((void **)&pklist->d_snglsnr_buffer, one_take_size);
+                pklist->len_snglsnr_buffer = one_take_size;
             }
             // 2. copy snglsnr to temporal gpu memory d_snglsnr_buffer
             CUDA_CHECK(cudaMemcpyAsync(pklist->d_snglsnr_buffer, snglsnr,
-                                       snglsnr_cpy_size, cudaMemcpyHostToDevice,
+                                       one_take_size, cudaMemcpyHostToDevice,
                                        postcoh->stream));
             // 3. do transpose, at the same time, snr data will be moved to
             // proper positions in state->d_snglsnr[cur_ifo]
             transpose_snglsnr(
               pklist->d_snglsnr_buffer, state->d_snglsnr[cur_ifo],
-              state->snglsnr_start_load, snglsnr_cpy_len, state->snglsnr_len,
-              state->ntmplt, postcoh->stream);
+              state->snglsnr_start_load, postcoh->one_take_len,
+              state->snglsnr_len, state->ntmplt, postcoh->stream);
 
             cudaStreamSynchronize(postcoh->stream);
-            state->snr_list[cur_ifo] = one_take_snr;
         }
         cur_ifo = 0;
         for (int iifo = 0; iifo < state->nifo; ++iifo)
@@ -1949,6 +1826,10 @@ static void cuda_postcoh_process(GstCollectPads *pads,
                             cur_ifo, state->peak_list[cur_ifo]->npeak[0]);
                 }
             }
+            /* move along */
+            GST_DEBUG_OBJECT(postcoh, "flush adapter %d, size %d\n", cur_ifo,
+                             exe_size);
+            gst_adapter_flush(data->adapter, exe_size);
         }
         common_size -= exe_size;
         int exe_len = state->exe_len;
@@ -1960,15 +1841,6 @@ static void cuda_postcoh_process(GstCollectPads *pads,
 
         /* make a buffer and send it out */
         cuda_postcoh_new_buffer_and_push(postcoh, exe_len);
-
-        for (i = 0, collectlist = pads->data; collectlist;
-             collectlist = g_slist_next(collectlist), i++) {
-            data = collectlist->data;
-            /* move along */
-            GST_DEBUG_OBJECT(postcoh, "flush adapter %d, size %d\n", cur_ifo,
-                             exe_size);
-            gst_adapter_flush(data->adapter, exe_size);
-        }
 
         /* move along */
         postcoh->samples_out += exe_len;
@@ -2023,13 +1895,6 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
                          ", start offset0 to %" G_GUINT64_FORMAT,
                          GST_TIME_ARGS(postcoh->t0), postcoh->offset0);
         postcoh->set_starttime = TRUE;
-        if (!cuda_postcoh_padding_adapter(pads, postcoh)) {
-            /* can not push to each pad adapter */
-            GST_ERROR_OBJECT(
-              postcoh,
-              "cannot push a zero buffer to each pad adapter, check adapter");
-            return GST_FLOW_ERROR;
-        }
     }
 
     if (postcoh->is_all_aligned) {

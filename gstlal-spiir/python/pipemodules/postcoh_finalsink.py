@@ -232,8 +232,8 @@ class FAPUpdater(object):
 
         if self.output and len(self.output) != len(self.collect_walltime):
             raise ValueError(
-                "number of input walltimes does match the number of \
-                    input filenames: %s does not match %s" %
+                "number of input walltimes does match the number of input \
+                    filenames: %s does not match %s" %
                 (collect_walltime_string, output_list_string))
 
         self.verbose = verbose
@@ -261,8 +261,8 @@ class FAPUpdater(object):
             map(lambda x: os.remove(x), self.rm_fnames)
             self.rm_fnames = []
         except:
-            print >> sys.stderr, "remove files failed, rm_fnames \
-                %s" % ', '.join(self.rm_fnames)
+            print >> sys.stderr, "remove files failed, rm_fnames %s" \
+                % ', '.join(self.rm_fnames)
             return None
 
         ls_fnames = sorted(os.listdir(str(self.path)))
@@ -308,8 +308,8 @@ class FAPUpdater(object):
             # it will give you a signal 7 error in OPA2
             while len(valid_fnames) > self.max_nstats_formargi:
                 logging.info("update fap: %d stats files for marignalization, \
-                        over the input string length limit, combining" %
-                             len(valid_fnames))
+                    over the input string length limit, combining" \
+                    % len(valid_fnames))
                 self.combine_stats()
                 ls_fnames = self.get_fnames("stats")
                 valid_fnames = self.get_valid_bankstats(ls_fnames, boundary)
@@ -416,7 +416,6 @@ class FinalSink(object):
                  far_factor,
                  cluster_window=0.5,
                  snapshot_interval=None,
-                 fapupdater_ifos="H1L1V1K1",
                  fapupdater_interval=None,
                  cohfar_accumbackground_output_prefix=None,
                  cohfar_accumbackground_output_name=None,
@@ -446,8 +445,6 @@ class FinalSink(object):
         self.channel_dict = channel_dict
         self.ifos = lsctables.ifos_from_instrument_set(
             channel_dict.keys()).replace(",", "")  # format: "H1L1V1K1"
-        self.fapupdater_ifos = fapupdater_ifos
-        # ifos that are used for significance estimation
 
         # cluster parameters
         self.cluster_window = cluster_window
@@ -529,7 +526,7 @@ class FinalSink(object):
             input_prefix_list=cohfar_accumbackground_output_prefix,
             output_list_string=fapupdater_output_fname,
             collect_walltime_string=fapupdater_collect_walltime_string,
-            ifos=self.fapupdater_ifos,
+            ifos=self.ifos,
             verbose=verbose)
 
         # online information performer
@@ -645,13 +642,10 @@ class FinalSink(object):
                 if self.need_candidate_check:
                     self.nevent_clustered += 1
                     self.__set_far(self.candidate)
+                    self.postcoh_table.append(self.candidate)
                     if self.gracedb_far_threshold and self.__pass_test(
                             self.candidate):
                         self.__do_gracedb_alert(self.candidate)
-
-                    self.candidate.delete_all_snr_series()
-                    self.postcoh_table.append(self.candidate)
-
                     if self.need_online_perform:
                         self.onperformer.update_eye_candy(self.candidate)
                     self.candidate = None
@@ -799,9 +793,9 @@ class FinalSink(object):
                  abs(float(trigger.end) - float(last_submitted_time)) < 100
                  and trigger.far > last_submitted_far * 0.5):
             print >> sys.stderr, "trigger controled, time %f, FAR %f, \
-                last_far %f, last_submitted time %f, last_submitted far %f" % (
-                float(trigger.end), trigger.far, last_far, last_submitted_time,
-                last_submitted_far)
+                last_far %f, last_submitted time %f, last_submitted far %f" \
+                    % (float(trigger.end), trigger.far, last_far,
+                    last_submitted_time, last_submitted_far)
             self.last_trigger.append((trigger.end, trigger.far))
             line = "%f,%e,%d\n" % (float(
                 trigger.end), trigger.far, trigger_is_submitted)
@@ -809,10 +803,10 @@ class FinalSink(object):
                 f.write(line)
             return True
 
-        print >> sys.stderr, "trigger passed, time %f, FAR %f, \
-            last_far %f, last_submitted time %f, last_submitted_far %f" % (
-            float(trigger.end), trigger.far, last_far, last_submitted_time,
-            last_submitted_far)
+        print >> sys.stderr, "trigger passed, time %f, FAR %f, last_far %f, \
+            last_submitted time %f, last_submitted_far %f" \
+                % (float(trigger.end), trigger.far, last_far,
+                last_submitted_time, last_submitted_far)
 
         trigger_is_submitted = 1
         #self.last_trigger.append((trigger.end, trigger.far))
@@ -842,7 +836,7 @@ class FinalSink(object):
         lal_whiten_element = self.pipeline.get_by_name("lal_whiten_%s" % ifo)
         current_lal_psd = np.array(lal_whiten_element.get_property("mean-psd"))
         psd_frequency_series = lal.CreateREAL8FrequencySeries(
-            name="PSD",
+            name="psd",
             epoch=LIGOTimeGPS(lal.UTCToGPS(time.gmtime()), 0),
             f0=0.0,
             deltaF=lal_whiten_element.get_property("delta-f"),
@@ -931,7 +925,8 @@ class FinalSink(object):
             return
         gid = gracedb_ids[0]
         log_message = "Optimal ra and dec from this coherent pipeline: \
-            (%f, %f) in degrees" % (trigger.ra, trigger.dec)
+            (%f, %f) in degrees" \
+                % (trigger.ra, trigger.dec)
         while gracedb_upload_itrial < 10:
             try:
                 resp = self.gracedb_client.writeLog(gid,
@@ -1147,6 +1142,9 @@ class CoincsDocFromPostcoh(object):
         if psds is not None:
             self.assemble_ligolw_psd_arrays(psds)
 
+        if psds is not None:
+            self.assemble_ligolw_psd_arrays(psds)
+
         postcoh_table.append(trigger)
 
     def assemble_coinc_map_table(self, trigger):
@@ -1265,6 +1263,31 @@ class CoincsDocFromPostcoh(object):
             row.spin2z = trigger.spin2z
             row.event_id = "sngl_inspiral:event_id:%d" % ifo_id
             sngl_inspiral_table.append(row)
+            iifo += 1
+
+    def assemble_ligolw_psd_arrays(self, psds):
+        """Assembles a LIGO_LW REAL8FrequencySeries Array from a
+        dictionary where keys are ifo strings and values are a
+        lal.REAL8FrequencySeries object of the mean-psd for each
+        ifo already retrieved from the pipeline.
+
+        The PSD LIGO_LW element will then be appended to the xmldoc
+        with both the REAL8FrequencySeries Array object and a 
+        corresponding Param object that specifies the ifo string.
+
+        Parameters
+        ----------
+        psds: dict[str, lal.REAL8FrequencySeries]
+            A dictionary of frequency series objects that refer to
+            the mean-psd for each ifo key.
+        """
+        ligolw_psds_container = ligolw.LIGO_LW(attrs={"Name": "psd"})
+        for ifo, psd in psds.items():
+            ligolw_psd_element = lal.series.build_REAL8FrequencySeries(psd)
+            ligolw_psd_element.appendChild(
+                ligolw_param.Param.build(u"instrument", u"lstring", ifo))
+            ligolw_psds_container.appendChild(ligolw_psd_element)
+        self.xmldoc.childNodes[-1].appendChild(ligolw_psds_container)
 
     def assemble_ligolw_snr_series_arrays(self, trigger):
         """Assembles LIGO_LW COMPLEX8TimeSeries arrays that
@@ -1312,28 +1335,6 @@ class CoincsDocFromPostcoh(object):
             ligolw_snr_series_element.appendChild(
                 ligolw_param.Param.build(u"event_id", u"ilwd:char", event_id))
             self.xmldoc.childNodes[-1].appendChild(ligolw_snr_series_element)
-
-    def assemble_ligolw_psd_arrays(self, psds):
-        """Assembles a LIGO_LW REAL8FrequencySeries Array from a
-        dictionary where keys are ifo strings and values are a
-        lal.REAL8FrequencySeries object of the mean-psd for each
-        ifo already retrieved from the pipeline.
-
-        The PSD LIGO_LW element will then be appended to the xmldoc
-        with both the REAL8FrequencySeries Array object and a 
-        corresponding Param object that specifies the ifo string.
-
-        Parameters
-        ----------
-        psds: dict[str, lal.REAL8FrequencySeries]
-            A dictionary of frequency series objects that refer to
-            the mean-psd for each ifo key.
-        """
-        for ifo, psd in psds.items():
-            ligolw_psd_element = lal.series.build_REAL8FrequencySeries(psd)
-            ligolw_psd_element.appendChild(
-                ligolw_param.Param.build(u"instrument", u"lstring", ifo))
-            self.xmldoc.childNodes[-1].appendChild(ligolw_psd_element)
 
 
 def call_plot_fits_func(pngname,
@@ -1458,8 +1459,8 @@ def upload_skymap(gracedb_client, gid, ifos, skymap_fname, end_time,
         msg += " can not plot fits to pngs"
         gracedb_client.writeLog(
             gid,
-            "%s, check if it is due to that the trigger single SNR \
-                is below %s in the postcoh element for a skymap output" %
-            (msg, str(cuda_postcoh_output_skymap)),
+            "%s, check if it is due to that the trigger single SNR is below \
+                %s in the postcoh element for a skymap output" \
+            % (msg, str(cuda_postcoh_output_skymap)),
             filename=None,
             tag_name="sky_loc")
