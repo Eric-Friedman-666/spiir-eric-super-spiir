@@ -233,8 +233,8 @@ class FAPUpdater(object):
         if self.output and len(self.output) != len(self.collect_walltime):
             raise ValueError(
                 "number of input walltimes does match the number of input \
-                    filenames: %s does not match %s" %
-                (collect_walltime_string, output_list_string))
+                    filenames: %s does not match %s" \
+                    % (collect_walltime_string, output_list_string))
 
         self.verbose = verbose
 
