@@ -696,14 +696,16 @@ class FinalSink(object):
         #                 ____(cur_table cleaned)
         #                           |boundary incremented
 
-        # This may be a rare source of nondeterminism,
-        # as we may consider different events equal
+        # Compare cohsnr for statistical significance, with tie-breaks. See #45
         def is_better_event(lhs, rhs):
-            # If both end and cohsnr are equal,
-            # lhs is not considered better (because it is the same)
-            if lhs.cohsnr == rhs.cohsnr:
+            if lhs.cohsnr != rhs.cohsnr:
+                return lhs.cohsnr > rhs.cohsnr
+            if lhs.end != rhs.end:
                 return lhs.end < rhs.end
-            return lhs.cohsnr > rhs.cohsnr
+            # Each bank has a set of templates, forming a unique 'composite key'
+            if lhs.bankid != rhs.bankid:
+                return lhs.bankid < rhs.bankid
+            return lhs.tmplt_idx < rhs.tmplt_idx
 
         peak_event = None
         # find the max cohsnr event within the boundary of cur_event_table
