@@ -1306,7 +1306,7 @@ class CoincsDocFromPostcoh(object):
             The PostcohInspiralTable candidate trigger instance.
         """
 
-        for ifo in re.findall('..', trigger.ifos):
+        for ifo_id, ifo in enumerate(re.findall('..', trigger.ifos)):
             # Append snr_series data into XML document
             epoch_second = getattr(trigger,
                                    "snr_series_epoch_gpsSeconds_" + ifo)
@@ -1326,8 +1326,7 @@ class CoincsDocFromPostcoh(object):
             ligolw_snr_series_element = lal.series.build_COMPLEX8TimeSeries(
                 snr_time_series)
             # Add event_id into the snr_time_series_element
-            event_id = lsctables.SnglInspiralTable.get_table(
-                self.xmldoc).RowType().event_id
+            event_id = "sngl_inspiral:event_id:%d" % ifo_id
             ligolw_snr_series_element.appendChild(
                 ligolw_param.Param.build(u"event_id", u"ilwd:char", event_id))
             self.xmldoc.childNodes[-1].appendChild(ligolw_snr_series_element)

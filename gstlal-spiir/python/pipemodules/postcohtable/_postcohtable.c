@@ -174,7 +174,7 @@ static PyMemberDef members[] = {
 
 // These are upper bounds for memory storage and do not need to be exact.
 #define NUM_STRING_GETSETS  3
-#define NUM_OFFSET_KEY_GETSETS     8
+#define NUM_OFFSET_KEY_GETSETS 8 * MAX_NIFO
 #define NUM_GETSETS_PER_IFO 10
 #define NUM_GETSETS                                                            \
     (NUM_STRING_GETSETS + NUM_OFFSET_KEY_GETSETS + NUM_GETSETS_PER_IFO * MAX_NIFO)
@@ -187,7 +187,7 @@ typedef struct {
 
 typedef struct {
     size_t offset;
-      char key[MAX_GETSET_NAME_LENGTH];
+    char key[MAX_GETSET_NAME_LENGTH];
 } OffsetKey;
 
 // NOTE: This structure includes pointers to its own fields, so it requires a
@@ -235,26 +235,28 @@ static PyObject *get_snr_series(PyObject *obj, void *closure) {
     assert(obj);
     const OffsetKey *offset_key = (OffsetKey *)closure;
     const size_t offset = offset_key->offset;
-    COMPLEX8TimeSeries *snr_series = (COMPLEX8TimeSeries *)((void *)obj + offset);
-    const char *name        = offset_key->key;
-    if (!strcmp(name, "_snr_series_name")) {
+    COMPLEX8TimeSeries *snr_series = 
+        (COMPLEX8TimeSeries *)((void *)obj + offset);
+
+    const char *key = offset_key->key;
+    if (!strcmp(key, "snr_series_name")) {
         return PyString_FromString(snr_series->name);
-    } else if (!strcmp(name, "_snr_series_epoch_gpsSeconds")) {
+    } else if (!strcmp(key, "snr_series_epoch_gpsSeconds")) {
         return PyInt_FromLong(snr_series->epoch.gpsSeconds);
-    } else if (!strcmp(name, "_snr_series_epoch_gpsNanoSeconds")) {
+    } else if (!strcmp(key, "snr_series_epoch_gpsNanoSeconds")) {
         return PyInt_FromLong(snr_series->epoch.gpsNanoSeconds);
-    } else if (!strcmp(name, "_snr_series_f0")) {
+    } else if (!strcmp(key, "snr_series_f0")) {
         return PyFloat_FromDouble(snr_series->f0);
-    } else if (!strcmp(name, "_snr_series_deltaT")) {
+    } else if (!strcmp(key, "snr_series_deltaT")) {
         return PyFloat_FromDouble(snr_series->deltaT);
-    } else if (!strcmp(name, "_snr_series_sampleUnits")) {
+    } else if (!strcmp(key, "snr_series_sampleUnits")) {
         char *s          = XLALUnitToString(&snr_series->sampleUnits);
         PyObject *result = PyString_FromString(s);
         XLALFree(s);
         return result;
-    } else if (!strcmp(name, "_snr_series_data_length_")) {
+    } else if (!strcmp(key, "snr_series_data_length")) {
         return PyInt_FromLong(snr_series->data->length);
-    } else if (!strcmp(name, "_snr_series_data_")) {
+    } else if (!strcmp(key, "snr_series_data")) {
         npy_intp dims[] = { snr_series->data->length };
         PyObject *array =
           PyArray_SimpleNewFromData(1, dims, NPY_CFLOAT, snr_series->data->data);
@@ -340,7 +342,7 @@ static GetSetBuilder *
     builder.getset_idx           = 0;
     builder.string_field_idx     = 0;
     builder.offset_idx           = 0;
-    builder.offset_key_idx              = 0;
+    builder.offset_key_idx       = 0;
     builder.postcohtable_getsets = postcohtable_getsets;
     return &builder;
 }
@@ -415,76 +417,73 @@ static void prepare_getset(PostcohtableGetSets *postcohtable_getsets) {
     declare_string_getset(builder, "skymap_fname", string_field,
                           read_string_from_field, write_string_to_field);
 
-    OffsetKey offset_key = { 0 };
-
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         char *name[MAX_GETSET_NAME_LENGTH];
+        OffsetKey offset_key = {};
 
-        // FIXME: Any 4 of these snr_series members uncommented will cause a segfault, maybe something to do with MAX_NIFO?
-
-        // format_name(name, "_snr_series_name", ifo_id);
-        // offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
-        // strcpy(offset_key.key, "_snr_series_name");
-        // declare_offset_key_getset(
-        //   builder, name,
-        //   offset_key,
-        //   get_snr_series, NULL);
-        
-        format_name(name, "_snr_series_epoch_gpsSeconds", ifo_id);
+        format_name(name, "snr_series_name", ifo_id);
         offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
-        strcpy(offset_key.key, "_snr_series_epoch_gpsSeconds");
+        strcpy(offset_key.key, "snr_series_name");
         declare_offset_key_getset(
           builder, name,
           offset_key,
           get_snr_series, NULL);
 
-        format_name(name, "_snr_series_epoch_gpsNanoSeconds", ifo_id);
+        format_name(name, "snr_series_epoch_gpsSeconds", ifo_id);
         offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
-        strcpy(offset_key.key, "_snr_series_epoch_gpsNanoSeconds");
+        strcpy(offset_key.key, "snr_series_epoch_gpsSeconds");
         declare_offset_key_getset(
           builder, name,
           offset_key,
           get_snr_series, NULL);
 
-        format_name(name, "_snr_series_f0", ifo_id);
+        format_name(name, "snr_series_epoch_gpsNanoSeconds", ifo_id);
         offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
-        strcpy(offset_key.key, "_snr_series_f0");
+        strcpy(offset_key.key, "snr_series_epoch_gpsNanoSeconds");
         declare_offset_key_getset(
           builder, name,
           offset_key,
           get_snr_series, NULL);
 
-        // format_name(name, "_snr_series_deltaT", ifo_id);
-        // offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
-        // strcpy(offset_key.key, "_snr_series_deltaT");
-        // declare_offset_key_getset(
-        //   builder, name,
-        //   offset_key,
-        //   get_snr_series, NULL);
+        format_name(name, "snr_series_f0", ifo_id);
+        offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
+        strcpy(offset_key.key, "snr_series_f0");
+        declare_offset_key_getset(
+          builder, name,
+          offset_key,
+          get_snr_series, NULL);
 
-        // format_name(name, "_snr_series_sampleUnits", ifo_id);
-        // offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
-        // strcpy(offset_key.key, "_snr_series_sampleUnits");
-        // declare_offset_key_getset(
-        //   builder, name,
-        //   offset_key,
-        //   get_snr_series, NULL);
+        format_name(name, "snr_series_deltaT", ifo_id);
+        offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
+        strcpy(offset_key.key, "snr_series_deltaT");
+        declare_offset_key_getset(
+          builder, name,
+          offset_key,
+          get_snr_series, NULL);
 
-        // format_name(name, "_snr_series_data_length", ifo_id);
-        // offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
-        // strcpy(offset_key.key, "_snr_series_data_length");
-        // declare_offset_key_getset(
-        //   builder, name,
-        //   offset_key,
-        //   get_snr_series, NULL);
+        format_name(name, "snr_series_sampleUnits", ifo_id);
+        offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
+        strcpy(offset_key.key, "snr_series_sampleUnits");
+        declare_offset_key_getset(
+          builder, name,
+          offset_key,
+          get_snr_series, NULL);
 
-        // format_name(name, "_snr_series_data", ifo_id);
-        // offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
-        // strcpy(offset_key.key, "_snr_series_data");
-        // declare_offset_key_getset(
-        //   builder, name,
-        //   offset_key,
-        //   get_snr_series, NULL);
+        format_name(name, "snr_series_data_length", ifo_id);
+        offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
+        strcpy(offset_key.key, "snr_series_data_length");
+        declare_offset_key_getset(
+          builder, name,
+          offset_key,
+          get_snr_series, NULL);
+
+        format_name(name, "snr_series_data", ifo_id);
+        offset_key.offset   = offsetof(PostcohInspiralWrapper, postcohtable.snr_series[ifo_id]),
+        strcpy(offset_key.key, "snr_series_data");
+        declare_offset_key_getset(
+          builder, name,
+          offset_key,
+          get_snr_series, NULL);
 
         format_name(name, "chisq", ifo_id);
         declare_offset_getset(
