@@ -39,7 +39,6 @@
 #define EPSILON                   5
 #define PEAKFINDER_CLUSTER_WINDOW 5
 #define RAD2DEG                   57.2957795
-#define MAX_TIMELAG               70000000 // earth_radius *pi/light_speed in nanoseconds
 #define ACCELERATE_POSTCOH_MEMORY_COPY
 
 #define GST_CAT_DEFAULT cuda_postcoh_debug
@@ -615,11 +614,10 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
 
     /* preserved_len is used to allow history data and future data for chisq
      * calculation plus a long enough buffering to account for time shifts */
-    postcoh->preserved_len =
-      state->autochisq_len
-      + 2 * floor(MAX_TIMELAG / (double)GST_SECOND * postcoh->rate);
+    postcoh->preserved_len = state->autochisq_len + 160;
+    // head_len is the amount of "history" that is maintained on the adapter
     postcoh->head_len =
-      postcoh->preserved_len / 2; // length to store history data
+      postcoh->preserved_len / 2;
     /* length for the current execution block (i.e. current data) */
     postcoh->exe_len  = postcoh->rate;
     postcoh->exe_size = postcoh->exe_len * postcoh->bps;
@@ -632,7 +630,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
      * that to be copied to the GPU structure, the GPU structure is a ring
      * buffer and already stored history data */
     postcoh->snglsnr_cpy_len =
-      postcoh->preserved_len - postcoh->head_len + postcoh->exe_len;
+      postcoh->preserved_len / 2 + postcoh->exe_len;
     postcoh->snglsnr_cpy_size = postcoh->snglsnr_cpy_len * postcoh->bps;
 
     state->exe_len      = postcoh->rate;
@@ -986,8 +984,7 @@ static gint cuda_postcoh_push_and_get_common_size(GstCollectPads *pads,
      * data. if there is no data in this adapter, the common size is determined
      * by other detectors.
      */
-    for (i = 0, collectlist = pads->data; collectlist;
-         collectlist = g_slist_next(collectlist), i++) {
+    for (collectlist = pads->data; collectlist; collectlist = g_slist_next(collectlist)) {
         data = collectlist->data;
         buf  = gst_collect_pads_pop(pads, (GstCollectData *)data);
         if (!buf) { // buf == NULL
@@ -1179,54 +1176,28 @@ static int cuda_postcoh_select_background(PeakList *pklist,
                                           int hist_trials,
                                           int max_npeak,
                                           float cohsnr_thresh) {
-    int ipeak, npeak, peak_cur, itrial, background_cur, removed_bg,
-      left_backgrounds = 0;
-    removed_bg         = 0;
-    npeak              = pklist->npeak[0];
+    int ipeak, npeak, peak_cur, itrial, background_cur, left_backgrounds = 0;
+    npeak = pklist->npeak[0];
     for (ipeak = 0; ipeak < npeak; ipeak++) {
         peak_cur = pklist->peak_pos[ipeak];
-        if (sqrt(pklist->cohsnr[peak_cur]) > 8 && pklist->chisq[0][peak_cur] < 3
-            && pklist->chisq[1][peak_cur] < 3) {
-            printf("removed background: snr_h: %f chisq_h: %f \n snr_l: %f "
-                   "chisq_l: %f, check ifo: %d cohsnr: %f cohsnr_bg: %f \n",
-                   pklist->snglsnr[0][peak_cur], pklist->chisq[0][peak_cur],
-                   pklist->snglsnr[1][peak_cur], pklist->chisq[1][peak_cur],
-                   write_ifo, pklist->cohsnr[peak_cur],
-                   pklist->cohsnr_bg[peak_cur]);
-            printf("check backgrounds: fg H: %f bg H: %f \n ",
-                   pklist->snglsnr[0][peak_cur],
-                   pklist->snglsnr_bg[0][peak_cur]);
-            // if the peak fits the 'signal' critera, mark bg as invalid:
-            printf("marking bg as invalid: %f\n", pklist->cohsnr_bg[peak_cur]);
-            for (itrial = 0; itrial < hist_trials; itrial++) {
-                background_cur = itrial * max_npeak + peak_cur;
-                // printf("cohsnr_bg: %f \n",
-                // pklist->cohsnr_bg[background_cur]);
+        for (itrial = 1; itrial <= hist_trials; itrial++) {
+            background_cur = (itrial - 1) * max_npeak + peak_cur;
+            // FIXME: consider a different threshold for 3-detector
+            //          if (sqrt(pklist->cohsnr_bg[background_cur]) >
+            // cohsnr_thresh
+            //* pklist->snglsnr_H[iifo*max_npeak + peak_cur])
+            if (sqrt(pklist->cohsnr_bg[background_cur])
+                > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
+                left_backgrounds++;
+                GST_LOG("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
+                        ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
+                        pklist->snglsnr[write_ifo][peak_cur]);
+            } else {
+                GST_LOG(
+                  "no mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
+                  ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
+                  pklist->snglsnr[write_ifo][peak_cur]);
                 pklist->cohsnr_bg[background_cur] = -1;
-            }
-            removed_bg++;
-            printf("in remove loop, removed bgs now %d\n", removed_bg);
-        } else {
-            for (itrial = 1; itrial <= hist_trials; itrial++) {
-                background_cur = (itrial - 1) * max_npeak + peak_cur;
-                //  FIXME: consider a different threshold for 3-detector
-                //             if (sqrt(pklist->cohsnr_bg[background_cur]) >
-                //  cohsnr_thresh
-                //* pklist->snglsnr_H[iifo*max_npeak + peak_cur])
-                if (sqrt(pklist->cohsnr_bg[background_cur])
-                    > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
-                    left_backgrounds++;
-                    GST_LOG(
-                      "mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
-                      ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
-                      pklist->snglsnr[write_ifo][peak_cur]);
-                } else {
-                    GST_LOG(
-                      "no mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
-                      ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
-                      pklist->snglsnr[write_ifo][peak_cur]);
-                    pklist->cohsnr_bg[background_cur] = -1;
-                }
             }
         }
     }
@@ -1387,24 +1358,12 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
 
             /* fill in the attributes for single detectors first */
             for (int ifo_id = 0; ifo_id < nifo; ifo_id++) {
-                /* check if the detector is alive */
-                if (state->cur_ifo_is_gap[ifo_id]) continue;
                 int write_ifo = state->write_ifo_mapping[ifo_id];
-
-                XLALGPSAdd(&(end_time),
-                           (double)pklist->ntoff[write_ifo][peak_cur]
-                             / exe_len);
-                output->end_time_sngl[write_ifo] = end_time;
-                end_time = output->end_time; // restore it
-
-                output->snglsnr[write_ifo] =
-                  pklist->snglsnr[write_ifo][peak_cur];
-                output->coaphase[write_ifo] =
-                  pklist->coaphase[write_ifo][peak_cur];
-                output->chisq[write_ifo] = pklist->chisq[write_ifo][peak_cur];
                 output->deff[write_ifo] =
                   sqrt(state->sigmasq[ifo_id][cur_tmplt_idx])
                   / pklist->snglsnr[write_ifo][peak_cur]; // in MPC
+                // Only record snr series on active IFOs
+                if (state->cur_ifo_is_gap[ifo_id]) continue;
 
                 /* epoch is the GPS time of the first sample */
                 LIGOTimeGPS epoch = output->end_time_sngl[write_ifo];
@@ -1961,8 +1920,8 @@ static void cuda_postcoh_process(GstCollectPads *pads,
         /* make a buffer and send it out */
         cuda_postcoh_new_buffer_and_push(postcoh, exe_len);
 
-        for (i = 0, collectlist = pads->data; collectlist;
-             collectlist = g_slist_next(collectlist), i++) {
+        for (collectlist = pads->data; collectlist;
+             collectlist = g_slist_next(collectlist)) {
             data = collectlist->data;
             /* move along */
             GST_DEBUG_OBJECT(postcoh, "flush adapter %d, size %d\n", cur_ifo,

@@ -175,9 +175,9 @@ static PyMemberDef members[] = {
 // These are upper bounds for memory storage and do not need to be exact.
 #define NUM_STRING_GETSETS  3
 #define NUM_OFFSET_KEY_GETSETS 7 * MAX_NIFO
-#define NUM_GETSETS_PER_IFO 11
+#define NUM_OFFSET_GETSETS 11 * MAX_NIFO
 #define NUM_GETSETS                                                            \
-    (NUM_STRING_GETSETS + NUM_OFFSET_KEY_GETSETS + NUM_GETSETS_PER_IFO * MAX_NIFO)
+    (NUM_STRING_GETSETS + NUM_OFFSET_KEY_GETSETS + NUM_OFFSET_GETSETS)
 #define MAX_GETSET_NAME_LENGTH 40
 
 typedef struct {
@@ -196,7 +196,7 @@ typedef struct {
     char names[NUM_GETSETS][MAX_GETSET_NAME_LENGTH];
     StringField string_fields[NUM_STRING_GETSETS];
     OffsetKey offset_keys[NUM_OFFSET_KEY_GETSETS];
-    size_t offsets[NUM_GETSETS_PER_IFO * MAX_NIFO];
+    size_t offsets[NUM_OFFSET_GETSETS];
     struct PyGetSetDef getsets[NUM_GETSETS + 1];
 } PostcohtableGetSets;
 
@@ -230,7 +230,6 @@ static int
     return 0;
 }
 
-// FIXME: This should follow the same format as our other get functions.
 static PyObject *get_snr_series(PyObject *obj, void *closure) {
     assert(obj);
     const OffsetKey *offset_key = (OffsetKey *)closure;
@@ -783,7 +782,7 @@ PyMODINIT_FUNC init_postcohtable(void) {
     /* PostcohInspiralTable */
     //_PostcohInspiralWrapper_Type =
     //&postcohtable_py__postcohinspiraltable_type;
-    if (PyType_Ready(&postcoh_inspiral_wrapper_type) < 0) return; // FIXME: SEGFAULT occurs here in the current state.
+    if (PyType_Ready(&postcoh_inspiral_wrapper_type) < 0) return;
     Py_INCREF(&postcoh_inspiral_wrapper_type);
     PyModule_AddObject(module, "GSTLALPostcohInspiral",
                        (PyObject *)&postcoh_inspiral_wrapper_type);
