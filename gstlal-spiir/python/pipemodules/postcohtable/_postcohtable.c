@@ -49,6 +49,10 @@
  */
 
 typedef struct {
+    PyObject snr_series[MAX_NIFO];
+} Complex8TimeSeriesWrapper;
+
+typedef struct {
     PyObject_HEAD
     PostcohInspiralTable postcohtable;
     PyObject *end_time_sngl;
@@ -60,30 +64,28 @@ typedef struct {
     PyObject *far_1d_sngl;
     PyObject *far_2h_sngl;
     PyObject *deff;
+    Complex8TimeSeriesWrapper wrapped_snr_series;
 } PostcohInspiralWrapper;
 
-typedef struct {
-    PyObject_HEAD
-    PyObject *snr_series[MAX_NIFO];
-} Complex8TimeSeriesWrapper;
-
-static void PyArray_Complex8TimeSeriesNewFromData(Complex8TimeSeriesWrapper * wrapped_snr_series, COMPLEX8TimeSeries snr_series) {
+static void PyArray_SimpleNewFromComplex8TimeSeries(Complex8TimeSeriesWrapper * wrapped_snr_series, PostcohInspiralTable * buffer_postcoh) {
   // Allocate a separate numpy array for each snr_series
-  if (snr_series) {
+  if (buffer_postcoh->snr_series) {
       for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
-          if (snr_series[ifo_id] && snr_series[ifo_id]->data->length > 0) {
-              npy_intp snr_series_dims[1] = { snr_series[ifo_id]->data->length };
-              wrapped_snr_series->snr_series[ifo_id] = PyArray_SimpleNewFromData(1, snr_series_dims, NPY_CFLOAT, snr_series[ifo_id]->data->data);
-              Py_INCREF(wrapped_snr_series->snr_series[ifo_id]);
-          } else {
-              wrapped_snr_series->snr_series[ifo_id] = NULL;
-          }
+          if (buffer_postcoh->snr_series[ifo_id] && buffer_postcoh->snr_series[ifo_id]->data->length > 0) {
+              npy_intp snr_series_dims[1] = { buffer_postcoh->snr_series[ifo_id]->data->length };
+              wrapped_snr_series->snr_series[ifo_id] = *PyArray_SimpleNewFromData(1, snr_series_dims, NPY_CFLOAT, buffer_postcoh->snr_series[ifo_id]->data->data);
+              Py_INCREF(&wrapped_snr_series->snr_series[ifo_id]);
+          } 
+          // else {
+          //     wrapped_snr_series->snr_series[ifo_id] = NULL;
+          // }
       }
-  } else {
-      for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
-          wrapped_snr_series->snr_series[ifo_id] = NULL;
-      }
-  }
+  } 
+  // else {
+  //     for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
+  //         wrapped_snr_series->snr_series[ifo_id] = NULL;
+  //     }
+  // }
 }
 
 // static PyObject *row_event_id_type = NULL;
@@ -497,7 +499,7 @@ static void prepare_getset(PostcohtableGetSets *postcohtable_getsets) {
         format_name(name, "snr_series_data", ifo_id);
         declare_offset_getset(
           builder, name,
-          offsetof(PostcohInspiralWrapper, snr_series[ifo_id]),
+          offsetof(PostcohInspiralWrapper, wrapped_snr_series.snr_series[ifo_id]),
           get_py_object, NULL);
 
         format_name(name, "chisq", ifo_id);
@@ -612,13 +614,10 @@ static PyObject *__new__(PyTypeObject *type, PyObject *args, PyObject *kwds) {
     return (PyObject *)instance;
 }
 
-static void free_snr_series(PostcohInspiralWrapper *wrapped_postcohtable) {
+static void free_snr_series(PostcohInspiralWrapper *postcoh_inspiral) {
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        if (wrapped_postcohtable->postcohtable.snr_series[ifo_id]) {
-            XLALDestroyCOMPLEX8TimeSeries(wrapped_postcohtable->postcohtable.snr_series[ifo_id]);
-        }
-        if (wrapped_postcohtable->snr_series[ifo_id]) {
-            Py_DECREF(wrapped_postcohtable->snr_series[ifo_id]);
+        if (&postcoh_inspiral->wrapped_snr_series.snr_series[ifo_id]) {
+            Py_DECREF(&postcoh_inspiral->wrapped_snr_series.snr_series[ifo_id]);
         }
     }
 }
@@ -685,30 +684,29 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        wrapped_snr_series->snr_series = PyArray_SimpleNewFromComplex8TimeSeries(
-          wrapped_snr_series, wrapped_postcohtable->postcohtable.snr_series);
+        PyArray_SimpleNewFromComplex8TimeSeries(
+          wrapped_snr_series, buffer_postcohtable);
 
-        wrapped_postcohtable->postcohtable = *buffer_postcohtable;
-
+        wrapped_postcohtable->wrapped_snr_series = *wrapped_snr_series;
         wrapped_postcohtable->end_time_sngl = PyArray_SimpleNewFromData(
           2, end_time_dims, NPY_INT,
-          wrapped_postcohtable->postcohtable.end_time_sngl);
+          buffer_postcohtable->end_time_sngl);
         wrapped_postcohtable->snglsnr = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.snglsnr);
+          1, dims, NPY_FLOAT, buffer_postcohtable->snglsnr);
         wrapped_postcohtable->coaphase = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.coaphase);
+          1, dims, NPY_FLOAT, buffer_postcohtable->coaphase);
         wrapped_postcohtable->chisq = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.chisq);
+          1, dims, NPY_FLOAT, buffer_postcohtable->chisq);
         wrapped_postcohtable->far_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_sngl);
+          1, dims, NPY_FLOAT, buffer_postcohtable->far_sngl);
         wrapped_postcohtable->far_1w_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_1w_sngl);
+          1, dims, NPY_FLOAT, buffer_postcohtable->far_1w_sngl);
         wrapped_postcohtable->far_1d_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_1d_sngl);
+          1, dims, NPY_FLOAT, buffer_postcohtable->far_1d_sngl);
         wrapped_postcohtable->far_2h_sngl = PyArray_SimpleNewFromData(
-          1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_2h_sngl);
+          1, dims, NPY_FLOAT, buffer_postcohtable->far_2h_sngl);
         wrapped_postcohtable->deff = PyArray_SimpleNewFromData(
-          1, dims, NPY_DOUBLE, wrapped_postcohtable->postcohtable.deff);
+          1, dims, NPY_DOUBLE, buffer_postcohtable->deff);
 
         if (PyList_Append(result, (PyObject *)wrapped_postcohtable))
             printf("append failure");
