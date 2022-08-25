@@ -51,7 +51,6 @@
 typedef struct {
     PyObject_HEAD
     PostcohInspiralTable postcohtable;
-    PyObject *snr_series[MAX_NIFO];
     PyObject *end_time_sngl;
     PyObject *snglsnr;
     PyObject *coaphase;
@@ -62,6 +61,30 @@ typedef struct {
     PyObject *far_2h_sngl;
     PyObject *deff;
 } PostcohInspiralWrapper;
+
+typedef struct {
+    PyObject_HEAD
+    PyObject *snr_series[MAX_NIFO];
+} Complex8TimeSeriesWrapper;
+
+static void PyArray_Complex8TimeSeriesNewFromData(Complex8TimeSeriesWrapper * wrapped_snr_series, COMPLEX8TimeSeries snr_series) {
+  // Allocate a separate numpy array for each snr_series
+  if (snr_series) {
+      for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
+          if (snr_series[ifo_id] && snr_series[ifo_id]->data->length > 0) {
+              npy_intp snr_series_dims[1] = { snr_series[ifo_id]->data->length };
+              wrapped_snr_series->snr_series[ifo_id] = PyArray_SimpleNewFromData(1, snr_series_dims, NPY_CFLOAT, snr_series[ifo_id]->data->data);
+              Py_INCREF(wrapped_snr_series->snr_series[ifo_id]);
+          } else {
+              wrapped_snr_series->snr_series[ifo_id] = NULL;
+          }
+      }
+  } else {
+      for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
+          wrapped_snr_series->snr_series[ifo_id] = NULL;
+      }
+  }
+}
 
 // static PyObject *row_event_id_type = NULL;
 // static PyObject *process_id_type = NULL;
@@ -654,6 +677,17 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
+        Complex8TimeSeriesWrapper *wrapped_snr_series =
+          (Complex8TimeSeriesWrapper *)PyType_GenericNew((PyTypeObject *)cls, NULL,
+                                                      NULL);
+        if (!wrapped_snr_series) {
+            Py_DECREF(result);
+            return NULL;
+        }
+
+        wrapped_snr_series->snr_series = PyArray_SimpleNewFromComplex8TimeSeries(
+          wrapped_snr_series, wrapped_postcohtable->postcohtable.snr_series);
+
         wrapped_postcohtable->postcohtable = *buffer_postcohtable;
 
         wrapped_postcohtable->end_time_sngl = PyArray_SimpleNewFromData(
@@ -675,24 +709,6 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
           1, dims, NPY_FLOAT, wrapped_postcohtable->postcohtable.far_2h_sngl);
         wrapped_postcohtable->deff = PyArray_SimpleNewFromData(
           1, dims, NPY_DOUBLE, wrapped_postcohtable->postcohtable.deff);
-
-        // Allocate a separate numpy array for each snr_series
-        if (wrapped_postcohtable->postcohtable.snr_series) {
-            for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
-                if (wrapped_postcohtable->postcohtable.snr_series[ifo_id]
-                    && wrapped_postcohtable->postcohtable.snr_series[ifo_id]->data->length > 0) {
-                    npy_intp snr_series_dims[1] = { wrapped_postcohtable->postcohtable.snr_series[ifo_id]->data->length };
-                    wrapped_postcohtable->snr_series[ifo_id] = PyArray_SimpleNewFromData(1, snr_series_dims, NPY_CFLOAT, wrapped_postcohtable->postcohtable.snr_series[ifo_id]->data->data);
-                    Py_INCREF(wrapped_postcohtable->snr_series[ifo_id]);
-                } else {
-                    wrapped_postcohtable->snr_series[ifo_id] = NULL;
-                }
-            }
-        } else {
-            for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
-                wrapped_postcohtable->snr_series[ifo_id] = NULL;
-            }
-        }
 
         if (PyList_Append(result, (PyObject *)wrapped_postcohtable))
             printf("append failure");
