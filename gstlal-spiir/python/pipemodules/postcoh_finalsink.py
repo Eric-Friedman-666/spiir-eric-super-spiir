@@ -588,7 +588,7 @@ class FinalSink(object):
                 logging.info("buf gap at %d" % buf.timestamp)
                 return
             buf_timestamp = LIGOTimeGPS(0, buf.timestamp)
-            newevents = postcohtable.GSTLALPostcohInspiral.from_buffer(buf)
+            newevents, snr_series_list = postcohtable.from_buffer(buf)
             self.need_candidate_check = False
 
             if len(newevents) == 0:
@@ -646,7 +646,6 @@ class FinalSink(object):
                             self.candidate):
                         self.__do_gracedb_alert(self.candidate)
 
-                    self.candidate.delete_all_snr_series()
                     self.postcoh_table.append(self.candidate)
 
                     if self.need_online_perform:
@@ -661,7 +660,6 @@ class FinalSink(object):
 
             if self.cluster_window == 0:
                 for event in newevents:
-                    event.delete_all_snr_series()
                     self.postcoh_table.append(event)
 
                 del self.cur_event_table[:]
