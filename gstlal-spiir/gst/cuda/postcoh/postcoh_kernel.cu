@@ -36,6 +36,7 @@ const int GAMMA_ITMAX = 50;
 #define WARP_SIZE     32
 #define WARP_MASK     31
 #define LOG_WARP_SIZE 5
+#define ALL_THREADS_MASK 0xFFFFFFFF
 
 #define MIN_EPSILON       1e-7
 #define MAXIFOS           6
@@ -99,9 +100,11 @@ __global__ void ker_max_snglsnr(COMPLEX_F **snr, // INPUT: snr
         // inter-warp reduction to find the max snr among threads in the warp
         for (int j = WARP_SIZE / 2; j > 0; j = j >> 1) {
 
-            temp_snr_sq = __shfl(max_snr_sq, wIDl + j, 2 * j);
+            temp_snr_sq =
+              __shfl_sync(ALL_THREADS_MASK, max_snr_sq, wIDl + j, 2 * j);
 
-            temp_template = __shfl(max_template, wIDl + j, 2 * j);
+            temp_template =
+              __shfl_sync(ALL_THREADS_MASK, max_template, wIDl + j, 2 * j);
             max_template  = (max_template + temp_template)
                            + (max_template - temp_template)
                                * (2 * (max_snr_sq > temp_snr_sq) - 1);
@@ -420,11 +423,11 @@ __global__ void ker_coh_max_and_chisq_versatile(
     volatile int *restrict sky_idx_shared      = (int *)&nullstream_shared[wn];
 
     // float    *mu;    // matrix u for certain sky direction
-    int peak_cur, tmplt_cur, ipeak_max = 0;
+    int peak_cur, tmplt_cur;
     COMPLEX_F dk[MAXIFOS];
     int NtOff;
     int map_idx;
-    float real, imag, factor;
+    float real, imag;
     float al_all = 0.0f, chisq_cur;
 
     float stat_max, stat_tmp;
@@ -503,10 +506,11 @@ __global__ void ker_coh_max_and_chisq_versatile(
         }
 
         for (i = WARP_SIZE / 2; i > 0; i = i >> 1) {
-            stat_tmp           = __shfl_xor(stat_max, i);
-            snr_tmp            = __shfl_xor(snr_max, i);
-            nullstream_max_tmp = __shfl_xor(nullstream_max, i);
-            sky_idx_tmp        = __shfl_xor(sky_idx, i);
+            stat_tmp = __shfl_xor_sync(ALL_THREADS_MASK, stat_max, i);
+            snr_tmp  = __shfl_xor_sync(ALL_THREADS_MASK, snr_max, i);
+            nullstream_max_tmp =
+              __shfl_xor_sync(ALL_THREADS_MASK, nullstream_max, i);
+            sky_idx_tmp = __shfl_xor_sync(ALL_THREADS_MASK, sky_idx, i);
 
             if (stat_tmp > stat_max) {
                 stat_max       = stat_tmp;
@@ -592,14 +596,15 @@ __global__ void ker_coh_max_and_chisq_versatile(
                 laneChi2 += (data.re * data.re + data.im * data.im);
             }
             for (int k = WARP_SIZE >> 1; k > 0; k = k >> 1) {
-                laneChi2 += __shfl_xor(laneChi2, k, WARP_SIZE);
+                laneChi2 +=
+                  __shfl_xor_sync(ALL_THREADS_MASK, laneChi2, k, WARP_SIZE);
             }
             if (srcLane == 0) { snr_shared[wID] = laneChi2; }
             __syncthreads();
             if (threadIdx.x < wn) {
                 laneChi2 = snr_shared[srcLane];
                 for (i = wn / 2; i > 0; i = i >> 1) {
-                    laneChi2 += __shfl_xor(laneChi2, i);
+                    laneChi2 += __shfl_xor_sync(ALL_THREADS_MASK, laneChi2, i);
                 }
                 if (srcLane == 0) {
                     chisq_cur = laneChi2 / autocorr_norm[j][tmplt_cur];
@@ -625,7 +630,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
          *
          */
 
-        int ipix = 0, rand_range = trial_sample_inv * hist_trials - 1;
+        int ipix = 0;
         for (itrial = 1 + threadIdx.x / WARP_SIZE; itrial <= hist_trials;
              itrial += blockDim.x / WARP_SIZE) {
             snr_max        = 0.0;
@@ -633,6 +638,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
             sky_idx        = 0;
 
             // FIXME: try using random offset like the following
+            // rand_range = trial_sample_inv * hist_trials - 1;
             // trial_offset = rand()% rand_range + 1;
             trial_offset  = itrial * trial_sample_inv;
             output_offset = peak_cur + (itrial - 1) * max_npeak;
@@ -699,10 +705,11 @@ __global__ void ker_coh_max_and_chisq_versatile(
             }
 
             for (i = WARP_SIZE / 2; i > 0; i = i >> 1) {
-                stat_tmp           = __shfl_xor(stat_max, i);
-                snr_tmp            = __shfl_xor(snr_max, i);
-                nullstream_max_tmp = __shfl_xor(nullstream_max, i);
-                sky_idx_tmp        = __shfl_xor(sky_idx, i);
+                stat_tmp = __shfl_xor_sync(ALL_THREADS_MASK, stat_max, i);
+                snr_tmp  = __shfl_xor_sync(ALL_THREADS_MASK, snr_max, i);
+                nullstream_max_tmp =
+                  __shfl_xor_sync(ALL_THREADS_MASK, nullstream_max, i);
+                sky_idx_tmp = __shfl_xor_sync(ALL_THREADS_MASK, sky_idx, i);
 
                 if (stat_tmp > stat_max) {
                     stat_max       = stat_tmp;
@@ -789,7 +796,8 @@ __global__ void ker_coh_max_and_chisq_versatile(
                     laneChi2 += (data.re * data.re + data.im * data.im);
                 }
                 for (int k = WARP_SIZE >> 1; k > 0; k = k >> 1) {
-                    laneChi2 += __shfl_xor(laneChi2, k, WARP_SIZE);
+                    laneChi2 +=
+                      __shfl_xor_sync(ALL_THREADS_MASK, laneChi2, k, WARP_SIZE);
                 }
 
                 if (srcLane == 0) {
@@ -906,9 +914,6 @@ void cohsnr_and_chisq(PostcohState *state,
                       int gps_idx,
                       int output_skymap,
                       cudaStream_t stream) {
-    size_t freemem;
-    size_t totalmem;
-
     int threads = 256;
     int sharedsize =
       MAX(2 * threads * sizeof(float), 4 * threads / WARP_SIZE * sizeof(float));

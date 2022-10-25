@@ -28,6 +28,7 @@
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
 #define PY_SSIZE_T_CLEAN
+#include <IFOMap.h>
 #include <Python.h>
 #include <lal/TimeSeries.h>
 #include <lal/Units.h>
@@ -390,9 +391,9 @@ static void declare_key_getset(
 }
 
 static void format_name(char *output_name, char *base_name, int ifo_id) {
-    assert(strlen(base_name) + 1 + strlen(IFOMap[ifo_id])
+    assert(strlen(base_name) + 1 + strlen(get_ifo_string(ifo_id))
            < MAX_GETSET_NAME_LENGTH);
-    sprintf(output_name, "%s_%s", base_name, IFOMap[ifo_id]);
+    sprintf(output_name, "%s_%s", base_name, get_ifo_string(ifo_id));
 }
 
 static void prepare_getset(PostcohtableGetSets *postcohtable_getsets) {
@@ -429,7 +430,7 @@ static void prepare_getset(PostcohtableGetSets *postcohtable_getsets) {
     declare_key_getset(builder, "_snr_data", "_snr_data", get_snr_series, NULL);
 
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        char *name[MAX_GETSET_NAME_LENGTH];
+        char name[MAX_GETSET_NAME_LENGTH];
         format_name(name, "chisq", ifo_id);
         declare_offset_getset(
           builder, name,
@@ -706,8 +707,8 @@ PyMODINIT_FUNC init_postcohtable(void) {
     PyObject *ifo_map = PyList_New(MAX_NIFO);
     Py_INCREF(ifo_map);
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        PyObject *str =
-          PyString_FromStringAndSize(IFOMap[ifo_id], strlen(IFOMap[ifo_id]));
+        PyObject *str = PyString_FromStringAndSize(
+          get_ifo_string(ifo_id), strlen(get_ifo_string(ifo_id)));
         assert(str);
         Py_INCREF(str);
         PyList_SetItem(ifo_map, ifo_id, str);

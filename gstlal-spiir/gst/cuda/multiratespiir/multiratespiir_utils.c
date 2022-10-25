@@ -42,19 +42,6 @@ extern "C" {
 #endif
 
 #define NTHREAD_LIMIT 1024
-#if 0
-// deprecated: we have cuda_debug.h for gpu debug now
-#define gpuErrchk(ans)                                                         \
-    { gpuAssert((ans), __FILE__, __LINE__); }
-static void gpuAssert(cudaError_t code, char *file, int line)
-{
-   if (code != cudaSuccess) 
-   {
-      printf ("GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-      exit(code);
-   }
-}
-#endif
 /*
  * ============================================================================
  *
@@ -694,162 +681,6 @@ gint spiir_state_get_outlen(SpiirState **spstate,
     return in_len;
 }
 
-/* DEPRECATED */
-#if 0
-void
-spiir_state_load_bank (SpiirState **spstate, guint num_depths, gdouble *bank, gint bank_len, cudaStream_t stream)
-{
-
-	COMPLEX_F *tmp_a1 = NULL, *tmp_b0 = NULL;
-       	int *tmp_d = NULL, tmp_max = 0;
-	int a1_len = 0, b0_len = 0, d_len = 0;
-	int a1_eff_len = 0, b0_eff_len = 0, d_eff_len = 0;
-	gint i, depth;
-	gint pos = 1; //start position, the 0 is for number of depths
-
-	for (depth = num_depths - 1; depth >= 0; depth--) {
-		SPSTATE(depth)->num_templates = (gint) bank[pos];
-		SPSTATE(depth)->num_filters = (gint) bank[pos+1]/2;
-		//printf("depth %d, ntemplates %d, nfilters %d\n", depth, SPSTATE(depth)->num_templates, SPSTATE(depth)->num_filters);
-
-		/* 
-		 * initiate coefficient a1
-		 */
-		if (SPSTATE(depth)->num_templates > 0) {
-			//printf("dpt %d\n",depth);
-		a1_eff_len = (gint) bank[pos] * bank[pos+1]/2;	
-		pos = pos + 2;
-		spiir_state_workspace_realloc_complex (&tmp_a1, &a1_len, a1_eff_len);
-
-		for (i=0; i<a1_eff_len; i++) {
-			tmp_a1[i].re = (float) bank[pos++];
-//			printf("a matrix %d, re %e \n", i, tmp_a1[i].re);
-			tmp_a1[i].im = (float) bank[pos++];
-//			printf("a matrix %d, im %e \n", i, tmp_a1[i].im);
-		}
-
-		cudaMalloc((void **) &(SPSTATE(depth)->d_a1), a1_eff_len * sizeof (COMPLEX_F));
-
-		cudaMemcpyAsync(SPSTATE(depth)->d_a1, tmp_a1, a1_eff_len * sizeof(COMPLEX_F), cudaMemcpyHostToDevice, stream);
-		/* 
-		 * initiate coefficient b0
-		 */
-		b0_eff_len = (gint) bank[pos] * bank[pos+1]/2;	
-		pos = pos + 2;
-		spiir_state_workspace_realloc_complex (&tmp_b0, &b0_len, b0_eff_len);
-
-		for (i=0; i<b0_eff_len; i++) {
-			tmp_b0[i].re = (float) bank[pos++];
-			tmp_b0[i].im = (float) bank[pos++];
-		}
-
-		cudaMalloc((void **) &(SPSTATE(depth)->d_b0), b0_eff_len * sizeof (COMPLEX_F));
-
-		cudaMemcpyAsync(SPSTATE(depth)->d_b0, tmp_b0, b0_eff_len * sizeof(COMPLEX_F), cudaMemcpyHostToDevice, stream);
-		/* 
-		 * initiate coefficient d (delay)
-		 */
-
-		d_eff_len = (gint) bank[pos] * bank[pos+1];
-
-		pos = pos + 2;
-		spiir_state_workspace_realloc_int (&tmp_d, &d_len, d_eff_len);
-
-		tmp_max = (int)bank[pos];
-		for (i=0; i<d_eff_len; i++) {
-			tmp_d[i] = (int) bank[pos++];
-			tmp_max = tmp_d[i] > tmp_max ? tmp_d[i] : tmp_max;
-		}
-
-		SPSTATE(depth)->delay_max = tmp_max;
-		cudaMalloc((void **) &(SPSTATE(depth)->d_d), d_eff_len * sizeof (int));
-
-		cudaMemcpyAsync(SPSTATE(depth)->d_d, tmp_d, d_eff_len * sizeof(int), cudaMemcpyHostToDevice, stream);
-		/* 
-		 * initiate previous output y
-		 */
-
-		cudaMalloc((void **) &(SPSTATE(depth)->d_y), a1_eff_len * sizeof (COMPLEX_F));
-
-		cudaMemsetAsync(SPSTATE(depth)->d_y, 0, a1_eff_len * sizeof(COMPLEX_F), stream);
-		} else {
-			SPSTATE(depth)->d_a1 = NULL;
-			SPSTATE(depth)->d_b0 = NULL;
-			SPSTATE(depth)->d_d = NULL;
-			SPSTATE(depth)->d_y = NULL;
-			SPSTATE(depth)->delay_max = 0;
-		}
-	}
-	if (tmp_a1)
-		free (tmp_a1);
-	if (tmp_b0)
-		free (tmp_b0);
-	if (tmp_d)
-		free (tmp_d);
-	//g_assert (pos == bank_len);
-        //gpuErrchk (cudaPeekAtLastError ());
-
-
-}
-
-SpiirState ** 
-spiir_state_create (gdouble *bank, gint bank_len, guint num_head_cover_samples,
-		guint num_exe_samples, gint width, guint rate, cudaStream_t stream)
-{
-
-	//printf("init spstate\n");
-	gint i, inrate, outrate, queue_alloc_size;
-	gint num_depths = (gint) bank[0];
-	gint outchannels = (gint) bank[1] * 2;
-	SpiirState ** spstate = (SpiirState **)malloc(num_depths * sizeof(SpiirState*));
-
-	for(i=0; i<num_depths; i++)
-	{
-		SPSTATE(i) = (SpiirState *)malloc(sizeof(SpiirState));
-		SPSTATE(i)->depth = i;
-		inrate = rate/pow(2, i);
-		outrate = inrate / 2;
-
-		SPSTATEDOWN(i) = resampler_state_create (inrate, outrate, 1, num_exe_samples, num_head_cover_samples, i, stream);
-		SPSTATEUP(i) = resampler_state_create (outrate, inrate, outchannels, num_exe_samples, num_head_cover_samples, i, stream);
-		g_assert (SPSTATEDOWN(i) != NULL);
-	    g_assert (SPSTATEUP(i) != NULL);
-
-	}
-	spiir_state_load_bank (spstate, num_depths, bank, bank_len, stream);
-
-	for(i=0; i<num_depths; i++) {
-
-		SPSTATE(i)->nb = 0;
-		SPSTATE(i)->pre_out_spiir_len = 0;
-		SPSTATE(i)->queue_len = (2 * num_head_cover_samples + num_exe_samples) / pow (2, i) + 1 + SPSTATE(i)->delay_max; 
-		SPSTATE(i)->queue_first_sample = 0;
-		SPSTATE(i)->queue_last_sample = SPSTATE(i)->delay_max;
-		queue_alloc_size = SPSTATE(i)->queue_len* sizeof(float);
-		cudaMalloc((void **) &(SPSTATE(i)->d_queue), queue_alloc_size);
-		cudaMemsetAsync(SPSTATE(i)->d_queue, 0, queue_alloc_size, stream);
-
-	}
-
-	return spstate;
-}
-
-void
-spiir_state_flush_queue (SpiirState **spstate, gint depth, gint
-		num_flush_samples)
-{
-  int i;
-  gint queue_len = SPSTATE(depth)->queue_len;
-  float *pos_queue = SPSTATE(depth)->queue;
-
-  for (i=0; i<queue_len - num_flush_samples; i++) 
-	  pos_queue[i] = pos_queue[i + num_flush_samples];
-
-  SPSTATE(depth)->queue_len = SPSTATE(depth)->queue_len - num_flush_samples;
-  SPSTATE(depth)->queue_last_sample = SPSTATE(depth)->queue_last_sample - num_flush_samples;
-}
-#endif
-
 void cuda_multiratespiir_read_bank_id(const char *fname, gint *bank_id) {
     XmlNodeStruct xns;
     XmlParam xparam = { 0, NULL };
@@ -907,7 +738,6 @@ void cuda_multiratespiir_init_cover_samples(guint *num_head_cover_samples,
                                             gint up_filtlen) {
     guint i          = num_depths;
     gint rate_start  = 0;
-    gboolean success = FALSE;
 
     if (num_depths > 1) {
         rate_start = up_filtlen;

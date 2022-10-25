@@ -1,5 +1,5 @@
-ADD_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/lib/include
-ADD_LIBS = -L\$(top_srcdir)/lib -lgstlalspiir
+ADD_CFLAGS = $(GSTLAL_SPIIR_CFLAGS)
+ADD_LIBS = $(GSTLAL_SPIIR_LIBS)
 
 
 # This is a trick taken from the gst-python automake setup.

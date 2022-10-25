@@ -17,11 +17,13 @@
  * Boston, MA 02111-1307, USA.
  */
 
+#include <IFOMap.h>
 #include <LIGOLwHeader.h>
+#include <chealpix.h>
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
 #include <gst/gst.h>
-#include <pipe_macro.h> // for ifo_set__get_string
+#include <pipe_macro.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
 
@@ -143,14 +145,15 @@ void cuda_device_print(int deviceCount) {
     }
 }
 
-/* get ifo indices of a given set of ifos in IFOMap
+/* get ifo indices of a given set of ifos
  * e.g. HV: 0, 2
  */
 void get_write_ifo_mapping(char *ifos, int nifo, int *write_ifo_mapping) {
     int iifo, jifo;
     for (iifo = 0; iifo < nifo; iifo++)
         for (jifo = 0; jifo < MAX_NIFO; jifo++)
-            if (strncmp(ifos + iifo * IFO_LEN, IFOMap[jifo], IFO_LEN) == 0) {
+            if (strncmp(ifos + iifo * IFO_LEN, get_ifo_string(jifo), IFO_LEN)
+                == 0) {
                 write_ifo_mapping[iifo] = jifo;
                 break;
             }
@@ -416,7 +419,7 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
         // Find sigma_fname that matches ifo i, if any
         gchar *matched_fname = NULL;
         for (isigma = sigma_fnames; *isigma; isigma++) {
-            if (strncmp(*isigma, IFOMap[i], IFO_LEN) == 0) {
+            if (strncmp(*isigma, get_ifo_string(i), IFO_LEN) == 0) {
                 matched_fname = *isigma;
             }
         }
@@ -644,7 +647,7 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
         // Find auto_fname that matches ifo i, if any
         gchar *matched_fname = NULL;
         for (iauto = auto_fnames; *iauto; iauto++) {
-            if (strncmp(*iauto, IFOMap[i], IFO_LEN) == 0) {
+            if (strncmp(*iauto, get_ifo_string(i), IFO_LEN) == 0) {
                 matched_fname = *iauto;
             }
         }

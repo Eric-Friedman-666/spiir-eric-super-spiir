@@ -21,6 +21,7 @@
  * peaks from all detectors and for each peak, do null stream analysis.
  */
 #include <getopt.h>
+#include <glib/gstdio.h>
 #include <gst/gst.h>
 #include <math.h>
 #include <pipe_macro.h>
@@ -213,7 +214,6 @@ static int to_xml(RspSkymap *rsp_map,
                   int compression) {
     int rc;
     xmlTextWriterPtr writer;
-    xmlChar *tmp;
 
     XmlArray *tmp_array = (XmlArray *)malloc(sizeof(XmlArray));
 

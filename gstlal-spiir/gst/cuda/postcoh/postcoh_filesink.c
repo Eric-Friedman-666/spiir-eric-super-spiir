@@ -31,6 +31,7 @@
 #include "postcohtable_utils.h"
 
 #include <errno.h>
+#include <glib.h>
 #include <glib/gstdio.h>
 #include <gst/gst.h>
 #include <math.h>
@@ -207,116 +208,6 @@ static void postcoh_filesink_dispose(GObject *object) {
     }
 }
 
-/* copied from gstreamer-0.10.36/ gstreamer/ gst/ gsturi.c */
-
-static gchar *gst_file_utils_canonicalise_path(const gchar *path) {
-    gchar **parts, **p, *clean_path;
-
-#ifdef G_OS_WIN32
-    {
-        GST_WARNING("FIXME: canonicalise win32 path");
-        return g_strdup(path);
-    }
-#endif
-
-    parts = g_strsplit(path, "/", -1);
-
-    p = parts;
-    while (*p != NULL) {
-        if (strcmp(*p, ".") == 0) {
-            /* just move all following parts on top of this, incl. NUL
-             * terminator */
-            g_free(*p);
-            g_memmove(p, p + 1, (g_strv_length(p + 1) + 1) * sizeof(gchar *));
-            /* re-check the new current part again in the next iteration */
-            continue;
-        } else if (strcmp(*p, "..") == 0 && p > parts) {
-            /* just move all following parts on top of the previous part, incl.
-             * NUL terminator */
-            g_free(*(p - 1));
-            g_free(*p);
-            g_memmove(p - 1, p + 1,
-                      (g_strv_length(p + 1) + 1) * sizeof(gchar *));
-            /* re-check the new current part again in the next iteration */
-            --p;
-            continue;
-        }
-        ++p;
-    }
-    if (*path == '/') {
-        guint num_parts;
-
-        num_parts = g_strv_length(parts) + 1; /* incl. terminator */
-        parts     = g_renew(gchar *, parts, num_parts + 1);
-        g_memmove(parts + 1, parts, num_parts * sizeof(gchar *));
-        parts[0] = g_strdup("/");
-    }
-
-    clean_path = g_build_filenamev(parts);
-    g_strfreev(parts);
-    return clean_path;
-}
-
-static gboolean file_path_contains_relatives(const gchar *path) {
-    return (strstr(path, "/./") != NULL || strstr(path, "/../") != NULL
-            || strstr(path, G_DIR_SEPARATOR_S "." G_DIR_SEPARATOR_S) != NULL
-            || strstr(path, G_DIR_SEPARATOR_S ".." G_DIR_SEPARATOR_S) != NULL);
-}
-
-/**
- * gst_filename_to_uri:
- * @filename: absolute or relative file name path
- * @error: pointer to error, or NULL
- *
- * Similar to g_filename_to_uri(), but attempts to handle relative file paths
- * as well. Before converting @filename into an URI, it will be prefixed by
- * the current working directory if it is a relative path, and then the path
- * will be canonicalised so that it doesn't contain any './' or '../' segments.
- *
- * On Windows #filename should be in UTF-8 encoding.
- *
- * Since: 0.10.33
- */
-static gchar *gst_filename_to_uri_local(const gchar *filename, GError **error) {
-    gchar *abs_location = NULL;
-    gchar *uri, *abs_clean;
-
-    g_return_val_if_fail(filename != NULL, NULL);
-    g_return_val_if_fail(error == NULL || *error == NULL, NULL);
-
-    if (g_path_is_absolute(filename)) {
-        if (!file_path_contains_relatives(filename)) {
-            uri = g_filename_to_uri(filename, NULL, error);
-            goto beach;
-        }
-
-        abs_location = g_strdup(filename);
-    } else {
-        gchar *cwd;
-
-        cwd          = g_get_current_dir();
-        abs_location = g_build_filename(cwd, filename, NULL);
-        g_free(cwd);
-
-        if (!file_path_contains_relatives(abs_location)) {
-            uri = g_filename_to_uri(abs_location, NULL, error);
-            goto beach;
-        }
-    }
-
-    /* path is now absolute, but contains '.' or '..' */
-    abs_clean = gst_file_utils_canonicalise_path(abs_location);
-    GST_LOG("'%s' -> '%s' -> '%s'", filename, abs_location, abs_clean);
-    uri = g_filename_to_uri(abs_clean, NULL, error);
-    g_free(abs_clean);
-
-beach:
-
-    g_free(abs_location);
-    GST_DEBUG("'%s' -> '%s'", filename, uri);
-    return uri;
-}
-
 static gboolean postcoh_filesink_set_location(PostcohFilesink *sink,
                                               const gchar *location) {
     if (sink->file) goto was_open;
@@ -327,7 +218,7 @@ static gboolean postcoh_filesink_set_location(PostcohFilesink *sink,
         /* we store the filename as we received it from the application. On
          * Windows this should be in UTF8 */
         sink->filename = g_strdup(location);
-        sink->uri      = gst_filename_to_uri_local(location, NULL);
+        sink->uri      = gst_filename_to_uri(location, NULL);
         //	sink->uri = g_filename_to_uri (location, NULL, NULL);
         //	sink->uri = gst_uri_construct ("file", sink->filename);
         //	printf ("filename : %s", sink->filename);
@@ -564,12 +455,6 @@ static gboolean postcoh_filesink_cleanup_xml(PostcohFilesink *sink) {
     return TRUE;
 }
 
-static gboolean
-  postcoh_filesink_is_invalid_background(PostcohInspiralTable *table) {
-    gboolean is_invalid = FALSE;
-    if (table->is_background == 1 && table->cohsnr < EPSILON) is_invalid = TRUE;
-    return is_invalid;
-}
 static GstFlowReturn
   postcoh_filesink_write_table_from_buf(PostcohFilesink *sink, GstBuffer *buf) {
     PostcohInspiralTable *table = (PostcohInspiralTable *)GST_BUFFER_DATA(buf);
@@ -577,19 +462,14 @@ static GstFlowReturn
       (PostcohInspiralTable *)(GST_BUFFER_DATA(buf) + GST_BUFFER_SIZE(buf));
 
     XmlTable *xtable = sink->xtable;
-    int rc;
-    gboolean is_invalid = FALSE;
 
     GST_LOG_OBJECT(sink, "start to write postcoh table");
     for (; table < table_end; table++) {
-        // is_invalid = postcoh_filesink_is_invalid_background(table);
-        if (!is_invalid) {
-            GString *line = g_string_new("\t\t\t\t");
-            postcohtable_set_line(line, table, xtable);
-            rc = xmlTextWriterWriteFormatRaw(sink->writer, line->str);
-            if (rc < 0) return GST_FLOW_ERROR;
-            g_string_free(line, TRUE);
-        }
+        GString *line = g_string_new("\t\t\t\t");
+        postcohtable_set_line(line, table, xtable);
+        int rc = xmlTextWriterWriteFormatRaw(sink->writer, line->str);
+        if (rc < 0) return GST_FLOW_ERROR;
+        g_string_free(line, TRUE);
     }
 
     GST_LOG_OBJECT(sink,

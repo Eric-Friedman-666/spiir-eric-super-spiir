@@ -31,6 +31,7 @@
  */
 
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
 #include <gstlal/gstlal.h>
