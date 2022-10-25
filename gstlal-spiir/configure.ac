@@ -375,6 +375,7 @@ GSTLAL_SPIIR_CFLAGS="-I\$(top_srcdir)/include -I\$(top_srcdir)/lib/include"
 GSTLAL_SPIIR_LIBS="-L\$(top_srcdir)/lib -lgstlalspiir"
 AC_SUBST([GSTLAL_SPIIR_CFLAGS])
 AC_SUBST([GSTLAL_SPIIR_LIBS])
+
 #
 # Output configure information
 #

@@ -103,8 +103,8 @@ typedef struct {
      * filter info
      */
 
-    GMutex *iir_matrix_lock;
-    GCond *iir_matrix_available;
+    GMutex iir_matrix_lock;
+    GCond iir_matrix_available;
     gsl_matrix_int *delay;
     gsl_matrix_complex *a1;
     gsl_matrix_complex *b0;

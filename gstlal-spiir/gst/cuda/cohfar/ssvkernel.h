@@ -95,7 +95,13 @@ void fftkernelWin(gsl_vector *data, double w, char *WinFunc, gsl_vector *y);
 void fftkernel(gsl_vector *data, double w, gsl_vector *y);
 void gsl_vector_histc(gsl_vector *x, gsl_vector *edges, gsl_vector *result);
 void gsl_vector_long_to_double(gsl_vector_long *in, gsl_vector *out);
+void gsl_vector_double_to_long(gsl_vector *in, gsl_vector_long *out);
 void gsl_matrix_long_to_double(gsl_matrix_long *in, gsl_matrix *out);
+void gsl_matrix_hist3(gsl_vector *x_dim1,
+                      gsl_vector *x_dim2,
+                      gsl_vector *edges_dim1,
+                      gsl_vector *edges_dim2,
+                      gsl_matrix *result);
 
 void gsl_vector_linspace(double min_val,
                          double max_val,

@@ -72,28 +72,6 @@ static double get_kth_value_gsl(double *all_dist, int len, int knn_k) {
     free(small);
     return kth_value;
 }
-/* deprecated: takes too long */
-static double
-  get_kth_value(double *all_dist,
-                int len,
-                int knn_k) // Puts the distances from reference point to all
-                           // data points into ascending order
-{
-    int i = 0;
-    int j = 0;
-    for (i = 0; i < len; i++) {
-        for (j = 0; j < len; j++) {
-            if (all_dist[i] < all_dist[j]) {
-
-                double t    = all_dist[i];
-                all_dist[i] = all_dist[j];
-                all_dist[j] = t;
-            }
-        }
-    }
-    double kthVal = all_dist[knn_k - 1];
-    return kthVal;
-}
 
 static void find_kth_dist(
   gsl_vector *tin_x,
@@ -141,8 +119,7 @@ static void calc_pdf(double band_const,
     int num_nonzero = nonzero_idx->size1;
     double dist, gau, sum_gau = 0.0;
     double cur_x_coor, cur_y_coor, knn_x_coor, knn_y_coor;
-    double norm_factor  = 0, hband;
-    double norm_machine = (double)gsl_matrix_long_max(histogram);
+    double hband;
     // two-dimensional histogram
     gsl_matrix *histogram_double =
       gsl_matrix_alloc(histogram->size1, histogram->size2);
@@ -185,11 +162,6 @@ static void calc_pdf(double band_const,
     // printf("sum of pdf %lf\n", pdf_sum);
     gsl_matrix_scale(pdf, 1 / pdf_sum);
 
-    /* deprecated; norm_factor is problematic, causing zeros of pdf.
-     * normalization that sum(pdf) == 1 */
-    // norm_factor = 1/ gsl_matrix_sum(pdf);
-    // printf("norm_factor %lf\n", norm_factor);
-    // gsl_matrix_scale(pdf, norm_factor);
     gsl_matrix_free(histogram_double);
 }
 

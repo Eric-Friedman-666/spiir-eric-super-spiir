@@ -34,6 +34,12 @@
 #include <glib.h>
 #include <postcohtable.h>
 
+const char *ifo_set__get_string(ifo_set_type ifo_set);
+
+// Parse IFO set from string representation. See implementation for details.
+bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos);
+ifo_set_type ifo_set__parse_or_empty(const char *ifos_str);
+
 Bins1D *bins1D_create_long(double cmin, double cmax, int nbin);
 
 Bins2D *bins2D_create(double cmin_x,
@@ -59,12 +65,25 @@ void trigger_stats_feature_rate_update(double snr,
                                        FeatureStats *feature,
                                        TriggerStats *cur_stats);
 
+void trigger_stats_feature_rate_update_all(gsl_vector *snr_vec,
+                                           gsl_vector *chisq_vec,
+                                           FeatureStats *feature,
+                                           TriggerStats *cur_stats);
+
+void trigger_stats_feature_rate_to_pdf(FeatureStats *feature);
+
+void trigger_stats_feature_rate_to_pdf_hist(FeatureStats *feature, Bins2D *pdf);
+
 double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
 
 ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos,
                                PostcohInspiralTable *trigger);
 
 void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
+
+void trigger_stats_livetime_add(TriggerStats **stats_out,
+                                TriggerStats **stats_in,
+                                const int index);
 
 int ifo_set__count(const ifo_set_type ifos);
 
@@ -78,11 +97,20 @@ void trigger_stats_xml_reset(TriggerStatsXML *stats);
 
 void signal_stats_init(TriggerStatsXML *sgstats, int source_type);
 
+void trigger_stats_feature_rate_add(FeatureStats *feature1,
+                                    FeatureStats *feature2,
+                                    TriggerStats *cur_stats);
+
 void trigger_stats_feature_rates_add(FeatureStats *feature1,
                                      FeatureStats *feature2,
                                      TriggerStats *cur_stats);
 
 void trigger_stats_feature_rates_to_pdf(FeatureStats *feature);
+
+void trigger_stats_feature_to_rank(FeatureStats *feature, RankingStats *rank);
+
+void trigger_stats_feature_to_rank_lr(FeatureStats *feature,
+                                      RankingStats *rank);
 
 double bins2D_get_val(double snr, double chisq, Bins2D *bins);
 

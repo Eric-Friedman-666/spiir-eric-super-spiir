@@ -36,6 +36,8 @@
     50 // deprecated. supposed to be used to collect last 50 seconds of
        // background stats.
 
+typedef unsigned int ifo_set_type;
+
 typedef struct {
     double cmin;
     double cmax;

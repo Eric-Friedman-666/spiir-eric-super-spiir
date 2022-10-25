@@ -18,6 +18,8 @@
  */
 
 #include "postcohtable_utils.h"
+
+#include <IFOMap.h>
 // FIXME: The current code works. But it misses 4 fields in output compared with
 // the online pipeline output: eta, fap_l, h, v
 
@@ -34,13 +36,13 @@ void postcohtable_init(XmlTable *table) {
     g_array_append_val(table->names, *g_string_new("postcoh:end_time_ns"));
     g_array_append_val(table->type_names, *g_string_new("int_4s"));
     for (int i = 0; i < MAX_NIFO; ++i) {
-        g_array_append_val(
-          table->names,
-          *g_string_append(g_string_new("postcoh:end_time_"), IFOMap[i]));
+        g_array_append_val(table->names,
+                           *g_string_append(g_string_new("postcoh:end_time_"),
+                                            get_ifo_string(i)));
         g_array_append_val(table->type_names, *g_string_new("int_4s"));
         g_array_append_val(
-          table->names,
-          *g_string_append(g_string_new("postcoh:end_time_ns_"), IFOMap[i]));
+          table->names, *g_string_append(g_string_new("postcoh:end_time_ns_"),
+                                         get_ifo_string(i)));
         g_array_append_val(table->type_names, *g_string_new("int_4s"));
     }
     g_array_append_val(table->names, *g_string_new("postcoh:is_background"));
@@ -56,21 +58,21 @@ void postcohtable_init(XmlTable *table) {
     g_array_append_val(table->names, *g_string_new("postcoh:pix_idx"));
     g_array_append_val(table->type_names, *g_string_new("int_4s"));
     for (int i = 0; i < MAX_NIFO; ++i) {
-        g_array_append_val(
-          table->names,
-          *g_string_append(g_string_new("postcoh:snglsnr_"), IFOMap[i]));
+        g_array_append_val(table->names,
+                           *g_string_append(g_string_new("postcoh:snglsnr_"),
+                                            get_ifo_string(i)));
+        g_array_append_val(table->type_names, *g_string_new("real_4"));
+    }
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        g_array_append_val(table->names,
+                           *g_string_append(g_string_new("postcoh:coaphase_"),
+                                            get_ifo_string(i)));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
     }
     for (int i = 0; i < MAX_NIFO; ++i) {
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:coaphase_"), IFOMap[i]));
-        g_array_append_val(table->type_names, *g_string_new("real_4"));
-    }
-    for (int i = 0; i < MAX_NIFO; ++i) {
-        g_array_append_val(
-          table->names,
-          *g_string_append(g_string_new("postcoh:chisq_"), IFOMap[i]));
+          *g_string_append(g_string_new("postcoh:chisq_"), get_ifo_string(i)));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
     }
     g_array_append_val(table->names, *g_string_new("postcoh:cohsnr"));
@@ -86,9 +88,9 @@ void postcohtable_init(XmlTable *table) {
     g_array_append_val(table->names, *g_string_new("postcoh:far"));
     g_array_append_val(table->type_names, *g_string_new("real_4"));
     for (int i = 0; i < MAX_NIFO; ++i) {
-        g_array_append_val(
-          table->names,
-          *g_string_append(g_string_new("postcoh:far_sngl_"), IFOMap[i]));
+        g_array_append_val(table->names,
+                           *g_string_append(g_string_new("postcoh:far_sngl_"),
+                                            get_ifo_string(i)));
         g_array_append_val(table->type_names, *g_string_new("real_4"));
     }
     g_array_append_val(table->names, *g_string_new("postcoh:far_2h"));
@@ -129,7 +131,7 @@ void postcohtable_init(XmlTable *table) {
     for (int i = 0; i < MAX_NIFO; ++i) {
         g_array_append_val(
           table->names,
-          *g_string_append(g_string_new("postcoh:deff_"), IFOMap[i]));
+          *g_string_append(g_string_new("postcoh:deff_"), get_ifo_string(i)));
         g_array_append_val(table->type_names, *g_string_new("real_8"));
     }
 }

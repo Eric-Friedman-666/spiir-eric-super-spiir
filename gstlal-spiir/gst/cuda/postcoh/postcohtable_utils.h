@@ -29,4 +29,8 @@
 #include <postcohtable.h>
 
 void postcohtable_init(XmlTable *table);
+
+void postcohtable_set_line(GString *line,
+                           PostcohInspiralTable *table,
+                           XmlTable *xtable);
 #endif /* __POSTCOH_TABLE_UTILS_H__ */
