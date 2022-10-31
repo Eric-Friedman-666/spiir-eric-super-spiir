@@ -21,8 +21,16 @@
 #define __POSTCOH_FILESINK_H__
 
 #include <LIGOLwHeader.h>
+
+// Suppresses a warning from gstreamer using deprecated mutexes.
+// Should be revisited after the gstreamer upgrade.
+// See #15
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/base/gstbasesink.h>
 #include <gst/gst.h>
+#pragma GCC diagnostic pop
+
 #include <stdio.h>
 
 G_BEGIN_DECLS

@@ -443,8 +443,7 @@ double logexp(double x) {
         return x;
 }
 void gsl_vector_logexp(gsl_vector *x) {
-    size_t i;
-    for (i = 0; i < x->size; i++)
+    for (size_t i = 0; i < x->size; i++)
         gsl_vector_set(x, i, logexp(gsl_vector_get(x, i)));
 }
 double ilogexp(double x) {

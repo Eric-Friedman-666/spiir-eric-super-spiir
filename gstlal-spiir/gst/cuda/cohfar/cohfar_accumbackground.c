@@ -30,10 +30,28 @@
  *  stuff from gobject/gstreamer
  */
 
+// Suppresses a warning that only occurs on NVCC
+// It should be revisited after the gstreamer upgrade
+// See #15
+#if defined(__CUDACC__)
+#pragma diag_suppress 1217
+#endif
 #include <glib.h>
+#if defined(__CUDACC__)
+#pragma diag_default 1217
+#endif
+
 #include <glib/gstdio.h>
+
+// Suppresses a warning from gstreamer using deprecated mutexes.
+// Should be revisited after the gstreamer upgrade.
+// See #15
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
+#pragma GCC diagnostic pop
+
 #include <gstlal/gstlal.h>
 
 /*
