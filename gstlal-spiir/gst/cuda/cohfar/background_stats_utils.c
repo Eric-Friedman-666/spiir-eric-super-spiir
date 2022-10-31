@@ -324,10 +324,7 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
     // Allocate for the final combination (all IFOs together)
     multistats[num_stats - 1] = (TriggerStats *)malloc(sizeof(TriggerStats));
     TriggerStats *cur_stats   = multistats[num_stats - 1];
-    cur_stats->ifos =
-      malloc(strlen(ifo_set__get_string(enabled_ifos)) * sizeof(char) + 1);
-    strncpy(cur_stats->ifos, ifo_set__get_string(enabled_ifos),
-            strlen(ifo_set__get_string(enabled_ifos)) * sizeof(char) + 1);
+    cur_stats->ifos = strdup(ifo_set__get_string(enabled_ifos));
     // create feature
     cur_stats->feature = feature_stats_create();
     // our rank, cdf
@@ -341,10 +338,7 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
             multistats[stats_idx] =
               (TriggerStats *)malloc(sizeof(TriggerStats));
             cur_stats       = multistats[stats_idx];
-            cur_stats->ifos =
-              malloc(strlen(get_ifo_string(ifo_id)) * sizeof(char) + 1);
-            strncpy(cur_stats->ifos, get_ifo_string(ifo_id),
-                    strlen(get_ifo_string(ifo_id)) * sizeof(char) + 1);
+            cur_stats->ifos = strdup(get_ifo_string(ifo_id));
             // create feature
             cur_stats->feature = feature_stats_create();
             // our rank, cdf

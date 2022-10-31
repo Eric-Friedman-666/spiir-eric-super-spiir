@@ -31,7 +31,18 @@
 
 #include <LIGOLwHeader.h>
 #include <cohfar/background_stats.h>
+
+// Suppresses a warning that only occurs on NVCC
+// It should be revisited after the gstreamer upgrade
+// See #15
+#if defined(__CUDACC__)
+#pragma diag_suppress 1217
+#endif
 #include <glib.h>
+#if defined(__CUDACC__)
+#pragma diag_default 1217
+#endif
+
 #include <postcohtable.h>
 
 const char *ifo_set__get_string(ifo_set_type ifo_set);
