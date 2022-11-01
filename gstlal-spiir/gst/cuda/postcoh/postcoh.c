@@ -441,7 +441,7 @@ static void set_channels(GstPostcohCollectData *data, gint channels) {
 }
 
 static gboolean sink_event(GstPad *pad, GstEvent *event) {
-    CudaPostcoh *postcoh        = CUDA_POSTCOH(GST_PAD_PARENT(pad));
+    CudaPostcoh *postcoh = CUDA_POSTCOH(GST_PAD_PARENT(pad));
 
     switch (GST_EVENT_TYPE(event)) {
     case GST_EVENT_NEWSEGMENT: GST_DEBUG_OBJECT(pad, "new segment"); break;
@@ -2037,10 +2037,10 @@ static void cuda_postcoh_init(CudaPostcoh *postcoh, CudaPostcohClass *klass) {
     postcoh->hist_trials           = POSTCOH_PARAMS_NOT_INIT;
     g_mutex_init(&postcoh->prop_lock);
     g_cond_init(&postcoh->prop_avail);
-    postcoh->stream_id             = POSTCOH_PARAMS_NOT_INIT;
-    postcoh->device_id             = POSTCOH_PARAMS_NOT_INIT;
-    postcoh->process_id            = 0;
-    postcoh->cur_event_id          = 0;
-    postcoh->t_roll_start          = GST_CLOCK_TIME_NONE;
-    postcoh->refresh_interval      = 0;
+    postcoh->stream_id        = POSTCOH_PARAMS_NOT_INIT;
+    postcoh->device_id        = POSTCOH_PARAMS_NOT_INIT;
+    postcoh->process_id       = 0;
+    postcoh->cur_event_id     = 0;
+    postcoh->t_roll_start     = GST_CLOCK_TIME_NONE;
+    postcoh->refresh_interval = 0;
 }

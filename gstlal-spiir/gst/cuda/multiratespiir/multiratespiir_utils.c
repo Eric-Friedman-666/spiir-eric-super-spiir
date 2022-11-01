@@ -749,8 +749,8 @@ void cuda_multiratespiir_init_cover_samples(guint *num_head_cover_samples,
                                             guint num_depths,
                                             gint down_filtlen,
                                             gint up_filtlen) {
-    guint i          = num_depths;
-    gint rate_start  = 0;
+    guint i         = num_depths;
+    gint rate_start = 0;
 
     if (num_depths > 1) {
         rate_start = up_filtlen;

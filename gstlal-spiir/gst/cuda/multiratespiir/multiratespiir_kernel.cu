@@ -56,7 +56,7 @@ extern "C" {
 #endif
 
 #define THREADSPERBLOCK 256
-#define NB_MAX          32
+#define NB_MAX           32
 #define ALL_THREADS_MASK 0xFFFFFFFF
 
 //#define ORIGINAL
