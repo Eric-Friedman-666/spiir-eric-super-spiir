@@ -33,7 +33,7 @@ check clang standards:
     - apt-get update && apt-get install -y clang-format-14 git-core
   script:
     - cd gstlal-spiir
-    - linter_errors=$(git-clang-format-14 --commit origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME -q --diff | grep -v --color=never "no modified files to format" || true)
+    - linter_errors=$(git-clang-format-14 --binary clang-format-14 --commit origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME -q --diff | grep -v --color=never "no modified files to format" || true)
     - echo "$linter_errors"
     - if [ ! -z "$linter_errors" ]; then echo "Detected clang formatting issues; please fix"; exit 1; else echo "Clang formatting is correct"; exit 0; fi
   only:
