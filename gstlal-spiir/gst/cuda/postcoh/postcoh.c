@@ -1234,14 +1234,14 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
 static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                                            GstBuffer *outbuf) {
     PostcohState *state = postcoh->state;
-    int out_size = GST_BUFFER_SIZE(outbuf);
+    int out_size        = GST_BUFFER_SIZE(outbuf);
 
     if (out_size == 0) return 0;
 
     PostcohInspiralTable *output =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
     memset(output, 0, out_size);
-    
+
     int nifo         = state->nifo;
     int ifos_size    = sizeof(char) * IFO_LEN * state->cur_nifo,
         one_ifo_size = sizeof(char) * IFO_LEN;
