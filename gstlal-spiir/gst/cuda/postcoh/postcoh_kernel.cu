@@ -33,9 +33,9 @@ extern "C" {
 const int GAMMA_ITMAX = 50;
 // const float GAMMA_EPS = 2.22e-16;
 
-#define WARP_SIZE     32
-#define WARP_MASK     31
-#define LOG_WARP_SIZE 5
+#define WARP_SIZE        32
+#define WARP_MASK        31
+#define LOG_WARP_SIZE    5
 #define ALL_THREADS_MASK 0xFFFFFFFF
 
 #define MIN_EPSILON       1e-7
@@ -105,7 +105,7 @@ __global__ void ker_max_snglsnr(COMPLEX_F **snr, // INPUT: snr
 
             temp_template =
               __shfl_sync(ALL_THREADS_MASK, max_template, wIDl + j, 2 * j);
-            max_template  = (max_template + temp_template)
+            max_template = (max_template + temp_template)
                            + (max_template - temp_template)
                                * (2 * (max_snr_sq > temp_snr_sq) - 1);
             max_template = max_template >> 1;

@@ -762,13 +762,13 @@ static void cuda_iirbank_class_init(GSTLALIIRBankCudaClass *klass) {
 
 static void cuda_iirbank_init(GSTLALIIRBankCuda *filter,
                               GSTLALIIRBankCudaClass *kclass) {
-    filter->adapter              = gst_adapter_new();
+    filter->adapter = gst_adapter_new();
     g_mutex_init(&filter->iir_matrix_lock);
     g_cond_init(&filter->iir_matrix_available);
-    filter->a1                   = NULL;
-    filter->b0                   = NULL;
-    filter->delay                = NULL;
-    filter->y                    = NULL;
-    filter->bank                 = NULL;
+    filter->a1    = NULL;
+    filter->b0    = NULL;
+    filter->delay = NULL;
+    filter->y     = NULL;
+    filter->bank  = NULL;
     gst_base_transform_set_gap_aware(GST_BASE_TRANSFORM(filter), TRUE);
 }

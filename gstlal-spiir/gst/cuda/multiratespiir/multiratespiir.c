@@ -1362,7 +1362,7 @@ static void cuda_multiratespiir_set_property(GObject *object,
                                              GParamSpec *pspec) {
     CudaMultirateSPIIR *element;
 
-    element          = CUDA_MULTIRATESPIIR(object);
+    element = CUDA_MULTIRATESPIIR(object);
 
     GST_OBJECT_LOCK(element);
     switch (prop_id) {
