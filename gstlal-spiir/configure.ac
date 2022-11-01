@@ -306,13 +306,13 @@ AS_IF([test "x$with_cuda" != "xno"], [
 	], [
 		CLIBS="lib"
 	])
-	AC_SUBST([NVCC], ["${with_cuda}/bin/nvcc $NVCCFLAGS"])
+	AC_SUBST([NVCC], ["${with_cuda}/bin/nvcc"])
 	AC_SUBST([NVCC_CFLAGS], ["-I${with_cuda}/include"])
 	PKG_CHECK_MODULES([GLIB], [glib-2.0])
 	AC_SUBST([NVCC_GSTLAL_CFLAGS], [$GLIB_CFLAGS])
 	AC_SUBST([NVCC_LAL_CFLAGS], ["$($PKG_CONFIG --cflags-only-I lal)"])
 	AC_SUBST([NVCC_gstreamer_CFLAGS], ["$($PKG_CONFIG --cflags-only-I gstreamer-0.10)"])
-	AC_SUBST([NVCC_ADD_CFLAGS], ["-Xcudafe --display_error_number $NVCCFLAGS"])
+	AC_SUBST([NVCC_ADD_CFLAGS], ["-Xcudafe --display_error_number"])
 	AC_SUBST([NVCC_LIBS], ["-L${with_cuda}/$CLIBS -lcudart"])
 	HAVE_CUDA="yes"
 ], [

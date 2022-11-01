@@ -35,15 +35,8 @@ libcuda_plugin_la_LIBADD = $(ADD_LIBS)
 
 libcuda_plugin_la_LDFLAGS = $(AM_LDFLAGS) $(GSL_LIBS) $(LAL_LIBS) $(GSTLAL_LIBS) $(gstreamer_LIBS) $(GSTLAL_PLUGIN_LDFLAGS) $(NVCC_LIBS) $(CHEALPIX_LIBS) -lstdc++ 
 
-default:
-	ifeq ($(strip $(libgstlalspiir_la_CFLAGS)),)
-			comp_FLAG =
-	else
-			comp_FLAG = --compiler-options=\"$(libgstlalspiir_la_CFLAGS)\"
-	endif
-
 .cu.lo:
-	$(top_srcdir)/gnuscripts/cudalt.py $@ $(NVCC) $(NVCC_CFLAGS) $(NVCC_ADD_CFLAGS) $(DEFAULT_INCLUDES) $(NVCC_LAL_CFLAGS) $(NVCC_GSTLAL_CFLAGS) $(NVCC_gstreamer_CFLAGS) $(ADD_CFLAGS) --ptxas-options=-v -O0  -maxrregcount=0 -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_80,code=sm_80 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_52,code=sm_52 --compiler-options=\"$(libcuda_plugin_la_CFLAGS)\" -c $<
+	$(top_srcdir)/gnuscripts/cudalt.py $@ $(NVCC) $(NVCC_CFLAGS) $(NVCC_ADD_CFLAGS) $(DEFAULT_INCLUDES) $(NVCC_LAL_CFLAGS) $(NVCC_GSTLAL_CFLAGS) $(NVCC_gstreamer_CFLAGS) $(ADD_CFLAGS) --ptxas-options=-v -O0  -maxrregcount=0 -gencode arch=compute_70,code=compute_70 -gencode arch=compute_61,code=sm_61 -gencode arch=compute_60,code=sm_60 -gencode arch=compute_52,code=sm_52 -gencode arch=compute_50,code=sm_50 -gencode arch=compute_37,code=sm_37 -gencode arch=compute_35,code=sm_35 -gencode arch=compute_30,code=sm_30 --compiler-options=\"$(libgstlalspiir_la_CFLAGS)\" -c $<
 
 noinst_HEADERS = \
 	spiir/spiir_kernel.h \
