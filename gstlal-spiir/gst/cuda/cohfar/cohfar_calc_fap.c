@@ -283,7 +283,7 @@ int main(int argc, char *argv[]) {
     int *update_pdf = (int *)malloc(sizeof(int));
 
     parse_opts(argc, argv, pin, pfmt, pout, pifos, ptype, update_pdf);
-    int type = get_type(ptype);
+    int type      = get_type(ptype);
     int num_stats = strlen(*pifos) / IFO_LEN + 1;
     int rc; // return value
 

@@ -664,6 +664,7 @@ else:
 
 # need to print out host name
 import socket
+
 print("pipeline executing on node" + socket.gethostname())
 if int(options.finalsink_need_online_perform) > 0:
     # create a new, empty, Bottle application

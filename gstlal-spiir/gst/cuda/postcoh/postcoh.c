@@ -616,8 +616,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
      * calculation plus a long enough buffering to account for time shifts */
     postcoh->preserved_len = state->autochisq_len + 160;
     // head_len is the amount of "history" that is maintained on the adapter
-    postcoh->head_len =
-      postcoh->preserved_len / 2;
+    postcoh->head_len = postcoh->preserved_len / 2;
     /* length for the current execution block (i.e. current data) */
     postcoh->exe_len  = postcoh->rate;
     postcoh->exe_size = postcoh->exe_len * postcoh->bps;
@@ -629,16 +628,15 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     /* snglsnr_cpy_len is the length that only considers current and future data
      * that to be copied to the GPU structure, the GPU structure is a ring
      * buffer and already stored history data */
-    postcoh->snglsnr_cpy_len =
-      postcoh->preserved_len / 2 + postcoh->exe_len;
+    postcoh->snglsnr_cpy_len  = postcoh->preserved_len / 2 + postcoh->exe_len;
     postcoh->snglsnr_cpy_size = postcoh->snglsnr_cpy_len * postcoh->bps;
 
-    state->exe_len      = postcoh->rate;
-    state->tmp_maxsnr   = (float *)malloc(sizeof(float) * state->exe_len);
-    state->tmp_tmpltidx = (int *)malloc(sizeof(int) * state->exe_len);
-    state->max_npeak    = postcoh->rate > postcoh->channels / 2
-                         ? postcoh->channels / 2
-                         : postcoh->rate;
+    state->exe_len          = postcoh->rate;
+    state->tmp_maxsnr       = (float *)malloc(sizeof(float) * state->exe_len);
+    state->tmp_tmpltidx     = (int *)malloc(sizeof(int) * state->exe_len);
+    state->max_npeak        = postcoh->rate > postcoh->channels / 2
+                                ? postcoh->channels / 2
+                                : postcoh->rate;
     state->trial_sample_inv = round(postcoh->trial_interval * postcoh->rate);
     state->snglsnr_len      = postcoh->preserved_len + postcoh->exe_len
                          + postcoh->hist_trials * state->trial_sample_inv;
@@ -984,7 +982,8 @@ static gint cuda_postcoh_push_and_get_common_size(GstCollectPads *pads,
      * data. if there is no data in this adapter, the common size is determined
      * by other detectors.
      */
-    for (collectlist = pads->data; collectlist; collectlist = g_slist_next(collectlist)) {
+    for (collectlist = pads->data; collectlist;
+         collectlist = g_slist_next(collectlist)) {
         data = collectlist->data;
         buf  = gst_collect_pads_pop(pads, (GstCollectData *)data);
         if (!buf) { // buf == NULL
@@ -1282,14 +1281,14 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
 static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                                            GstBuffer *outbuf) {
     PostcohState *state = postcoh->state;
-    int out_size = GST_BUFFER_SIZE(outbuf);
+    int out_size        = GST_BUFFER_SIZE(outbuf);
 
     if (out_size == 0) return 0;
 
     PostcohInspiralTable *output =
       (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
     memset(output, 0, out_size);
-    
+
     int nifo         = state->nifo;
     int ifos_size    = sizeof(char) * IFO_LEN * state->cur_nifo,
         one_ifo_size = sizeof(char) * IFO_LEN;

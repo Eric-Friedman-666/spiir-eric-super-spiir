@@ -421,8 +421,8 @@ static void cohfar_accumbackground_set_property(GObject *object,
     GST_OBJECT_LOCK(element);
     switch (prop_id) {
     case PROP_IFOS:
-        element->ifos   = g_value_dup_string(value);
-        element->nifo   = strlen(element->ifos) / IFO_LEN;
+        element->ifos = g_value_dup_string(value);
+        element->nifo = strlen(element->ifos) / IFO_LEN;
         // TODO: Consider using ifo_set__try_parse to check for errors
         element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);
         element->bgstats =
@@ -620,7 +620,7 @@ static void
                               CohfarAccumbackgroundClass *element_klass) {
     GstElementClass *klass = GST_ELEMENT_CLASS(element_klass);
     element->sinkpad       = gst_pad_new_from_template(
-      gst_element_class_get_pad_template(klass, "sink"), "sink");
+            gst_element_class_get_pad_template(klass, "sink"), "sink");
     gst_element_add_pad(GST_ELEMENT(element), element->sinkpad);
 
     element->srcpad = gst_pad_new_from_template(

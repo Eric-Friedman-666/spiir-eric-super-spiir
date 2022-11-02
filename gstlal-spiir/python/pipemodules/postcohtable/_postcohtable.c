@@ -88,17 +88,15 @@ static PyMemberDef members_snr_series[] = {
     { "epoch_gpsNanoSeconds", T_OBJECT_EX,
       offsetof(Complex8TimeSeriesWrapper, epoch_gpsNanoSeconds), 0,
       "epoch_gpsNanoSeconds" },
-    { "f0", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, f0), 0,
-      "f0" },
-    { "deltaT", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, deltaT),
-      0, "deltaT" },
+    { "f0", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, f0), 0, "f0" },
+    { "deltaT", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, deltaT), 0,
+      "deltaT" },
     { "sampleUnits", T_OBJECT_EX,
-      offsetof(Complex8TimeSeriesWrapper, sampleUnits), 0,
-      "sampleUnits" },
-    { "data_length", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, data_length),
-      0, "data_length" },
-    { "data", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, data),
-      0, "data" },
+      offsetof(Complex8TimeSeriesWrapper, sampleUnits), 0, "sampleUnits" },
+    { "data_length", T_OBJECT_EX,
+      offsetof(Complex8TimeSeriesWrapper, data_length), 0, "data_length" },
+    { "data", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, data), 0,
+      "data" },
     { NULL },
 };
 
@@ -117,8 +115,10 @@ static PyTypeObject snr_series_wrapper_type = {
 static PyObject *
   new_wrapped_snr_series(PostcohInspiralTable *buffer_postcohtable) {
 
-    PyObject *pyModule = PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
-    PyObject *wrapped_snr_series_class = PyObject_GetAttrString(pyModule, "SNRSeries");
+    PyObject *pyModule =
+      PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *wrapped_snr_series_class =
+      PyObject_GetAttrString(pyModule, "SNRSeries");
 
     PyObject *wrapped_snr_series_list = PyList_New(MAX_NIFO);
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
@@ -264,50 +264,43 @@ static void __del_postcohinspiral__(PyObject *self) {
 }
 
 static PyMemberDef members_postcohinspiral[] = {
-    { "ifos", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ifos), 0,
-      "ifos" },
+    { "ifos", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ifos), 0, "ifos" },
     { "pivotal_ifo", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, pivotal_ifo),
       0, "pivotal_ifo" },
     { "skymap_fname", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, skymap_fname), 0,
-      "skymap_fname" },
+      offsetof(PostcohInspiralWrapper, skymap_fname), 0, "skymap_fname" },
     // Not dependent on the number of detectors
-    { "end_time", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, end_time),
-      0, "end_time" },
+    { "end_time", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, end_time), 0,
+      "end_time" },
     { "end_time_ns", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, end_time_ns),
       0, "end_time_ns" },
     { "is_background", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, is_background), 0,
-      "is_background" },
-    { "livetime", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, livetime),
-      0, "livetime" },
-    { "tmplt_idx", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, tmplt_idx),
-      0, "tmplt_idx" },
+      offsetof(PostcohInspiralWrapper, is_background), 0, "is_background" },
+    { "livetime", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, livetime), 0,
+      "livetime" },
+    { "tmplt_idx", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, tmplt_idx), 0,
+      "tmplt_idx" },
     { "bankid", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, bankid), 0,
       "bankid" },
-    { "pix_idx", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, pix_idx),
-      0, "pix_idx" },
+    { "pix_idx", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, pix_idx), 0,
+      "pix_idx" },
     { "cohsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, cohsnr), 0,
       "cohsnr" },
-    { "nullsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, nullsnr),
-      0, "nullsnr" },
-    { "cmbchisq", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, cmbchisq),
-      0, "cmbchisq" },
+    { "nullsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, nullsnr), 0,
+      "nullsnr" },
+    { "cmbchisq", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, cmbchisq), 0,
+      "cmbchisq" },
     { "spearman_pval", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, spearman_pval), 0,
-      "spearman_pval" },
-    { "fap", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, fap), 0,
-      "fap" },
+      offsetof(PostcohInspiralWrapper, spearman_pval), 0, "spearman_pval" },
+    { "fap", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, fap), 0, "fap" },
     { "far_2h", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_2h), 0,
       "far_2h" },
     { "far_1d", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1d), 0,
       "far_1d" },
     { "far_1w", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1w), 0,
       "far_1w" },
-    { "far", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far), 0,
-      "far" },
-    { "rank", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, rank), 0,
-      "rank" },
+    { "far", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far), 0, "far" },
+    { "rank", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, rank), 0, "rank" },
     { "template_duration", T_OBJECT_EX,
       offsetof(PostcohInspiralWrapper, template_duration), 0,
       "template_duration" },
@@ -319,8 +312,7 @@ static PyMemberDef members_postcohinspiral[] = {
       "mchirp" },
     { "mtotal", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mtotal), 0,
       "mtotal" },
-    { "eta", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, eta), 0,
-      "eta" },
+    { "eta", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, eta), 0, "eta" },
     { "spin1x", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin1x), 0,
       "spin1x" },
     { "spin1y", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin1y), 0,
@@ -334,35 +326,32 @@ static PyMemberDef members_postcohinspiral[] = {
     { "spin2z", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin2z), 0,
       "spin2z" },
     { "ra", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ra), 0, "ra" },
-    { "dec", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, dec), 0,
-      "dec" },
-    { "f_final", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, f_final),
-      0, "f_final" },
+    { "dec", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, dec), 0, "dec" },
+    { "f_final", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, f_final), 0,
+      "f_final" },
     { "_process_id", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, _process_id),
       0, "process_id (long)" },
-    { "_event_id", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, _event_id),
-      0, "event_id (long)" },
+    { "_event_id", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, _event_id), 0,
+      "event_id (long)" },
 
     // Things that are done single detector are ndarrays
     { "end_time_sngl", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, end_time_sngl), 0,
-      "end_time_sngl" },
-    { "snglsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, snglsnr),
-      0, "snglsnr" },
-    { "coaphase", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, coaphase),
-      0, "coaphase" },
+      offsetof(PostcohInspiralWrapper, end_time_sngl), 0, "end_time_sngl" },
+    { "snglsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, snglsnr), 0,
+      "snglsnr" },
+    { "coaphase", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, coaphase), 0,
+      "coaphase" },
     { "chisq", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, chisq), 0,
       "chisq" },
-    { "far_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_sngl),
-      0, "far_sngl" },
+    { "far_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_sngl), 0,
+      "far_sngl" },
     { "far_1w_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1w_sngl),
       0, "far_1w_sngl" },
     { "far_1d_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1d_sngl),
       0, "far_1d_sngl" },
     { "far_2h_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_2h_sngl),
       0, "far_2h_sngl" },
-    { "deff", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, deff), 0,
-      "deff" },
+    { "deff", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, deff), 0, "deff" },
     { NULL },
 };
 
@@ -380,12 +369,13 @@ static PyTypeObject postcoh_inspiral_wrapper_type = {
 
 static PostcohInspiralWrapper *
   new_wrapped_postcohtable(PostcohInspiralTable *buffer_postcohtable) {
-    PyObject *pyModule = PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
-    PyObject *wrapped_postcohtable_class = PyObject_GetAttrString(pyModule, "PostcohInspiral");
+    PyObject *pyModule =
+      PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *wrapped_postcohtable_class =
+      PyObject_GetAttrString(pyModule, "PostcohInspiral");
 
-    PostcohInspiralWrapper *self =
-      (PostcohInspiralWrapper *)PyType_GenericNew(
-        (PyTypeObject *)wrapped_postcohtable_class, NULL, NULL);
+    PostcohInspiralWrapper *self = (PostcohInspiralWrapper *)PyType_GenericNew(
+      (PyTypeObject *)wrapped_postcohtable_class, NULL, NULL);
     if (!self) return NULL;
 
     npy_intp dims[1]          = { MAX_NIFO };
@@ -470,11 +460,10 @@ static void __del_postcohevent__(PyObject *self) {
 }
 
 static PyMemberDef members_postcohevent[] = {
-    { "postcohinspiral", T_OBJECT_EX, offsetof(PostcohEvent, postcohinspiral), 0,
-      "postcohinspiral" },
+    { "postcohinspiral", T_OBJECT_EX, offsetof(PostcohEvent, postcohinspiral),
+      0, "postcohinspiral" },
     // Things that are done single detector are ndarrays
-    { "snr_series", T_OBJECT_EX,
-      offsetof(PostcohEvent, snr_series), 0,
+    { "snr_series", T_OBJECT_EX, offsetof(PostcohEvent, snr_series), 0,
       "snr_series" },
     { NULL },
 };
@@ -493,12 +482,13 @@ static PyTypeObject postcohevent_type = {
 
 static PostcohEvent *
   new_postcohevent(PostcohInspiralTable *buffer_postcohtable) {
-    PyObject *pyModule = PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
-    PyObject *postcohevent_class = PyObject_GetAttrString(pyModule, "PostcohEvent");
+    PyObject *pyModule =
+      PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *postcohevent_class =
+      PyObject_GetAttrString(pyModule, "PostcohEvent");
 
-    PostcohEvent *self =
-      (PostcohEvent *)PyType_GenericNew(
-        (PyTypeObject *)postcohevent_class, NULL, NULL);
+    PostcohEvent *self = (PostcohEvent *)PyType_GenericNew(
+      (PyTypeObject *)postcohevent_class, NULL, NULL);
     if (!self) return NULL;
 
     PostcohInspiralWrapper *wrapped_postcohtable =
@@ -559,8 +549,7 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        PostcohEvent *postcohevent =
-          new_postcohevent(buffer_postcohtable);
+        PostcohEvent *postcohevent = new_postcohevent(buffer_postcohtable);
 
         if (!postcohevent) {
             Py_DECREF(event_list);
@@ -582,14 +571,14 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
 }
 
 static struct PyMethodDef methods[] = {
-        { "from_buffer", from_buffer, METH_VARARGS,
-          "Construct a tuple of PostcohInspiralTable objects from a buffer "
-          "object. "
-          " The buffer is interpreted as a C array of PostcohInspiralTable "
-          "structures." },
-        {
-          NULL,
-        }
+    { "from_buffer", from_buffer, METH_VARARGS,
+      "Construct a tuple of PostcohInspiralTable objects from a buffer "
+      "object. "
+      " The buffer is interpreted as a C array of PostcohInspiralTable "
+      "structures." },
+    {
+      NULL,
+    }
 };
 
 PyMODINIT_FUNC init_postcohtable(void) {
@@ -609,13 +598,11 @@ PyMODINIT_FUNC init_postcohtable(void) {
     }
     PyModule_AddObject(module, "ifo_map", ifo_map);
 
-
     if (PyType_Ready(&postcoh_inspiral_wrapper_type) < 0) return NULL;
     Py_INCREF(&postcoh_inspiral_wrapper_type);
 
     PyModule_AddObject(module, "PostcohInspiral",
                        (PyObject *)&postcoh_inspiral_wrapper_type);
-
 
     if (PyType_Ready(&snr_series_wrapper_type) < 0) return NULL;
     Py_INCREF(&snr_series_wrapper_type);
@@ -623,10 +610,8 @@ PyMODINIT_FUNC init_postcohtable(void) {
     PyModule_AddObject(module, "SNRSeries",
                        (PyObject *)&snr_series_wrapper_type);
 
-
     if (PyType_Ready(&postcohevent_type) < 0) return NULL;
     Py_INCREF(&postcohevent_type);
 
-    PyModule_AddObject(module, "PostcohEvent",
-                       (PyObject *)&postcohevent_type);
+    PyModule_AddObject(module, "PostcohEvent", (PyObject *)&postcohevent_type);
 }

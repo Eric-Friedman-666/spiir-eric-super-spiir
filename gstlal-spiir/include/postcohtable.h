@@ -29,9 +29,9 @@
 #include <lal/LALStdlib.h> // for the datatypes
 #include <pipe_macro.h> // for MAX_IFO_LEN and macros
 
-// TODO: postcohtable is overloaded; it's both a buffer and a xml document 
+// TODO: postcohtable is overloaded; it's both a buffer and a xml document
 // format. It is used for data processing, used for outputting the significant
-// triggers schema AND the zerolags schema. It records data for both cohered 
+// triggers schema AND the zerolags schema. It records data for both cohered
 // values and per-ifo in the same table.
 typedef struct tagPostcohInspiralTable {
     struct tagPostcohInspiralTable *next;

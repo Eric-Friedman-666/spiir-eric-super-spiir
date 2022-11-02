@@ -121,17 +121,17 @@ static void _update_fars(PostcohInspiralTable *table,
 
     double max_rank = 0;
     max_rank        = MAX(trigger_stats_get_val_from_map(
-                     table->cohsnr, table->cmbchisq,
-                     stats_1w->multistats[cmb_stats_idx]->rank->rank_map),
-                   max_rank);
+                            table->cohsnr, table->cmbchisq,
+                            stats_1w->multistats[cmb_stats_idx]->rank->rank_map),
+                          max_rank);
     max_rank        = MAX(trigger_stats_get_val_from_map(
-                     table->cohsnr, table->cmbchisq,
-                     stats_1d->multistats[cmb_stats_idx]->rank->rank_map),
-                   max_rank);
+                            table->cohsnr, table->cmbchisq,
+                            stats_1d->multistats[cmb_stats_idx]->rank->rank_map),
+                          max_rank);
     max_rank        = MAX(trigger_stats_get_val_from_map(
-                     table->cohsnr, table->cmbchisq,
-                     stats_2h->multistats[cmb_stats_idx]->rank->rank_map),
-                   max_rank);
+                            table->cohsnr, table->cmbchisq,
+                            stats_2h->multistats[cmb_stats_idx]->rank->rank_map),
+                          max_rank);
     table->rank     = max_rank;
 
     table->far_1w = _calculate_far(stats_1w->multistats[cmb_stats_idx],
@@ -310,8 +310,8 @@ static void cohfar_assignfar_set_property(GObject *object,
     GST_OBJECT_LOCK(element);
     switch (prop_id) {
     case PROP_IFOS:
-        element->ifos   = g_value_dup_string(value);
-        element->nifo   = strlen(element->ifos) / IFO_LEN;
+        element->ifos = g_value_dup_string(value);
+        element->nifo = strlen(element->ifos) / IFO_LEN;
         // TODO: Consider using ifo_set__try_parse to check for errors
         element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);
         element->bgstats_1w =

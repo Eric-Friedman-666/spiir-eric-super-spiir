@@ -258,10 +258,10 @@ __global__ void
         if (tWarp == 0) {
             // Load each partial sum (if that warp existed) into a lane-local
             // value in warp 0
-            float sum_real = (threadIdx.x<blockDim.x>> LOGWARPSIZE)
+            float sum_real = (threadIdx.x < blockDim.x >> LOGWARPSIZE)
                                ? partialSumsReal[tLane]
                                : 0;
-            float sum_imag = (threadIdx.x<blockDim.x>> LOGWARPSIZE)
+            float sum_imag = (threadIdx.x < blockDim.x >> LOGWARPSIZE)
                                ? partialSumsImag[tLane]
                                : 0;
 
@@ -708,8 +708,8 @@ gint multi_downsample(SpiirState **spstate,
         dim3 grid(1, 1, 1);
         block.x = MIN(THREADSPERBLOCK, out_processed);
         grid.x  = out_processed % block.x == 0
-                   ? out_processed / block.x
-                   : (int)out_processed / block.x + 1;
+                    ? out_processed / block.x
+                    : (int)out_processed / block.x + 1;
 
         uint share_mem_sz =
           (2 * block.x + 4 * SPSTATEDOWN(i)->sinc_len) * sizeof(float);

@@ -47,7 +47,7 @@ __device__ static inline float atomicMax(float *address, float val) {
     do {
         assumed = old;
         old     = atomicCAS(address_as_i, assumed,
-                        __float_as_int(fmaxf(val, __int_as_float(assumed))));
+                            __float_as_int(fmaxf(val, __int_as_float(assumed))));
     } while (assumed != old);
     return __int_as_float(old);
 }
@@ -229,10 +229,10 @@ __device__ float gser(float x, float a) {
 }
 
 __global__ void ker_coh_skymap(
-  float *restrict
-    cohsnr_skymap, /* OUTPUT, of size (num_triggers * num_sky_directions) */
-  float *restrict
-    nullsnr_skymap, /* OUTPUT, of size (num_triggers * num_sky_directions) */
+  float *restrict cohsnr_skymap, /* OUTPUT, of size (num_triggers *
+                                    num_sky_directions) */
+  float *restrict nullsnr_skymap, /* OUTPUT, of size (num_triggers *
+                                     num_sky_directions) */
   COMPLEX_F *restrict *restrict snr, /* INPUT, (2, 3) * data_points */
   int iifo, /* INPUT, detector we are considering */
   int nifo, /* INPUT, all detectors that are in this coherent analysis */
@@ -377,25 +377,25 @@ __global__ void ker_coh_max_and_chisq_versatile(
   float dt, /* INPUT, 1/ sampling rate */
   int ntmplt, /* INPUT, number of templates */
   int autochisq_len, /* INPUT, auto-chisq length */
-  COMPLEX_F *restrict *restrict
-    autocorr_matrix, /* INPUT, autocorrelation matrix for all templates */
+  COMPLEX_F *restrict *restrict autocorr_matrix, /* INPUT, autocorrelation
+                                                    matrix for all templates */
   float *restrict *restrict autocorr_norm, /* INPUT, autocorrelation
                             normalization matrix for all templates */
   int hist_trials, /* INPUT, trial number */
   int trial_sample_inv, /* INPUT, trial interval in samples */
   int *restrict pix_idx, /* OUTPUT, sky direction index */
   int *restrict pix_idx_bg, /* OUTPUT, sky direction index for the background */
-  float *restrict
-    cohsnr, /* OUTPUT, the coherent SNR for combination of detectors */
-  float *restrict
-    nullsnr, /* OUTPUT, the nullsnr for the combination of detectors */
-  float *restrict
-    cmbchisq, /* OUTPUT, the chisq for the combination of detectors */
-  float *restrict
-    cohsnr_bg, /* OUTPUT, the coherent SNR for the background noise */
+  float *restrict cohsnr, /* OUTPUT, the coherent SNR for combination of
+                             detectors */
+  float *restrict nullsnr, /* OUTPUT, the nullsnr for the combination of
+                              detectors */
+  float
+    *restrict cmbchisq, /* OUTPUT, the chisq for the combination of detectors */
+  float
+    *restrict cohsnr_bg, /* OUTPUT, the coherent SNR for the background noise */
   float *restrict nullsnr_bg, /* OUTPUT, the nullsnr for the background noise */
-  float *restrict
-    cmbchisq_bg, /* OUTPUT, the combined chisq for the background noise */
+  float *restrict cmbchisq_bg, /* OUTPUT, the combined chisq for the background
+                                  noise */
   float *restrict *restrict coaphase,
   float *restrict *restrict coaphase_bg,
   int *restrict *restrict ntoff,
@@ -755,7 +755,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
                 map_idx = iifo * nifo + j;
                 NtOff   = round(toa_diff_map[map_idx * num_sky_directions
                                            + pix_idx_bg[output_offset]]
-                              / dt);
+                                / dt);
 
                 peak_pos_tmp =
                   start_exe + len_cur

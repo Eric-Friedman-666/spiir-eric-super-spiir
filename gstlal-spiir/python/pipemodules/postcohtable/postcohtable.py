@@ -22,10 +22,13 @@ from lal import LIGOTimeGPS
 import lal
 from . import _postcohtable
 
-__all__ = ["PostcohInspiral", "SNRSeries", "PostcohEvent", "ifo_map", "from_buffer"]
+__all__ = [
+    "PostcohInspiral", "SNRSeries", "PostcohEvent", "ifo_map", "from_buffer"
+]
 
 ifo_map = _postcohtable.ifo_map
 from_buffer = _postcohtable.from_buffer
+
 
 class PostcohInspiral(_postcohtable.PostcohInspiral):
     __slots__ = ()
@@ -73,7 +76,7 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
         for i, ifo in enumerate(_postcohtable.ifo_map):
             if ifo in name:
                 found_ifo = i
-                name = name.replace('_'+ifo, '')
+                name = name.replace('_' + ifo, '')
                 break
         if found_ifo is None:
             return super(PostcohInspiral, self).__getattribute__(name)
@@ -82,14 +85,15 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
         elif name == "end_time_ns_sngl":
             return self.end_time_sngl[1][found_ifo]
         else:
-            return super(PostcohInspiral, self).__getattribute__(name)[found_ifo]
+            return super(PostcohInspiral,
+                         self).__getattribute__(name)[found_ifo]
 
     def __setattr__(self, name, value):
         found_ifo = None
         for i, ifo in enumerate(_postcohtable.ifo_map):
             if ifo in name:
                 found_ifo = i
-                name = name.replace('_'+ifo, '')
+                name = name.replace('_' + ifo, '')
                 break
         if found_ifo is None:
             return super(PostcohInspiral, self).__setattr__(name, value)
@@ -98,10 +102,13 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
         elif name == "end_time_ns_sngl":
             self.end_time_sngl[1][found_ifo] = value
         else:
-            super(PostcohInspiral, self).__getattribute__(name)[found_ifo] = value
+            super(PostcohInspiral,
+                  self).__getattribute__(name)[found_ifo] = value
+
 
 class SNRSeries(_postcohtable.SNRSeries):
     __slots__ = ()
+
 
 class PostcohEvent(_postcohtable.PostcohEvent):
     __slots__ = ()
@@ -116,7 +123,7 @@ class PostcohEvent(_postcohtable.PostcohEvent):
         for i, ifo in enumerate(_postcohtable.ifo_map):
             if ifo in name:
                 found_ifo = i
-                name = name.replace('_'+ifo, '')
+                name = name.replace('_' + ifo, '')
                 break
         if found_ifo is None:
             raise AttributeError("IFO not found.")
@@ -132,7 +139,7 @@ class PostcohEvent(_postcohtable.PostcohEvent):
         for i, ifo in enumerate(_postcohtable.ifo_map):
             if ifo in name:
                 found_ifo = i
-                name = name.replace('_'+ifo, '')
+                name = name.replace('_' + ifo, '')
                 break
         if found_ifo is None:
             raise AttributeError("IFO not found.")

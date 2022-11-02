@@ -286,7 +286,7 @@ void feature_stats_destroy(FeatureStats *feature) {
 RankingStats *rank_stats_create() {
     RankingStats *rank = (RankingStats *)malloc(sizeof(RankingStats));
     rank->rank_map     = bins2D_create(LOGSNR_CMIN, LOGSNR_CMAX, LOGSNR_NBIN,
-                                   LOGCHISQ_CMIN, LOGCHISQ_CMAX, LOGCHISQ_NBIN);
+                                       LOGCHISQ_CMIN, LOGCHISQ_CMAX, LOGCHISQ_NBIN);
     rank->rank_rate =
       bins1D_long_create(LOGRANK_CMIN, LOGRANK_CMAX, LOGRANK_NBIN);
     rank->rank_pdf = bins1D_create(LOGRANK_CMIN, LOGRANK_CMAX, LOGRANK_NBIN);
