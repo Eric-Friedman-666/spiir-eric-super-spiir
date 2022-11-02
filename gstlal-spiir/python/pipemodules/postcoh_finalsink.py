@@ -452,8 +452,7 @@ class FinalSink(object):
         self.cluster_boundary = None
         self.negative_latency = negative_latency
         self.need_candidate_check = False
-        self.cur_event_table = lsctables.New(
-            postcoh_table_def.PostcohInspiralTable)
+        self.cur_event_table = []
         self.chisq_ratio_thresh = chisq_ratio_veto_thresh
         self.superevent_thresh = superevent_thresh
         # FIXME: hard-coded the opa_thresh that all triggers less than
@@ -488,8 +487,7 @@ class FinalSink(object):
 
         # the postcoh doc stores clustered postcoh triggers and is snapshotted
         self.postcoh_document = PostcohDocument()
-        self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
-            self.postcoh_document.xmldoc)
+        self.postcoh_table = []
 
         # coinc doc to be uploaded to gracedb
         self.append_psd_to_coincs_doc = append_psd_to_coincs_doc
@@ -588,7 +586,7 @@ class FinalSink(object):
                 logging.info("buf gap at %d" % buf.timestamp)
                 return
             buf_timestamp = LIGOTimeGPS(0, buf.timestamp)
-            newevents, snr_series_list = postcohtable.from_buffer(buf)
+            newevents = postcohtable.from_buffer(buf)
             self.need_candidate_check = False
 
             if len(newevents) == 0:
@@ -659,9 +657,6 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
             if self.cluster_window == 0:
-                for event in newevents:
-                    self.postcoh_table.append(event)
-
                 del self.cur_event_table[:]
 
             # dump zerolag candidates when interval is reached
@@ -998,11 +993,8 @@ class FinalSink(object):
         # set a new document for postcoh_document
         postcoh_document = self.postcoh_document.get_another()
         # remember to delete the old postcoh doc
-        del self.postcoh_table
         del self.postcoh_document
         self.postcoh_document = postcoh_document
-        self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
-            self.postcoh_document.xmldoc)
 
     def __wait_internal_process_finish(self):
         if self.thread_snapshot is not None and self.thread_snapshot.isAlive():

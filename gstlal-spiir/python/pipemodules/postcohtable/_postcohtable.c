@@ -50,66 +50,55 @@
 
 typedef struct {
     PyObject_HEAD
-    PyArrayObject *numpy_snr_series;
     PyStringObject *name;
     PyIntObject *epoch_gpsSeconds;
     PyIntObject *epoch_gpsNanoSeconds;
     PyFloatObject *f0;
     PyFloatObject *deltaT;
     PyStringObject *sampleUnits;
-    PyIntObject *length;
+    PyIntObject *data_length;
+    PyArrayObject *data;
     COMPLEX8TimeSeries *complex8_snr_series;
 } Complex8TimeSeriesWrapper;
 
-static void __del___snr_series(PyObject *self) {
+static void __del_snr_series__(PyObject *self) {
     Complex8TimeSeriesWrapper *self_typed = (Complex8TimeSeriesWrapper *)self;
-    Py_XDECREF(self_typed->numpy_snr_series);
+
     Py_XDECREF(self_typed->name);
     Py_XDECREF(self_typed->epoch_gpsSeconds);
     Py_XDECREF(self_typed->epoch_gpsNanoSeconds);
     Py_XDECREF(self_typed->f0);
     Py_XDECREF(self_typed->deltaT);
     Py_XDECREF(self_typed->sampleUnits);
-    Py_XDECREF(self_typed->length);
+    Py_XDECREF(self_typed->data_length);
+    Py_XDECREF(self_typed->data);
     if (self_typed->complex8_snr_series) {
         XLALDestroyCOMPLEX8TimeSeries(self_typed->complex8_snr_series);
     }
-    // Py_DECREF(self_typed->complex8_snr_series);
 
     Py_TYPE(self)->tp_free(self);
 }
 
-static PyObject *
-  __new___snr_series(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    Complex8TimeSeriesWrapper *instance =
-      (Complex8TimeSeriesWrapper *)type->tp_alloc(type, 0);
-
-    if (!instance) return NULL;
-
-    return (PyObject *)instance;
-}
-
 static PyMemberDef members_snr_series[] = {
-    { "numpy_snr_series", T_OBJECT_EX,
-      offsetof(Complex8TimeSeriesWrapper, numpy_snr_series), READONLY,
-      "numpy_snr_series" },
-    { "name", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, name), READONLY,
+    { "name", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, name), 0,
       "name" },
     { "epoch_gpsSeconds", T_OBJECT_EX,
-      offsetof(Complex8TimeSeriesWrapper, epoch_gpsSeconds), READONLY,
+      offsetof(Complex8TimeSeriesWrapper, epoch_gpsSeconds), 0,
       "epoch_gpsSeconds" },
     { "epoch_gpsNanoSeconds", T_OBJECT_EX,
-      offsetof(Complex8TimeSeriesWrapper, epoch_gpsNanoSeconds), READONLY,
+      offsetof(Complex8TimeSeriesWrapper, epoch_gpsNanoSeconds), 0,
       "epoch_gpsNanoSeconds" },
-    { "f0", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, f0), READONLY,
+    { "f0", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, f0), 0,
       "f0" },
     { "deltaT", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, deltaT),
-      READONLY, "deltaT" },
+      0, "deltaT" },
     { "sampleUnits", T_OBJECT_EX,
-      offsetof(Complex8TimeSeriesWrapper, sampleUnits), READONLY,
+      offsetof(Complex8TimeSeriesWrapper, sampleUnits), 0,
       "sampleUnits" },
-    { "length", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, length),
-      READONLY, "length" },
+    { "data_length", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, data_length),
+      0, "data_length" },
+    { "data", T_OBJECT_EX, offsetof(Complex8TimeSeriesWrapper, data),
+      0, "data" },
     { NULL },
 };
 
@@ -122,31 +111,29 @@ static PyTypeObject snr_series_wrapper_type = {
       Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
     .tp_members = members_snr_series,
     .tp_name    = MODULE_NAME ".SNRSeries",
-    .tp_new     = __new___snr_series,
-    .tp_dealloc = __del___snr_series,
+    .tp_dealloc = __del_snr_series__,
 };
 
 static PyObject *
   new_wrapped_snr_series(PostcohInspiralTable *buffer_postcohtable) {
 
+    PyObject *pyModule = PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *wrapped_snr_series_class = PyObject_GetAttrString(pyModule, "SNRSeries");
+
     PyObject *wrapped_snr_series_list = PyList_New(MAX_NIFO);
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-
         Complex8TimeSeriesWrapper *wrapped_snr_series =
-          (Complex8TimeSeriesWrapper *)PyObject_CallObject(
-            (PyObject *)&snr_series_wrapper_type, NULL);
+          (Complex8TimeSeriesWrapper *)PyType_GenericNew(
+            (PyTypeObject *)wrapped_snr_series_class, NULL, NULL);
         if (!wrapped_snr_series) return NULL;
 
         COMPLEX8TimeSeries *complex8_snr_series =
           buffer_postcohtable->snr_series[ifo_id];
 
         if (complex8_snr_series && complex8_snr_series->data->length > 0) {
-            wrapped_snr_series->complex8_snr_series = &complex8_snr_series;
+            wrapped_snr_series->complex8_snr_series = complex8_snr_series;
 
             npy_intp snr_series_dims[1] = { complex8_snr_series->data->length };
-            wrapped_snr_series->numpy_snr_series = PyArray_SimpleNewFromData(
-              1, snr_series_dims, NPY_CFLOAT, complex8_snr_series->data->data);
-            Py_INCREF(&wrapped_snr_series->numpy_snr_series);
 
             wrapped_snr_series->name =
               PyString_FromString(complex8_snr_series->name);
@@ -161,8 +148,10 @@ static PyObject *
             char *s = XLALUnitToString(&complex8_snr_series->sampleUnits);
             wrapped_snr_series->sampleUnits = PyString_FromString(s);
             XLALFree(s);
-            wrapped_snr_series->length =
+            wrapped_snr_series->data_length =
               PyInt_FromLong(complex8_snr_series->data->length);
+            wrapped_snr_series->data = PyArray_SimpleNewFromData(
+              1, snr_series_dims, NPY_CFLOAT, complex8_snr_series->data->data);
         }
         PyList_SetItem(wrapped_snr_series_list, ifo_id,
                        (PyObject *)wrapped_snr_series);
@@ -221,175 +210,158 @@ typedef struct {
     PyArrayObject *deff;
 } PostcohInspiralWrapper;
 
-static void __del__(PyObject *self) {
+static void __del_postcohinspiral__(PyObject *self) {
     PostcohInspiralWrapper *self_typed = (PostcohInspiralWrapper *)self;
 
-    Py_DECREF(self_typed->ifos);
-    Py_DECREF(self_typed->pivotal_ifo);
-    Py_DECREF(self_typed->skymap_fname);
-    Py_DECREF(self_typed->end_time);
-    Py_DECREF(self_typed->end_time_ns);
-    Py_DECREF(self_typed->is_background);
-    Py_DECREF(self_typed->livetime);
-    Py_DECREF(self_typed->tmplt_idx);
-    Py_DECREF(self_typed->bankid);
-    Py_DECREF(self_typed->pix_idx);
-    Py_DECREF(self_typed->cohsnr);
-    Py_DECREF(self_typed->nullsnr);
-    Py_DECREF(self_typed->cmbchisq);
-    Py_DECREF(self_typed->spearman_pval);
-    Py_DECREF(self_typed->fap);
-    Py_DECREF(self_typed->far_2h);
-    Py_DECREF(self_typed->far_1d);
-    Py_DECREF(self_typed->far_1w);
-    Py_DECREF(self_typed->far);
-    Py_DECREF(self_typed->rank);
-    Py_DECREF(self_typed->template_duration);
-    Py_DECREF(self_typed->mass1);
-    Py_DECREF(self_typed->mass2);
-    Py_DECREF(self_typed->mchirp);
-    Py_DECREF(self_typed->mtotal);
-    Py_DECREF(self_typed->eta);
-    Py_DECREF(self_typed->spin1x);
-    Py_DECREF(self_typed->spin1y);
-    Py_DECREF(self_typed->spin1z);
-    Py_DECREF(self_typed->spin2x);
-    Py_DECREF(self_typed->spin2y);
-    Py_DECREF(self_typed->spin2z);
-    Py_DECREF(self_typed->ra);
-    Py_DECREF(self_typed->dec);
-    Py_DECREF(self_typed->f_final);
-    Py_DECREF(self_typed->_process_id);
-    Py_DECREF(self_typed->_event_id);
-    Py_DECREF(self_typed->end_time_sngl);
-    Py_DECREF(self_typed->snglsnr);
-    Py_DECREF(self_typed->coaphase);
-    Py_DECREF(self_typed->chisq);
-    Py_DECREF(self_typed->far_sngl);
-    Py_DECREF(self_typed->far_1w_sngl);
-    Py_DECREF(self_typed->far_1d_sngl);
-    Py_DECREF(self_typed->far_2h_sngl);
-    Py_DECREF(self_typed->deff);
-    Py_DECREF(self_typed->end_time_sngl);
-    Py_DECREF(self_typed->snglsnr);
-    Py_DECREF(self_typed->coaphase);
-    Py_DECREF(self_typed->chisq);
-    Py_DECREF(self_typed->far_sngl);
-    Py_DECREF(self_typed->far_1w_sngl);
-    Py_DECREF(self_typed->far_1d_sngl);
-    Py_DECREF(self_typed->far_2h_sngl);
-    Py_DECREF(self_typed->deff);
+    Py_XDECREF(self_typed->ifos);
+    Py_XDECREF(self_typed->pivotal_ifo);
+    Py_XDECREF(self_typed->skymap_fname);
+    Py_XDECREF(self_typed->end_time);
+    Py_XDECREF(self_typed->end_time_ns);
+    Py_XDECREF(self_typed->is_background);
+    Py_XDECREF(self_typed->livetime);
+    Py_XDECREF(self_typed->tmplt_idx);
+    Py_XDECREF(self_typed->bankid);
+    Py_XDECREF(self_typed->pix_idx);
+    Py_XDECREF(self_typed->cohsnr);
+    Py_XDECREF(self_typed->nullsnr);
+    Py_XDECREF(self_typed->cmbchisq);
+    Py_XDECREF(self_typed->spearman_pval);
+    Py_XDECREF(self_typed->fap);
+    Py_XDECREF(self_typed->far_2h);
+    Py_XDECREF(self_typed->far_1d);
+    Py_XDECREF(self_typed->far_1w);
+    Py_XDECREF(self_typed->far);
+    Py_XDECREF(self_typed->rank);
+    Py_XDECREF(self_typed->template_duration);
+    Py_XDECREF(self_typed->mass1);
+    Py_XDECREF(self_typed->mass2);
+    Py_XDECREF(self_typed->mchirp);
+    Py_XDECREF(self_typed->mtotal);
+    Py_XDECREF(self_typed->eta);
+    Py_XDECREF(self_typed->spin1x);
+    Py_XDECREF(self_typed->spin1y);
+    Py_XDECREF(self_typed->spin1z);
+    Py_XDECREF(self_typed->spin2x);
+    Py_XDECREF(self_typed->spin2y);
+    Py_XDECREF(self_typed->spin2z);
+    Py_XDECREF(self_typed->ra);
+    Py_XDECREF(self_typed->dec);
+    Py_XDECREF(self_typed->f_final);
+    Py_XDECREF(self_typed->_process_id);
+    Py_XDECREF(self_typed->_event_id);
+    Py_XDECREF(self_typed->end_time_sngl);
+    Py_XDECREF(self_typed->snglsnr);
+    Py_XDECREF(self_typed->coaphase);
+    Py_XDECREF(self_typed->chisq);
+    Py_XDECREF(self_typed->far_sngl);
+    Py_XDECREF(self_typed->far_1w_sngl);
+    Py_XDECREF(self_typed->far_1d_sngl);
+    Py_XDECREF(self_typed->far_2h_sngl);
+    Py_XDECREF(self_typed->deff);
+
     Py_TYPE(self)->tp_free(self);
 }
 
-static PyObject *__new__(PyTypeObject *type, PyObject *args, PyObject *kwds) {
-    PostcohInspiralWrapper *instance =
-      (PostcohInspiralWrapper *)type->tp_alloc(type, 0);
-
-    if (!instance) return NULL;
-
-    return (PyObject *)instance;
-}
-
-static PyMemberDef members[] = {
-    { "ifos", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ifos), READONLY,
+static PyMemberDef members_postcohinspiral[] = {
+    { "ifos", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ifos), 0,
       "ifos" },
     { "pivotal_ifo", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, pivotal_ifo),
-      READONLY, "pivotal_ifo" },
+      0, "pivotal_ifo" },
     { "skymap_fname", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, skymap_fname), READONLY,
+      offsetof(PostcohInspiralWrapper, skymap_fname), 0,
       "skymap_fname" },
     // Not dependent on the number of detectors
     { "end_time", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, end_time),
-      READONLY, "end_time" },
+      0, "end_time" },
     { "end_time_ns", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, end_time_ns),
-      READONLY, "end_time_ns" },
+      0, "end_time_ns" },
     { "is_background", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, is_background), READONLY,
+      offsetof(PostcohInspiralWrapper, is_background), 0,
       "is_background" },
     { "livetime", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, livetime),
-      READONLY, "livetime" },
+      0, "livetime" },
     { "tmplt_idx", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, tmplt_idx),
-      READONLY, "tmplt_idx" },
-    { "bankid", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, bankid), READONLY,
+      0, "tmplt_idx" },
+    { "bankid", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, bankid), 0,
       "bankid" },
     { "pix_idx", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, pix_idx),
-      READONLY, "pix_idx" },
-    { "cohsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, cohsnr), READONLY,
+      0, "pix_idx" },
+    { "cohsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, cohsnr), 0,
       "cohsnr" },
     { "nullsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, nullsnr),
-      READONLY, "nullsnr" },
+      0, "nullsnr" },
     { "cmbchisq", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, cmbchisq),
-      READONLY, "cmbchisq" },
+      0, "cmbchisq" },
     { "spearman_pval", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, spearman_pval), READONLY,
+      offsetof(PostcohInspiralWrapper, spearman_pval), 0,
       "spearman_pval" },
-    { "fap", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, fap), READONLY,
+    { "fap", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, fap), 0,
       "fap" },
-    { "far_2h", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_2h), READONLY,
+    { "far_2h", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_2h), 0,
       "far_2h" },
-    { "far_1d", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1d), READONLY,
+    { "far_1d", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1d), 0,
       "far_1d" },
-    { "far_1w", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1w), READONLY,
+    { "far_1w", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1w), 0,
       "far_1w" },
-    { "far", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far), READONLY,
+    { "far", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far), 0,
       "far" },
-    { "rank", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, rank), READONLY,
+    { "rank", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, rank), 0,
       "rank" },
     { "template_duration", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, template_duration), READONLY,
+      offsetof(PostcohInspiralWrapper, template_duration), 0,
       "template_duration" },
-    { "mass1", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mass1), READONLY,
+    { "mass1", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mass1), 0,
       "mass1" },
-    { "mass2", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mass2), READONLY,
+    { "mass2", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mass2), 0,
       "mass2" },
-    { "mchirp", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mchirp), READONLY,
+    { "mchirp", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mchirp), 0,
       "mchirp" },
-    { "mtotal", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mtotal), READONLY,
+    { "mtotal", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, mtotal), 0,
       "mtotal" },
-    { "eta", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, eta), READONLY,
+    { "eta", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, eta), 0,
       "eta" },
-    { "spin1x", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin1x), READONLY,
+    { "spin1x", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin1x), 0,
       "spin1x" },
-    { "spin1y", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin1y), READONLY,
+    { "spin1y", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin1y), 0,
       "spin1y" },
-    { "spin1z", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin1z), READONLY,
+    { "spin1z", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin1z), 0,
       "spin1z" },
-    { "spin2x", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin2x), READONLY,
+    { "spin2x", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin2x), 0,
       "spin2x" },
-    { "spin2y", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin2y), READONLY,
+    { "spin2y", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin2y), 0,
       "spin2y" },
-    { "spin2z", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin2z), READONLY,
+    { "spin2z", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, spin2z), 0,
       "spin2z" },
-    { "ra", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ra), READONLY, "ra" },
-    { "dec", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, dec), READONLY,
+    { "ra", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ra), 0, "ra" },
+    { "dec", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, dec), 0,
       "dec" },
     { "f_final", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, f_final),
-      READONLY, "f_final" },
+      0, "f_final" },
     { "_process_id", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, _process_id),
-      READONLY, "process_id (long)" },
+      0, "process_id (long)" },
     { "_event_id", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, _event_id),
-      READONLY, "event_id (long)" },
+      0, "event_id (long)" },
 
     // Things that are done single detector are ndarrays
     { "end_time_sngl", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, end_time_sngl), READONLY,
+      offsetof(PostcohInspiralWrapper, end_time_sngl), 0,
       "end_time_sngl" },
     { "snglsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, snglsnr),
-      READONLY, "snglsnr" },
+      0, "snglsnr" },
     { "coaphase", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, coaphase),
-      READONLY, "coaphase" },
-    { "chisq", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, chisq), READONLY,
+      0, "coaphase" },
+    { "chisq", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, chisq), 0,
       "chisq" },
     { "far_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_sngl),
-      READONLY, "far_sngl" },
+      0, "far_sngl" },
     { "far_1w_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1w_sngl),
-      READONLY, "far_1w_sngl" },
+      0, "far_1w_sngl" },
     { "far_1d_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1d_sngl),
-      READONLY, "far_1d_sngl" },
+      0, "far_1d_sngl" },
     { "far_2h_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_2h_sngl),
-      READONLY, "far_2h_sngl" },
-    { "deff", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, deff), READONLY,
+      0, "far_2h_sngl" },
+    { "deff", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, deff), 0,
       "deff" },
     { NULL },
 };
@@ -401,18 +373,19 @@ static PyTypeObject postcoh_inspiral_wrapper_type = {
     .tp_doc = "LAL's PostcohInspiral structure",
     .tp_flags =
       Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
-    .tp_members = members,
-    .tp_name    = MODULE_NAME ".GSTLALPostcohInspiral",
-    .tp_new     = __new__,
-    .tp_dealloc = __del__,
+    .tp_members = members_postcohinspiral,
+    .tp_name    = MODULE_NAME ".PostcohInspiral",
+    .tp_dealloc = __del_postcohinspiral__,
 };
 
-static PyObject *
+static PostcohInspiralWrapper *
   new_wrapped_postcohtable(PostcohInspiralTable *buffer_postcohtable) {
+    PyObject *pyModule = PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *wrapped_postcohtable_class = PyObject_GetAttrString(pyModule, "PostcohInspiral");
 
     PostcohInspiralWrapper *self =
-      (PostcohInspiralWrapper *)PyObject_CallObject(
-        (PyObject *)&postcoh_inspiral_wrapper_type, NULL);
+      (PostcohInspiralWrapper *)PyType_GenericNew(
+        (PyTypeObject *)wrapped_postcohtable_class, NULL, NULL);
     if (!self) return NULL;
 
     npy_intp dims[1]          = { MAX_NIFO };
@@ -462,13 +435,13 @@ static PyObject *
     self->end_time_sngl = PyArray_SimpleNewFromData(
       2, end_time_dims, NPY_INT, buffer_postcohtable->end_time_sngl);
     self->snglsnr  = PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                              buffer_postcohtable->snglsnr);
+                                               buffer_postcohtable->snglsnr);
     self->coaphase = PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
                                                buffer_postcohtable->coaphase);
     self->chisq =
       PyArray_SimpleNewFromData(1, dims, NPY_FLOAT, buffer_postcohtable->chisq);
     self->far_sngl    = PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                               buffer_postcohtable->far_sngl);
+                                                  buffer_postcohtable->far_sngl);
     self->far_1w_sngl = PyArray_SimpleNewFromData(
       1, dims, NPY_FLOAT, buffer_postcohtable->far_1w_sngl);
     self->far_1d_sngl = PyArray_SimpleNewFromData(
@@ -481,104 +454,73 @@ static PyObject *
     return (PyObject *)self;
 }
 
-static PyObject *from_buffer(PyObject *cls, PyObject *args) {
-    const char *data;
-    Py_ssize_t length;
+typedef struct {
+    PyObject_HEAD
+    PostcohInspiralWrapper *postcohinspiral;
+    PyListObject *snr_series;
+} PostcohEvent;
 
-    if (!PyArg_ParseTuple(args, "s#", (const char **)&data, &length))
-        return NULL;
-    const char *const end = data + length;
+static void __del_postcohevent__(PyObject *self) {
+    PostcohEvent *self_typed = (PostcohEvent *)self;
 
-    PyObject *table_list = PyList_New(0);
+    Py_XDECREF(self_typed->postcohinspiral);
+    Py_XDECREF(self_typed->snr_series);
 
-    if (!table_list) {
-        PyErr_SetString(PyExc_ValueError, "table list error");
-        return NULL;
-    }
+    Py_TYPE(self)->tp_free(self);
+}
 
-    PyObject *series_list = PyList_New(0);
+static PyMemberDef members_postcohevent[] = {
+    { "postcohinspiral", T_OBJECT_EX, offsetof(PostcohEvent, postcohinspiral), 0,
+      "postcohinspiral" },
+    // Things that are done single detector are ndarrays
+    { "snr_series", T_OBJECT_EX,
+      offsetof(PostcohEvent, snr_series), 0,
+      "snr_series" },
+    { NULL },
+};
 
-    if (!series_list) {
-        Py_DECREF(table_list);
-        PyErr_SetString(PyExc_ValueError, "series list error");
-        return NULL;
-    }
+static PyTypeObject postcohevent_type = {
+    // clang-format off
+  PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
+  .tp_basicsize = sizeof(PostcohEvent), // clang-format on
+    .tp_doc = "Postcoh Event structure",
+    .tp_flags =
+      Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
+    .tp_members = members_postcohevent,
+    .tp_name    = MODULE_NAME ".PostcohEvent",
+    .tp_dealloc = __del_postcohevent__,
+};
 
-    while (data < end) {
-        /* memcpy postcoh postcohtable */
-        const PostcohInspiralTable *buffer_postcohtable =
-          (const PostcohInspiralTable *)data;
-        data += sizeof(PostcohInspiralTable);
-        /* if the data read in is less then expected amount */
-        if (data > end) {
-            Py_DECREF(table_list);
-            Py_DECREF(series_list);
-            PyErr_SetString(PyExc_ValueError,
-                            "overran end of buffer while deserializing a "
-                            "PostcohInspiralTable");
-            return NULL;
-        }
+static PostcohEvent *
+  new_postcohevent(PostcohInspiralTable *buffer_postcohtable) {
+    PyObject *pyModule = PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *postcohevent_class = PyObject_GetAttrString(pyModule, "PostcohEvent");
 
-        PostcohInspiralWrapper *wrapped_postcohtable =
-          (PostcohInspiralWrapper *)new_wrapped_postcohtable(
-            buffer_postcohtable);
-        if (!wrapped_postcohtable) {
-            Py_DECREF(table_list);
-            Py_DECREF(series_list);
-            PyErr_SetString(PyExc_ValueError, "wrapped_postcohtable error");
-            return NULL;
-        }
+    PostcohEvent *self =
+      (PostcohEvent *)PyType_GenericNew(
+        (PyTypeObject *)postcohevent_class, NULL, NULL);
+    if (!self) return NULL;
 
-        if (PyList_Append(table_list, (PyObject *)wrapped_postcohtable)) {
-            Py_DECREF(table_list);
-            Py_DECREF(series_list);
-            PyErr_SetString(PyExc_ValueError, "postcohtable append failure");
-            return NULL;
-        }
-        Py_DECREF((PyObject *)wrapped_postcohtable);
-
-        PyObject *wrapped_snr_series_list =
-          new_wrapped_snr_series(buffer_postcohtable);
-        if (!wrapped_snr_series_list) {
-            Py_DECREF(table_list);
-            Py_DECREF(series_list);
-            PyErr_SetString(PyExc_ValueError, "wrapped_snr_series error");
-            return NULL;
-        }
-
-        if (PyList_Append(series_list, (PyObject *)wrapped_snr_series_list)) {
-            Py_DECREF(table_list);
-            Py_DECREF(series_list);
-            PyErr_SetString(PyExc_ValueError, "snr_series append failure");
-            return NULL;
-        }
-        Py_DECREF(wrapped_snr_series_list);
-    }
-
-    if (data != end) {
-        Py_DECREF(table_list);
-        Py_DECREF(series_list);
-        PyErr_SetString(PyExc_ValueError, "did not consume entire buffer");
+    PostcohInspiralWrapper *wrapped_postcohtable =
+      new_wrapped_postcohtable(buffer_postcohtable);
+    if (!wrapped_postcohtable) {
+        Py_DECREF(self);
+        PyErr_SetString(PyExc_ValueError, "wrapped_postcohtable error");
         return NULL;
     }
 
-    PyObject *result = PyList_New(0);
+    self->postcohinspiral = wrapped_postcohtable;
 
-    if (!result) {
-        Py_DECREF(table_list);
-        Py_DECREF(series_list);
-        PyErr_SetString(PyExc_ValueError, "result list error");
+    PyObject *wrapped_snr_series_list =
+      new_wrapped_snr_series(buffer_postcohtable);
+    if (!wrapped_snr_series_list) {
+        Py_DECREF(self);
+        PyErr_SetString(PyExc_ValueError, "wrapped_snr_series error");
         return NULL;
     }
 
-    PyList_Append(result, (PyObject *)table_list);
-    PyList_Append(result, (PyObject *)series_list);
-
-    PyObject *tuple = PyList_AsTuple(result);
-    Py_DECREF(result);
-    Py_DECREF(table_list);
-    Py_DECREF(series_list);
-    return tuple;
+    self->snr_series = wrapped_snr_series_list;
+    return (PyObject *)self;
 }
 
 /*
@@ -589,8 +531,57 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
  * ============================================================================
  */
 
-PyMODINIT_FUNC init_postcohtable(void) {
-    static struct PyMethodDef methods[] = {
+static PyObject *from_buffer(PyObject *cls, PyObject *args) {
+    const char *data;
+    Py_ssize_t length;
+
+    if (!PyArg_ParseTuple(args, "s#", &data, &length)) return NULL;
+    const char *const end = data + length;
+
+    PyObject *event_list = PyList_New(0);
+
+    if (!event_list) {
+        PyErr_SetString(PyExc_ValueError, "event list error");
+        return NULL;
+    }
+
+    while (data < end) {
+        /* memcpy postcoh postcohtable */
+        const PostcohInspiralTable *buffer_postcohtable =
+          (const PostcohInspiralTable *)data;
+        data += sizeof(PostcohInspiralTable);
+        /* if the data read in is less then expected amount */
+        if (data > end) {
+            Py_DECREF(event_list);
+            PyErr_SetString(PyExc_ValueError,
+                            "overran end of buffer while deserializing a "
+                            "PostcohInspiralTable");
+            return NULL;
+        }
+
+        PostcohEvent *postcohevent =
+          new_postcohevent(buffer_postcohtable);
+
+        if (!postcohevent) {
+            Py_DECREF(event_list);
+            PyErr_SetString(PyExc_ValueError, "postcohevent error");
+            return NULL;
+        }
+
+        PyList_Append(event_list, (PyObject *)postcohevent);
+        Py_DECREF(postcohevent);
+    }
+
+    if (data != end) {
+        Py_DECREF(event_list);
+        PyErr_SetString(PyExc_ValueError, "did not consume entire buffer");
+        return NULL;
+    }
+
+    return event_list;
+}
+
+static struct PyMethodDef methods[] = {
         { "from_buffer", from_buffer, METH_VARARGS,
           "Construct a tuple of PostcohInspiralTable objects from a buffer "
           "object. "
@@ -599,8 +590,9 @@ PyMODINIT_FUNC init_postcohtable(void) {
         {
           NULL,
         }
-    };
+};
 
+PyMODINIT_FUNC init_postcohtable(void) {
     PyObject *module = Py_InitModule3(
       MODULE_NAME, methods, "Wrapper for LAL's PostcohInspiralTable type.");
 
@@ -617,12 +609,24 @@ PyMODINIT_FUNC init_postcohtable(void) {
     }
     PyModule_AddObject(module, "ifo_map", ifo_map);
 
+
     if (PyType_Ready(&postcoh_inspiral_wrapper_type) < 0) return NULL;
     Py_INCREF(&postcoh_inspiral_wrapper_type);
 
-    PyModule_AddObject(module, "GSTLALPostcohInspiral",
+    PyModule_AddObject(module, "PostcohInspiral",
                        (PyObject *)&postcoh_inspiral_wrapper_type);
+
 
     if (PyType_Ready(&snr_series_wrapper_type) < 0) return NULL;
     Py_INCREF(&snr_series_wrapper_type);
+
+    PyModule_AddObject(module, "SNRSeries",
+                       (PyObject *)&snr_series_wrapper_type);
+
+
+    if (PyType_Ready(&postcohevent_type) < 0) return NULL;
+    Py_INCREF(&postcohevent_type);
+
+    PyModule_AddObject(module, "PostcohEvent",
+                       (PyObject *)&postcohevent_type);
 }
