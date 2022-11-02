@@ -1,5 +1,5 @@
-ADD_CFLAGS = -I$(top_srcdir)/include -I$(top_srcdir)/lib/include $(LAPACKE_CFLAGS) $(SPIIR_FIX_COMPLEX_CFLAGS)
-ADD_LIBS = -L\$(top_srcdir)/lib -lgstlalspiir -llapack $(LAPACKE_LIBS)
+ADD_CFLAGS = $(GSTLAL_SPIIR_CFLAGS) $(LAPACKE_CFLAGS) $(SPIIR_FIX_COMPLEX_CFLAGS)
+ADD_LIBS = $(GSTLAL_SPIIR_LIBS) -llapack $(LAPACKE_LIBS)
 
 plugin_LTLIBRARIES = libcuda_plugin.la
 

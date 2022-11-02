@@ -17,11 +17,13 @@
  * Boston, MA 02111-1307, USA.
  */
 
+#include <IFOMap.h>
 #include <LIGOLwHeader.h>
+#include <chealpix.h>
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
 #include <gst/gst.h>
-#include <pipe_macro.h> // for ifo_set__get_string
+#include <pipe_macro.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
 
@@ -143,14 +145,15 @@ void cuda_device_print(int deviceCount) {
     }
 }
 
-/* get ifo indices of a given set of ifos in IFOMap
+/* get ifo indices of a given set of ifos
  * e.g. HV: 0, 2
  */
 void get_write_ifo_mapping(char *ifos, int nifo, int *write_ifo_mapping) {
     int iifo, jifo;
     for (iifo = 0; iifo < nifo; iifo++)
         for (jifo = 0; jifo < MAX_NIFO; jifo++)
-            if (strncmp(ifos + iifo * IFO_LEN, IFOMap[jifo], IFO_LEN) == 0) {
+            if (strncmp(ifos + iifo * IFO_LEN, get_ifo_string(jifo), IFO_LEN)
+                == 0) {
                 write_ifo_mapping[iifo] = jifo;
                 break;
             }
@@ -388,7 +391,7 @@ PeakList *create_peak_list(PostcohState *state, cudaStream_t stream) {
 void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
 
     gchar **isigma, **sigma_fnames = g_strsplit(fname, ",", -1);
-    int mem_alloc_size = 0, ntmplt = 0, match_ifo = 0, nifo = 0;
+    int mem_alloc_size = 0, ntmplt = 0, nifo = 0;
 
     /* parsing for nifo */
     for (isigma = sigma_fnames; *isigma; isigma++) nifo++;
@@ -411,30 +414,33 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
     int last_dimension = -1;
 
     /* parsing for all_ifos */
-    for (isigma = sigma_fnames; *isigma; isigma++) {
-        gchar **this_ifo_split = g_strsplit(*isigma, ":", -1);
-
-        for (int i = 0; i < nifo; i++) {
-            if (strncmp(this_ifo_split[0], IFOMap[i], IFO_LEN) == 0) {
-                match_ifo = i;
-                break;
+    int num_parsed_ifos = 0;
+    for (int i = 0; i < MAX_NIFO; i++) {
+        // Find sigma_fname that matches ifo i, if any
+        gchar *matched_fname = NULL;
+        for (isigma = sigma_fnames; *isigma; isigma++) {
+            if (strncmp(*isigma, get_ifo_string(i), IFO_LEN) == 0) {
+                matched_fname = *isigma;
             }
         }
-
+        if (!matched_fname) continue;
+        int ifo_ind            = num_parsed_ifos++;
+        gchar **this_ifo_split = g_strsplit(matched_fname, ":", -1);
         parseFile(this_ifo_split[1], xns, 1);
 
         ntmplt = array_sigmasq[0].dim[0];
-// ifo sets like HL, match_ifo will still be like 0:H,1:L
-// ifo sets like HV, match_ifo will still be like 0:H,1:V
+// ifo sets like HL, ifo_ind will still be like 0:H,1:L
+// ifo sets like HV, ifo_ind will still be like 0:H,1:V
 #ifdef __DEBUG__
-        printf("this sigma %s, this ifo %s, match ifo %d,ntmplt %d \n", *isigma,
-               this_ifo_split[0], match_ifo, ntmplt);
+        printf("this sigma %s, this ifo %s, ifo ind %d,ntmplt %d \n", *isigma,
+               this_ifo_split[0], ifo_ind, ntmplt);
 #endif
 
-        /* check if the lengths of sigmasq arrays are equal for all detectors */
+        /* check if the lengths of sigmasq arrays are equal for all
+         * detectors */
         if (last_dimension == -1) {
-            /* allocate memory for sigmasq for all detectors upon the first
-             * detector ntmplt */
+            /* allocate memory for sigmasq for all detectors upon the
+             * first detector ntmplt */
             last_dimension = ntmplt;
             mem_alloc_size = sizeof(double) * ntmplt;
             for (int i = 0; i < nifo; i++) {
@@ -448,11 +454,11 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
         }
 
         for (int j = 0; j < ntmplt; j++) {
-            sigmasq[match_ifo][j] =
+            sigmasq[ifo_ind][j] =
               (double)((double *)(array_sigmasq[0].data))[j];
 #ifdef __DEBUG__
-            printf("match ifo %d, template %d: %f\n", match_ifo, j,
-                   sigmasq[match_ifo][j]);
+            printf("ifo ind %d, template %d: %f\n", ifo_ind, j,
+                   sigmasq[ifo_ind][j]);
 #endif
         }
 
@@ -465,7 +471,6 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
          * this is to debug memory for regression tests
          */
         xmlMemoryDump();
-
         g_strfreev(this_ifo_split);
     }
     /* free memory */
@@ -605,8 +610,7 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
 #endif
 
     gchar **iauto, **auto_fnames = g_strsplit(fname, ",", -1);
-    int mem_alloc_size = 0, autochisq_len = 0, ntmplt = 0, match_ifo = 0,
-        nifo = 0;
+    int mem_alloc_size = 0, autochisq_len = 0, ntmplt = 0, nifo = 0;
 
     /* parsing for nifo */
     for (iauto = auto_fnames; *iauto; iauto++) nifo++;
@@ -638,29 +642,31 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
     xns[1].data       = &(array_autocorr[1]);
 
     /* parsing for all_ifos */
-    for (iauto = auto_fnames; *iauto; iauto++) {
-        gchar **this_ifo_split = g_strsplit(*iauto, ":", -1);
-
-        for (int i = 0; i < nifo; i++) {
-            if (strncmp(this_ifo_split[0], IFOMap[i], IFO_LEN) == 0) {
-                match_ifo = i;
-                break;
+    int num_parsed_ifos = 0;
+    for (int i = 0; i < MAX_NIFO; i++) {
+        // Find auto_fname that matches ifo i, if any
+        gchar *matched_fname = NULL;
+        for (iauto = auto_fnames; *iauto; iauto++) {
+            if (strncmp(*iauto, get_ifo_string(i), IFO_LEN) == 0) {
+                matched_fname = *iauto;
             }
         }
-
+        if (!matched_fname) continue;
+        int ifo_ind           = num_parsed_ifos++;
+        gchar **this_ifo_split = g_strsplit(matched_fname, ":", -1);
         parseFile(this_ifo_split[1], xns, 2);
         ntmplt        = array_autocorr[0].dim[1];
         autochisq_len = array_autocorr[0].dim[0];
 
 #ifdef __DEBUG__
-        printf(
-          "this auto %s, this ifo %s, match ifo %d,ntmplt %d,auto len %d \n",
-          *iauto, this_ifo_split[0], match_ifo, ntmplt, autochisq_len);
+        printf("this auto %s, this ifo %s, ifo ind %d,ntmplt %d,auto "
+               "len %d \n",
+               *iauto, this_ifo_split[0], ifo_ind, ntmplt, autochisq_len);
 #endif
 
         mem_alloc_size = sizeof(COMPLEX_F) * ntmplt * autochisq_len;
-        CUDA_CHECK(cudaMalloc((void **)&(autocorr[match_ifo]), mem_alloc_size));
-        CUDA_CHECK(cudaMalloc((void **)&(autocorr_norm[match_ifo]),
+        CUDA_CHECK(cudaMalloc((void **)&(autocorr[ifo_ind]), mem_alloc_size));
+        CUDA_CHECK(cudaMalloc((void **)&(autocorr_norm[ifo_ind]),
                               sizeof(float) * ntmplt));
 
         if (tmp_autocorr == NULL) {
@@ -682,22 +688,22 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
                 tmp_norm[j] += 2 - (tmp_re * tmp_re + tmp_im * tmp_im);
             }
 #ifdef __DEBUG__
-            printf("match ifo %d, norm %d: %f\n", match_ifo, j, tmp_norm[j]);
+            printf("ifo ind %d, norm %d: %f\n", ifo_ind, j, tmp_norm[j]);
 #endif
         }
         /* copy the autocorr array to GPU device;
          * copy the array address to GPU device */
-        CUDA_CHECK(cudaMemcpyAsync(autocorr[match_ifo], tmp_autocorr,
+        CUDA_CHECK(cudaMemcpyAsync(autocorr[ifo_ind], tmp_autocorr,
                                    mem_alloc_size, cudaMemcpyHostToDevice,
                                    stream));
-        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_autocorr_matrix[match_ifo]),
-                                   &(autocorr[match_ifo]), sizeof(COMPLEX_F *),
+        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_autocorr_matrix[ifo_ind]),
+                                   &(autocorr[ifo_ind]), sizeof(COMPLEX_F *),
                                    cudaMemcpyHostToDevice, stream));
-        CUDA_CHECK(cudaMemcpyAsync(autocorr_norm[match_ifo], tmp_norm,
+        CUDA_CHECK(cudaMemcpyAsync(autocorr_norm[ifo_ind], tmp_norm,
                                    sizeof(float) * ntmplt,
                                    cudaMemcpyHostToDevice, stream));
-        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_autocorr_norm[match_ifo]),
-                                   &(autocorr_norm[match_ifo]), sizeof(float *),
+        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_autocorr_norm[ifo_ind]),
+                                   &(autocorr_norm[ifo_ind]), sizeof(float *),
                                    cudaMemcpyHostToDevice, stream));
 
         freeArraydata(array_autocorr);

@@ -28,6 +28,7 @@
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
 #define PY_SSIZE_T_CLEAN
+#include <IFOMap.h>
 #include <Python.h>
 #include <lal/TimeSeries.h>
 #include <lal/Units.h>
@@ -590,8 +591,8 @@ PyMODINIT_FUNC init_postcohtable(void) {
 
     PyObject *ifo_map = PyList_New(MAX_NIFO);
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        PyObject *str =
-          PyString_FromStringAndSize(IFOMap[ifo_id], strlen(IFOMap[ifo_id]));
+        PyObject *str = PyString_FromStringAndSize(
+          get_ifo_string(ifo_id), strlen(get_ifo_string(ifo_id)));
         assert(str);
         Py_INCREF(str);
         PyList_SetItem(ifo_map, ifo_id, str);

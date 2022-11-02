@@ -10,33 +10,6 @@
 #endif
 
 #define MAX_NIFO 4
-#ifdef __cplusplus
-constexpr
-#endif
-  static const char *IFOMap[MAX_NIFO] = {
-      "H1", // 1 << 0 = 1
-      "L1", // 1 << 1 = 2
-      "V1", // 1 << 2 = 4
-      "K1", // 1 << 3 = 8
-  };
-#define MAX_IFO_SET 0b1111 // { H1, L1, V1, K1 } bitset
-
-typedef unsigned int ifo_set_type;
-
-/* function to encapsulate IFOComboMap, such that ifo_set isn't directly
- *  used as an index */
-const char *ifo_set__get_string(ifo_set_type ifo_set);
-
-// Parse IFO set from string representation. See implementation for details.
-bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos);
-ifo_set_type ifo_set__parse_or_empty(const char *ifos_str);
-
-// Mapping from IFO set to string representation
-// Index is one less than the bitset representation of the set
-static const char *IFOComboMap[MAX_IFO_SET] = {
-    "H1",   "L1",   "H1L1",   "V1",   "H1V1",   "L1V1",   "H1L1V1",   "K1",
-    "H1K1", "L1K1", "H1L1K1", "V1K1", "H1V1K1", "L1V1K1", "H1L1V1K1",
-};
 
 #ifndef MAX_ALLIFO_LEN
 #define MAX_ALLIFO_LEN 14

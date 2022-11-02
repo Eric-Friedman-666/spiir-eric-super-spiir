@@ -367,10 +367,6 @@ static void cohfar_assignfar_get_property(GObject *object,
     switch (prop_id) {
     case PROP_IFOS: g_value_set_string(value, element->ifos); break;
 
-    case PROP_INPUT_FNAME:
-        g_value_set_string(value, element->input_fnames);
-        break;
-
     case PROP_SILENT_TIME: g_value_set_int(value, element->silent_time); break;
 
     case PROP_REFRESH_INTERVAL:

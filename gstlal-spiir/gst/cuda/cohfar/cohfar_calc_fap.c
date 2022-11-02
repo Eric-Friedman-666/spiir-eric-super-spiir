@@ -29,6 +29,7 @@
 #include <cohfar/background_stats_utils.h>
 #include <getopt.h>
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <math.h>
 #include <string.h>
 
@@ -161,6 +162,7 @@ static int get_type(gchar **ptype) {
     if (g_strcmp0(*ptype, "background") == 0) return STATS_XML_TYPE_BACKGROUND;
     if (g_strcmp0(*ptype, "zerolag") == 0) return STATS_XML_TYPE_ZEROLAG;
     if (g_strcmp0(*ptype, "all") == 0) return STATS_XML_TYPE_ALL;
+    return -1;
 }
 
 static int process_stats_full(gchar **in_fnames,
@@ -283,9 +285,8 @@ int main(int argc, char *argv[]) {
     int *update_pdf = (int *)malloc(sizeof(int));
 
     parse_opts(argc, argv, pin, pfmt, pout, pifos, ptype, update_pdf);
-    int type      = get_type(ptype);
     int num_stats = strlen(*pifos) / IFO_LEN + 1;
-    int rc; // return value
+    int rc        = 0; // return value
 
     gchar **in_fnames =
       g_strsplit(*pin, ",", -1); // split the string completely
@@ -293,8 +294,6 @@ int main(int argc, char *argv[]) {
     if (g_strcmp0(*pfmt, "data") == 0) {
         gsl_vector *data_dim1 = NULL, *data_dim2 = NULL;
         cohfar_get_data_from_file(in_fnames, &data_dim1, &data_dim2);
-        TriggerStatsXML *bgstats_in =
-          trigger_stats_xml_create(*pifos, STATS_XML_TYPE_BACKGROUND);
         TriggerStatsXML *bgstats_out =
           trigger_stats_xml_create(*pifos, STATS_XML_TYPE_BACKGROUND);
         // FIXME: hardcoded to only update the last stats
@@ -311,6 +310,7 @@ int main(int argc, char *argv[]) {
             free(data_dim2);
         }
     } else if (g_strcmp0(*pfmt, "stats") == 0) {
+        int type = get_type(ptype);
         if (type == STATS_XML_TYPE_ALL) {
             rc =
               process_stats_full(in_fnames, num_stats, pifos, pout, update_pdf);

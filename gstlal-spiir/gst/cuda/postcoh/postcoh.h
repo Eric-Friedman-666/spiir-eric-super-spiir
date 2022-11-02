@@ -251,8 +251,8 @@ struct _CudaPostcoh {
     PostcohState *state;
     float snglsnr_thresh;
     float cohsnr_thresh;
-    GMutex *prop_lock;
-    GCond *prop_avail;
+    GMutex prop_lock;
+    GCond prop_avail;
     gint hist_trials;
     float trial_interval;
     gint trial_interval_in_samples;

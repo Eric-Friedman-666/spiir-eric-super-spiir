@@ -443,7 +443,7 @@ double logexp(double x) {
         return x;
 }
 void gsl_vector_logexp(gsl_vector *x) {
-    int i;
+    size_t i;
     for (i = 0; i < x->size; i++)
         gsl_vector_set(x, i, logexp(gsl_vector_get(x, i)));
 }
@@ -457,7 +457,7 @@ void gsl_matrix_hist3(gsl_vector *x_dim1,
                       gsl_vector *edges_dim1,
                       gsl_vector *edges_dim2,
                       gsl_matrix *result) {
-    size_t i, j, l, m;
+    size_t i, l, m;
     double temp1, temp2;
     for (i = 0; i < x_dim1->size; i++) {
         temp1 = gsl_vector_get(x_dim1, i);
@@ -566,10 +566,6 @@ void ssvkernel_from_hist(gsl_vector *y_hist_input,
 
     char *WinFunc = "Boxcar"; // Window function ('Gauss','Laplace','Cauchy')
     // only "Boxcar" is available
-
-    size_t nbs = 1 * 1e2; // number of bootstrap samples
-
-    double confidence = 0.95;
 
     size_t i, j;
 
@@ -700,40 +696,15 @@ void ssvkernel(gsl_vector *x,
     char *WinFunc = "Boxcar"; // Window function ('Gauss','Laplace','Cauchy')
     // only "Boxcar" is available
 
-    size_t nbs = 1 * 1e2; // number of bootstrap samples
-
-    double confidence = 0.95;
-
     size_t i, j;
 
     double max_tin = gsl_vector_max(tin);
     double min_tin = gsl_vector_min(tin);
     double T       = max_tin - min_tin;
 
-    size_t number = 0;
-#if 0
-	/* remove out of range data */
-	//set x_ab variable
-	for (i = 0; i < x->size; i++) {
-		if (gsl_vector_get(x, i) <= max_tin
-				&& gsl_vector_get(x, i) >= min_tin) {
-			number++;
-		}
-	}
-	gsl_vector * x_ab = gsl_vector_alloc(number);
-	gsl_vector * temp_x_ab = gsl_vector_alloc(number);
-	number = 0;
-	for (i = 0; i < x->size; i++) {
-		if (gsl_vector_get(x, i) <= max_tin
-				&& gsl_vector_get(x, i) >= min_tin) {
-			gsl_vector_set(x_ab, number, gsl_vector_get(x, i));
-			number++;
-		}
-	}
-#endif
     gsl_vector *x_ab = gsl_vector_alloc(x->size);
     gsl_vector_memcpy(x_ab, x);
-    printf("number of data %d\n", x_ab->size);
+    printf("number of data %lu\n", x_ab->size);
 
     /* make the out of range data to be inside the bins */
     for (i = 0; i < x_ab->size; i++) {
@@ -742,21 +713,7 @@ void ssvkernel(gsl_vector *x,
     }
 
     // finished
-    /*	gsl_vector_memcpy(temp_x_ab,x_ab);
-            gsl_sort_vector(temp_x_ab);
-            number = 0;
-            double dt_samp = 0;
-            for (i = 0; i < temp_x_ab->size - 1; i++) {
-                    double diff = gsl_vector_get(temp_x_ab, i + 1)
-                                    - gsl_vector_get(temp_x_ab, i);
-                    if (diff != 0) {
-                            if (number == 0 || diff < dt_samp) {
-                                    dt_samp = diff;
-                                    number++;
-                            }
-                    }
-            }
-    */
+
     // set t variable
     gsl_vector *t;
     /* force bins to be the same as the input bins */
@@ -889,68 +846,6 @@ void ssvkernel(gsl_vector *x,
 
     printf("optimization completed\n");
     gsl_matrix_memcpy(result, yv);
-    // Bootstrap Confidence Interval
-    //	printf("computing bootsrap confidence intervals....\n");
-    //	gsl_matrix * yb = gsl_matrix_alloc(nbs, tin->size);
-    //
-    //	gsl_rng * r = gsl_rng_alloc(gsl_rng_taus);
-    //	gsl_vector * y_histb = gsl_vector_alloc(t->size);
-    //	gsl_vector * temp_t = gsl_vector_alloc(t->size);
-    //	gsl_vector * yb_buf = gsl_vector_alloc(L);
-    //	gsl_interp_accel *acc = gsl_interp_accel_alloc();
-    //	gsl_interp * linear = gsl_interp_alloc(gsl_interp_linear, t->size);
-    ////linear interpolation
-    //
-    //	for (i = 0; i < nbs; i++) {
-    //		size_t Nb = gsl_ran_poisson(r, N);
-    //		gsl_vector * xb = gsl_vector_alloc(Nb);
-    //		for (j = 0; j < Nb; j++) {
-    //			gsl_vector_set(xb, j,
-    //					gsl_vector_get(x_ab,
-    // floor(gsl_ran_flat(r, 0, N))));
-    //		}
-    //
-    //		gsl_vector_histc(xb, t_dt2, y_histb);
-    //		for (k = 0; k < L; k++) {
-    //			gsl_vector_memcpy(temp_t, t);
-    //			gsl_vector_scale(temp_t, -1);
-    //			gsl_vector_add_constant(temp_t, gsl_vector_get(t, k));
-    //			Gauss(temp_t, gsl_vector_get(optwp, k), temp_t);
-    //			gsl_vector_mul(temp_t, y_histb);
-    //			gsl_vector_set(yb_buf, k, gsl_vector_sum(temp_t) / Nb);
-    //		}
-    //		gsl_vector_scale(yb_buf, 1/(gsl_vector_sum(yb_buf) * dt));
-    //		gsl_interp_init(linear, t->data, yb_buf->data, t->size);
-    //		for (j = 0; j < tin->size; j++) {
-    //			gsl_matrix_set(yb, i, j,
-    //					gsl_interp_eval(linear, t->data,
-    // yb_buf->data,
-    // gsl_vector_get(tin, j), acc));
-    //		}
-    //		gsl_vector_free(xb);
-    //	}
-    //	gsl_vector * yb_col = gsl_vector_alloc(yb->size1);
-
-    //	for (i = 0; i < lower_bound->size; i++) {
-    //		gsl_matrix_get_col(yb_col, yb, i);
-    //		gsl_sort_vector(yb_col);
-    //		gsl_vector_set(lower_bound, i,
-    //				gsl_vector_get(yb_col, floor((1 - confidence) *
-    // nbs))); 		gsl_vector_set(upper_bound, i,
-    // gsl_vector_get(yb_col, floor((confidence) * nbs)));
-    //	}
-    //	gsl_interp_init(linear, t->data, yv->data, t->size);
-    //	for (i = 0; i < tin->size; i++) {
-    //		gsl_vector_set(result, i,
-    //				gsl_interp_eval(linear, t->data, yv->data,
-    //						gsl_vector_get(tin, i), acc));
-    //	}
-    //	gsl_interp_accel_free(acc);
-    //	gsl_interp_free(linear);
-    //	gsl_rng_free(r);
-    //	gsl_vector_free(temp_t);
-    //	gsl_vector_free(temp_x_ab);
-    //	gsl_vector_free(yb_buf);
     gsl_vector_free(x_ab);
     gsl_vector_free(t);
     gsl_vector_free(t_dt2);
@@ -974,157 +869,3 @@ void ssvkernel(gsl_vector *x,
     gsl_matrix_free(C_local);
     //	gsl_matrix_free(yb);
 }
-#if 0
-int main() {
-	int MAX_LINE = 100;
-	size_t num_line = 0; //number of line in file
-	size_t i,j,k,l,m;
-	char buf[MAX_LINE];
-	FILE *fp1,*fp2;
-	if ((fp1 = fopen("/home/wangyan/Code/new_pdfcdf/AdaptiveKDE/data/data.txt", "r")) == NULL) { /* open file of data in dimension1*/
-		printf("read file error dimen1\n");
-		return 0;
-	}
-	if ((fp2 = fopen("/home/wangyan/Code/new_pdfcdf/AdaptiveKDE/data/data2.txt", "r")) == NULL) { /* open file of data in dimension2*/
-		printf("read file error dimen1\n");
-		return 0;
-	}
-	while (fgets(buf, MAX_LINE, fp1) != NULL) { // count number of lines in file.
-		num_line++;								//each file's number of lines must be the same
-	}
-	rewind(fp1);
-
-	//data_dim1 and data_dim2 contain the data of two dimensions
-	gsl_vector * data_dim1 = gsl_vector_alloc(num_line);
-	gsl_vector * data_dim2 = gsl_vector_alloc(num_line);
-	i = 0;
-	while (fgets(buf, MAX_LINE, fp1) != NULL) { //read the data
-		gsl_vector_set(data_dim1, i, atoi(buf));
-		fgets(buf, MAX_LINE, fp2) ;
-		gsl_vector_set(data_dim2, i, atoi(buf));
-		i++;
-	}
-
-	//tin_dim1 and tin_dim2 contains points at which estimations are computed
-	size_t num_bin1 = XN, num_bin2 = YN; //each bin's size
-	gsl_vector * tin_dim1 =  gsl_vector_alloc(num_bin1);
-	gsl_vector * tin_dim2 =  gsl_vector_alloc(num_bin2);
-    //bin of each dimension
-    //
-    	double tin_dim1_max = gsl_vector_max(data_dim1) + 0.5;  // linspace in power (i.e. logspace)
-	double tin_dim1_min = gsl_vector_min(data_dim1) - 0.5;
-	double tin_dim2_max = gsl_vector_max(data_dim2) + 0.5;
-	double tin_dim2_min = gsl_vector_min(data_dim2) - 0.5;
-
-	gsl_vector_linspace(tin_dim1_min, tin_dim1_max, num_bin1, tin_dim1);
-	gsl_vector_linspace(tin_dim2_min, tin_dim2_max, num_bin2, tin_dim2);
-	gsl_vector * y_hist_result_dim1 = gsl_vector_alloc(num_bin1);
-	gsl_vector * y_hist_result_dim2 = gsl_vector_alloc(num_bin2);
-    //histogram of each dimension
-	gsl_matrix * result_dim1  = gsl_matrix_alloc(tin_dim1->size,tin_dim1->size);
-	gsl_matrix * result_dim2  = gsl_matrix_alloc(tin_dim2->size,tin_dim2->size);
-
-	//Compute temporary result of each dimension, equal to the 'y1' and 'y2' in matlab code 'test.m';
-	ssvkernel(data_dim2,tin_dim2,y_hist_result_dim2,result_dim2);
-	ssvkernel(data_dim1,tin_dim1,y_hist_result_dim1,result_dim1);
-
-	//two-dimensional histogram
-	gsl_vector * temp_tin_dim1 =  gsl_vector_alloc(num_bin1);
-	gsl_vector * temp_tin_dim2 =  gsl_vector_alloc(num_bin2);
-	gsl_vector_memcpy(temp_tin_dim1,tin_dim1);
-	gsl_vector_add_constant(temp_tin_dim1,-gsl_vector_mindiff(tin_dim1)/2);
-	gsl_vector_memcpy(temp_tin_dim2,tin_dim2);
-	gsl_vector_add_constant(temp_tin_dim2,-gsl_vector_mindiff(tin_dim2)/2);
-	gsl_matrix * histogram = gsl_matrix_alloc(tin_dim1->size,tin_dim2->size);
-	gsl_matrix_hist3(data_dim1,data_dim2,temp_tin_dim1,temp_tin_dim2,histogram);
-
-	//Compute the 'scale' variable in matlab code 'test.m'
-	for(i=0;i<histogram->size1;i++){
-		for(j=0;j<histogram->size2;j++){
-			double temp = gsl_matrix_get(histogram,i,j);
-			temp = temp/(gsl_vector_get(y_hist_result_dim1,i)*gsl_vector_get(y_hist_result_dim2,j));
-			if(isnan(temp))
-				gsl_matrix_set(histogram,i,j,0);
-			else
-				gsl_matrix_set(histogram,i,j,temp);
-		}
-	}
-
-	//compute the two-dimensional estimation
-	gsl_matrix * result = gsl_matrix_alloc(tin_dim1->size,tin_dim2->size);//final result
-	gsl_matrix * temp_matrix = gsl_matrix_alloc(tin_dim1->size,tin_dim2->size);
-	for(i=0;i<tin_dim1->size;i++){
-		for(j=0;j<tin_dim2->size;j++){
-			gsl_matrix_get_col(y_hist_result_dim1,result_dim1,i);
-			gsl_matrix_get_col(y_hist_result_dim2,result_dim2,j);
-			gsl_matrix_xmul(y_hist_result_dim1,y_hist_result_dim2,temp_matrix);
-			gsl_matrix_mul_elements(temp_matrix,histogram);
-			gsl_matrix_set(result,i,j,gsl_matrix_sum(temp_matrix)/(double)data_dim1->size);
-		}
-	}
-
-	PdfCdf *pc = (PdfCdf *) malloc(sizeof(PdfCdf));
-	pc->xn = (int) XN;
-	pc->yn = (int) YN;
-
-	for ( i=0; i<tin_dim1->size; i++) {
-		pc->xtick[i] = gsl_vector_get(tin_dim1, i);
-	}
-
-	for ( j=0; j<tin_dim2->size; j++) {
-		pc->ytick[j] = gsl_vector_get(tin_dim2, j);
-	}
-
-	for ( i=0; i<tin_dim1->size; i++) {
-		for ( j=0; j<tin_dim2->size; j++) {
-		
-			pc->pdf[i][j] = gsl_matrix_get(result, i, j);
-
-		}
-	}
-
-	pdf2cdf(pc);
-	//pdf2cdf_sharpcut(pc);
-
-
-/*	printf("printing PDF \n");
-	for ( i=0; i<pc->xn; i++) {
-		for ( j=0; j<pc->yn; j++) {
-		
-			printf("%Lf \t", pc->pdf[i][j]);
-
-		}
-		printf("\n");
-	}
-*/
-
-
-	printf("printing CDF \n");
-	for ( i=0; i<pc->xn; i++) {
-		for ( j=0; j<pc->yn; j++) {
-		
-			printf("%Lf \t", pc->cdf[i][j]) ;
-
-		}
-		printf("\n");
-	}
-
-	free(pc);
-	
-	fclose(fp1);
-	fclose(fp2);
-	gsl_vector_free(y_hist_result_dim1);
-	gsl_vector_free(y_hist_result_dim2);
-	gsl_vector_free(data_dim1);
-	gsl_vector_free(data_dim2);
-	gsl_vector_free(tin_dim1);
-	gsl_vector_free(tin_dim2);
-	gsl_vector_free(temp_tin_dim1);
-	gsl_vector_free(temp_tin_dim2);
-	gsl_matrix_free(result_dim1);
-	gsl_matrix_free(result_dim2);
-	gsl_matrix_free(result);
-	gsl_matrix_free(histogram);
-	gsl_matrix_free(temp_matrix);
-}
-#endif

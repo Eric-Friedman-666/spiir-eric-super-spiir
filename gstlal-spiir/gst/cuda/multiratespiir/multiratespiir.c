@@ -70,18 +70,18 @@ static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
                  sub_stop;
     gboolean need_flush   = FALSE;
     GArray *flag_segments = element->flag_segments;
-    guint64 buf_offset = GST_BUFFER_OFFSET(outbuf), sub_offset, sub_offset_end;
+    guint64 sub_offset, sub_offset_end;
     guint outsize;
-    gint out_len, pushed_len = 0;
+    guint out_len, pushed_len = 0;
     gint is_buf_intact = 1;
     GstFlowReturn ret;
     GstBuffer *subbuf;
-    int i, flush_len = 0;
+    guint flush_len = 0;
     FlagSegment *this_segment =
       &((FlagSegment *)flag_segments->data)[flag_segments->len - 1];
     /* make sure the last segment always later than the outbuf */
     g_assert(this_segment->stop >= stop);
-    for (i = 0; i<flag_segments->len, stop> start; i++) {
+    for (guint i = 0; i < flag_segments->len && stop > start; i++) {
 
         this_segment = &((FlagSegment *)flag_segments->data)[i];
         /*		| start				| stop
@@ -108,13 +108,13 @@ static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
                                * element->offset_per_nanosecond);
         sub_offset     = element->offset0 + element->samples_out;
         sub_offset_end = sub_offset + out_len;
-        outsize        = (guint)out_len * (guint)element->bps;
+        outsize        = out_len * (guint)element->bps;
 
         GST_DEBUG_OBJECT(
           element,
           "segment len %d, processing %d, start %" GST_TIME_FORMAT
           ", stop %" GST_TIME_FORMAT " segment start %" GST_TIME_FORMAT
-          ", segment stop %" GST_TIME_FORMAT " out_len %d, out_size %u",
+          ", segment stop %" GST_TIME_FORMAT " out_len %u, out_size %u",
           flag_segments->len, i, GST_TIME_ARGS(start), GST_TIME_ARGS(stop),
           GST_TIME_ARGS(this_segment->start), GST_TIME_ARGS(this_segment->stop),
           out_len, outsize);
@@ -154,8 +154,8 @@ static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
               GST_TIME_ARGS(sub_stop - sub_start), sub_offset, sub_offset_end,
               this_segment->is_gap, GST_TIME_ARGS(GST_BUFFER_TIMESTAMP(outbuf)),
               GST_TIME_ARGS(GST_BUFFER_DURATION(outbuf)),
-              (float *)GST_BUFFER_DATA(subbuf)[0],
-              (float *)GST_BUFFER_DATA(subbuf)[1]);
+              (double)GST_BUFFER_DATA(subbuf)[0],
+              (double)GST_BUFFER_DATA(subbuf)[1]);
 
             ret = gst_pad_push(element->srcpad, subbuf);
             GST_LOG_OBJECT(element, "pushed sub buffer, result = %s",
@@ -354,8 +354,8 @@ static void cuda_multiratespiir_class_init(CudaMultirateSPIIRClass *klass) {
 static void cuda_multiratespiir_init(CudaMultirateSPIIR *element,
                                      CudaMultirateSPIIRClass *klass) {
     //  GstBaseTransform *trans = GST_BASE_TRANSFORM (element);
-    element->iir_bank_lock       = g_mutex_new();
-    element->iir_bank_available  = g_cond_new();
+    g_mutex_init(&element->iir_bank_lock);
+    g_cond_init(&element->iir_bank_available);
     element->bank_fname          = NULL;
     element->num_depths          = 0;
     element->outchannels         = 0;
@@ -374,7 +374,7 @@ static void cuda_multiratespiir_init(CudaMultirateSPIIR *element,
     // for ACCELERATE_MULTIRATESPIIR_MEMORY_COPY
     element->h_snglsnr_buffer   = NULL;
     element->len_snglsnr_buffer = 0;
-    element->srcpad             = gst_element_get_static_pad(element, "src");
+    element->srcpad = gst_element_get_static_pad(GST_ELEMENT(element), "src");
 }
 
 /* vmethods */
@@ -398,8 +398,8 @@ static gboolean cuda_multiratespiir_start(GstBaseTransform *base) {
 static gboolean cuda_multiratespiir_stop(GstBaseTransform *base) {
     CudaMultirateSPIIR *element = CUDA_MULTIRATESPIIR(base);
 
-    g_mutex_free(element->iir_bank_lock);
-    g_cond_free(element->iir_bank_available);
+    g_mutex_clear(&element->iir_bank_lock);
+    g_cond_clear(&element->iir_bank_available);
 
     if (element->spstate) {
         spiir_state_destroy(element->spstate, element->num_depths);
@@ -460,16 +460,16 @@ static GstCaps *cuda_multiratespiir_transform_caps(GstBaseTransform *base,
          * src caps is the same with sink caps, except it only has number of
          * channels that equals to the number of templates
          */
-        // if (!g_mutex_trylock(element->iir_bank_lock))
+        // if (!g_mutex_trylock(&element->iir_bank_lock))
         // printf("lock by another thread");
-        g_mutex_lock(element->iir_bank_lock);
+        g_mutex_lock(&element->iir_bank_lock);
         if (!element->spstate)
-            g_cond_wait(element->iir_bank_available, element->iir_bank_lock);
+            g_cond_wait(&element->iir_bank_available, &element->iir_bank_lock);
 
         gst_structure_set(gst_caps_get_structure(othercaps, 0), "channels",
                           G_TYPE_INT,
                           cuda_multiratespiir_get_outchannels(element), NULL);
-        g_mutex_unlock(element->iir_bank_lock);
+        g_mutex_unlock(&element->iir_bank_lock);
         break;
 
     case GST_PAD_UNKNOWN:
@@ -546,9 +546,9 @@ static gboolean cuda_multiratespiir_set_caps(GstBaseTransform *base,
     success &= gst_structure_get_int(s, "width", &width);
     success &= gst_structure_get_int(s, "rate", &rate);
 
-    g_mutex_lock(element->iir_bank_lock);
+    g_mutex_lock(&element->iir_bank_lock);
     if (!element->spstate)
-        g_cond_wait(element->iir_bank_available, element->iir_bank_lock);
+        g_cond_wait(&element->iir_bank_available, &element->iir_bank_lock);
 
     if (!success) {
         GST_ERROR_OBJECT(element,
@@ -584,30 +584,9 @@ static gboolean cuda_multiratespiir_set_caps(GstBaseTransform *base,
     element->offset_per_nanosecond = element->rate / 1e9;
     /* transform_caps already done, num_depths already set */
 
-    g_mutex_unlock(element->iir_bank_lock);
+    g_mutex_unlock(&element->iir_bank_lock);
     return success;
 }
-
-/* c downsample2x */
-#if 0
-static void
-downsample2x(ResamplerState *state, float *in, const gint num_inchunk, float *out, gint *out_processed)
-{
-  float *pos_mem;
-  pos_mem = state->mem;
-  gint filt_offs = state->filt_len - 1;
-  gint j;
-  for (j = 0; j < num_inchunk; ++j)
-    pos_mem[j + filt_offs] = in[j];
-
-  /*
-   * FIXME: not filter yet
-   */
-  *out_processed = num_inchunk/2;
-  for (j = 0; j < *out_processed; ++j)
-    out[j] = in[j];
-}
-#endif
 
 static GstFlowReturn cuda_multiratespiir_assemble_gap_buffer(
   CudaMultirateSPIIR *element, gint len, GstBuffer *gapbuf) {
@@ -692,9 +671,8 @@ static GstFlowReturn cuda_multiratespiir_push_drain(CudaMultirateSPIIR *element,
 
     num_in_multidown = MIN(old_in_len, element->num_exe_samples);
 
-    gint outsize = 0, out_len = 0, upfilt_len;
+    gint outsize = 0, out_len = 0;
     float *in_multidown, *pos_out;
-    upfilt_len = element->spstate[0]->upstate->filt_len;
 #if 0
   gint tmp_out_len = 0;
   float *tmp_out;
@@ -702,7 +680,6 @@ static GstFlowReturn cuda_multiratespiir_push_drain(CudaMultirateSPIIR *element,
   tmp_out = (float *)malloc(element->outchannels * tmp_out_len * sizeof(float));
 #endif
 
-    gint i, j;
     GstBuffer *outbuf;
     GstFlowReturn res;
     float *outdata;
@@ -743,17 +720,6 @@ static GstFlowReturn cuda_multiratespiir_push_drain(CudaMultirateSPIIR *element,
         num_out_spiirup =
           spiirup(element->spstate, num_out_multidown, element->num_depths,
                   pos_out, element->stream);
-
-#if 0
-    /* reshape is deprecated because it cost hugh cpu usage */
-    /* reshape to the outbuf data */
-    for (i=0; i<num_out_spiirup; i++)
-      for (j=0; j<element->outchannels; j++)
-	      outdata[element->outchannels * (i + last_num_out_spiirup) + j] = tmp_out[tmp_out_len * j + i + upfilt_len - 1];
-
-    //memcpy(pos_out, tmp_out, sizeof(float) * num_out_spiirup * (element->outchannels));
-    //free(tmp_out);
-#endif
 
         GST_DEBUG_OBJECT(element, "done cpy data to BUFFER");
 
@@ -838,14 +804,12 @@ static GstFlowReturn cuda_multiratespiir_process(CudaMultirateSPIIR *element,
     num_exe_samples  = element->num_exe_samples;
     num_in_multidown = MIN(old_in_len, num_exe_samples);
 
-    gint outsize = 0, out_len = 0, upfilt_len;
+    gint outsize = 0, out_len = 0;
     float *in_multidown;
-    upfilt_len = element->spstate[0]->upstate->filt_len;
     // int tmp_out_len = element->spstate[0]->upstate->mem_len;
     // float *tmp_out = (float *)malloc(element->outchannels * tmp_out_len *
     // sizeof(float));
 
-    gint i, j;
     float *outdata, *pos_out;
 
     if (element->num_exe_samples == element->rate) out_len = in_len;
@@ -892,17 +856,6 @@ static GstFlowReturn cuda_multiratespiir_process(CudaMultirateSPIIR *element,
                   pos_out, element->stream);
         // num_out_spiirup = spiirup (element->spstate, num_out_multidown,
         // element->num_depths, tmp_out, element->stream);
-
-#if 0
-    /* reshape is deprecated because it cost hugh cpu usage */
-    /* reshape to the outbuf data */
-    for (i=0; i<num_out_spiirup; i++)
-      for (j=0; j<element->outchannels; j++)
-	      outdata[element->outchannels * (i + last_num_out_spiirup) + j] = tmp_out[tmp_out_len * j + i + upfilt_len - 1];
-
-    //memcpy(pos_out, tmp_out, sizeof(float) * num_out_spiirup * (element->outchannels));
-    //free(tmp_out);
-#endif
 
         GST_DEBUG_OBJECT(element, "done cpy data to BUFFER");
 
@@ -1019,11 +972,11 @@ static GstFlowReturn cuda_multiratespiir_transform(GstBaseTransform *base,
      * set device context
      */
 
-    g_mutex_lock(element->iir_bank_lock);
+    g_mutex_lock(&element->iir_bank_lock);
     if (!element->spstate_initialised) {
-        g_cond_wait(element->iir_bank_available, element->iir_bank_lock);
+        g_cond_wait(&element->iir_bank_available, &element->iir_bank_lock);
     }
-    g_mutex_unlock(element->iir_bank_lock);
+    g_mutex_unlock(&element->iir_bank_lock);
 
     CUDA_CHECK(cudaSetDevice(element->deviceID));
     /* check for timestamp discontinuities;  reset if needed, and set
@@ -1089,11 +1042,9 @@ static GstFlowReturn cuda_multiratespiir_transform(GstBaseTransform *base,
         return GST_FLOW_OK;
     }
 
-    gint in_samples, num_exe_samples, num_head_cover_samples,
-      num_tail_cover_samples;
+    gint in_samples, num_exe_samples, num_tail_cover_samples;
     in_samples             = GST_BUFFER_SIZE(inbuf) / (element->width / 8);
     num_exe_samples        = element->num_exe_samples;
-    num_head_cover_samples = element->num_head_cover_samples;
     num_tail_cover_samples = element->num_tail_cover_samples;
     guint64 history_gap_samples, gap_buffer_len;
     gint num_zeros, adapter_len, num_filt_samples;
@@ -1342,16 +1293,16 @@ static gboolean cuda_multiratespiir_event(GstBaseTransform *base,
         element->samples_in      = 0;
         element->samples_out     = 0;
         element->need_discont    = TRUE;
-        g_mutex_lock(element->iir_bank_lock);
+        g_mutex_lock(&element->iir_bank_lock);
         if (!element->spstate)
-            g_cond_wait(element->iir_bank_available, element->iir_bank_lock);
+            g_cond_wait(&element->iir_bank_available, &element->iir_bank_lock);
         if (element->num_head_cover_samples > 0)
             cuda_multiratespiir_update_exe_samples(
               &element->num_exe_samples, element->num_head_cover_samples);
         else
             cuda_multiratespiir_update_exe_samples(&element->num_exe_samples,
                                                    element->rate);
-        g_mutex_unlock(element->iir_bank_lock);
+        g_mutex_unlock(&element->iir_bank_lock);
 
         break;
 
@@ -1394,7 +1345,6 @@ static void cuda_multiratespiir_set_property(GObject *object,
     CudaMultirateSPIIR *element;
 
     element          = CUDA_MULTIRATESPIIR(object);
-    gboolean success = TRUE;
 
     GST_OBJECT_LOCK(element);
     switch (prop_id) {
@@ -1402,7 +1352,7 @@ static void cuda_multiratespiir_set_property(GObject *object,
     case PROP_IIRBANK_FNAME:
 
         GST_DEBUG("spiir bank acquiring the lock");
-        g_mutex_lock(element->iir_bank_lock);
+        g_mutex_lock(&element->iir_bank_lock);
         GST_DEBUG("spiir bank have acquired the lock");
 
         GST_LOG_OBJECT(element, "obtaining bank, stream id is %d",
@@ -1462,8 +1412,8 @@ static void cuda_multiratespiir_set_property(GObject *object,
           element->num_depths, element->outchannels);
 
         GST_DEBUG("spiir bank done read, broadcasting the lock");
-        g_cond_broadcast(element->iir_bank_available);
-        g_mutex_unlock(element->iir_bank_lock);
+        g_cond_broadcast(&element->iir_bank_available);
+        g_mutex_unlock(&element->iir_bank_lock);
         GST_DEBUG("spiir bank done broadcasting");
 
         break;
@@ -1488,9 +1438,9 @@ static void cuda_multiratespiir_get_property(GObject *object,
 
     switch (prop_id) {
     case PROP_IIRBANK_FNAME:
-        g_mutex_lock(element->iir_bank_lock);
+        g_mutex_lock(&element->iir_bank_lock);
         g_value_set_string(value, element->bank_fname);
-        g_mutex_unlock(element->iir_bank_lock);
+        g_mutex_unlock(&element->iir_bank_lock);
         break;
 
     case PROP_GAP_HANDLE: g_value_set_int(value, element->gap_handle); break;

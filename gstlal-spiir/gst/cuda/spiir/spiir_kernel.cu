@@ -29,6 +29,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include <cuda_debug.h>
 #include <spiir/spiir_kernel.h>
 #include <stdio.h>
 
@@ -40,17 +41,6 @@ extern "C" {
 #define complex _Complex
 #endif
 
-// for gpu debug
-#define gpuErrchk(ans)                                                         \
-    { gpuAssert((ans), __FILE__, __LINE__); }
-inline void
-  gpuAssert(cudaError_t code, char *file, int line, bool abort = true) {
-    if (code != cudaSuccess) {
-        fprintf(stderr, "GPUassert: %s %s %d\n", cudaGetErrorString(code), file,
-                line);
-        if (abort) exit(code);
-    }
-}
 /*
  * ============================================================================
  *
@@ -213,7 +203,7 @@ int cuda_bank_init(GSTLALIIRBankCuda *element) {
      * copy to GPU memory
      */
 
-    gpuErrchk(cudaPeekAtLastError());
+    CUDA_CHECK(cudaPeekAtLastError());
     cudaMemcpyAsync(bank->d_a1_s, h_a1_s, size1 * size2 * sizeof(COMPLEX8_F),
                     cudaMemcpyHostToDevice, element->stream);
     cudaMemcpyAsync(bank->d_b0_s, h_b0_s, size1 * size2 * sizeof(COMPLEX8_F),
@@ -223,7 +213,7 @@ int cuda_bank_init(GSTLALIIRBankCuda *element) {
     cudaMemcpyAsync(bank->d_d_i, d, size1 * size2 * sizeof(int),
                     cudaMemcpyHostToDevice, element->stream);
 
-    gpuErrchk(cudaPeekAtLastError());
+    CUDA_CHECK(cudaPeekAtLastError());
     free(h_a1_s);
     free(h_b0_s);
     free(h_y_s);
@@ -398,10 +388,10 @@ GstFlowReturn filter_d(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     = 0;
     */
     static int streamID        = 0;
-    static GMutex *stream_lock = g_mutex_new();
+    static GMutex stream_lock  = {};
 
     if (element->bank == NULL) {
-        g_mutex_lock(stream_lock);
+        g_mutex_lock(&stream_lock);
         streamID = streamID + 1;
         int deviceCount;
         cudaGetDeviceCount(&deviceCount);
@@ -410,7 +400,7 @@ GstFlowReturn filter_d(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
         cuda_bank_init(element);
         // printf("streamID is %d, device ID is %d\n", streamID,
         // element->deviceID);
-        g_mutex_unlock(stream_lock);
+        g_mutex_unlock(&stream_lock);
     }
 
     // cudaSetDevice(element->deviceID);
@@ -563,10 +553,10 @@ GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     = 0;
     */
     static int streamID        = 0;
-    static GMutex *stream_lock = g_mutex_new();
+    static GMutex stream_lock  = {};
 
     if (element->bank == NULL) {
-        g_mutex_lock(stream_lock);
+        g_mutex_lock(&stream_lock);
         streamID = streamID + 1;
         int deviceCount;
         cudaGetDeviceCount(&deviceCount);
@@ -575,7 +565,7 @@ GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
         cuda_bank_init(element);
         // printf("streamID is %d, device ID is %d\n", streamID,
         // element->deviceID);
-        g_mutex_unlock(stream_lock);
+        g_mutex_unlock(&stream_lock);
     }
 
     // cudaSetDevice(element->deviceID);
@@ -664,7 +654,7 @@ GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
                     output_length * bank->num_templates * sizeof(COMPLEX8_F),
                     cudaMemcpyDeviceToHost, element->stream);
     cudaStreamSynchronize(element->stream);
-    //	gpuErrchk(cudaPeekAtLastError());
+    //	CUDA_CHECK(cudaPeekAtLastError());
 
     /*
      * wrap output buffer in a complex float array.

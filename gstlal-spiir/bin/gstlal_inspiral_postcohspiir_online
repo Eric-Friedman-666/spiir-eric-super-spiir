@@ -58,6 +58,7 @@
 # =============================================================================
 #
 
+import errno
 import os
 import resource
 import sys
@@ -556,7 +557,7 @@ def parse_command_line():
         raise ValueError, "files %s do not exist" % ", ".join(
             "'%s'" % filename for filename in sorted(missing_files))
 
-    # make a folder to store all outputs for a node
+    # make a folder to store all outputs for each node separately
     if not os.path.exists(options.job_tag):
         os.mkdir(options.job_tag)
     # do not support chisq method selection yet
@@ -591,8 +592,20 @@ def parse_command_line():
         ifo_combos = pipe_macro.get_ifo_combos(ifo_list)
         for i_ifo_combo in ifo_combos:
             skymap_path = "%s_skymap" % i_ifo_combo
-            if not os.path.exists(skymap_path):
-                os.mkdir(skymap_path)
+            # NOTE: Every node shares the same skymap path, so we must handle
+            #   race conditions. In Py3 we can just use os.mkdir(exist_ok=True)
+            if not os.path.isdir(skymap_path):
+                try:
+                    os.mkdir(skymap_path)
+                except OSError as e:
+                    if e.errno == errno.EEXIST and os.path.isdir(skymap_path):
+                        dir_msg = "skymap dir %s already exists." % skymap_path
+                        print >> sys.stderr, dir_msg
+                    else:
+                        raise e
+                else:
+                    dir_msg = "creating skymap dir at %s" % skymap_path
+                    print >> sys.stderr, dir_msg
 
         if options.finalsink_fapupdater_output_fname is None:
             options.finalsink_fapupdater_output_fname = options.cohfar_assignfar_input_fname

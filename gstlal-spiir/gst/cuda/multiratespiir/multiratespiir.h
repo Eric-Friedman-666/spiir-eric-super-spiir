@@ -143,8 +143,8 @@ struct _CudaMultirateSPIIR {
     // gdouble *bank;
     // gint bank_len;
     gchar *bank_fname;
-    GMutex *iir_bank_lock;
-    GCond *iir_bank_available;
+    GMutex iir_bank_lock;
+    GCond iir_bank_available;
     SpiirState **spstate;
     gboolean spstate_initialised;
 

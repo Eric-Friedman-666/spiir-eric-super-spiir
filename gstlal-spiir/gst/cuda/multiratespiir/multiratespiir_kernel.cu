@@ -39,25 +39,10 @@ extern "C" {
 
 #define THREADSPERBLOCK 256
 #define NB_MAX          32
+#define ALL_THREADS_MASK 0xFFFFFFFF
 
 //#define ORIGINAL
 #define CUT_FILTERS 0 // set to 0 to keep all the filtering results
-#if 0
-// deprecated: we have cuda_debug.h for gpu debug now
-#define gpuErrchk(stream)                                                      \
-    { gpuAssert(stream, __FILE__, __LINE__); }
-static void gpuAssert(cudaStream_t stream, char *file, int line, bool abort=true)
-{
-	cudaStreamSynchronize(stream);
-	cudaError_t code = cudaPeekAtLastError ();
-
-	if (code != cudaSuccess) 
-	{
-		printf ("GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
-		if (abort) exit(code);
-	}
-}
-#endif
 extern __shared__ char sharedMem[];
 
 __global__ void downsample2x(const float amplifier,
@@ -241,8 +226,10 @@ __global__ void
 
         // Inter-Warp Reduction
         for (int off = WARPSIZE >> 1; off > 0; off = off >> 1) {
-            fltrOutptReal += __shfl_down(fltrOutptReal, off, 2 * off);
-            fltrOutptImag += __shfl_down(fltrOutptImag, off, 2 * off);
+            fltrOutptReal +=
+              __shfl_down_sync(ALL_THREADS_MASK, fltrOutptReal, off, 2 * off);
+            fltrOutptImag +=
+              __shfl_down_sync(ALL_THREADS_MASK, fltrOutptImag, off, 2 * off);
         }
 
         if (tLane == 0) {
@@ -266,8 +253,8 @@ __global__ void
                                : 0;
 
             for (int off = WARPSIZE >> 1; off > 0; off = off >> 1) {
-                sum_real += __shfl_down(sum_real, off);
-                sum_imag += __shfl_down(sum_imag, off);
+                sum_real += __shfl_down_sync(ALL_THREADS_MASK, sum_real, off);
+                sum_imag += __shfl_down_sync(ALL_THREADS_MASK, sum_imag, off);
             }
 
             if (threadIdx.x == 0) {
@@ -360,8 +347,10 @@ __global__ void cuda_iir_filter_kernel_fine(COMPLEX_F *cudaA1,
 
             // Inter-CU Reduction
             for (int off = cu >> 1; off > 0; off = off >> 1) {
-                fltrOutptReal += __shfl(fltrOutptReal, tLane + off, 2 * off);
-                fltrOutptImag += __shfl(fltrOutptImag, tLane + off, 2 * off);
+                fltrOutptReal += __shfl_sync(ALL_THREADS_MASK, fltrOutptReal,
+                                             tLane + off, 2 * off);
+                fltrOutptImag += __shfl_sync(ALL_THREADS_MASK, fltrOutptImag,
+                                             tLane + off, 2 * off);
             }
 
             if (tIdL == 0) {
@@ -502,7 +491,7 @@ __global__ void outdata_reshape(
     unsigned int tx = threadIdx.x, tdx = blockDim.x;
     unsigned int by = blockIdx.y, channels = gridDim.y;
     int mem_out_start = mem_out_len * by + filt_len - 1;
-    float *in, *out;
+    float *out;
     int i;
 
     for (i = tx; i < len; i += tdx) {
@@ -885,7 +874,6 @@ gint spiirup(SpiirState **spstate,
             // Use Fine-Grained Kernel
             int numTemplates = SPSTATE(i)->num_templates;
             int numFilters   = SPSTATE(i)->num_filters;
-            int mem_len      = SPSTATEUP(i)->mem_len;
             int t            = numFilters - 1;
             int c            = 0;
             while (t >>= 1) { ++c; }
@@ -994,7 +982,6 @@ gint spiirup(SpiirState **spstate,
                 // Use Fine-Grained Kernel
                 int numTemplates = SPSTATE(i)->num_templates;
                 int numFilters   = SPSTATE(i)->num_filters;
-                int mem_len      = SPSTATEUP(i)->mem_len;
                 int t            = numFilters - 1;
                 int c            = 0;
                 while (t >>= 1) { ++c; }

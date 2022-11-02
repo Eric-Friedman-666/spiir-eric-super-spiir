@@ -26,6 +26,7 @@
  * 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <IFOMap.h>
 #include <cohfar/background_stats_utils.h>
 #include <cohfar/knn_kde.h>
 #include <cohfar/ssvkernel.h>
@@ -39,7 +40,7 @@
 #define RANK_MIN_LIMIT 1e-100
 #define EPSILON        1e-6
 
-// We can determine if the IFO at IFOMap[ifo_id] is in the ifo_set by
+// We can determine if the IFO at ifo_id is in the ifo_set by
 // checking if that power of two exists in the ifo_set
 int ifo_set__contains(const ifo_set_type ifos, const int ifo_id) {
     return ifos & (1 << ifo_id);
@@ -55,6 +56,16 @@ int ifo_set__count(const ifo_set_type ifos) { return __builtin_popcount(ifos); }
 int ifo_set__is_empty(const ifo_set_type ifos) {
     return ifo_set__count(ifos) == 0;
 }
+
+// { K1, V1, L1, H1 } bitset - note that H1 is the least-significant bit
+#define MAX_IFO_SET 0b1111
+
+// Mapping from IFO set to string representation
+// Index is one less than the bitset representation of the set
+static const char *IFOComboMap[MAX_IFO_SET] = {
+    "H1",   "L1",   "H1L1",   "V1",   "H1V1",   "L1V1",   "H1L1V1",   "K1",
+    "H1K1", "L1K1", "H1L1K1", "V1K1", "H1V1K1", "L1V1K1", "H1L1V1K1",
+};
 
 const char *ifo_set__get_string(ifo_set_type ifo_set) {
     return IFOComboMap[ifo_set - 1];
@@ -83,7 +94,7 @@ bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos) {
             // Don't try to match IFOs already in set, as duplicates are invalid
             if (ifo_set__contains(ifos, ifo_id)) continue;
 
-            char *ifo_name      = IFOMap[ifo_id];
+            const char *ifo_name = get_ifo_string(ifo_id);
             size_t ifo_name_len = strlen(ifo_name);
             if (!strncmp(ifos_str, ifo_name, ifo_name_len)) {
                 // Insert into bitset and progress string
@@ -127,7 +138,7 @@ ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos,
             // This is a check that the data from this ifo is actually
             // valid. If it's not valid, the number will be very *very* small
             if (trigger->snglsnr[ifo_id] > EPSILON) {
-                strncpy(final_ifos + IFO_LEN * nifo, IFOMap[ifo_id],
+                strncpy(final_ifos + IFO_LEN * nifo, get_ifo_string(ifo_id),
                         one_ifo_size);
                 nifo++;
             } else {
@@ -330,9 +341,10 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
             multistats[stats_idx] =
               (TriggerStats *)malloc(sizeof(TriggerStats));
             cur_stats       = multistats[stats_idx];
-            cur_stats->ifos = malloc(strlen(IFOMap[ifo_id]) * sizeof(char) + 1);
-            strncpy(cur_stats->ifos, IFOMap[ifo_id],
-                    strlen(IFOMap[ifo_id]) * sizeof(char) + 1);
+            cur_stats->ifos =
+              malloc(strlen(get_ifo_string(ifo_id)) * sizeof(char) + 1);
+            strncpy(cur_stats->ifos, get_ifo_string(ifo_id),
+                    strlen(get_ifo_string(ifo_id)) * sizeof(char) + 1);
             // create feature
             cur_stats->feature = feature_stats_create();
             // our rank, cdf
@@ -480,7 +492,6 @@ void trigger_stats_feature_rate_to_pdf_hist(FeatureStats *feature,
                                             Bins2D *pdf) {
 
     gsl_vector_long *snr   = feature->lgsnr_rate->data;
-    gsl_vector_long *chisq = feature->lgchisq_rate->data;
 
     long nevent = gsl_vector_long_sum(snr);
     // printf("nevent %ld\n", nevent);
@@ -562,8 +573,6 @@ gboolean trigger_stats_feature_rate_to_pdf_ssvkernel(FeatureStats *feature) {
     gsl_matrix *histogram = gsl_matrix_alloc(snr->size, chisq->size);
     gsl_matrix_long_to_double(
       (gsl_matrix_long *)feature->lgsnr_lgchisq_rate->data, histogram);
-    // gsl_matrix_hist3(snr_data, chisq_data, temp_tin_snr, temp_tin_chisq,
-    // histogram);
 
     // Compute the 'scale' variable in matlab code 'test.m'
     unsigned i, j;
@@ -718,16 +727,8 @@ void trigger_stats_pdf_to_fap(Bins2D *pdf, Bins2D *fap) {
     // printf("fap cmax %f\n", gsl_matricmax_x(fapdata));
 }
 
-static double ncx2pdf(double chisq, double dof, double r) {
-    // wiki non-central chi-square
-    double prefactor =
-      0.5 * exp(-0.5 * (chisq + r)) * pow((chisq / r), dof / 4 - 0.5);
-    // printf("besselof %f\n", sqrt(r * chisq));
-    return prefactor * gsl_sf_bessel_I0(sqrt(r * chisq));
-}
-
 static void signal_stats_gen_pdfmap(Bins2D *fpdf) {
-    double prob, logcohsnr, logchisq, cohsnr, chisq, sum_y, sum_all = 0;
+    double prob, sum_y, sum_all = 0;
     int nbin_x = fpdf->nbin_x, nbin_y = fpdf->nbin_y;
     int ibin_x, ibin_y;
     gsl_matrix *fpdfdata = fpdf->data;
@@ -735,10 +736,6 @@ static void signal_stats_gen_pdfmap(Bins2D *fpdf) {
     for (ibin_x = nbin_x - 1; ibin_x >= 0; ibin_x--) {
         sum_y = 0;
         for (ibin_y = 0; ibin_y <= nbin_y - 1; ibin_y++) {
-            logcohsnr = fpdf->step_x * ibin_x + fpdf->cmin_x;
-            logchisq  = fpdf->step_y * ibin_y + fpdf->cmin_y;
-            cohsnr    = pow(10, logcohsnr);
-            chisq     = pow(10, logchisq);
             // non-central chi-square pdf, degree of freedom 2, delta (r)
             // parameter 1 + (cohsnr*0.045)^2 fitted by MDC BNS injection
             // FIXME: r parameter will be different for other type of injections
@@ -836,11 +833,9 @@ void trigger_stats_feature_to_rank_lr(FeatureStats *feature,
 
     // note the rank_min and max is based on log10 scale, need to log10 the
     // rankval_mat data also set minimal p_noise to be PNOISE_MIN_LIMIT
-    double p_signal, p_noise, logcohsnr, logcmbchisq;
+    double p_signal, p_noise;
     for (ibin_x = nbin_x - 1; ibin_x >= 0; ibin_x--) {
         for (ibin_y = 0; ibin_y <= nbin_y - 1; ibin_y++) {
-            logcohsnr   = fpdf->step_x * ibin_x + fpdf->cmin_x;
-            logcmbchisq = fpdf->step_y * ibin_y + fpdf->cmin_y;
             // FIXME: sgfpdf
             // p_signal = trigger_stats_get_val_from_map(logsnr, logcmbchisq,
             // sgfpdf) * fpdf->step_x * fpdf->step_y;
@@ -1431,7 +1426,7 @@ gboolean trigger_stats_xml_dump(TriggerStatsXML *stats,
 
     /* write a table*/
 
-    XmlTable *rank_range_table, *feature_range_table;
+    XmlTable *rank_range_table;
     rank_range_table = (XmlTable *)malloc(sizeof(XmlTable));
     GString *name    = g_string_new(NULL);
     g_string_printf(name, "%s:%s", stats->rank_xmlname->str, RANK_RATE_SUFFIX);
@@ -1446,7 +1441,8 @@ gboolean trigger_stats_xml_dump(TriggerStatsXML *stats,
     XmlHashVal *vals = (XmlHashVal *)malloc(sizeof(XmlHashVal) * 3);
     construct_table_content(rank_range_table, vals, name, LOGRANK_CMIN,
                             LOGRANK_CMAX, LOGRANK_NBIN);
-    int rt = ligoxml_write_Table(writer, rank_range_table);
+    // NOTE: ligoxml_write_Table returns an int that goes unused here.
+    ligoxml_write_Table(writer, rank_range_table);
 
     /* free memory used by constructing a XmlTable */
     for (int ival = 0; ival < 3; ival++) {
@@ -1610,9 +1606,9 @@ void trigger_stats_pdf_from_data(gsl_vector *data_dim1,
     // Compute temporary result of each dimension, equal to the 'y1' and 'y2' in
     // matlab code 'test.m';
     ssvkernel(data_dim1, tin_dim1, y_hist_result_dim1, result_dim1);
-    printf("snr data %d, completed\n", data_dim1->size);
+    printf("snr data %lu, completed\n", data_dim1->size);
     ssvkernel(data_dim2, tin_dim2, y_hist_result_dim2, result_dim2);
-    printf("chisq data %d, completed\n", data_dim2->size);
+    printf("chisq data %lu, completed\n", data_dim2->size);
 
     gsl_vector_double_to_long(y_hist_result_dim1,
                               (gsl_vector_long *)lgsnr_rate->data);
