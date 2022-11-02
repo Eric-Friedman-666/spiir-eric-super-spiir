@@ -35,10 +35,27 @@
  *  stuff from gobject/gstreamer
  */
 
+// Suppresses a warning that only occurs on NVCC
+// It should be revisited after the gstreamer upgrade
+// See #15
+#if defined(__CUDACC__)
+#pragma diag_suppress 1217
+#endif
 #include <glib.h>
+#if defined(__CUDACC__)
+#pragma diag_default 1217
+#endif
+
+// Suppresses a warning from gstreamer using deprecated mutexes.
+// Should be revisited after the gstreamer upgrade.
+// See #15
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/base/gstadapter.h>
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
+#pragma GCC diagnostic pop
+
 #include <gstlal/gstlal.h>
 #include <spiir/spiir.h>
 
@@ -745,13 +762,13 @@ static void cuda_iirbank_class_init(GSTLALIIRBankCudaClass *klass) {
 
 static void cuda_iirbank_init(GSTLALIIRBankCuda *filter,
                               GSTLALIIRBankCudaClass *kclass) {
-    filter->adapter              = gst_adapter_new();
+    filter->adapter = gst_adapter_new();
     g_mutex_init(&filter->iir_matrix_lock);
     g_cond_init(&filter->iir_matrix_available);
-    filter->a1                   = NULL;
-    filter->b0                   = NULL;
-    filter->delay                = NULL;
-    filter->y                    = NULL;
-    filter->bank                 = NULL;
+    filter->a1    = NULL;
+    filter->b0    = NULL;
+    filter->delay = NULL;
+    filter->y     = NULL;
+    filter->bank  = NULL;
     gst_base_transform_set_gap_aware(GST_BASE_TRANSFORM(filter), TRUE);
 }

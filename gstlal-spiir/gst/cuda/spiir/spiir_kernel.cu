@@ -387,8 +387,8 @@ GstFlowReturn filter_d(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     (cudaStream_t*)malloc(NSTREAMS * sizeof (cudaStream_t)); static int streamID
     = 0;
     */
-    static int streamID        = 0;
-    static GMutex stream_lock  = {};
+    static int streamID       = 0;
+    static GMutex stream_lock = {};
 
     if (element->bank == NULL) {
         g_mutex_lock(&stream_lock);
@@ -552,8 +552,8 @@ GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     (cudaStream_t*)malloc(NSTREAMS * sizeof (cudaStream_t)); static int streamID
     = 0;
     */
-    static int streamID        = 0;
-    static GMutex stream_lock  = {};
+    static int streamID       = 0;
+    static GMutex stream_lock = {};
 
     if (element->bank == NULL) {
         g_mutex_lock(&stream_lock);

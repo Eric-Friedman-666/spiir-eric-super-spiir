@@ -21,7 +21,14 @@
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_matrix.h>
 #include <gsl/gsl_vector.h>
+
+// Suppress warnings about deprecated API
+// Revisit after the python 3 upgrade
+// See #15
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcpp"
 #include <numpy/arrayobject.h>
+#pragma GCC diagnostic pop
 
 /* static functions used by the python wrappers */
 

@@ -29,8 +29,26 @@
 extern "C" {
 #endif
 #include <cuda_debug.h>
+
+// Suppresses a warning that only occurs on NVCC
+// It should be revisited after the gstreamer upgrade
+// See #15
+#if defined(__CUDACC__)
+#pragma diag_suppress 1217
+#endif
 #include <glib.h>
+#if defined(__CUDACC__)
+#pragma diag_default 1217
+#endif
+
+// Suppresses a warning from gstreamer using deprecated mutexes.
+// Should be revisited after the gstreamer upgrade.
+// See #15
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/gst.h>
+#pragma GCC diagnostic pop
+
 #include <multiratespiir/multiratespiir_kernel.h>
 #include <stdio.h>
 #ifdef __cplusplus
@@ -38,7 +56,7 @@ extern "C" {
 #endif
 
 #define THREADSPERBLOCK 256
-#define NB_MAX          32
+#define NB_MAX           32
 #define ALL_THREADS_MASK 0xFFFFFFFF
 
 //#define ORIGINAL

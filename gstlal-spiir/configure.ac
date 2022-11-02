@@ -134,7 +134,7 @@ AC_SUBST([pkgpyexecdir], ["\${pyexecdir}/gstlal"])
 
 
 AX_CFLAGS_WARN_ALL([AM_CFLAGS])
-AM_CFLAGS="$AM_CFLAGS -Wextra -Wno-missing-field-initializers -Wno-unused-parameter"	# extra gcc-specific stuff
+AM_CFLAGS="$AM_CFLAGS -Wextra -Wno-missing-field-initializers -Wno-unused-parameter -fdiagnostics-show-option"	# extra gcc-specific stuff
 AC_SUBST([AM_CFLAGS])
 
 
@@ -312,6 +312,7 @@ AS_IF([test "x$with_cuda" != "xno"], [
 	AC_SUBST([NVCC_GSTLAL_CFLAGS], [$GLIB_CFLAGS])
 	AC_SUBST([NVCC_LAL_CFLAGS], ["$($PKG_CONFIG --cflags-only-I lal)"])
 	AC_SUBST([NVCC_gstreamer_CFLAGS], ["$($PKG_CONFIG --cflags-only-I gstreamer-0.10)"])
+	AC_SUBST([NVCC_ADD_CFLAGS], ["-Xcudafe --display_error_number"])
 	AC_SUBST([NVCC_LIBS], ["-L${with_cuda}/$CLIBS -lcudart"])
 	HAVE_CUDA="yes"
 ], [

@@ -32,7 +32,18 @@ extern "C" {
 #include <LIGOLwHeader.h>
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
+
+// Suppresses a warning that only occurs on NVCC
+// It should be revisited after the gstreamer upgrade
+// See #15
+#if defined(__CUDACC__)
+#pragma diag_suppress 1217
+#endif
 #include <glib.h>
+#if defined(__CUDACC__)
+#pragma diag_default 1217
+#endif
+
 #include <math.h>
 #include <multiratespiir/multiratespiir.h>
 #include <multiratespiir/multiratespiir_utils.h>
@@ -620,7 +631,9 @@ SpiirState **spiir_state_create(const gchar *bank_fname,
           cudaMemsetAsync(SPSTATE(i)->d_queue, 0, queue_alloc_size, stream));
     }
     // FIXME: this d_out will cost large GPU memory, find a way to avoid it
-    int out_alloc_size = MAX(num_exe_samples, num_head_cover_samples)
+    // NOTE: num_exe_samples will be replaced with an unsigned data type
+    // in the gstreamer upgrade
+    int out_alloc_size = MAX((guint)num_exe_samples, num_head_cover_samples)
                          * outchannels * sizeof(float);
 
     // printf("out_alloc_size %d\n", out_alloc_size);
@@ -736,8 +749,8 @@ void cuda_multiratespiir_init_cover_samples(guint *num_head_cover_samples,
                                             guint num_depths,
                                             gint down_filtlen,
                                             gint up_filtlen) {
-    guint i          = num_depths;
-    gint rate_start  = 0;
+    guint i         = num_depths;
+    gint rate_start = 0;
 
     if (num_depths > 1) {
         rate_start = up_filtlen;

@@ -19,6 +19,8 @@
 //#define __DEBUG__ 1
 //#define __DEBUG_TABLE__ 1
 // In Array Node, No Dim sub node should appear after Stream sub node
+// TODO: This function has an unsatisfactory degree of nesting and should be
+// broken down into separate functions.
 void readArray(xmlTextReaderPtr reader, void *data) {
     int i, rows, ntoken, ret, nodeType;
     size_t bytes;
@@ -77,6 +79,10 @@ void readArray(xmlTextReaderPtr reader, void *data) {
 #endif
 
             xmlChar *copy = xmlStrdup(xmlTextReaderConstValue(reader));
+            if (copy == NULL) {
+                fprintf(stderr, "xml read failed.\n");
+                break;
+            }
             // cacluate the number of rows
             rows = 1;
             for (i = 0; i < xArrayPtr->ndim - 1; ++i) rows *= xArrayPtr->dim[i];
@@ -95,29 +101,34 @@ void readArray(xmlTextReaderPtr reader, void *data) {
 #endif
 
                 xmlChar *copyline = xmlStrdup(line);
-                // token = strtok_r(copyline, " ", &saveTokenPtr);
-                token = (xmlChar *)strtok_r((char *)copyline, (char *)delimiter,
-                                            &saveTokenPtr);
-                ntoken = 0;
-                while (token != NULL) {
+                if (copyline == NULL) {
+                    fprintf(stderr, "xml line read failed.\n");
+                } else {
+                    // token = strtok_r(copyline, " ", &saveTokenPtr);
+                    token = (xmlChar *)strtok_r(
+                      (char *)copyline, (char *)delimiter, &saveTokenPtr);
+                    ntoken = 0;
+                    while (token != NULL) {
 #ifdef __DEBUG__
-                    printf("token: %s (%d * %d + %d = %d)\n", (char *)token, i,
-                           xArrayPtr->dim[xArrayPtr->ndim - 1], ntoken,
-                           i * xArrayPtr->dim[xArrayPtr->ndim - 1] + ntoken);
+                        printf("token: %s (%d * %d + %d = %d)\n", (char *)token,
+                               i, xArrayPtr->dim[xArrayPtr->ndim - 1], ntoken,
+                               i * xArrayPtr->dim[xArrayPtr->ndim - 1]
+                                 + ntoken);
 #endif
-                    sscanf(
-                      (char *)token, (char *)ligoxml_get_type_format(type),
-                      xArrayPtr->data
-                        + (i * xArrayPtr->dim[xArrayPtr->ndim - 1] + ntoken)
-                            * ligoxml_get_type_size(type));
-                    // token = strtok_r(NULL, " ", &saveTokenPtr);
-                    token = (xmlChar *)strtok_r(NULL, (char *)delimiter,
-                                                &saveTokenPtr);
-                    ++ntoken;
-                }
+                        sscanf(
+                          (char *)token, (char *)ligoxml_get_type_format(type),
+                          xArrayPtr->data
+                            + (i * xArrayPtr->dim[xArrayPtr->ndim - 1] + ntoken)
+                                * ligoxml_get_type_size(type));
+                        // token = strtok_r(NULL, " ", &saveTokenPtr);
+                        token = (xmlChar *)strtok_r(NULL, (char *)delimiter,
+                                                    &saveTokenPtr);
+                        ++ntoken;
+                    }
 
+                    free(copyline);
+                }
                 line = (xmlChar *)strtok_r(NULL, "\n", &saveLinePtr);
-                free(copyline);
             }
             free(copy);
         }

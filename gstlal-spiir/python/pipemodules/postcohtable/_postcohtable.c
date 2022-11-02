@@ -24,7 +24,6 @@
  * ============================================================================
  */
 
-#include <string.h>
 #define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
 
 #define PY_SSIZE_T_CLEAN
@@ -36,6 +35,12 @@
 #include <pipe_macro.h>
 #include <postcohtable.h>
 #include <structmember.h>
+
+// NOTE: This must be included after Python.h due to redefinition of
+// _POSIX_C_SOURCE.
+// Revisit after python upgrade
+// See #15
+#include <string.h>
 
 /*
  * ============================================================================

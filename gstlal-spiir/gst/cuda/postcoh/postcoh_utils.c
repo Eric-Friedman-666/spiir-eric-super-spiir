@@ -22,7 +22,15 @@
 #include <chealpix.h>
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
+
+// Suppresses a warning from gstreamer using deprecated mutexes.
+// Should be revisited after the gstreamer upgrade.
+// See #15
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/gst.h>
+#pragma GCC diagnostic pop
+
 #include <pipe_macro.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
@@ -652,7 +660,7 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
             }
         }
         if (!matched_fname) continue;
-        int ifo_ind           = num_parsed_ifos++;
+        int ifo_ind            = num_parsed_ifos++;
         gchar **this_ifo_split = g_strsplit(matched_fname, ":", -1);
         parseFile(this_ifo_split[1], xns, 2);
         ntmplt        = array_autocorr[0].dim[1];

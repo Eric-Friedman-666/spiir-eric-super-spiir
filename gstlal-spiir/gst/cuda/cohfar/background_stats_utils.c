@@ -95,7 +95,7 @@ bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos) {
             if (ifo_set__contains(ifos, ifo_id)) continue;
 
             const char *ifo_name = get_ifo_string(ifo_id);
-            size_t ifo_name_len = strlen(ifo_name);
+            size_t ifo_name_len  = strlen(ifo_name);
             if (!strncmp(ifos_str, ifo_name, ifo_name_len)) {
                 // Insert into bitset and progress string
                 ifos |= 1 << ifo_id;
@@ -324,10 +324,7 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
     // Allocate for the final combination (all IFOs together)
     multistats[num_stats - 1] = (TriggerStats *)malloc(sizeof(TriggerStats));
     TriggerStats *cur_stats   = multistats[num_stats - 1];
-    cur_stats->ifos =
-      malloc(strlen(ifo_set__get_string(enabled_ifos)) * sizeof(char) + 1);
-    strncpy(cur_stats->ifos, ifo_set__get_string(enabled_ifos),
-            strlen(ifo_set__get_string(enabled_ifos)) * sizeof(char) + 1);
+    cur_stats->ifos           = strdup(ifo_set__get_string(enabled_ifos));
     // create feature
     cur_stats->feature = feature_stats_create();
     // our rank, cdf
@@ -341,10 +338,7 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos) {
             multistats[stats_idx] =
               (TriggerStats *)malloc(sizeof(TriggerStats));
             cur_stats       = multistats[stats_idx];
-            cur_stats->ifos =
-              malloc(strlen(get_ifo_string(ifo_id)) * sizeof(char) + 1);
-            strncpy(cur_stats->ifos, get_ifo_string(ifo_id),
-                    strlen(get_ifo_string(ifo_id)) * sizeof(char) + 1);
+            cur_stats->ifos = strdup(get_ifo_string(ifo_id));
             // create feature
             cur_stats->feature = feature_stats_create();
             // our rank, cdf
@@ -491,7 +485,7 @@ void trigger_stats_livetime_inc(TriggerStats **stats, const int index) {
 void trigger_stats_feature_rate_to_pdf_hist(FeatureStats *feature,
                                             Bins2D *pdf) {
 
-    gsl_vector_long *snr   = feature->lgsnr_rate->data;
+    gsl_vector_long *snr = feature->lgsnr_rate->data;
 
     long nevent = gsl_vector_long_sum(snr);
     // printf("nevent %ld\n", nevent);
