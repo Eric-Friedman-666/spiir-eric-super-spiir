@@ -639,7 +639,7 @@ static void
                               CohfarAccumbackgroundClass *element_klass) {
     GstElementClass *klass = GST_ELEMENT_CLASS(element_klass);
     element->sinkpad       = gst_pad_new_from_template(
-            gst_element_class_get_pad_template(klass, "sink"), "sink");
+      gst_element_class_get_pad_template(klass, "sink"), "sink");
     gst_element_add_pad(GST_ELEMENT(element), element->sinkpad);
 
     element->srcpad = gst_pad_new_from_template(

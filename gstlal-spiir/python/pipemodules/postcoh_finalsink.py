@@ -487,7 +487,8 @@ class FinalSink(object):
 
         # the postcoh doc stores clustered postcoh triggers and is snapshotted
         self.postcoh_document = PostcohDocument()
-        self.postcoh_table = []
+        self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
+            self.postcoh_document.xmldoc)
 
         # coinc doc to be uploaded to gracedb
         self.append_psd_to_coincs_doc = append_psd_to_coincs_doc
@@ -644,7 +645,7 @@ class FinalSink(object):
                             self.candidate):
                         self.__do_gracedb_alert(self.candidate)
 
-                    self.postcoh_table.append(self.candidate)
+                    self.postcoh_table.append(self.candidate.postcohinspiral)
 
                     if self.need_online_perform:
                         self.onperformer.update_eye_candy(self.candidate)
@@ -657,6 +658,8 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
             if self.cluster_window == 0:
+                for event in newevents:
+                    self.postcoh_table.append(event.postcohinspiral)
                 del self.cur_event_table[:]
 
             # dump zerolag candidates when interval is reached
@@ -993,8 +996,11 @@ class FinalSink(object):
         # set a new document for postcoh_document
         postcoh_document = self.postcoh_document.get_another()
         # remember to delete the old postcoh doc
+        del self.postcoh_table
         del self.postcoh_document
         self.postcoh_document = postcoh_document
+        self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
+            self.postcoh_document.xmldoc)
 
     def __wait_internal_process_finish(self):
         if self.thread_snapshot is not None and self.thread_snapshot.isAlive():
@@ -1137,7 +1143,7 @@ class CoincsDocFromPostcoh(object):
         if psds is not None:
             self.assemble_ligolw_psd_arrays(psds)
 
-        postcoh_table.append(trigger)
+        postcoh_table.append(trigger.postcohinspiral)
 
     def assemble_coinc_map_table(self, trigger):
 

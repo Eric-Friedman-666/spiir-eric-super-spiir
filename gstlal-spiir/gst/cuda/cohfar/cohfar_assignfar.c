@@ -138,17 +138,17 @@ static void _update_fars(PostcohInspiralTable *table,
 
     double max_rank = 0;
     max_rank        = MAX(trigger_stats_get_val_from_map(
-                            table->cohsnr, table->cmbchisq,
-                            stats_1w->multistats[cmb_stats_idx]->rank->rank_map),
-                          max_rank);
+                     table->cohsnr, table->cmbchisq,
+                     stats_1w->multistats[cmb_stats_idx]->rank->rank_map),
+                   max_rank);
     max_rank        = MAX(trigger_stats_get_val_from_map(
-                            table->cohsnr, table->cmbchisq,
-                            stats_1d->multistats[cmb_stats_idx]->rank->rank_map),
-                          max_rank);
+                     table->cohsnr, table->cmbchisq,
+                     stats_1d->multistats[cmb_stats_idx]->rank->rank_map),
+                   max_rank);
     max_rank        = MAX(trigger_stats_get_val_from_map(
-                            table->cohsnr, table->cmbchisq,
-                            stats_2h->multistats[cmb_stats_idx]->rank->rank_map),
-                          max_rank);
+                     table->cohsnr, table->cmbchisq,
+                     stats_2h->multistats[cmb_stats_idx]->rank->rank_map),
+                   max_rank);
     table->rank     = max_rank;
 
     table->far_1w = _calculate_far(stats_1w->multistats[cmb_stats_idx],

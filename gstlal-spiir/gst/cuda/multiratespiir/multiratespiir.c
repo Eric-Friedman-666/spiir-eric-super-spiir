@@ -123,7 +123,7 @@ static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
         sub_stop  = this_segment->stop < stop ? this_segment->stop : stop;
 
         out_len        = round((double)(sub_stop - sub_start)
-                               * element->offset_per_nanosecond);
+                        * element->offset_per_nanosecond);
         sub_offset     = element->offset0 + element->samples_out;
         sub_offset_end = sub_offset + out_len;
         outsize        = out_len * (guint)element->bps;
@@ -1091,7 +1091,7 @@ static GstFlowReturn cuda_multiratespiir_transform(GstBaseTransform *base,
                  */
                 gap_buffer_len = in_samples;
                 res            = cuda_multiratespiir_assemble_gap_buffer(
-                             element, gap_buffer_len, outbuf);
+                  element, gap_buffer_len, outbuf);
 
                 if (res != GST_FLOW_OK) return res;
                 else
@@ -1108,7 +1108,7 @@ static GstFlowReturn cuda_multiratespiir_transform(GstBaseTransform *base,
                  */
                 gap_buffer_len = in_samples;
                 res            = cuda_multiratespiir_assemble_gap_buffer(
-                             element, gap_buffer_len, outbuf);
+                  element, gap_buffer_len, outbuf);
 
                 if (res != GST_FLOW_OK) return res;
             }
@@ -1142,7 +1142,7 @@ static GstFlowReturn cuda_multiratespiir_transform(GstBaseTransform *base,
                      */
                     gap_buffer_len = in_samples - num_zeros;
                     res            = cuda_multiratespiir_assemble_gap_buffer(
-                                 element, gap_buffer_len, outbuf);
+                      element, gap_buffer_len, outbuf);
                     if (res != GST_FLOW_OK) return res;
 
                 } else {

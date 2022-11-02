@@ -377,7 +377,7 @@ GstFlowReturn filter_d(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     unsigned output_length;
     available_length = get_available_samples(element);
     input            = (double *)gst_adapter_peek(element->adapter,
-                                                  available_length * sizeof(double));
+                                       available_length * sizeof(double));
 
     /* GPU setup
     cudaSetDevice(0);
@@ -542,7 +542,7 @@ GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     unsigned output_length;
     available_length = get_available_samples(element);
     input            = (float *)gst_adapter_peek(element->adapter,
-                                                 available_length * element->width / 8);
+                                      available_length * element->width / 8);
 
     /* GPU setup
     cudaSetDevice(0);

@@ -36,18 +36,8 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
     process_id_type = ilwd.get_ilwdchar_class("process", "process_id")
     event_id_type = ilwd.get_ilwdchar_class("postcoh", "event_id")
 
-    @property
-    def end(self):
-        if self.end_time is None and self.end_time_ns is None:
-            return None
-        return LIGOTimeGPS(self.end_time, self.end_time_ns)
+    end = lsctables.gpsproperty("end_time", "end_time_ns")
 
-    @end.setter
-    def end(self, gps):
-        if gps is None:
-            self.end_time = self.end_time_ns = None
-        else:
-            self.end_time, self.end_time_ns = gps.gpsSeconds, gps.gpsNanoSeconds
 
     def __eq__(self, other):
         return not cmp((self.ifo, self.end, self.mass1, self.mass2, self.spin1,
