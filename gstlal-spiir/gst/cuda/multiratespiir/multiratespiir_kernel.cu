@@ -645,7 +645,7 @@ gint multi_downsample(SpiirState **spstate,
                       cudaStream_t stream) {
     float *pos_inqueue, *pos_outqueue;
     gint num_inchunk = num_in_multidown;
-    gint i, out_processed = num_inchunk;
+    gint out_processed = num_inchunk;
 
     GST_LOG("multidownsample: start. in %d samples\n", num_inchunk);
     /* make sure that unspiired samples + incoming samples won't exceed the
@@ -686,7 +686,7 @@ gint multi_downsample(SpiirState **spstate,
      * last_sample.
      */
 
-    for (i = 0; i < num_depths - 1; i++) {
+    for (guint i = 0; i < num_depths - 1; i++) {
 
         /* predicted output length of downsample this round,
          * we already ganrantee earlier that the length in samples
@@ -764,16 +764,11 @@ gint multi_downsample(SpiirState **spstate,
         num_inchunk                 = out_processed;
     }
     SPSTATE(num_depths - 1)->queue_last_sample =
-      (SPSTATE(i)->queue_last_sample + out_processed) % SPSTATE(i)->queue_len;
+      (SPSTATE(num_depths - 1)->queue_last_sample + out_processed)
+      % SPSTATE(num_depths - 1)->queue_len;
     GST_LOG("multidownsample: finished. out processed %d samples",
             out_processed);
 
-#if 0
-	for (i=0; i<out_processed; i++) {
-	printf ("in[%d] = %e\n", i, in_multidown[i]);
-	printf ("out[%d] = %e\n", i, SPSTATE(num_depths-1)->queue[i]);
-	}
-#endif
     return out_processed;
 }
 

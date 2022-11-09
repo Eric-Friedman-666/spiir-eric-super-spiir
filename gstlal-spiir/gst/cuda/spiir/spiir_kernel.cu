@@ -188,8 +188,7 @@ int cuda_bank_init(GSTLALIIRBankCuda *element) {
     /*
      * prepare a1, b0, y, convert to float
      */
-    int i;
-    for (i = 0; i < size1 * size2; i++) {
+    for (unsigned int i = 0; i < size1 * size2; i++) {
         h_a1_s[i].re = float(creal(a1[i]));
         h_a1_s[i].im = float(cimag(a1[i]));
         h_b0_s[i].re = float(creal(b0[i]));
@@ -536,7 +535,6 @@ GstFlowReturn filter_d(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
 GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     float *restrict input;
     complex float *restrict output;
-    unsigned int i;
 
     unsigned available_length;
     unsigned output_length;
@@ -582,7 +580,7 @@ GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
 
     if (output_length != bank->pre_output_length) {
         // set nb
-        i = NB_MAX;
+        unsigned int i = NB_MAX;
         if (bank->num_filters < NB_MAX) { i = bank->num_filters; }
 
         for (; i > 0; --i) {
@@ -615,7 +613,8 @@ GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     /*
      * transfer input data to gpu memory
      */
-    for (i = 0; i < available_length; i++) bank->h_input_s[i] = float(input[i]);
+    for (size_t i = 0; i < available_length; i++)
+        bank->h_input_s[i] = float(input[i]);
 
     cudaMemcpyAsync(bank->d_input_s, bank->h_input_s,
                     available_length * sizeof(float), cudaMemcpyHostToDevice,
@@ -666,9 +665,8 @@ GstFlowReturn filter_s(GSTLALIIRBankCuda *element, GstBuffer *outbuf) {
     memset(output, 0,
            output_length * iir_channels(element) / 2 * sizeof(*output));
     COMPLEX8_F temp;
-    int j;
-    for (i = 0; i < output_length; ++i) {
-        for (j = 0; j < bank->num_templates; ++j) {
+    for (unsigned int i = 0; i < output_length; ++i) {
+        for (unsigned int j = 0; j < bank->num_templates; ++j) {
             temp = bank->h_output_s[j * output_length + i];
             __real__ output[i * bank->num_templates + j] = (double)temp.re;
             __imag__ output[i * bank->num_templates + j] = (double)temp.im;
