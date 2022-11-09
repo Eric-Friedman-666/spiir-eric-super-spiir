@@ -1139,7 +1139,7 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     GString *hist_name = g_string_new(NULL);
     g_string_printf(hist_name, "%s:hist_trials:param",
                     stats->feature_xmlname->str);
-    sprintf((char *)xns[pos_xns].tag, hist_name->str);
+    strcpy((char *)xns[pos_xns].tag, hist_name->str);
     xns[pos_xns].processPtr = readParam;
     xns[pos_xns].data       = param_hist_trials;
     g_string_free(hist_name, TRUE);
