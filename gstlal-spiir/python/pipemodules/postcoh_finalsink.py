@@ -1307,7 +1307,8 @@ class CoincsDocFromPostcoh(object):
         # Append snr_series data into XML document
         for ifo_id, snr_series in enumerate(trigger.snr_series):
             if snr_series:
-                epoch = LIGOTimeGPS(snr_series.epoch_gpsSeconds, snr_series.epoch_gpsNanoSeconds)
+                epoch = LIGOTimeGPS(snr_series.epoch_gpsSeconds,
+                                    snr_series.epoch_gpsNanoSeconds)
                 # Convert c-based snr_series into swig-based snr_series that ligolw is familliar with
                 snr_time_series = lal.CreateCOMPLEX8TimeSeries(
                     name=snr_series.name,
@@ -1323,8 +1324,10 @@ class CoincsDocFromPostcoh(object):
                 # Add event_id into the snr_time_series_element
                 event_id = "sngl_inspiral:event_id:%d" % ifo_id
                 ligolw_snr_series_element.appendChild(
-                    ligolw_param.Param.build(u"event_id", u"ilwd:char", event_id))
-                self.xmldoc.childNodes[-1].appendChild(ligolw_snr_series_element)
+                    ligolw_param.Param.build(u"event_id", u"ilwd:char",
+                                             event_id))
+                self.xmldoc.childNodes[-1].appendChild(
+                    ligolw_snr_series_element)
 
 
 def call_plot_fits_func(pngname,

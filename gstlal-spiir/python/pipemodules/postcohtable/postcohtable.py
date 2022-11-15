@@ -38,7 +38,6 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
 
     end = lsctables.gpsproperty("end_time", "end_time_ns")
 
-
     def __eq__(self, other):
         return not cmp((self.ifo, self.end, self.mass1, self.mass2, self.spin1,
                         self.spin2, self.search),
@@ -66,7 +65,7 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
         for i, ifo in enumerate(_postcohtable.ifo_map):
             if name.endswith(ifo):
                 found_ifo = i
-                name = name[:-len('_'+ifo)]
+                name = name[:-len('_' + ifo)]
                 break
         if found_ifo is None:
             return super(PostcohInspiral, self).__getattribute__(name)
@@ -83,7 +82,7 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
         for i, ifo in enumerate(_postcohtable.ifo_map):
             if name.endswith(ifo):
                 found_ifo = i
-                name = name[:-len('_'+ifo)]
+                name = name[:-len('_' + ifo)]
                 break
         if found_ifo is None:
             return super(PostcohInspiral, self).__setattr__(name, value)
