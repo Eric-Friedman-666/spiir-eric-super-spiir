@@ -23,7 +23,7 @@ import lal
 from . import _postcohtable
 
 __all__ = [
-    "PostcohInspiral", "SNRSeries", "PostcohEvent", "ifo_map", "from_buffer"
+    "PostcohInspiral", "SNRSeries", "PostcohTrigger", "ifo_map", "from_buffer"
 ]
 
 ifo_map = _postcohtable.ifo_map
@@ -99,17 +99,17 @@ class SNRSeries(_postcohtable.SNRSeries):
     __slots__ = ()
 
 
-class PostcohEvent(_postcohtable.PostcohEvent):
+class PostcohTrigger(_postcohtable.PostcohTrigger):
     __slots__ = ()
 
     def __getattribute__(self, name):
         if name in ['postcohinspiral', 'snr_series']:
-            return super(PostcohEvent, self).__getattribute__(name)
+            return super(PostcohTrigger, self).__getattribute__(name)
         else:
             return getattr(self.postcohinspiral, name)
 
     def __setattr__(self, name, value):
         if name in ['postcohinspiral', 'snr_series']:
-            return super(PostcohEvent, self).__setattr__(name, value)
+            return super(PostcohTrigger, self).__setattr__(name, value)
         else:
             return setattr(self.postcohinspiral, name, value)

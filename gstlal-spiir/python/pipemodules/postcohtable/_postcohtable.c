@@ -354,10 +354,10 @@ typedef struct {
     PyObject_HEAD
     PostcohInspiralWrapper *postcohinspiral;
     PyObject *snr_series;
-} PostcohEvent;
+} PostcohTrigger;
 
-static void __del_postcohevent__(PyObject *self) {
-    PostcohEvent *self_typed = (PostcohEvent *)self;
+static void __del_postcohtrigger__(PyObject *self) {
+    PostcohTrigger *self_typed = (PostcohTrigger *)self;
 
     Py_XDECREF(self_typed->postcohinspiral);
     Py_XDECREF(self_typed->snr_series);
@@ -365,36 +365,36 @@ static void __del_postcohevent__(PyObject *self) {
     Py_TYPE(self)->tp_free(self);
 }
 
-static PyMemberDef members_postcohevent[] = {
-    { "postcohinspiral", T_OBJECT_EX, offsetof(PostcohEvent, postcohinspiral),
+static PyMemberDef members_postcohtrigger[] = {
+    { "postcohinspiral", T_OBJECT_EX, offsetof(PostcohTrigger, postcohinspiral),
       0, "postcohinspiral" },
     // Things that are done single detector are ndarrays
-    { "snr_series", T_OBJECT_EX, offsetof(PostcohEvent, snr_series), 0,
+    { "snr_series", T_OBJECT_EX, offsetof(PostcohTrigger, snr_series), 0,
       "snr_series" },
     { NULL },
 };
 
-static PyTypeObject postcohevent_type = {
+static PyTypeObject postcohtrigger_type = {
     // clang-format off
   PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
-  .tp_basicsize = sizeof(PostcohEvent), // clang-format on
+  .tp_basicsize = sizeof(PostcohTrigger), // clang-format on
     .tp_doc = "Postcoh Event structure",
     .tp_flags =
       Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
-    .tp_members = members_postcohevent,
-    .tp_name    = MODULE_NAME ".PostcohEvent",
-    .tp_dealloc = __del_postcohevent__,
+    .tp_members = members_postcohtrigger,
+    .tp_name    = MODULE_NAME ".PostcohTrigger",
+    .tp_dealloc = __del_postcohtrigger__,
 };
 
 static PyObject *
-  new_postcohevent(const PostcohInspiralTable *buffer_postcohtable) {
+  new_postcohtrigger(const PostcohInspiralTable *buffer_postcohtable) {
     PyObject *pyModule =
       PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
-    PyObject *postcohevent_class =
-      PyObject_GetAttrString(pyModule, "PostcohEvent");
+    PyObject *postcohtrigger_class =
+      PyObject_GetAttrString(pyModule, "PostcohTrigger");
 
-    PostcohEvent *self = (PostcohEvent *)PyType_GenericNew(
-      (PyTypeObject *)postcohevent_class, NULL, NULL);
+    PostcohTrigger *self = (PostcohTrigger *)PyType_GenericNew(
+      (PyTypeObject *)postcohtrigger_class, NULL, NULL);
     if (!self) return NULL;
 
     PostcohInspiralWrapper *wrapped_postcohtable =
@@ -455,16 +455,16 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        PyObject *postcohevent = new_postcohevent(buffer_postcohtable);
+        PyObject *postcohtrigger = new_postcohtrigger(buffer_postcohtable);
 
-        if (!postcohevent) {
+        if (!postcohtrigger) {
             Py_DECREF(event_list);
-            PyErr_SetString(PyExc_ValueError, "postcohevent error");
+            PyErr_SetString(PyExc_ValueError, "postcohtrigger error");
             return NULL;
         }
 
-        PyList_Append(event_list, postcohevent);
-        Py_DECREF(postcohevent);
+        PyList_Append(event_list, postcohtrigger);
+        Py_DECREF(postcohtrigger);
     }
 
     if (data != end) {
@@ -516,8 +516,9 @@ PyMODINIT_FUNC init_postcohtable(void) {
     PyModule_AddObject(module, "SNRSeries",
                        (PyObject *)&snr_series_wrapper_type);
 
-    if (PyType_Ready(&postcohevent_type) < 0) return;
-    Py_INCREF(&postcohevent_type);
+    if (PyType_Ready(&postcohtrigger_type) < 0) return;
+    Py_INCREF(&postcohtrigger_type);
 
-    PyModule_AddObject(module, "PostcohEvent", (PyObject *)&postcohevent_type);
+    PyModule_AddObject(module, "PostcohTrigger",
+                       (PyObject *)&postcohtrigger_type);
 }
