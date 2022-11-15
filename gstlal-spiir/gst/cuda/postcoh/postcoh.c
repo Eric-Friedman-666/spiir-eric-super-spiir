@@ -911,7 +911,7 @@ static gboolean
 static void cuda_postcoh_push_zerobuf(GstAdapter *adapter, guint size) {
     GstBuffer *zerobuf = gst_buffer_new_and_alloc(size);
     if (!zerobuf) {
-        GST_DEBUG_OBJECT(data, "failure allocating zero-pad buffer");
+        GST_DEBUG_OBJECT(adapter, "failure allocating zero-pad buffer");
     }
     memset(GST_BUFFER_DATA(zerobuf), 0, GST_BUFFER_SIZE(zerobuf));
     gst_adapter_push(adapter, zerobuf);
@@ -975,7 +975,7 @@ static gint cuda_postcoh_push_and_get_common_size(GstCollectPads *pads,
     GstPostcohCollectData *data;
     GstBuffer *buf = NULL;
 
-    gint i = 0, min_size = 0, size_cur, cur_ifo_has_data = 0;
+    gint min_size = 0, size_cur, cur_ifo_has_data = 0;
     gboolean min_size_init = FALSE, is_gap;
     GstClockTime buf_end;
 
@@ -1287,17 +1287,20 @@ static void cuda_postcoh_record_snr_series(CudaPostcoh *postcoh,
       XLALCreateCOMPLEX8TimeSeries("snr", &epoch, 0., 1. / postcoh->rate,
                                    &lalDimensionlessUnit, state->autochisq_len);
 
+    int one_take_offset = postcoh->head_len - (state->autochisq_len - 1) / 2;
+
     // the first data sample
     COMPLEX8 *curr_snglsnr =
-      state->snr_list[ifo_id]
-      + (pklist->len_idx[peak_cur] + pklist->ntoff[ifo_id][peak_cur]
-         + one_take_offset)
-          * state->ntmplt
-      + pklist->tmplt_idx[peak_cur];
+      (COMPLEX8 *)(state->snr_list[ifo_id]
+                   + (pklist->len_idx[peak_cur]
+                      + pklist->ntoff[ifo_id][peak_cur] + one_take_offset)
+                       * state->ntmplt
+                   + pklist->tmplt_idx[peak_cur]);
 
     // FIXME: speedup
     // Load snglsnr data into snr_series->data->data
-    for (int j = 0; j < output->snr_series[ifo_id]->data->length; j++) {
+    for (unsigned int j = 0; j < output->snr_series[ifo_id]->data->length;
+         j++) {
         output->snr_series[ifo_id]->data->data[j] = *curr_snglsnr;
         curr_snglsnr += state->ntmplt;
     }
@@ -1347,7 +1350,6 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
      * and cmbchisq = single chisq */
     /* only output multi-detector events, cohsnr, cmbchisq only make sense when
      * cur_nifo >=2 */
-    int one_take_offset = postcoh->head_len - (state->autochisq_len - 1) / 2;
     for (int pivotal_ifo = 0; (pivotal_ifo < nifo) && (state->cur_nifo >= 2);
          pivotal_ifo++) {
         if (state->cur_ifo_is_gap[pivotal_ifo]) continue;
@@ -1739,7 +1741,7 @@ static void cuda_postcoh_process(GstCollectPads *pads,
                                  CudaPostcoh *postcoh) {
     GSList *collectlist;
     GstPostcohCollectData *data;
-    COMPLEX_F *one_take_snr, *snglsnr, *pos_dd_snglsnr, *pos_in_snglsnr;
+    COMPLEX_F *one_take_snr, *snglsnr;
 
     int i = 0, cur_ifo = 0;
     PostcohState *state = postcoh->state;
@@ -1842,7 +1844,7 @@ static void cuda_postcoh_process(GstCollectPads *pads,
             // 3. do transpose, at the same time, snr data will be moved to
             // proper positions in state->d_snglsnr[cur_ifo]
             transpose_snglsnr(
-              pklist->d_snglsnr_buffer, state->d_snglsnr[cur_ifo],
+              (COMPLEX_F *)pklist->d_snglsnr_buffer, state->d_snglsnr[cur_ifo],
               state->snglsnr_start_load, snglsnr_cpy_len, state->snglsnr_len,
               state->ntmplt, postcoh->stream);
 

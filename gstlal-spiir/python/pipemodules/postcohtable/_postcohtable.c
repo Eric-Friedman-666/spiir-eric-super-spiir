@@ -127,7 +127,7 @@ static PyTypeObject snr_series_wrapper_type = {
 };
 
 static PyObject *
-  new_wrapped_snr_series(PostcohInspiralTable *buffer_postcohtable) {
+  new_wrapped_snr_series(const PostcohInspiralTable *buffer_postcohtable) {
 
     PyObject *pyModule =
       PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
@@ -152,24 +152,24 @@ static PyObject *
             PyList_SetItem(wrapped_snr_series_list, ifo_id, Py_None);
         }
     }
-    return (PyObject *)wrapped_snr_series_list;
+    return wrapped_snr_series_list;
 }
 
 typedef struct {
     PyObject_HEAD
     PostcohInspiralTable postcohtable;
-    PyStringObject *ifos;
-    PyStringObject *pivotal_ifo;
-    PyStringObject *skymap_fname;
-    PyArrayObject *end_time_sngl;
-    PyArrayObject *snglsnr;
-    PyArrayObject *coaphase;
-    PyArrayObject *chisq;
-    PyArrayObject *far_sngl;
-    PyArrayObject *far_1w_sngl;
-    PyArrayObject *far_1d_sngl;
-    PyArrayObject *far_2h_sngl;
-    PyArrayObject *deff;
+    PyObject *ifos;
+    PyObject *pivotal_ifo;
+    PyObject *skymap_fname;
+    PyObject *end_time_sngl;
+    PyObject *snglsnr;
+    PyObject *coaphase;
+    PyObject *chisq;
+    PyObject *far_sngl;
+    PyObject *far_1w_sngl;
+    PyObject *far_1d_sngl;
+    PyObject *far_2h_sngl;
+    PyObject *deff;
 } PostcohInspiralWrapper;
 
 static void __del_postcohinspiral__(PyObject *self) {
@@ -309,7 +309,7 @@ static PyTypeObject postcoh_inspiral_wrapper_type = {
 };
 
 static PostcohInspiralWrapper *
-  new_wrapped_postcohtable(PostcohInspiralTable *buffer_postcohtable) {
+  new_wrapped_postcohtable(const PostcohInspiralTable *buffer_postcohtable) {
     PyObject *pyModule =
       PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
     PyObject *wrapped_postcohtable_class =
@@ -347,13 +347,13 @@ static PostcohInspiralWrapper *
     self->deff =
       PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, self->postcohtable.deff);
 
-    return (PyObject *)self;
+    return self;
 }
 
 typedef struct {
     PyObject_HEAD
     PostcohInspiralWrapper *postcohinspiral;
-    PyListObject *snr_series;
+    PyObject *snr_series;
 } PostcohEvent;
 
 static void __del_postcohevent__(PyObject *self) {
@@ -386,8 +386,8 @@ static PyTypeObject postcohevent_type = {
     .tp_dealloc = __del_postcohevent__,
 };
 
-static PostcohEvent *
-  new_postcohevent(PostcohInspiralTable *buffer_postcohtable) {
+static PyObject *
+  new_postcohevent(const PostcohInspiralTable *buffer_postcohtable) {
     PyObject *pyModule =
       PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
     PyObject *postcohevent_class =
@@ -455,7 +455,7 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        PostcohEvent *postcohevent = new_postcohevent(buffer_postcohtable);
+        PyObject *postcohevent = new_postcohevent(buffer_postcohtable);
 
         if (!postcohevent) {
             Py_DECREF(event_list);
@@ -463,7 +463,7 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        PyList_Append(event_list, (PyObject *)postcohevent);
+        PyList_Append(event_list, postcohevent);
         Py_DECREF(postcohevent);
     }
 
