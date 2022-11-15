@@ -1304,30 +1304,27 @@ class CoincsDocFromPostcoh(object):
             The PostcohInspiralTable candidate trigger instance.
         """
 
-        for ifo_id, ifo in enumerate(re.findall('..', trigger.ifos)):
-            # Append snr_series data into XML document
-            epoch_second = getattr(trigger,
-                                   "snr_series_epoch_gpsSeconds_" + ifo)
-            epoch_nanoSeconds = getattr(
-                trigger, "snr_series_epoch_gpsNanoSeconds_" + ifo)
-            epoch = LIGOTimeGPS(epoch_second, epoch_nanoSeconds)
-            snr_time_series = lal.CreateCOMPLEX8TimeSeries(
-                name=getattr(trigger, "snr_series_name_" + ifo),
-                epoch=epoch,
-                f0=getattr(trigger, "snr_series_f0_" + ifo),
-                deltaT=getattr(trigger, "snr_series_deltaT_" + ifo),
-                sampleUnits=getattr(trigger, "snr_series_sampleUnits_" + ifo),
-                length=getattr(trigger, "snr_series_data_length_" + ifo))
-            snr_time_series.data.data = getattr(trigger,
-                                                "snr_series_data_" + ifo)
+        # Append snr_series data into XML document
+        for ifo_id, snr_series in enumerate(trigger.snr_series):
+            if snr_series:
+                epoch = LIGOTimeGPS(snr_series.epoch_gpsSeconds, snr_series.epoch_gpsNanoSeconds)
+                # Convert c-based snr_series into swig-based snr_series that ligolw is familliar with
+                snr_time_series = lal.CreateCOMPLEX8TimeSeries(
+                    name=snr_series.name,
+                    epoch=epoch,
+                    f0=snr_series.f0,
+                    deltaT=snr_series.deltaT,
+                    sampleUnits=snr_series.sampleUnits,
+                    length=snr_series.data_length)
+                snr_time_series.data.data = snr_series.data
 
-            ligolw_snr_series_element = lal.series.build_COMPLEX8TimeSeries(
-                snr_time_series)
-            # Add event_id into the snr_time_series_element
-            event_id = "sngl_inspiral:event_id:%d" % ifo_id
-            ligolw_snr_series_element.appendChild(
-                ligolw_param.Param.build(u"event_id", u"ilwd:char", event_id))
-            self.xmldoc.childNodes[-1].appendChild(ligolw_snr_series_element)
+                ligolw_snr_series_element = lal.series.build_COMPLEX8TimeSeries(
+                    snr_time_series)
+                # Add event_id into the snr_time_series_element
+                event_id = "sngl_inspiral:event_id:%d" % ifo_id
+                ligolw_snr_series_element.appendChild(
+                    ligolw_param.Param.build(u"event_id", u"ilwd:char", event_id))
+                self.xmldoc.childNodes[-1].appendChild(ligolw_snr_series_element)
 
 
 def call_plot_fits_func(pngname,

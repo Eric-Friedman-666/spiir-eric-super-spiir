@@ -64,9 +64,9 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
     def __getattribute__(self, name):
         found_ifo = None
         for i, ifo in enumerate(_postcohtable.ifo_map):
-            if ifo in name:
+            if name.endswith(ifo):
                 found_ifo = i
-                name = name.replace('_' + ifo, '')
+                name = name[:-len('_'+ifo)]
                 break
         if found_ifo is None:
             return super(PostcohInspiral, self).__getattribute__(name)
@@ -81,9 +81,9 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
     def __setattr__(self, name, value):
         found_ifo = None
         for i, ifo in enumerate(_postcohtable.ifo_map):
-            if ifo in name:
+            if name.endswith(ifo):
                 found_ifo = i
-                name = name.replace('_' + ifo, '')
+                name = name[:-len('_'+ifo)]
                 break
         if found_ifo is None:
             return super(PostcohInspiral, self).__setattr__(name, value)
@@ -106,31 +106,11 @@ class PostcohEvent(_postcohtable.PostcohEvent):
     def __getattribute__(self, name):
         if name in ['postcohinspiral', 'snr_series']:
             return super(PostcohEvent, self).__getattribute__(name)
-        if 'snr_series_' not in name:
+        else:
             return getattr(self.postcohinspiral, name)
-        name = name.replace('snr_series_', '')
-        found_ifo = None
-        for i, ifo in enumerate(_postcohtable.ifo_map):
-            if ifo in name:
-                found_ifo = i
-                name = name.replace('_' + ifo, '')
-                break
-        if found_ifo is None:
-            raise AttributeError("IFO not found.")
-        return getattr(self.snr_series[found_ifo], name)
 
     def __setattr__(self, name, value):
         if name in ['postcohinspiral', 'snr_series']:
             return super(PostcohEvent, self).__setattr__(name, value)
-        if 'snr_series_' not in name:
+        else:
             return setattr(self.postcohinspiral, name, value)
-        name = name.replace('snr_series_', '')
-        found_ifo = None
-        for i, ifo in enumerate(_postcohtable.ifo_map):
-            if ifo in name:
-                found_ifo = i
-                name = name.replace('_' + ifo, '')
-                break
-        if found_ifo is None:
-            raise AttributeError("IFO not found.")
-        return setattr(self.snr_series[found_ifo], name, value)
