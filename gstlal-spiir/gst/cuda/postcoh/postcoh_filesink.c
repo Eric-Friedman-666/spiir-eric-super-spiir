@@ -486,7 +486,8 @@ static GstFlowReturn
     for (; table < table_end; table++) {
         GString *line = g_string_new("\t\t\t\t");
         postcohtable_set_line(line, table, xtable);
-        int rc = xmlTextWriterWriteFormatRaw(sink->writer, line->str);
+        int rc =
+          xmlTextWriterWriteString(sink->writer, (const xmlChar *)line->str);
         if (rc < 0) return GST_FLOW_ERROR;
         g_string_free(line, TRUE);
     }

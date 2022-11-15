@@ -214,5 +214,4 @@ void postcohtable_set_line(GString *line,
     }
 
     g_string_append(line, "\n");
-    // printf("%s", line->str);
 }

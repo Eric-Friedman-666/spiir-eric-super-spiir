@@ -205,8 +205,7 @@ int ligoxml_write_Table(xmlTextWriterPtr writer, const XmlTable *xtablePtr) {
             }
         }
         g_string_append(line, "\n");
-        // rc = xmlTextWriterWriteString(writer, line->str);
-        rc = xmlTextWriterWriteFormatRaw(writer, line->str);
+        rc = xmlTextWriterWriteString(writer, (const xmlChar *)line->str);
         g_string_free(line, TRUE);
     }
     rc = xmlTextWriterWriteString(writer, BAD_CAST "\t\t\t");
