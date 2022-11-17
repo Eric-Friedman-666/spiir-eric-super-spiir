@@ -1371,20 +1371,19 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             len_cur = pklist->len_idx[peak_cur];
             XLALGPSAdd(&(end_time), (double)len_cur / exe_len);
             output->end_time = end_time;
-            for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+
+            /* fill in the attributes for single detectors first */
+            for (int pad_id = 0; pad_id < nifo; end_time = output->end_time, pad_id++) {
+                int ifo_id = state->write_ifo_mapping[pad_id];
+
                 XLALGPSAdd(&(end_time),
-                           (double)pklist->ntoff[ifo_id][peak_cur] / exe_len);
+                        (double)pklist->ntoff[ifo_id][peak_cur] / exe_len);
                 output->end_time_sngl[ifo_id] = end_time;
-                end_time                      = output->end_time;
 
                 output->snglsnr[ifo_id]  = pklist->snglsnr[ifo_id][peak_cur];
                 output->coaphase[ifo_id] = pklist->coaphase[ifo_id][peak_cur];
                 output->chisq[ifo_id]    = pklist->chisq[ifo_id][peak_cur];
-            }
 
-            /* fill in the attributes for single detectors first */
-            for (int pad_id = 0; pad_id < nifo; pad_id++) {
-                int ifo_id = state->write_ifo_mapping[pad_id];
                 output->deff[ifo_id] =
                   sqrt(state->sigmasq[pad_id][cur_tmplt_idx])
                   / pklist->snglsnr[ifo_id][peak_cur]; // in MPC

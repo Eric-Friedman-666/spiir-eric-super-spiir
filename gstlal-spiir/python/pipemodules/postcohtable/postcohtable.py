@@ -70,9 +70,9 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
         if found_ifo is None:
             return super(PostcohInspiral, self).__getattribute__(name)
         if name == "end_time_sngl":
-            return self.end_time_sngl[0][found_ifo]
+            return self.end_time_sngl[found_ifo][0]
         elif name == "end_time_ns_sngl":
-            return self.end_time_sngl[1][found_ifo]
+            return self.end_time_sngl[found_ifo][1]
         else:
             return super(PostcohInspiral,
                          self).__getattribute__(name)[found_ifo]

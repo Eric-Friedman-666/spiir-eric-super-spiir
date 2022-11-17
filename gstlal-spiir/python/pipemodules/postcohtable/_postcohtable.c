@@ -325,7 +325,7 @@ static PostcohInspiralWrapper *
     self->pivotal_ifo  = PyString_FromString(self->postcohtable.pivotal_ifo);
     self->skymap_fname = PyString_FromString(self->postcohtable.skymap_fname);
 
-    npy_intp end_time_dims[2] = { 2, MAX_NIFO };
+    npy_intp end_time_dims[2] = { MAX_NIFO, 2 };
     self->end_time_sngl       = PyArray_SimpleNewFromData(
             2, end_time_dims, NPY_INT, self->postcohtable.end_time_sngl);
 
