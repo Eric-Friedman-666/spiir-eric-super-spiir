@@ -1389,7 +1389,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                   sqrt(state->sigmasq[pad_id][cur_tmplt_idx])
                   / pklist->snglsnr[ifo_id][peak_cur]; // in MPC
                 // Only record snr series on active IFOs
-                if (state->cur_ifo_is_gap[pad_id]) {
+                if (!state->cur_ifo_is_gap[pad_id]) {
                     cuda_postcoh_record_snr_series(postcoh, output, pklist,
                                                    peak_cur, ifo_id);
                 }
