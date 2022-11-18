@@ -658,7 +658,8 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
             if self.cluster_window == 0:
-                self.postcoh_table.extend([event.postcohinspiral for event in newevents])
+                self.postcoh_table.extend(
+                    [event.postcohinspiral for event in newevents])
                 del self.cur_event_table[:]
 
             # dump zerolag candidates when interval is reached
