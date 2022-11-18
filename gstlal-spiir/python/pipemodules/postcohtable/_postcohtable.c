@@ -68,22 +68,20 @@ static void __del_snr_series__(PyObject *self) {
     Py_TYPE(self)->tp_free(self);
 }
 
-#define GENERIC_GETTER(name, member, wrapper)                                  \
+#define GENERIC_SNR_SERIES_GETTER(name, member, wrapper)                       \
     static PyObject *get_##name(Complex8TimeSeriesWrapper *self,               \
                                 void *closure) {                               \
-        return wrapper(self->member);                                          \
+        return wrapper(self->complex8_snr_series->member);                     \
     }
 
-GENERIC_GETTER(name, complex8_snr_series->name, PyString_FromString)
-GENERIC_GETTER(epoch_gpsSeconds,
-               complex8_snr_series->epoch.gpsSeconds,
-               PyInt_FromLong)
-GENERIC_GETTER(epoch_gpsNanoSeconds,
-               complex8_snr_series->epoch.gpsNanoSeconds,
-               PyInt_FromLong)
-GENERIC_GETTER(f0, complex8_snr_series->f0, PyFloat_FromDouble)
-GENERIC_GETTER(deltaT, complex8_snr_series->deltaT, PyFloat_FromDouble)
-GENERIC_GETTER(data_length, complex8_snr_series->data->length, PyInt_FromLong)
+GENERIC_SNR_SERIES_GETTER(name, name, PyString_FromString)
+GENERIC_SNR_SERIES_GETTER(epoch_gpsSeconds, epoch.gpsSeconds, PyInt_FromLong)
+GENERIC_SNR_SERIES_GETTER(epoch_gpsNanoSeconds,
+                          epoch.gpsNanoSeconds,
+                          PyInt_FromLong)
+GENERIC_SNR_SERIES_GETTER(f0, f0, PyFloat_FromDouble)
+GENERIC_SNR_SERIES_GETTER(deltaT, deltaT, PyFloat_FromDouble)
+GENERIC_SNR_SERIES_GETTER(data_length, data->length, PyInt_FromLong)
 
 static PyObject *get_sampleUnits(Complex8TimeSeriesWrapper *self,
                                  void *closure) {
