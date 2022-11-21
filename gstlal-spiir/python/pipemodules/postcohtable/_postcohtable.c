@@ -125,7 +125,7 @@ static PyTypeObject snr_series_wrapper_type = {
 };
 
 static PyObject *
-  new_wrapped_snr_series(const PostcohInspiralTable *buffer_postcohtable) {
+  new_wrapped_snr_series_list(const PostcohInspiralTable *buffer_postcohtable) {
 
     PyObject *pyModule =
       PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
@@ -141,7 +141,11 @@ static PyObject *
             Complex8TimeSeriesWrapper *wrapped_snr_series =
               (Complex8TimeSeriesWrapper *)PyType_GenericNew(
                 (PyTypeObject *)wrapped_snr_series_class, NULL, NULL);
-            if (!wrapped_snr_series) return NULL;
+            if (!wrapped_snr_series) {
+                PyErr_SetString(PyExc_ValueError,
+                                "new wrapped_snr_series error");
+                return NULL;
+            }
 
             wrapped_snr_series->complex8_snr_series = complex8_snr_series;
             PyList_SetItem(wrapped_snr_series_list, ifo_id,
@@ -190,11 +194,13 @@ static void __del_postcohinspiral__(PyObject *self) {
 }
 
 static PyMemberDef members_postcohinspiral[] = {
-    { "ifos", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ifos), 0, "ifos" },
+    { "ifos", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ifos), READONLY,
+      "ifos" },
     { "pivotal_ifo", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, pivotal_ifo),
-      0, "pivotal_ifo" },
+      READONLY, "pivotal_ifo" },
     { "skymap_fname", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, skymap_fname), 0, "skymap_fname" },
+      offsetof(PostcohInspiralWrapper, skymap_fname), READONLY,
+      "skymap_fname" },
     // Not dependent on the number of detectors
     { "end_time", T_INT,
       offsetof(PostcohInspiralWrapper, postcohtable.end_time.gpsSeconds), 0,
@@ -275,22 +281,24 @@ static PyMemberDef members_postcohinspiral[] = {
 
     // Things that are done single detector are ndarrays
     { "end_time_sngl", T_OBJECT_EX,
-      offsetof(PostcohInspiralWrapper, end_time_sngl), 0, "end_time_sngl" },
-    { "snglsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, snglsnr), 0,
-      "snglsnr" },
-    { "coaphase", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, coaphase), 0,
-      "coaphase" },
-    { "chisq", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, chisq), 0,
+      offsetof(PostcohInspiralWrapper, end_time_sngl), READONLY,
+      "end_time_sngl" },
+    { "snglsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, snglsnr),
+      READONLY, "snglsnr" },
+    { "coaphase", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, coaphase),
+      READONLY, "coaphase" },
+    { "chisq", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, chisq), READONLY,
       "chisq" },
-    { "far_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_sngl), 0,
-      "far_sngl" },
+    { "far_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_sngl),
+      READONLY, "far_sngl" },
     { "far_1w_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1w_sngl),
-      0, "far_1w_sngl" },
+      READONLY, "far_1w_sngl" },
     { "far_1d_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1d_sngl),
-      0, "far_1d_sngl" },
+      READONLY, "far_1d_sngl" },
     { "far_2h_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_2h_sngl),
-      0, "far_2h_sngl" },
-    { "deff", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, deff), 0, "deff" },
+      READONLY, "far_2h_sngl" },
+    { "deff", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, deff), READONLY,
+      "deff" },
     { NULL },
 };
 
@@ -315,7 +323,10 @@ static PostcohInspiralWrapper *
 
     PostcohInspiralWrapper *self = (PostcohInspiralWrapper *)PyType_GenericNew(
       (PyTypeObject *)wrapped_postcohtable_class, NULL, NULL);
-    if (!self) return NULL;
+    if (!self) {
+        PyErr_SetString(PyExc_ValueError, "new wrapped_postcohtable error");
+        return NULL;
+    }
 
     self->postcohtable = *buffer_postcohtable;
 
@@ -350,25 +361,27 @@ static PostcohInspiralWrapper *
 
 typedef struct {
     PyObject_HEAD
-    PostcohInspiralWrapper *postcohinspiral;
-    PyObject *snr_series;
+    PostcohInspiralWrapper *wrapped_postcohtable;
+    PyObject *wrapped_snr_series_list;
 } PostcohTrigger;
 
 static void __del_postcohtrigger__(PyObject *self) {
     PostcohTrigger *self_typed = (PostcohTrigger *)self;
 
-    Py_XDECREF(self_typed->postcohinspiral);
-    Py_XDECREF(self_typed->snr_series);
+    Py_XDECREF(self_typed->wrapped_postcohtable);
+    Py_XDECREF(self_typed->wrapped_snr_series_list);
 
     Py_TYPE(self)->tp_free(self);
 }
 
 static PyMemberDef members_postcohtrigger[] = {
-    { "postcohinspiral", T_OBJECT_EX, offsetof(PostcohTrigger, postcohinspiral),
-      0, "postcohinspiral" },
+    { "postcoh_inspiral", T_OBJECT_EX,
+      offsetof(PostcohTrigger, wrapped_postcohtable), READONLY,
+      "postcoh_inspiral" },
     // Things that are done single detector are ndarrays
-    { "snr_series", T_OBJECT_EX, offsetof(PostcohTrigger, snr_series), 0,
-      "snr_series" },
+    { "snr_series_list", T_OBJECT_EX,
+      offsetof(PostcohTrigger, wrapped_snr_series_list), READONLY,
+      "snr_series_list" },
     { NULL },
 };
 
@@ -376,7 +389,7 @@ static PyTypeObject postcohtrigger_type = {
     // clang-format off
   PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
   .tp_basicsize = sizeof(PostcohTrigger), // clang-format on
-    .tp_doc = "Postcoh Event structure",
+    .tp_doc = "Postcoh Trigger structure",
     .tp_flags =
       Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_CHECKTYPES,
     .tp_members = members_postcohtrigger,
@@ -393,7 +406,10 @@ static PyObject *
 
     PostcohTrigger *self = (PostcohTrigger *)PyType_GenericNew(
       (PyTypeObject *)postcohtrigger_class, NULL, NULL);
-    if (!self) return NULL;
+    if (!self) {
+        PyErr_SetString(PyExc_ValueError, "new postcoh trigger error");
+        return NULL;
+    }
 
     PostcohInspiralWrapper *wrapped_postcohtable =
       new_wrapped_postcohtable(buffer_postcohtable);
@@ -403,17 +419,17 @@ static PyObject *
         return NULL;
     }
 
-    self->postcohinspiral = wrapped_postcohtable;
+    self->wrapped_postcohtable = wrapped_postcohtable;
 
     PyObject *wrapped_snr_series_list =
-      new_wrapped_snr_series(buffer_postcohtable);
+      new_wrapped_snr_series_list(buffer_postcohtable);
     if (!wrapped_snr_series_list) {
         Py_DECREF(self);
         PyErr_SetString(PyExc_ValueError, "wrapped_snr_series error");
         return NULL;
     }
 
-    self->snr_series = wrapped_snr_series_list;
+    self->wrapped_snr_series_list = wrapped_snr_series_list;
     return (PyObject *)self;
 }
 
@@ -432,10 +448,10 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
     if (!PyArg_ParseTuple(args, "s#", &data, &length)) return NULL;
     const char *const end = data + length;
 
-    PyObject *event_list = PyList_New(0);
+    PyObject *trigger_list = PyList_New(0);
 
-    if (!event_list) {
-        PyErr_SetString(PyExc_ValueError, "event list error");
+    if (!trigger_list) {
+        PyErr_SetString(PyExc_ValueError, "trigger list error");
         return NULL;
     }
 
@@ -446,7 +462,7 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
         data += sizeof(PostcohInspiralTable);
         /* if the data read in is less then expected amount */
         if (data > end) {
-            Py_DECREF(event_list);
+            Py_DECREF(trigger_list);
             PyErr_SetString(PyExc_ValueError,
                             "overran end of buffer while deserializing a "
                             "PostcohInspiralTable");
@@ -456,22 +472,22 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
         PyObject *postcohtrigger = new_postcohtrigger(buffer_postcohtable);
 
         if (!postcohtrigger) {
-            Py_DECREF(event_list);
+            Py_DECREF(trigger_list);
             PyErr_SetString(PyExc_ValueError, "postcohtrigger error");
             return NULL;
         }
 
-        PyList_Append(event_list, postcohtrigger);
+        PyList_Append(trigger_list, postcohtrigger);
         Py_DECREF(postcohtrigger);
     }
 
     if (data != end) {
-        Py_DECREF(event_list);
+        Py_DECREF(trigger_list);
         PyErr_SetString(PyExc_ValueError, "did not consume entire buffer");
         return NULL;
     }
 
-    return event_list;
+    return trigger_list;
 }
 
 static struct PyMethodDef methods[] = {

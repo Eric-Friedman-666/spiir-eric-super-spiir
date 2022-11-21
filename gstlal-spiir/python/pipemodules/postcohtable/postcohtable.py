@@ -18,7 +18,6 @@
 
 from glue.ligolw import ilwd
 from glue.ligolw import lsctables
-from lal import LIGOTimeGPS
 import lal
 from . import _postcohtable
 
@@ -28,6 +27,8 @@ __all__ = [
 
 ifo_map = _postcohtable.ifo_map
 from_buffer = _postcohtable.from_buffer
+SNRSeries = _postcohtable.SNRSeries
+PostcohTrigger = _postcohtable.PostcohTrigger
 
 
 class PostcohInspiral(_postcohtable.PostcohInspiral):
@@ -93,23 +94,3 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
         else:
             super(PostcohInspiral,
                   self).__getattribute__(name)[found_ifo] = value
-
-
-class SNRSeries(_postcohtable.SNRSeries):
-    __slots__ = ()
-
-
-class PostcohTrigger(_postcohtable.PostcohTrigger):
-    __slots__ = ()
-
-    def __getattribute__(self, name):
-        if name in ['postcohinspiral', 'snr_series']:
-            return super(PostcohTrigger, self).__getattribute__(name)
-        else:
-            return getattr(self.postcohinspiral, name)
-
-    def __setattr__(self, name, value):
-        if name in ['postcohinspiral', 'snr_series']:
-            return super(PostcohTrigger, self).__setattr__(name, value)
-        else:
-            return setattr(self.postcohinspiral, name, value)
