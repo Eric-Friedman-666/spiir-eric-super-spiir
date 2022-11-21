@@ -225,7 +225,7 @@ typedef struct _PostcohState {
     float snglsnr_max[MAX_NIFO];
     float *tmp_maxsnr;
     int *tmp_tmpltidx;
-    COMPLEX_F *snr_list[MAX_NIFO];
+    COMPLEX_F *snr_history_per_template[MAX_NIFO];
 } PostcohState;
 
 /**

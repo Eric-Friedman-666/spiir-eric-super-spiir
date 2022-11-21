@@ -751,8 +751,10 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
 
     state->is_member_init = POSTCOH_PARAMS_INIT;
 
-    // Initialize snr_list
-    for (int i = 0; i < MAX_NIFO; i++) { state->snr_list[i] = NULL; }
+    // Initialize snr_history_per_template
+    for (int i = 0; i < MAX_NIFO; i++) {
+        state->snr_history_per_template[i] = NULL;
+    }
 
     GST_OBJECT_UNLOCK(postcoh->collect);
     return TRUE;
@@ -1288,20 +1290,20 @@ static void cuda_postcoh_record_snr_series(CudaPostcoh *postcoh,
       XLALCreateCOMPLEX8TimeSeries("snr", &epoch, 0., 1. / postcoh->rate,
                                    &lalDimensionlessUnit, state->autochisq_len);
 
-    int snr_sample_index =
-      (pklist->len_idx[peak_cur] + pklist->ntoff[ifo_id][peak_cur]
-       + POSTCOH_BACKGROUND_LEN / 2);
+    int snr_series_start = POSTCOH_BACKGROUND_LEN / 2
+                           + pklist->len_idx[peak_cur]
+                           + pklist->ntoff[ifo_id][peak_cur];
 
     // the first data sample
     COMPLEX8 *curr_snglsnr =
-      (COMPLEX8 *)(state->snr_list[ifo_id] + snr_sample_index * state->ntmplt
+      (COMPLEX8 *)(state->snr_history_per_template[ifo_id]
+                   + snr_series_start * state->ntmplt
                    + pklist->tmplt_idx[peak_cur]);
 
     // Load snglsnr data into snr_series->data->data
     for (unsigned int j = 0; j < output->snr_series[ifo_id]->data->length;
-         j++) {
+         curr_snglsnr += state->ntmplt, j++) {
         output->snr_series[ifo_id]->data->data[j] = *curr_snglsnr;
-        curr_snglsnr += state->ntmplt;
     }
 }
 
@@ -1848,7 +1850,7 @@ static void cuda_postcoh_process(GstCollectPads *pads,
               state->ntmplt, postcoh->stream);
 
             cudaStreamSynchronize(postcoh->stream);
-            state->snr_list[cur_ifo] = one_take_snr;
+            state->snr_history_per_template[cur_ifo] = one_take_snr;
         }
         cur_ifo = 0;
         for (int iifo = 0; iifo < state->nifo; ++iifo)
