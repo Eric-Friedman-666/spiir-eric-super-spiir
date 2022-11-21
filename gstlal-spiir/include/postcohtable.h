@@ -80,6 +80,7 @@ typedef struct tagPostcohInspiralTable {
     REAL8 deff[MAX_NIFO];
     REAL8 rank;
     REAL4 f_final;
-    COMPLEX8TimeSeries *snr_series[MAX_NIFO]; // snr series data around peak
+    COMPLEX8TimeSeries
+      *snr_series_list[MAX_NIFO]; // snr series data around peak
 } PostcohInspiralTable;
 #endif /* __POSTCOH_TABLE_H */

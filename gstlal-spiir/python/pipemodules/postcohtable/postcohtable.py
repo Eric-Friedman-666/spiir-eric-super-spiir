@@ -18,14 +18,11 @@
 
 from glue.ligolw import ilwd
 from glue.ligolw import lsctables
-import lal
+from gstlal.pipemodules import pipe_macro
 from . import _postcohtable
 
-__all__ = [
-    "PostcohInspiral", "SNRSeries", "PostcohTrigger", "ifo_map", "from_buffer"
-]
+__all__ = ["PostcohInspiral", "SNRSeries", "PostcohTrigger", "from_buffer"]
 
-ifo_map = _postcohtable.ifo_map
 from_buffer = _postcohtable.from_buffer
 SNRSeries = _postcohtable.SNRSeries
 PostcohTrigger = _postcohtable.PostcohTrigger
@@ -63,7 +60,7 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
 
     def __getattribute__(self, name):
         found_ifo = None
-        for i, ifo in enumerate(_postcohtable.ifo_map):
+        for i, ifo in enumerate(pipe_macro.IFO_MAP):
             if name.endswith(ifo):
                 found_ifo = i
                 name = name[:-len('_' + ifo)]
@@ -80,7 +77,7 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
 
     def __setattr__(self, name, value):
         found_ifo = None
-        for i, ifo in enumerate(_postcohtable.ifo_map):
+        for i, ifo in enumerate(pipe_macro.IFO_MAP):
             if name.endswith(ifo):
                 found_ifo = i
                 name = name[:-len('_' + ifo)]

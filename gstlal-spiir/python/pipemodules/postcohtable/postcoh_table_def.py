@@ -10,7 +10,7 @@ dbtables.ligolwtypes.ToPyType["ilwd:char"] = unicode
 
 PostcohInspiralID = ilwd.get_ilwdchar_class(u"postcoh", u"event_id")
 
-import postcohtable
+from gstlal.pipemodules import pipe_macro
 
 
 # need to be consistent with the table defined in postcohinspiral_table.h
@@ -57,24 +57,23 @@ class PostcohInspiralTable(table.Table):
                 ("dec", "real_8"),
                 ("rank", "real_8"),
             ],
-            list(("deff_" + name, "real_8") for name in postcohtable.ifo_map),
-            list(("far_sngl_" + name, "real_4")
-                 for name in postcohtable.ifo_map),
+            list(("deff_" + name, "real_8") for name in pipe_macro.IFO_MAP),
+            list(
+                ("far_sngl_" + name, "real_4") for name in pipe_macro.IFO_MAP),
             list(("far_2h_sngl_" + name, "real_4")
-                 for name in postcohtable.ifo_map),
+                 for name in pipe_macro.IFO_MAP),
             list(("far_1d_sngl_" + name, "real_4")
-                 for name in postcohtable.ifo_map),
+                 for name in pipe_macro.IFO_MAP),
             list(("far_1w_sngl_" + name, "real_4")
-                 for name in postcohtable.ifo_map),
-            list(("snglsnr_" + name, "real_4")
-                 for name in postcohtable.ifo_map),
-            list(("coaphase_" + name, "real_4")
-                 for name in postcohtable.ifo_map),
-            list(("chisq_" + name, "real_4") for name in postcohtable.ifo_map),
+                 for name in pipe_macro.IFO_MAP),
+            list(("snglsnr_" + name, "real_4") for name in pipe_macro.IFO_MAP),
+            list(
+                ("coaphase_" + name, "real_4") for name in pipe_macro.IFO_MAP),
+            list(("chisq_" + name, "real_4") for name in pipe_macro.IFO_MAP),
             list(("end_time_sngl_" + name, "int_4s")
-                 for name in postcohtable.ifo_map),
+                 for name in pipe_macro.IFO_MAP),
             list(("end_time_ns_sngl_" + name, "int_4s")
-                 for name in postcohtable.ifo_map),
+                 for name in pipe_macro.IFO_MAP),
         ))
     constraints = "PRIMARY KEY (event_id)"
     next_id = PostcohInspiralID(0)

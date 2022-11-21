@@ -135,7 +135,7 @@ static PyObject *
     PyObject *wrapped_snr_series_list = PyList_New(MAX_NIFO);
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         COMPLEX8TimeSeries *complex8_snr_series =
-          buffer_postcohtable->snr_series[ifo_id];
+          buffer_postcohtable->snr_series_list[ifo_id];
 
         if (complex8_snr_series && complex8_snr_series->data->length > 0) {
             Complex8TimeSeriesWrapper *wrapped_snr_series =
@@ -415,7 +415,6 @@ static PyObject *
       new_wrapped_postcohtable(buffer_postcohtable);
     if (!wrapped_postcohtable) {
         Py_DECREF(self);
-        PyErr_SetString(PyExc_ValueError, "wrapped_postcohtable error");
         return NULL;
     }
 
@@ -425,7 +424,6 @@ static PyObject *
       new_wrapped_snr_series_list(buffer_postcohtable);
     if (!wrapped_snr_series_list) {
         Py_DECREF(self);
-        PyErr_SetString(PyExc_ValueError, "wrapped_snr_series error");
         return NULL;
     }
 
@@ -473,7 +471,6 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
 
         if (!postcohtrigger) {
             Py_DECREF(trigger_list);
-            PyErr_SetString(PyExc_ValueError, "postcohtrigger error");
             return NULL;
         }
 
@@ -507,16 +504,6 @@ PyMODINIT_FUNC init_postcohtable(void) {
 
     if (module == NULL) return;
     import_array();
-
-    PyObject *ifo_map = PyList_New(MAX_NIFO);
-    for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        PyObject *str = PyString_FromStringAndSize(
-          get_ifo_string(ifo_id), strlen(get_ifo_string(ifo_id)));
-        assert(str);
-        Py_INCREF(str);
-        PyList_SetItem(ifo_map, ifo_id, str);
-    }
-    PyModule_AddObject(module, "ifo_map", ifo_map);
 
     if (PyType_Ready(&postcoh_inspiral_wrapper_type) < 0) return;
     Py_INCREF(&postcoh_inspiral_wrapper_type);

@@ -1286,7 +1286,7 @@ static void cuda_postcoh_record_snr_series(CudaPostcoh *postcoh,
 
     // Allocate the memory
     // Note ownership is transferred with the buffer
-    output->snr_series[ifo_id] =
+    output->snr_series_list[ifo_id] =
       XLALCreateCOMPLEX8TimeSeries("snr", &epoch, 0., 1. / postcoh->rate,
                                    &lalDimensionlessUnit, state->autochisq_len);
 
@@ -1300,10 +1300,10 @@ static void cuda_postcoh_record_snr_series(CudaPostcoh *postcoh,
                    + snr_series_start * state->ntmplt
                    + pklist->tmplt_idx[peak_cur]);
 
-    // Load snglsnr data into snr_series->data->data
-    for (unsigned int j = 0; j < output->snr_series[ifo_id]->data->length;
+    // Load snglsnr data into snr_series_list->data->data
+    for (unsigned int j = 0; j < output->snr_series_list[ifo_id]->data->length;
          curr_snglsnr += state->ntmplt, j++) {
-        output->snr_series[ifo_id]->data->data[j] = *curr_snglsnr;
+        output->snr_series_list[ifo_id]->data->data[j] = *curr_snglsnr;
     }
 }
 
