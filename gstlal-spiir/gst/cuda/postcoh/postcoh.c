@@ -1201,8 +1201,9 @@ static int cuda_postcoh_select_background(PeakList *pklist,
 
 static int cuda_postcoh_select_foreground(PostcohState *state,
                                           float cohsnr_thresh) {
-    int ipeak, npeak, nifo = state->nifo, cluster_peak_pos[state->max_npeak],
-                      bubbled_peak_pos[state->max_npeak], peak_cur;
+    int iifo, ipeak, npeak, nifo = state->nifo,
+                            cluster_peak_pos[state->max_npeak],
+                            bubbled_peak_pos[state->max_npeak], peak_cur;
     int final_peaks = 0, bubbled_peaks = 0;
     PeakList *pklist;
     int *peak_pos;

@@ -66,4 +66,4 @@ def get_ifo_combos(ifos):
 
 
 def get_ifo_id(ifo_name):
-    return IFOMap.index(ifo_name)
+    return IFO_MAP.index(ifo_name)
