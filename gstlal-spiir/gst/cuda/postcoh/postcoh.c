@@ -634,7 +634,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     /* snglsnr_cpy_len is the length that only considers current and future data
      * that to be copied to the GPU structure, the GPU structure is a ring
      * buffer and already stored history data */
-    postcoh->snglsnr_cpy_len  = postcoh->preserved_len / 2 + postcoh->exe_len;
+    postcoh->snglsnr_cpy_len  = postcoh->head_len + postcoh->exe_len;
     postcoh->snglsnr_cpy_size = postcoh->snglsnr_cpy_len * postcoh->bps;
 
     state->exe_len          = postcoh->rate;
@@ -915,13 +915,14 @@ static void cuda_postcoh_push_zerobuf(GstAdapter *adapter, guint size) {
     GstBuffer *zerobuf = gst_buffer_new_and_alloc(size);
     if (!zerobuf) {
         GST_DEBUG_OBJECT(adapter, "failure allocating zero-pad buffer");
+        exit(1);
     }
     memset(GST_BUFFER_DATA(zerobuf), 0, GST_BUFFER_SIZE(zerobuf));
     gst_adapter_push(adapter, zerobuf);
 }
 
-static void cuda_postcoh_pad_with_fake_history(GstCollectPads *pads,
-                                               CudaPostcoh *postcoh) {
+static void cuda_postcoh_pad_with_fake_history(CudaPostcoh *postcoh,
+                                               GstCollectPads *pads) {
     /* invalid pads */
     g_assert(pads != NULL);
 
@@ -935,8 +936,8 @@ static void cuda_postcoh_pad_with_fake_history(GstCollectPads *pads,
     }
 }
 
-static gboolean cuda_postcoh_fillin_discont(GstCollectPads *pads,
-                                            CudaPostcoh *postcoh) {
+static gboolean cuda_postcoh_fillin_discont(CudaPostcoh *postcoh,
+                                            GstCollectPads *pads) {
     GSList *collectlist;
     GstPostcohCollectData *data;
     GstBuffer *buf = NULL;
@@ -971,8 +972,8 @@ static gboolean cuda_postcoh_fillin_discont(GstCollectPads *pads,
     return TRUE;
 }
 
-static gint cuda_postcoh_push_and_get_common_size(GstCollectPads *pads,
-                                                  CudaPostcoh *postcoh) {
+static gint cuda_postcoh_push_and_get_common_size(CudaPostcoh *postcoh,
+                                                  GstCollectPads *pads) {
 
     GSList *collectlist;
     GstPostcohCollectData *data;
@@ -1028,8 +1029,8 @@ static gint cuda_postcoh_push_and_get_common_size(GstCollectPads *pads,
     return min_size;
 }
 
-static gboolean cuda_postcoh_need_recollect(GstCollectPads *pads,
-                                            CudaPostcoh *postcoh) {
+static gboolean cuda_postcoh_need_recollect(CudaPostcoh *postcoh,
+                                            GstCollectPads *pads) {
 
     GSList *collectlist;
     GstPostcohCollectData *data;
@@ -1090,8 +1091,8 @@ static gboolean cuda_postcoh_need_recollect(GstCollectPads *pads,
     return need_recollect;
 }
 
-static gboolean cuda_postcoh_align_collected(GstCollectPads *pads,
-                                             CudaPostcoh *postcoh) {
+static gboolean cuda_postcoh_align_collected(CudaPostcoh *postcoh,
+                                             GstCollectPads *pads) {
 
     GSList *collectlist;
     GstPostcohCollectData *data;
@@ -1737,9 +1738,9 @@ static int peaks_over_thresh(COMPLEX_F *snglsnr,
     return npeak;
 }
 
-static void cuda_postcoh_process(GstCollectPads *pads,
-                                 gint common_size,
-                                 CudaPostcoh *postcoh) {
+static void cuda_postcoh_process(CudaPostcoh *postcoh,
+                                 GstCollectPads *pads,
+                                 gint common_size) {
     GSList *collectlist;
     GstPostcohCollectData *data;
     COMPLEX_F *one_take_snr, *snglsnr;
@@ -1954,20 +1955,20 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
                          GST_TIME_ARGS(postcoh->t0), postcoh->offset0);
         postcoh->set_starttime = TRUE;
 
-        cuda_postcoh_pad_with_fake_history(pads, postcoh);
+        cuda_postcoh_pad_with_fake_history(postcoh, pads);
     }
 
     if (postcoh->is_all_aligned) {
         /* first fill in any discontinuity */
-        cuda_postcoh_fillin_discont(pads, postcoh);
+        cuda_postcoh_fillin_discont(postcoh, pads);
 
         /* if buf in any of pads is 0 size, discard this buf.
          * push the buf in adapter if it is too small
          * this means this element starts to work only when
          * there are non-zero buffers in all pads */
-        if (cuda_postcoh_need_recollect(pads, postcoh)) return GST_FLOW_OK;
+        if (cuda_postcoh_need_recollect(postcoh, pads)) return GST_FLOW_OK;
 
-        common_size = cuda_postcoh_push_and_get_common_size(pads, postcoh);
+        common_size = cuda_postcoh_push_and_get_common_size(postcoh, pads);
         GST_DEBUG_OBJECT(postcoh, "get spanned size %d, get spanned samples %f",
                          common_size, (float)common_size / postcoh->bps);
 
@@ -1977,10 +1978,10 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
             return res;
         }
 
-        cuda_postcoh_process(pads, common_size, postcoh);
+        cuda_postcoh_process(postcoh, pads, common_size);
 
     } else {
-        postcoh->is_all_aligned = cuda_postcoh_align_collected(pads, postcoh);
+        postcoh->is_all_aligned = cuda_postcoh_align_collected(postcoh, pads);
     }
     return GST_FLOW_OK;
 }
