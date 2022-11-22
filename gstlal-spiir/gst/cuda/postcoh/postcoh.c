@@ -1208,14 +1208,14 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
     int *peak_pos;
     int left_entries = 0;
 
-    for (int pad_id = 0; pad_id < nifo; pad_id++) {
-        if (state->cur_ifo_is_gap[pad_id]) continue;
-        final_peaks                   = 0;
-        bubbled_peaks                 = 0;
-        pklist                        = state->peak_list[pad_id];
-        npeak                         = pklist->npeak[0];
-        peak_pos                      = pklist->peak_pos;
-        state->skymap_peakcur[pad_id] = peak_pos[0];
+    for (iifo = 0; iifo < nifo; iifo++) {
+        if (state->cur_ifo_is_gap[iifo]) continue;
+        final_peaks                 = 0;
+        bubbled_peaks               = 0;
+        pklist                      = state->peak_list[iifo];
+        npeak                       = pklist->npeak[0];
+        peak_pos                    = pklist->peak_pos;
+        state->skymap_peakcur[iifo] = peak_pos[0];
 
         /*
          * select background that satisfy the criteria: cohsnr > triggersnr +
@@ -1223,7 +1223,7 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
          */
         if (npeak > 0)
             left_entries += cuda_postcoh_select_background(
-              pklist, state->write_ifo_mapping[pad_id], state->hist_trials,
+              pklist, state->write_ifo_mapping[iifo], state->hist_trials,
               state->max_npeak, cohsnr_thresh);
 
         /*
@@ -1239,7 +1239,7 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
          * select zerolag that satisfy the criteria: cohsnr > triggersnr +
          * coh_thresh
          */
-        int write_ifo = state->write_ifo_mapping[pad_id];
+        int write_ifo = state->write_ifo_mapping[iifo];
         for (ipeak = 0; ipeak < npeak; ipeak++) {
             /* if the difference of maximum single snr and coherent snr is
              * ignorable, it means that only one detector is in action, we
@@ -1264,7 +1264,7 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
         memcpy(peak_pos, cluster_peak_pos, sizeof(int) * state->max_npeak);
         pklist->npeak[0] = npeak;
 
-        GST_DEBUG("ifo %d, back entries %d, npeak %d", pad_id, left_entries,
+        GST_DEBUG("ifo %d, back entries %d, npeak %d", iifo, left_entries,
                   npeak);
         /* mark the foreground triggers to be added to the postcoh table */
         left_entries += npeak;
