@@ -762,8 +762,8 @@ class FinalSink(object):
             for fars in zip(postcoh_inspiral.far_2h_sngl, postcoh_inspiral.
                             far_1d_sngl, postcoh_inspiral.far_1w_sngl)
         ]
-        for i, ifo in enumerate(pipe_macro.IFO_MAP):
-            setattr(postcoh_inspiral, "far_sngl_%s" % ifo, far_sngl[i])
+        for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
+            postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
 
     def __need_trigger_control(self, trigger):
         # do trigger control
@@ -1139,7 +1139,7 @@ class CoincsDocFromPostcoh(object):
         # add to sngl_inspiral table the network SNR = sqrt(H**2 + L**2 + V**2)
         row.snr = np.sqrt(
             np.sum([
-                getattr(postcoh_inspiral, "snglsnr_%s" % ifo)**2
+                postcoh_inspiral.snglsnr[pipe_macro.get_ifo_id(ifo)]**2
                 for ifo in re.findall("..", postcoh_inspiral.ifos)
             ]))
         row.end_time_ns = postcoh_inspiral.end_time_ns
@@ -1179,7 +1179,7 @@ class CoincsDocFromPostcoh(object):
             row.offset = 0
             time_slide_table.append(row)
 
-    def assemble_snglinspiral_table(self, trigger):
+    def assemble_snglinspiral_table(self, postcoh_inspiral):
         sngl_inspiral_table = lsctables.SnglInspiralTable.get_table(
             self.xmldoc)
         for standard_column in (
@@ -1202,28 +1202,29 @@ class CoincsDocFromPostcoh(object):
                 # already has it
                 pass
 
-        for ifo_id, ifo in enumerate(re.findall('..', trigger.ifos)):
+        for trigger_ifo_id, ifo in enumerate(re.findall('..', postcoh_inspiral.ifos)):
+            ifo_id = pipe_macro.get_ifo_id(ifo)
             row = sngl_inspiral_table.RowType()
             # Setting the individual row
             row.process_id = self.process.process_id
             row.ifo = ifo
             row.search = self.url
             row.channel = self.channel_dict[ifo]
-            row.end_time = getattr(trigger, "end_time_sngl_%s" % ifo)
-            row.end_time_ns = getattr(trigger, "end_time_ns_sngl_%s" % ifo)
+            row.end_time = postcoh_inspiral.end_time_sngl[ifo_id]
+            row.end_time_ns = postcoh_inspiral.end_time_ns_sngl[ifo_id]
             row.end_time_gmst = 0
             row.impulse_time = 0
             row.impulse_time_ns = 0
-            row.template_duration = trigger.template_duration
+            row.template_duration = postcoh_inspiral.template_duration
             row.event_duration = 0
             row.amplitude = 0
-            row.eff_distance = getattr(trigger, "deff_%s" % ifo)
-            row.coa_phase = getattr(trigger, "coaphase_%s" % ifo)
-            row.mass1 = trigger.mass1
-            row.mass2 = trigger.mass2
-            row.mchirp = trigger.mchirp
-            row.mtotal = trigger.mtotal
-            row.eta = trigger.eta
+            row.eff_distance = postcoh_inspiral.deff[ifo_id]
+            row.coa_phase = postcoh_inspiral.coaphase[ifo_id]
+            row.mass1 = postcoh_inspiral.mass1
+            row.mass2 = postcoh_inspiral.mass2
+            row.mchirp = postcoh_inspiral.mchirp
+            row.mtotal = postcoh_inspiral.mtotal
+            row.eta = postcoh_inspiral.eta
             row.kappa = 0
             row.chi = 1
             row.tau0 = 0
@@ -1242,9 +1243,9 @@ class CoincsDocFromPostcoh(object):
             row.alpha5 = 0
             row.alpha6 = 0
             row.beta = 0
-            row.f_final = trigger.f_final
-            row.snr = getattr(trigger, "snglsnr_%s" % ifo)
-            row.chisq = getattr(trigger, "chisq_%s" % ifo)
+            row.f_final = postcoh_inspiral.f_final
+            row.snr = postcoh_inspiral.snglsnr[ifo_id]
+            row.chisq = postcoh_inspiral.chisq[ifo_id]
             row.chisq_dof = 4
             row.bank_chisq = 0
             row.bank_chisq_dof = 0
@@ -1262,13 +1263,13 @@ class CoincsDocFromPostcoh(object):
             row.Gamma7 = 0
             row.Gamma8 = 0
             row.Gamma9 = 0
-            row.spin1x = trigger.spin1x
-            row.spin1y = trigger.spin1y
-            row.spin1z = trigger.spin1z
-            row.spin2x = trigger.spin2x
-            row.spin2y = trigger.spin2y
-            row.spin2z = trigger.spin2z
-            row.event_id = "sngl_inspiral:event_id:%d" % ifo_id
+            row.spin1x = postcoh_inspiral.spin1x
+            row.spin1y = postcoh_inspiral.spin1y
+            row.spin1z = postcoh_inspiral.spin1z
+            row.spin2x = postcoh_inspiral.spin2x
+            row.spin2y = postcoh_inspiral.spin2y
+            row.spin2z = postcoh_inspiral.spin2z
+            row.event_id = "sngl_inspiral:event_id:%d" % trigger_ifo_id
             sngl_inspiral_table.append(row)
 
     def assemble_ligolw_psd_arrays(self, psds):

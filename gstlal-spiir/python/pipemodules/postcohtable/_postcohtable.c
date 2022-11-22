@@ -152,6 +152,7 @@ static PyObject *
                            (PyObject *)wrapped_snr_series);
         } else {
             PyList_SetItem(wrapped_snr_series_list, ifo_id, Py_None);
+            Py_INCREF(Py_None);
         }
     }
     return wrapped_snr_series_list;
@@ -280,9 +281,9 @@ static PyMemberDef members_postcohinspiral[] = {
       "event_id (long)" },
 
     // Things that are done single detector are ndarrays
-    { "end_time_sngl", T_OBJECT_EX,
+    { "_end_time_sngl", T_OBJECT_EX,
       offsetof(PostcohInspiralWrapper, end_time_sngl), READONLY,
-      "end_time_sngl" },
+      "_end_time_sngl" },
     { "snglsnr", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, snglsnr),
       READONLY, "snglsnr" },
     { "coaphase", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, coaphase),
@@ -378,7 +379,6 @@ static PyMemberDef members_postcohtrigger[] = {
     { "postcoh_inspiral", T_OBJECT_EX,
       offsetof(PostcohTrigger, wrapped_postcohtable), READONLY,
       "postcoh_inspiral" },
-    // Things that are done single detector are ndarrays
     { "snr_series_list", T_OBJECT_EX,
       offsetof(PostcohTrigger, wrapped_snr_series_list), READONLY,
       "snr_series_list" },

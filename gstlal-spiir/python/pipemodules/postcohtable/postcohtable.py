@@ -58,36 +58,23 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
     def event_id(self, val):
         self._event_id = int(val)
 
+    @property
+    def end_time_sngl(self):
+        return self._end_time_sngl[:, 0]
+
+    @property
+    def end_time_ns_sngl(self):
+        return self._end_time_sngl[:, 1]
+
     def __getattribute__(self, name):
         found_ifo = None
-        for i, ifo in enumerate(pipe_macro.IFO_MAP):
+        for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
             if name.endswith(ifo):
-                found_ifo = i
+                found_ifo = ifo_id
+                # removesuffix() in python 3.9+
                 name = name[:-len('_' + ifo)]
                 break
         if found_ifo is None:
             return super(PostcohInspiral, self).__getattribute__(name)
-        if name == "end_time_sngl":
-            return self.end_time_sngl[found_ifo][0]
-        elif name == "end_time_ns_sngl":
-            return self.end_time_sngl[found_ifo][1]
-        else:
-            return super(PostcohInspiral,
-                         self).__getattribute__(name)[found_ifo]
-
-    def __setattr__(self, name, value):
-        found_ifo = None
-        for i, ifo in enumerate(pipe_macro.IFO_MAP):
-            if name.endswith(ifo):
-                found_ifo = i
-                name = name[:-len('_' + ifo)]
-                break
-        if found_ifo is None:
-            return super(PostcohInspiral, self).__setattr__(name, value)
-        if name == "end_time_sngl":
-            self.end_time_sngl[0][found_ifo] = value
-        elif name == "end_time_ns_sngl":
-            self.end_time_sngl[1][found_ifo] = value
-        else:
-            super(PostcohInspiral,
-                  self).__getattribute__(name)[found_ifo] = value
+        return super(PostcohInspiral,
+                        self).__getattribute__(name)[found_ifo]
