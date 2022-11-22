@@ -1202,7 +1202,8 @@ class CoincsDocFromPostcoh(object):
                 # already has it
                 pass
 
-        for trigger_ifo_id, ifo in enumerate(re.findall('..', postcoh_inspiral.ifos)):
+        for trigger_ifo_id, ifo in enumerate(
+                re.findall('..', postcoh_inspiral.ifos)):
             ifo_id = pipe_macro.get_ifo_id(ifo)
             row = sngl_inspiral_table.RowType()
             # Setting the individual row

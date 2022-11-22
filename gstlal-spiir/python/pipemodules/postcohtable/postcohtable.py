@@ -76,5 +76,4 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
                 break
         if found_ifo is None:
             return super(PostcohInspiral, self).__getattribute__(name)
-        return super(PostcohInspiral,
-                        self).__getattribute__(name)[found_ifo]
+        return super(PostcohInspiral, self).__getattribute__(name)[found_ifo]
