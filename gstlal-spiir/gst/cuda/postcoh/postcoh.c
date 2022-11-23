@@ -1852,7 +1852,8 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
               state->ntmplt, postcoh->stream);
 
             cudaStreamSynchronize(postcoh->stream);
-            state->snr_history_per_template[cur_ifo] = one_take_snr;
+            int ifo_id = state->write_ifo_mapping[cur_ifo];
+            state->snr_history_per_template[ifo_id] = one_take_snr;
         }
         cur_ifo = 0;
         for (int iifo = 0; iifo < state->nifo; ++iifo)
