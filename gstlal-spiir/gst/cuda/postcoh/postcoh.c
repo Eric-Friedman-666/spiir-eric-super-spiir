@@ -68,60 +68,33 @@ typedef struct flag_segment {
     gboolean is_gap; // GAP true, non-GAP, false
 } FlagSegment;
 
-static gboolean need_flag_gap(GstPostcohCollectData *data,
-                              GstClockTime start,
-                              GstClockTime stop) {
-    GstClockTime dur_gap = 0, dur_buf = stop - start;
-    gboolean need_flush   = FALSE;
+static gboolean postcoh_collect_data__is_gap(GstPostcohCollectData *data,
+                                             GstClockTime start,
+                                             GstClockTime stop) {
     GArray *flag_segments = data->flag_segments;
-    guint flush_len       = 0;
-    FlagSegment *this_segment =
+    /* The final segment must not end before the stop time */
+    g_assert(flag_segments->len > 0);
+    FlagSegment *final_segment =
       &((FlagSegment *)flag_segments->data)[flag_segments->len - 1];
-    /* make sure the last segment always later than the outbuf */
-    g_assert(this_segment->stop >= stop);
+    g_assert(final_segment->stop >= stop);
 
+    guint flush_len      = 0;
+    GstClockTime dur_gap = 0;
     for (guint i = 0; i < flag_segments->len; i++) {
-        this_segment = &((FlagSegment *)flag_segments->data)[i];
-        /*		| start				| stop
-         *									|
-         *this_start (1) | s | e (2)
-         * | s							| e
-         * | s		| e
-         *            |s | e
-         *            |s				| e
-         */
+        FlagSegment *this_segment = &((FlagSegment *)flag_segments->data)[i];
         if (this_segment->start >= stop) break;
-        if (this_segment->stop <= start) {
-            need_flush = TRUE;
-            flush_len  = i - 1;
-            continue;
-        }
-        if (this_segment->start <= start && this_segment->stop >= stop) {
-            dur_gap += this_segment->is_gap ? dur_buf : 0;
-            continue;
-        }
 
-        if (this_segment->start <= start && this_segment->stop < stop) {
-            dur_gap += this_segment->is_gap ? this_segment->stop - start : 0;
-            continue;
-        }
-        if (this_segment->start > start && this_segment->stop <= stop) {
-            dur_gap += this_segment->is_gap
-                         ? this_segment->stop - this_segment->start
-                         : 0;
-            continue;
-        }
-        if (this_segment->start > start && this_segment->stop > stop) {
-            dur_gap += this_segment->is_gap ? stop - this_segment->start : 0;
-            continue;
+        if (this_segment->stop <= start) {
+            flush_len = i + 1;
+        } else if (this_segment->is_gap) {
+            GstClockTime gap_start = MAX(this_segment->start, start);
+            GstClockTime gap_stop  = MIN(this_segment->stop, stop);
+            dur_gap += gap_stop - gap_start;
         }
     }
-    if (need_flush && flush_len > 0)
-        g_array_remove_range(flag_segments, 0, flush_len);
+    if (flush_len > 0) g_array_remove_range(flag_segments, 0, flush_len);
 
-    if (dur_gap > dur_buf / 2 - 1e-6) return TRUE;
-    else
-        return FALSE;
+    return dur_gap > (stop - start) / 2 - 1e-6;
 }
 
 static void add_flag_segment(GstPostcohCollectData *data,
@@ -1715,8 +1688,8 @@ static void cuda_postcoh_process(GstCollectPads *pads,
              collectlist = g_slist_next(collectlist), i++) {
             data    = collectlist->data;
             cur_ifo = state->input_ifo_mapping[i];
-            state->cur_ifo_is_gap[cur_ifo] =
-              need_flag_gap(data, postcoh->next_exe_t, ts_exe_end);
+            state->cur_ifo_is_gap[cur_ifo] = postcoh_collect_data__is_gap(
+              data, postcoh->next_exe_t, ts_exe_end);
             state->snglsnr_max[cur_ifo] = 0;
             PeakList *pklist            = state->peak_list[cur_ifo];
 

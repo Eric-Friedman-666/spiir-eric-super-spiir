@@ -81,68 +81,57 @@ typedef struct flag_segment {
     gboolean is_gap; // GAP true, non-GAP, false
 } FlagSegment;
 
-static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
-                                    GstBuffer *outbuf) {
-    GstClockTime buf_start = GST_BUFFER_TIMESTAMP(outbuf), start = buf_start,
-                 stop = start + GST_BUFFER_DURATION(outbuf), sub_start,
-                 sub_stop;
-    gboolean need_flush   = FALSE;
+static GstFlowReturn push_with_flag_segments(CudaMultirateSPIIR *element,
+                                             GstBuffer *outbuf) {
+    GstClockTime start    = GST_BUFFER_TIMESTAMP(outbuf),
+                 stop     = start + GST_BUFFER_DURATION(outbuf);
     GArray *flag_segments = element->flag_segments;
-    guint64 sub_offset, sub_offset_end;
-    guint outsize;
-    guint out_len, pushed_len = 0;
-    gint is_buf_intact = 1;
-    GstFlowReturn ret;
-    GstBuffer *subbuf;
-    guint flush_len = 0;
-    FlagSegment *this_segment =
-      &((FlagSegment *)flag_segments->data)[flag_segments->len - 1];
-    /* make sure the last segment always later than the outbuf */
-    g_assert(this_segment->stop >= stop);
-    for (guint i = 0; i < flag_segments->len && stop > start; i++) {
 
-        this_segment = &((FlagSegment *)flag_segments->data)[i];
-        /*		| start				| stop
-         *									|
-         *this_start (1) | s | e (2)
-         * | s							| e
-         * | s		| e
-         *            |s | e
-         *            |s				| e
-         */
+    /* The final segment must end after outbuf */
+    g_assert(flag_segments->len > 0);
+    FlagSegment *final_segment =
+      &((FlagSegment *)flag_segments->data)[flag_segments->len - 1];
+    g_assert(final_segment->stop >= stop);
+
+    guint pushed_len       = 0;
+    gboolean is_buf_intact = TRUE;
+    GstFlowReturn ret;
+    guint flush_len = 0;
+    for (guint i = 0; i < flag_segments->len && stop > start; i++) {
+        // Push a subbuffer for each segment's overlap with the buffer
+        FlagSegment *this_segment = &((FlagSegment *)flag_segments->data)[i];
 
         if (this_segment->start > stop) break;
 
         if (this_segment->stop < start) {
-            need_flush = TRUE;
-            flush_len  = i - 1;
+            flush_len = i + 1;
             continue;
         }
 
-        sub_start = this_segment->start > start ? this_segment->start : start;
-        sub_stop  = this_segment->stop < stop ? this_segment->stop : stop;
-
-        out_len        = round((double)(sub_stop - sub_start)
-                        * element->offset_per_nanosecond);
-        sub_offset     = element->offset0 + element->samples_out;
-        sub_offset_end = sub_offset + out_len;
-        outsize        = out_len * (guint)element->bps;
+        GstClockTime sub_start = MAX(this_segment->start, start);
+        GstClockTime sub_stop  = MIN(this_segment->stop, stop);
+        guint sub_len          = round((double)(sub_stop - sub_start)
+                              * element->offset_per_nanosecond);
+        guint sub_size         = sub_len * (guint)element->bps;
 
         GST_DEBUG_OBJECT(
           element,
-          "segment len %d, processing %d, start %" GST_TIME_FORMAT
+          "number of segments %d, processing %d, start %" GST_TIME_FORMAT
           ", stop %" GST_TIME_FORMAT " segment start %" GST_TIME_FORMAT
-          ", segment stop %" GST_TIME_FORMAT " out_len %u, out_size %u",
+          ", segment stop %" GST_TIME_FORMAT " sub_len %u, sub_size %u",
           flag_segments->len, i, GST_TIME_ARGS(start), GST_TIME_ARGS(stop),
           GST_TIME_ARGS(this_segment->start), GST_TIME_ARGS(this_segment->stop),
-          out_len, outsize);
-        if (out_len > 0) {
+          sub_len, sub_size);
+
+        if (sub_len > 0) {
+            guint64 sub_offset     = element->offset0 + element->samples_out;
+            guint64 sub_offset_end = sub_offset + sub_len;
             /* note that the buf->data is gunit8 *, so need to calculate the
              * offset for subbuf */
-            subbuf = gst_buffer_create_sub(
+            GstBuffer *subbuf = gst_buffer_create_sub(
               outbuf,
               (guint)(sub_offset - GST_BUFFER_OFFSET(outbuf)) * element->bps,
-              outsize);
+              sub_size);
             if (!subbuf) {
                 GST_ERROR_OBJECT(element, "failing creating sub-buffer");
                 return GST_FLOW_ERROR;
@@ -155,7 +144,7 @@ static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
             GST_BUFFER_DURATION(subbuf)   = sub_stop - sub_start;
             GST_BUFFER_OFFSET(subbuf)     = sub_offset;
             GST_BUFFER_OFFSET_END(subbuf) = sub_offset_end;
-            GST_BUFFER_SIZE(subbuf)       = outsize;
+            GST_BUFFER_SIZE(subbuf)       = sub_size;
 
             if (this_segment->is_gap) {
                 GST_BUFFER_FLAG_SET(subbuf, GST_BUFFER_FLAG_GAP);
@@ -168,7 +157,7 @@ static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
               ", offset %" G_GUINT64_FORMAT ", offset_end %" G_GUINT64_FORMAT
               " with flag %d from buf with timestamp %" GST_TIME_FORMAT
               " duration %" GST_TIME_FORMAT "first value %f, second value %f",
-              outsize, GST_TIME_ARGS(sub_start),
+              sub_size, GST_TIME_ARGS(sub_start),
               GST_TIME_ARGS(sub_stop - sub_start), sub_offset, sub_offset_end,
               this_segment->is_gap, GST_TIME_ARGS(GST_BUFFER_TIMESTAMP(outbuf)),
               GST_TIME_ARGS(GST_BUFFER_DURATION(outbuf)),
@@ -178,17 +167,16 @@ static GstFlowReturn push_with_flag(CudaMultirateSPIIR *element,
             ret = gst_pad_push(element->srcpad, subbuf);
             GST_LOG_OBJECT(element, "pushed sub buffer, result = %s",
                            gst_flow_get_name(ret));
-            is_buf_intact = 0;
-            element->samples_out += out_len;
+            is_buf_intact = FALSE;
+            element->samples_out += sub_len;
             start = sub_stop;
-            pushed_len += out_len;
+            pushed_len += sub_len;
         }
     }
     g_assert(pushed_len
              == GST_BUFFER_OFFSET_END(outbuf) - GST_BUFFER_OFFSET(outbuf));
 
-    if (need_flush && flush_len > 0)
-        g_array_remove_range(flag_segments, 0, flush_len);
+    if (flush_len > 0) g_array_remove_range(flag_segments, 0, flush_len);
 
     if (is_buf_intact) {
         gst_buffer_ref(outbuf); /* need the transform to free it */
@@ -942,7 +930,7 @@ static GstFlowReturn cuda_multiratespiir_process(CudaMultirateSPIIR *element,
     cuda_multiratespiir_update_exe_samples(&element->num_exe_samples,
                                            element->rate);
 
-    GstFlowReturn ret = push_with_flag(element, outbuf);
+    GstFlowReturn ret = push_with_flag_segments(element, outbuf);
     if (ret != GST_FLOW_OK) return ret;
     else
         return GST_BASE_TRANSFORM_FLOW_DROPPED;
