@@ -18,15 +18,17 @@
 
 from glue.ligolw import ilwd
 from glue.ligolw import lsctables
-import lal
+from gstlal.pipemodules import pipe_macro
 from . import _postcohtable
 
-__all__ = ["GSTLALPostcohInspiral", "ifo_map"]
+__all__ = ["PostcohInspiral", "SNRSeries", "PostcohTrigger", "from_buffer"]
 
-ifo_map = _postcohtable.ifo_map
+from_buffer = _postcohtable.from_buffer
+SNRSeries = _postcohtable.SNRSeries
+PostcohTrigger = _postcohtable.PostcohTrigger
 
 
-class GSTLALPostcohInspiral(_postcohtable.GSTLALPostcohInspiral):
+class PostcohInspiral(_postcohtable.PostcohInspiral):
     __slots__ = ()
 
     process_id_type = ilwd.get_ilwdchar_class("process", "process_id")
@@ -57,30 +59,21 @@ class GSTLALPostcohInspiral(_postcohtable.GSTLALPostcohInspiral):
         self._event_id = int(val)
 
     @property
-    def snr_time_series(self):
-        try:
-            name = self._snr_name
-        except ValueError:
-            # C interface raises ValueError if the internal snr
-            # pointer is NULL
-            return None
-        series = lal.CreateCOMPLEX8TimeSeries(
-            name,
-            lal.LIGOTimeGPS(self._snr_epoch_gpsSeconds,
-                            self._snr_epoch_gpsNanoSeconds), self._snr_f0,
-            self._snr_deltaT, lal.Unit(self._snr_sampleUnits),
-            self._snr_data_length)
-        # we want to be able to keep the table row object in memory
-        # for an extended period of time so we need to be able to
-        # release the memory used by the SNR time series when we no
-        # longer need it, and so we copy the data here instead of
-        # holding a reference to the original memory.  if we
-        # allowed references to the original memory to leak out
-        # into Python land we could never know if it's safe to free
-        # it
-        series.data.data[:] = self._snr_data
-        return series
+    def end_time_sngl(self):
+        return self._end_time_sngl[:, 0]
 
-    @snr_time_series.deleter
-    def snr_time_series(self):
-        self._snr_time_series_deleter()
+    @property
+    def end_time_ns_sngl(self):
+        return self._end_time_sngl[:, 1]
+
+    def __getattribute__(self, name):
+        found_ifo = None
+        for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
+            if name.endswith(ifo):
+                found_ifo = ifo_id
+                # removesuffix() in python 3.9+
+                name = name[:-len('_' + ifo)]
+                break
+        if found_ifo is None:
+            return super(PostcohInspiral, self).__getattribute__(name)
+        return super(PostcohInspiral, self).__getattribute__(name)[found_ifo]

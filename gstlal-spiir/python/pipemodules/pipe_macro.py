@@ -63,3 +63,7 @@ def get_ifo_combos(ifos):
         ]
         ifo_combos.extend(combo_str_list)
     return ifo_combos
+
+
+def get_ifo_id(ifo_name):
+    return IFO_MAP.index(ifo_name)
