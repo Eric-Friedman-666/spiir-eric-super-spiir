@@ -435,6 +435,7 @@ class FinalSink(object):
                  opa_cohsnr_thresh=8,
                  negative_latency=0,
                  append_psd_to_coincs_doc=True,
+                 expected_buffers_per_timestamp=None,
                  verbose=False):
         #
         # initialize
@@ -446,6 +447,11 @@ class FinalSink(object):
         self.channel_dict = channel_dict
         self.ifos = lsctables.ifos_from_instrument_set(
             channel_dict.keys()).replace(",", "")  # format: "H1L1V1K1"
+
+        # Track number of current buffers so we can process early when possible
+        self.current_timestamp = None
+        self.num_current_buffers = 0
+        self.expected_buffers_per_timestamp = expected_buffers_per_timestamp
 
         # cluster parameters
         self.cluster_window = cluster_window
@@ -622,11 +628,32 @@ class FinalSink(object):
                 self.t_start = buf_timestamp
                 self.is_first_buf = False
 
+            # Keep track of the latest timestamp seen on any buffer and number
+            # of buffers seen at that timestamp. If we have as many buffers as
+            # we are expecting we can process them now rather than waiting for
+            # the next buffer.
+            if self.current_timestamp is None \
+                    or buf_timestamp > self.current_timestamp:
+                self.current_timestamp = buf_timestamp
+                self.num_current_buffers = 0
+
+            if buf_timestamp == self.current_timestamp:
+                self.num_current_buffers += 1
+
+            have_latest_buffers = \
+                self.num_current_buffers == self.expected_buffers_per_timestamp
+
+            max_cluster_boundary = buf_timestamp
+            if have_latest_buffers:
+                max_cluster_boundary = buf_timestamp + LIGOTimeGPS(
+                    0, buf.duration)
+                self.cur_event_table.extend(newevents)
+
             # The max (upper) bound of any cluster we are willing to process.
             # Assume we have all buffers from before the start of this buffer
             # Event end times are offset by negative latency if we are
             # running early warning
-            max_cluster_boundary = buf_timestamp + self.negative_latency
+            max_cluster_boundary = max_cluster_boundary + self.negative_latency
             if self.is_first_event and nevent > 0:
                 self.cluster_boundary = (max_cluster_boundary +
                                          self.cluster_window)
@@ -659,7 +686,10 @@ class FinalSink(object):
             # extend newevents to cur_event_table
             # Has to be done after processing pre-existing events, because this
             # buffer may contain events with end time before the buffer start
-            self.cur_event_table.extend(newevents)
+            # Will have been done above if we could process this buffer early,
+            # so don't double up events if so.
+            if not have_latest_buffers:
+                self.cur_event_table.extend(newevents)
 
             if self.cluster_window == 0:
                 self.postcoh_table.extend(
