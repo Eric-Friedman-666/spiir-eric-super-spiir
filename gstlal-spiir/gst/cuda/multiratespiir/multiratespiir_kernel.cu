@@ -259,6 +259,7 @@ __global__ void
         // Wait for all partial sums to be done
         __syncthreads();
 
+        unsigned warp_mask = __ballot_sync(0xFFFFFFFF, tWarp == 0);
         // Warp-reduce partial sums to get final sum
         if (tWarp == 0) {
             // Load each partial sum (if that warp existed) into a lane-local
@@ -271,8 +272,8 @@ __global__ void
                                : 0;
 
             for (int off = WARPSIZE >> 1; off > 0; off = off >> 1) {
-                sum_real += __shfl_down_sync(ALL_THREADS_MASK, sum_real, off);
-                sum_imag += __shfl_down_sync(ALL_THREADS_MASK, sum_imag, off);
+                sum_real += __shfl_down_sync(warp_mask, sum_real, off);
+                sum_imag += __shfl_down_sync(warp_mask, sum_imag, off);
             }
 
             if (threadIdx.x == 0) {
@@ -340,6 +341,8 @@ __global__ void cuda_iir_filter_kernel_fine(COMPLEX_F *cudaA1,
     fltrOutptImag  = 0.0f;
 
     // Total number of CUs should exceed numTemplates
+    unsigned compute_unit_mask =
+      __ballot_sync(0xFFFFFFFF, cuIdG < numTemplates);
     if (cuIdG < numTemplates) {
         if (tIdL < numFilters) {
             a1          = cudaA1[cuIdG * numFilters + tIdL];
@@ -365,9 +368,9 @@ __global__ void cuda_iir_filter_kernel_fine(COMPLEX_F *cudaA1,
 
             // Inter-CU Reduction
             for (int off = cu >> 1; off > 0; off = off >> 1) {
-                fltrOutptReal += __shfl_sync(ALL_THREADS_MASK, fltrOutptReal,
+                fltrOutptReal += __shfl_sync(compute_unit_mask, fltrOutptReal,
                                              tLane + off, 2 * off);
-                fltrOutptImag += __shfl_sync(ALL_THREADS_MASK, fltrOutptImag,
+                fltrOutptImag += __shfl_sync(compute_unit_mask, fltrOutptImag,
                                              tLane + off, 2 * off);
             }
 
@@ -383,121 +386,6 @@ __global__ void cuda_iir_filter_kernel_fine(COMPLEX_F *cudaA1,
             cudaPrevSnr[cuIdG * numFilters + tIdL] = previousSnr;
         }
     }
-}
-
-__global__ void cuda_iir_filter_kernel(COMPLEX_F *cudaA1,
-                                       COMPLEX_F *cudaB0,
-                                       int *cudaShift,
-                                       COMPLEX_F *cudaPrevSnr,
-                                       float *cudaData,
-                                       float *cudaSnr,
-                                       gint mem_len,
-                                       gint filt_len,
-                                       gint delay_max,
-                                       gint len,
-                                       guint nb,
-                                       gint queue_first_sample,
-                                       gint queue_len) {
-    unsigned int i, j;
-
-    COMPLEX_F a1, b0;
-    int shift;
-    unsigned int tx = threadIdx.x;
-    // unsigned int bx = blockIdx.x;
-    unsigned int by = blockIdx.y;
-
-    unsigned int threads = blockDim.x, numFilters = blockDim.x;
-    float data;
-    COMPLEX_F *gPrevSnr;
-    COMPLEX_F previousSnr;
-    float *snr_real, *snr_imag;
-    COMPLEX_F snrVal;
-    unsigned int numSixtnGrp;
-    numSixtnGrp = (numFilters + 16 - 1) / 16;
-
-    volatile float *fltrOutptReal = (float *)sharedMem;
-    volatile float *fltrOutptImag = &(fltrOutptReal[numFilters + 8]);
-    float *grpOutptReal           = (float *)&(fltrOutptImag[numFilters + 8]);
-    float *grpOutptImag           = &(grpOutptReal[numSixtnGrp * nb]);
-
-    unsigned int tx_2 = tx % 16;
-    unsigned int tx_3 = tx / 16;
-    for (i = tx; i < 8; i += threads) {
-        fltrOutptReal[numFilters + i] = 0.0f;
-        fltrOutptImag[numFilters + i] = 0.0f;
-    }
-    __syncthreads();
-
-    if (tx < numFilters) {
-
-        gPrevSnr    = &(cudaPrevSnr[by * numFilters + tx]);
-        previousSnr = *gPrevSnr;
-
-        a1    = cudaA1[by * numFilters + tx];
-        b0    = cudaB0[by * numFilters + tx];
-        shift = delay_max - cudaShift[by * numFilters + tx];
-        if (tx < nb) {
-            snr_real = &(cudaSnr[2 * by * mem_len + filt_len - 1 + tx]);
-            snr_imag = &(cudaSnr[(2 * by + 1) * mem_len + filt_len - 1 + tx]);
-        }
-
-        for (i = 0; i < len; i += nb) {
-            for (j = 0; j < nb; ++j) {
-                // data = 0.01f;
-                // data = tex1Dfetch(texRef, shift+i+j);		//use
-                // texture, abandon now
-                data =
-                  cudaData[(shift + i + j + queue_first_sample) % queue_len];
-                // printf ("channelid %d, data %d %f\n", by, i+j, data);
-                fltrOutptReal[tx] = a1.re * previousSnr.re
-                                    - a1.im * previousSnr.im + b0.re * data;
-
-                fltrOutptImag[tx] = a1.re * previousSnr.im
-                                    + a1.im * previousSnr.re + b0.im * data;
-
-                //__syncthreads();
-                previousSnr.re = fltrOutptReal[tx];
-                previousSnr.im = fltrOutptImag[tx];
-
-                fltrOutptReal[tx] += fltrOutptReal[tx + 8];
-                fltrOutptImag[tx] += fltrOutptImag[tx + 8];
-                fltrOutptReal[tx] += fltrOutptReal[tx + 4];
-                fltrOutptImag[tx] += fltrOutptImag[tx + 4];
-                fltrOutptReal[tx] += fltrOutptReal[tx + 2];
-                fltrOutptImag[tx] += fltrOutptImag[tx + 2];
-                fltrOutptReal[tx] += fltrOutptReal[tx + 1];
-                fltrOutptImag[tx] += fltrOutptImag[tx + 1];
-                if (tx_2 == 0) {
-#if 0
-					for (int iter=1; iter<16; iter++) {
-						fltrOutptReal[tx] += fltrOutptReal[tx + iter];
-						fltrOutptImag[tx] += fltrOutptImag[tx + iter];
-					}
-#endif
-                    grpOutptReal[tx_3 * nb + j] = fltrOutptReal[tx];
-                    grpOutptImag[tx_3 * nb + j] = fltrOutptImag[tx];
-                }
-            }
-            __syncthreads();
-            if (tx < nb) {
-                snrVal.re = 0.0f;
-                snrVal.im = 0.0f;
-                for (j = 0; j < numSixtnGrp; ++j) {
-                    snrVal.re += grpOutptReal[j * nb + tx];
-                    snrVal.im += grpOutptImag[j * nb + tx];
-                }
-                snr_real[i] = snrVal.re;
-                snr_imag[i] = snrVal.im;
-            }
-            __syncthreads();
-        }
-        *gPrevSnr = previousSnr; // store previousSnr for next step
-    }
-#if 0
-	/* the following is to compare result with cpu */
-	if (tx < 1 && by < 1)
-	printf("delay_max, %d, snr.real[0] %.10f, snr.imag[0] %.10f, nb %f\n", delay_max, snr_real[0], snr_imag[0], (float)nb);
-#endif
 }
 
 __global__ void outdata_reshape(
@@ -521,15 +409,6 @@ __global__ void outdata_reshape(
     }
 
     __syncthreads();
-
-#if 0
-	if (tx < 1 && by < 1)
-		printf("mem_out_len %d, mem_in[filt_len-1] %f, mem_out[filt_len-1] %f\n", mem_out_len, mem_in[filt_len-1], mem_out[filt_len-1]);
-	for (i=tx; i< len*2; i+=tdx) {
-		outdata[i*channels + by] = mem_out[pos_out_start + i];
-	}
-
-#endif
 }
 
 __global__ void upsample2x_and_add_reshape(
@@ -575,15 +454,6 @@ __global__ void upsample2x_and_add_reshape(
     }
 
     __syncthreads();
-
-#if 0
-	if (tx < 1 && by < 1)
-		printf("mem_out_len %d, mem_in[filt_len-1] %f, mem_out[filt_len-1] %f\n", mem_out_len, mem_in[filt_len-1], mem_out[filt_len-1]);
-	for (i=tx; i< len*2; i+=tdx) {
-		outdata[i*channels + by] = mem_out[pos_out_start + i];
-	}
-
-#endif
 }
 
 __global__ void upsample2x_and_add(float *sinc,
@@ -625,11 +495,6 @@ __global__ void upsample2x_and_add(float *sinc,
     }
 
     __syncthreads();
-
-#if 0
-	if (tx < 1 && by < 1)
-		printf("mem_out_len %d, mem_in[filt_len-1] %f, mem_out[filt_len-1] %f\n", mem_out_len, mem_in[filt_len-1], mem_out[filt_len-1]);
-#endif
 
     // copy last to first (filt_len-1) mem data
     for (i = tx; i < filt_len - 1; i += tdx) {
@@ -817,46 +682,6 @@ gint spiirup(SpiirState **spstate,
     uint share_mem_sz;
 
     if (SPSTATE(i)->num_filters > CUT_FILTERS) {
-
-#ifdef ORIGINAL
-        block.x = SPSTATE(i)->num_filters;
-        grid.y  = SPSTATE(i)->num_templates;
-        share_mem_sz =
-          (block.x + 32
-           + (SPSTATE(i)->num_filters + 16 - 1) / 16 * SPSTATE(i)->nb)
-          * 2 * sizeof(float);
-
-        // using mutex to make sure that kernel launch is right after texture
-        // binding
-        // g_mutex_lock(element->cuTex_lock);
-        // Set up texture.
-        /*cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
-        texRef.addressMode[0] = cudaAddressModeWrap;
-        texRef.filterMode	= cudaFilterModeLinear;
-        texRef.normalized	= false;
-        cudaBindTexture(0, texRef, SPSTATE(i)->d_input_s, channelDesc,
-        available_length * sizeof(float));
-        */
-
-        GST_LOG(
-          "spiir_kernel: depth %d. processed %d, nb %d, num of (templates: "
-          "%d,filters: %d). block.size (%d, %d, %d), grid.size (%d, %d, %d)",
-          i, num_inchunk, SPSTATE(i)->nb, SPSTATE(i)->num_templates,
-          SPSTATE(i)->num_filters, block.x, block.y, block.z, grid.x, grid.y,
-          grid.z);
-
-        cuda_iir_filter_kernel<<<grid, block, share_mem_sz, stream>>>(
-          SPSTATE(i)->d_a1, SPSTATE(i)->d_b0, SPSTATE(i)->d_d, SPSTATE(i)->d_y,
-          SPSTATE(i)->d_queue, SPSTATEUP(i)->d_mem, SPSTATEUP(i)->mem_len,
-          SPSTATEUP(i)->filt_len, SPSTATE(i)->delay_max, num_inchunk,
-          SPSTATE(i)->nb, SPSTATE(i)->queue_first_sample,
-          SPSTATE(i)->queue_len);
-
-        cudaStreamSynchronize(stream);
-        // g_mutex_unlock(element->cuTex_lock);
-
-        CUDA_CHECK(cudaPeekAtLastError());
-#else
         GST_LOG(
           "spiir_kernel: depth %d. processed %d, nb %d, num of (templates: "
           "%d,filters: %d). block.size (%d, %d, %d), grid.size (%d, %d, %d)",
@@ -904,8 +729,6 @@ gint spiirup(SpiirState **spstate,
               numTemplates, cu, logcu);
             cudaStreamSynchronize(stream);
         }
-#endif
-
     } else {
         CUDA_CHECK(cudaMemsetAsync(SPSTATEUP(i)->d_mem, 0,
                                    sizeof(COMPLEX_F) * SPSTATEUP(i)->mem_len
@@ -927,44 +750,6 @@ gint spiirup(SpiirState **spstate,
             /*
              *	cuda kernel
              */
-
-#ifdef ORIGINAL
-            block.x = SPSTATE(i)->num_filters;
-            grid.y  = SPSTATE(i)->num_templates;
-            // share_mem_sz = (block.x+8 +
-            // (SPSTATE(i)->num_filters+16-1)/16*SPSTATE(i)->nb) * 2 *
-            // sizeof(float);
-            share_mem_sz =
-              (block.x + 32
-               + (SPSTATE(i)->num_filters + 16 - 1) / 16 * SPSTATE(i)->nb)
-              * 2 * sizeof(float);
-
-            GST_LOG("spiir_kernel: depth %d. processed %d, nb %d, num of "
-                    "(templates: %d,filters: %d). block.size (%d, %d, %d), "
-                    "grid.size (%d, %d, %d)",
-                    i, num_inchunk, SPSTATE(i)->nb, SPSTATE(i)->num_templates,
-                    SPSTATE(i)->num_filters, block.x, block.y, block.z, grid.x,
-                    grid.y, grid.z);
-            // using mutex to make sure that kernel launch is right after
-            // texture binding
-            // g_mutex_lock(element->cuTex_lock);
-            // Set up texture.
-            /*cudaChannelFormatDesc channelDesc =
-            cudaCreateChannelDesc<float>(); texRef.addressMode[0] =
-            cudaAddressModeWrap; texRef.filterMode	= cudaFilterModeLinear;
-            texRef.normalized	= false;
-            cudaBindTexture(0, texRef, SPSTATE(i)->d_input_s, channelDesc,
-            available_length * sizeof(float));
-            */
-            cuda_iir_filter_kernel<<<grid, block, share_mem_sz, stream>>>(
-              SPSTATE(i)->d_a1, SPSTATE(i)->d_b0, SPSTATE(i)->d_d,
-              SPSTATE(i)->d_y, SPSTATE(i)->d_queue, SPSTATEUP(i)->d_mem,
-              SPSTATEUP(i)->mem_len, SPSTATEUP(i)->filt_len,
-              SPSTATE(i)->delay_max, spiir_processed, SPSTATE(i)->nb,
-              SPSTATE(i)->queue_first_sample, SPSTATE(i)->queue_len);
-
-            cudaStreamSynchronize(stream);
-#else
             GST_LOG("spiir_kernel: depth %d. processed %d, nb %d, num of "
                     "(templates: %d,filters: %d). block.size (%d, %d, %d), "
                     "grid.size (%d, %d, %d)",
@@ -1013,7 +798,6 @@ gint spiirup(SpiirState **spstate,
                   numFilters, numTemplates, cu, logcu);
                 cudaStreamSynchronize(stream);
             }
-#endif
         } else {
             CUDA_CHECK(cudaMemsetAsync(SPSTATEUP(i)->d_mem, 0,
                                        sizeof(COMPLEX_F) * SPSTATEUP(i)->mem_len

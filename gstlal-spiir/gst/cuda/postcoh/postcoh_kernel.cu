@@ -600,12 +600,12 @@ __global__ void ker_coh_max_and_chisq_versatile(
                   __shfl_xor_sync(ALL_THREADS_MASK, laneChi2, k, WARP_SIZE);
             }
             if (srcLane == 0) { snr_shared[wID] = laneChi2; }
-            unsigned CHISQ_MASK = __ballot_sync(0xFFFFFFFF, threadIdx.x < wn);
+            unsigned chisq_mask = __ballot_sync(0xFFFFFFFF, threadIdx.x < wn);
             __syncthreads();
             if (threadIdx.x < wn) {
                 laneChi2 = snr_shared[srcLane];
                 for (i = wn / 2; i > 0; i = i >> 1) {
-                    laneChi2 += __shfl_xor_sync(CHISQ_MASK, laneChi2, i);
+                    laneChi2 += __shfl_xor_sync(chisq_mask, laneChi2, i);
                 }
                 if (srcLane == 0) {
                     chisq_cur = laneChi2 / autocorr_norm[j][tmplt_cur];
