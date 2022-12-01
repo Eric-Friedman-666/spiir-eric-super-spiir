@@ -381,8 +381,20 @@ static void cohfar_assignfar_get_property(GObject *object,
 
     GST_OBJECT_LOCK(element);
 
+    // C doesn't allow a variable to be declared as the first statement of a
+    // case
+    gchar *serialized_input_fnames;
     switch (prop_id) {
     case PROP_IFOS: g_value_set_string(value, element->ifos); break;
+
+    case PROP_INPUT_FNAME:
+        serialized_input_fnames =
+          g_strjoin(",", element->input_fnames[STATS_FNAME_1W_IDX],
+                    element->input_fnames[STATS_FNAME_1D_IDX],
+                    element->input_fnames[STATS_FNAME_2H_IDX], NULL);
+        g_value_set_string(value, serialized_input_fnames);
+        g_free(serialized_input_fnames);
+        break;
 
     case PROP_SILENT_TIME: g_value_set_int(value, element->silent_time); break;
 
