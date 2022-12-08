@@ -25,6 +25,7 @@
 #include <chealpix.h>
 #include <cohfar/background_stats_utils.h>
 #include <cuda_debug.h>
+#include <flag_segment.h>
 
 // Suppresses a warning from gstreamer using deprecated mutexes.
 // Should be revisited after the gstreamer upgrade.
@@ -58,89 +59,6 @@ GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 static void additional_initializations(GType type) {
     GST_DEBUG_CATEGORY_INIT(GST_CAT_DEFAULT, "cuda_postcoh", 0,
                             "cuda_postcoh element");
-}
-
-/*
- * add a segment to the control segment array.  note they are appended, and
- * the code assumes they are in order and do not overlap, see gstlal_gate.c
- * control_segment
- */
-
-typedef struct flag_segment {
-    GstClockTime start, stop;
-    gboolean is_gap; // GAP true, non-GAP, false
-} FlagSegment;
-
-static gboolean postcoh_collect_data__is_gap(GstPostcohCollectData *data,
-                                             GstClockTime start,
-                                             GstClockTime stop) {
-    GArray *flag_segments = data->flag_segments;
-    /* The final segment must not end before the stop time */
-    g_assert(flag_segments->len > 0);
-    FlagSegment *final_segment =
-      &((FlagSegment *)flag_segments->data)[flag_segments->len - 1];
-    g_assert(final_segment->stop >= stop);
-
-    guint flush_len      = 0;
-    GstClockTime dur_gap = 0;
-    for (guint i = 0; i < flag_segments->len; i++) {
-        FlagSegment *this_segment = &((FlagSegment *)flag_segments->data)[i];
-        if (this_segment->start >= stop) break;
-
-        if (this_segment->stop <= start) {
-            flush_len = i + 1;
-        } else if (this_segment->is_gap) {
-            GstClockTime gap_start = MAX(this_segment->start, start);
-            GstClockTime gap_stop  = MIN(this_segment->stop, stop);
-            dur_gap += gap_stop - gap_start;
-        }
-    }
-    if (flush_len > 0) g_array_remove_range(flag_segments, 0, flush_len);
-
-    return dur_gap > (stop - start) / 2 - 1e-6;
-}
-
-static void add_flag_segment(GstPostcohCollectData *data,
-                             GstClockTime start,
-                             GstClockTime stop,
-                             gboolean is_gap) {
-    FlagSegment new_segment = { .start  = start,
-                                .stop   = stop,
-                                .is_gap = is_gap };
-
-    g_assert_cmpuint(start, <=, stop);
-    GST_DEBUG_OBJECT(data,
-                     "found control segment [%" GST_TIME_FORMAT
-                     ", %" GST_TIME_FORMAT ") in state %d",
-                     GST_TIME_ARGS(new_segment.start),
-                     GST_TIME_ARGS(new_segment.stop), new_segment.is_gap);
-
-    /* try coalescing the new segment with the most recent one */
-    if (data->flag_segments->len) {
-        FlagSegment *final_segment =
-          &((FlagSegment *)
-              data->flag_segments->data)[data->flag_segments->len - 1];
-        /* if the most recent segment and the new segment have the
-         * same state and they touch, merge them */
-        if (final_segment->is_gap == new_segment.is_gap
-            && final_segment->stop >= new_segment.start) {
-            g_assert_cmpuint(new_segment.stop, >=, final_segment->stop);
-            final_segment->stop = new_segment.stop;
-            return;
-        }
-        /* otherwise, if the most recent segment had 0 length,
-         * replace it entirely with the new one.  note that the
-         * state carried by a zero-length segment is meaningless,
-         * zero-length segments are merely interpreted as a
-         * heart-beat indicating how far the control stream has
-         * advanced */
-        if (final_segment->stop == final_segment->start) {
-            *final_segment = new_segment;
-            return;
-        }
-    }
-    /* otherwise append a new segment */
-    g_array_append_val(data->flag_segments, new_segment);
 }
 
 #ifdef ACCELERATE_POSTCOH_MEMORY_COPY
@@ -981,7 +899,8 @@ static gint cuda_postcoh_push_and_get_common_size(CudaPostcoh *postcoh,
         buf_end = GST_BUFFER_TIMESTAMP(buf) + GST_BUFFER_DURATION(buf);
         is_gap =
           GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_GAP) ? TRUE : FALSE;
-        add_flag_segment(data, GST_BUFFER_TIMESTAMP(buf), buf_end, is_gap);
+        flag_segments_append(data->flag_segments, GST_BUFFER_TIMESTAMP(buf),
+                             buf_end, is_gap);
         gst_adapter_push(data->adapter, buf);
 
         size_cur = gst_adapter_available(data->adapter);
@@ -1044,8 +963,9 @@ static gboolean cuda_postcoh_need_recollect(CudaPostcoh *postcoh,
                 is_gap = GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_GAP)
                            ? TRUE
                            : FALSE;
-                add_flag_segment(data, GST_BUFFER_TIMESTAMP(buf), buf_end,
-                                 is_gap);
+                flag_segments_append(data->flag_segments,
+                                     GST_BUFFER_TIMESTAMP(buf), buf_end,
+                                     is_gap);
                 gst_adapter_push(data->adapter, buf);
                 need_recollect = TRUE;
                 continue;
@@ -1097,7 +1017,8 @@ static gboolean cuda_postcoh_align_collected(CudaPostcoh *postcoh,
         if (t_end_cur > t0) {
             is_gap =
               GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_GAP) ? TRUE : FALSE;
-            add_flag_segment(data, t_start_cur, t_end_cur, is_gap);
+            flag_segments_append(data->flag_segments, t_start_cur, t_end_cur,
+                                 is_gap);
 
             buf_aligned_offset0 = postcoh->offset0 - offset_cur;
             GST_DEBUG_OBJECT(
@@ -1768,8 +1689,8 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
              collectlist = g_slist_next(collectlist), i++) {
             data    = collectlist->data;
             cur_ifo = state->input_ifo_mapping[i];
-            state->cur_ifo_is_gap[cur_ifo] = postcoh_collect_data__is_gap(
-              data, postcoh->next_exe_t, ts_exe_end);
+            state->cur_ifo_is_gap[cur_ifo] = flag_segments_is_gap(
+              data->flag_segments, postcoh->next_exe_t, ts_exe_end);
             state->snglsnr_max[cur_ifo] = 0;
             PeakList *pklist            = state->peak_list[cur_ifo];
 

@@ -52,6 +52,7 @@
 #include <gst/gst.h>
 #pragma GCC diagnostic pop
 
+#include <flag_segment.h>
 #include <gstlal/gstlal.h>
 #include <math.h>
 #include <multiratespiir/multiratespiir.h>
@@ -76,11 +77,6 @@ static void additional_initializations(GType type) {
  * control_segment
  */
 
-typedef struct flag_segment {
-    GstClockTime start, stop;
-    gboolean is_gap; // GAP true, non-GAP, false
-} FlagSegment;
-
 static GstFlowReturn push_with_flag_segments(CudaMultirateSPIIR *element,
                                              GstBuffer *outbuf) {
     GstClockTime start    = GST_BUFFER_TIMESTAMP(outbuf),
@@ -90,7 +86,7 @@ static GstFlowReturn push_with_flag_segments(CudaMultirateSPIIR *element,
     /* The final segment must end after outbuf */
     g_assert(flag_segments->len > 0);
     FlagSegment *final_segment =
-      &((FlagSegment *)flag_segments->data)[flag_segments->len - 1];
+      &g_array_index(flag_segments, FlagSegment, flag_segments->len - 1);
     g_assert(final_segment->stop >= stop);
 
     guint pushed_len       = 0;
@@ -99,7 +95,8 @@ static GstFlowReturn push_with_flag_segments(CudaMultirateSPIIR *element,
     guint flush_len = 0;
     for (guint i = 0; i < flag_segments->len && stop > start; i++) {
         // Push a subbuffer for each segment's overlap with the buffer
-        FlagSegment *this_segment = &((FlagSegment *)flag_segments->data)[i];
+        FlagSegment *this_segment =
+          &g_array_index(flag_segments, FlagSegment, i);
 
         if (this_segment->start > stop) break;
 
@@ -185,49 +182,6 @@ static GstFlowReturn push_with_flag_segments(CudaMultirateSPIIR *element,
                        gst_flow_get_name(ret));
     }
     return GST_FLOW_OK;
-}
-
-static void add_flag_segment(CudaMultirateSPIIR *element,
-                             GstClockTime start,
-                             GstClockTime stop,
-                             gboolean is_gap) {
-    FlagSegment new_segment = { .start  = start,
-                                .stop   = stop,
-                                .is_gap = is_gap };
-
-    g_assert_cmpuint(start, <=, stop);
-    GST_DEBUG_OBJECT(element,
-                     "found flag segment [%" GST_TIME_FORMAT
-                     ", %" GST_TIME_FORMAT ") in state %d",
-                     GST_TIME_ARGS(new_segment.start),
-                     GST_TIME_ARGS(new_segment.stop), new_segment.is_gap);
-
-    /* try coalescing the new segment with the most recent one */
-    if (element->flag_segments->len) {
-        FlagSegment *final_segment =
-          &((FlagSegment *)
-              element->flag_segments->data)[element->flag_segments->len - 1];
-        /* if the most recent segment and the new segment have the
-         * same state and they touch, merge them */
-        if (final_segment->is_gap == new_segment.is_gap
-            && final_segment->stop >= new_segment.start) {
-            g_assert_cmpuint(new_segment.stop, >=, final_segment->stop);
-            final_segment->stop = new_segment.stop;
-            return;
-        }
-        /* otherwise, if the most recent segment had 0 length,
-         * replace it entirely with the new one.  note that the
-         * state carried by a zero-length segment is meaningless,
-         * zero-length segments are merely interpreted as a
-         * heart-beat indicating how far the flag stream has
-         * advanced */
-        if (final_segment->stop == final_segment->start) {
-            *final_segment = new_segment;
-            return;
-        }
-    }
-    /* otherwise append a new segment */
-    g_array_append_val(element->flag_segments, new_segment);
 }
 
 GST_BOILERPLATE_FULL(CudaMultirateSPIIR,
@@ -1217,8 +1171,8 @@ static GstFlowReturn cuda_multiratespiir_transform(GstBaseTransform *base,
     case 0: // gap is treated as 0;
         is_gap =
           GST_BUFFER_FLAG_IS_SET(inbuf, GST_BUFFER_FLAG_GAP) ? TRUE : FALSE;
-        add_flag_segment(
-          element, GST_BUFFER_TIMESTAMP(inbuf),
+        flag_segments_append(
+          element->flag_segments, GST_BUFFER_TIMESTAMP(inbuf),
           GST_BUFFER_TIMESTAMP(inbuf) + GST_BUFFER_DURATION(inbuf), is_gap);
 
         if (GST_BUFFER_FLAG_IS_SET(inbuf, GST_BUFFER_FLAG_GAP))

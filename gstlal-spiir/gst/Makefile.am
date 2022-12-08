@@ -4,5 +4,4 @@ else
 CUDA_SUBDIRS =
 endif
 
-
-SUBDIRS = $(CUDA_SUBDIRS)
+SUBDIRS = lib $(CUDA_SUBDIRS)

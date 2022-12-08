@@ -25,6 +25,7 @@ AC_CONFIG_FILES([ \
 	lib/Makefile \
 	bin/Makefile \
 	gst/Makefile \
+	gst/lib/Makefile \
 	gst/cuda/Makefile
 ])
 
@@ -376,6 +377,11 @@ GSTLAL_SPIIR_CFLAGS="-I\$(top_srcdir)/include -I\$(top_srcdir)/lib/include"
 GSTLAL_SPIIR_LIBS="-L\$(top_srcdir)/lib -lgstlalspiir"
 AC_SUBST([GSTLAL_SPIIR_CFLAGS])
 AC_SUBST([GSTLAL_SPIIR_LIBS])
+
+GST_COMMON_SPIIR_CFLAGS="-I\$(top_srcdir)/gst/lib/include"
+GST_COMMON_SPIIR_LIBS="-L\$(top_srcdir)/gst/lib -lgstcommon"
+AC_SUBST([GST_COMMON_SPIIR_CFLAGS])
+AC_SUBST([GST_COMMON_SPIIR_LIBS])
 
 #
 # Output configure information
