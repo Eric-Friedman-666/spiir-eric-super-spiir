@@ -567,12 +567,12 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
      * structure, see ker_coh_max_and_chisq */
     state->write_ifo_mapping = (int *)malloc(sizeof(int) * state->nifo);
 
-    gint8 i = 0, j = 0, cur_ifo = 0, nifo = state->nifo;
     GST_OBJECT_LOCK(postcoh->collect);
 
     /* find the enabled_ifos and input_ifo_mapping:
      * first find the ifos from the ifo streams
      * then, map ifo_id to its sinkpad's index */
+    int i = 0;
     for (i = 0, sinkpads = GST_ELEMENT(postcoh)->sinkpads; sinkpads;
          sinkpads = g_list_next(sinkpads), i++) {
         GstPad *pad = GST_PAD(sinkpads->data);
@@ -584,7 +584,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
         strncpy(state->all_ifos + IFO_LEN * i, data->ifo_name,
                 sizeof(char) * IFO_LEN);
     }
-    state->all_ifos[IFO_LEN * nifo] = '\0';
+    state->all_ifos[IFO_LEN * state->nifo] = '\0';
     // TODO: Consider using ifo_set__try_parse to check for errors
     ifo_set_type enabled_ifos = ifo_set__parse_or_empty(state->all_ifos);
     // sizeof() only works for arrays that we've statically created, so
@@ -592,20 +592,20 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     /* overwrite the sinkpad's ifos with the standardized ifo_set string */
     strncpy(state->all_ifos, ifo_set__get_string(enabled_ifos),
             strlen(ifo_set__get_string(enabled_ifos)));
-    state->all_ifos[IFO_LEN * nifo] = '\0';
+    state->all_ifos[IFO_LEN * state->nifo] = '\0';
 
     /* initialize input_ifo_mapping, snglsnr matrix, and peak_list */
     for (i = 0, sinkpads = GST_ELEMENT(postcoh)->sinkpads; sinkpads;
          sinkpads = g_list_next(sinkpads), i++) {
         GstPad *pad = GST_PAD(sinkpads->data);
         data        = gst_pad_get_element_private(pad);
-        for (j = 0; j < nifo; j++)
+        for (int j = 0; j < state->nifo; j++)
             if (strncmp(data->ifo_name, state->all_ifos + IFO_LEN * j, IFO_LEN)
                 == 0) {
                 state->input_ifo_mapping[i] = j;
-                cur_ifo                     = j;
                 break;
             }
+        int cur_ifo          = state->input_ifo_mapping[i];
         guint mem_alloc_size = state->snglsnr_len * postcoh->bps;
         // printf("device id %d, stream addr %p, alloc for snglsnr %d\n",
         // postcoh->device_id, postcoh->stream, mem_alloc_size);
@@ -629,7 +629,8 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
         state->peak_list[cur_ifo] =
           create_peak_list(postcoh->state, postcoh->stream);
     }
-    get_write_ifo_mapping(state->all_ifos, nifo, state->write_ifo_mapping);
+    get_write_ifo_mapping(state->all_ifos, state->nifo,
+                          state->write_ifo_mapping);
 
     CUDA_CHECK(cudaMalloc((void **)&state->d_write_ifo_mapping,
                           sizeof(int) * state->nifo));
@@ -643,8 +644,8 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     state->is_member_init = POSTCOH_PARAMS_INIT;
 
     // Initialize snr_history_per_template
-    for (int i = 0; i < MAX_NIFO; i++) {
-        state->snr_history_per_template[i] = NULL;
+    for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
+        state->snr_history_per_template[ifo_id] = NULL;
     }
 
     GST_OBJECT_UNLOCK(postcoh->collect);
@@ -1095,21 +1096,14 @@ static int cuda_postcoh_select_background(PeakList *pklist,
 
 static int cuda_postcoh_select_foreground(PostcohState *state,
                                           float cohsnr_thresh) {
-    int iifo, ipeak, npeak, nifo = state->nifo,
-                            cluster_peak_pos[state->max_npeak],
-                            bubbled_peak_pos[state->max_npeak], peak_cur;
-    int final_peaks = 0, bubbled_peaks = 0;
-    PeakList *pklist;
-    int *peak_pos;
     int left_entries = 0;
-
-    for (iifo = 0; iifo < nifo; iifo++) {
-        if (state->cur_ifo_is_gap[iifo]) continue;
-        final_peaks                 = 0;
-        bubbled_peaks               = 0;
-        pklist                      = state->peak_list[iifo];
-        npeak                       = pklist->npeak[0];
-        peak_pos                    = pklist->peak_pos;
+    for (int iifo = 0; iifo < state->nifo; iifo++) {
+        int ifo_id = state->write_ifo_mapping[iifo];
+        if (state->ifo_is_gap[ifo_id]) continue;
+        int final_peaks             = 0;
+        PeakList *pklist            = state->peak_list[iifo];
+        int npeak                   = pklist->npeak[0];
+        int *peak_pos               = pklist->peak_pos;
         state->skymap_peakcur[iifo] = peak_pos[0];
 
         /*
@@ -1117,33 +1111,35 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
          * coh_thresh
          */
         if (npeak > 0)
-            left_entries += cuda_postcoh_select_background(
-              pklist, state->write_ifo_mapping[iifo], state->hist_trials,
-              state->max_npeak, cohsnr_thresh);
+            left_entries +=
+              cuda_postcoh_select_background(pklist, ifo_id, state->hist_trials,
+                                             state->max_npeak, cohsnr_thresh);
 
         /*
          * mark the rest of peak positions to be -1 to identify invalid
          * background
          */
-
-        for (ipeak = 0; ipeak < state->max_npeak; ipeak++)
+        int cluster_peak_pos[state->max_npeak];
+        for (int ipeak = 0; ipeak < state->max_npeak; ipeak++) {
             cluster_peak_pos[ipeak] = -1;
+        }
         memcpy(cluster_peak_pos, peak_pos, sizeof(int) * npeak);
 
         /*
          * select zerolag that satisfy the criteria: cohsnr > triggersnr +
          * coh_thresh
          */
-        int write_ifo = state->write_ifo_mapping[iifo];
-        for (ipeak = 0; ipeak < npeak; ipeak++) {
+        int bubbled_peaks = 0;
+        int bubbled_peak_pos[state->max_npeak];
+        for (int ipeak = 0; ipeak < npeak; ipeak++) {
             /* if the difference of maximum single snr and coherent snr is
              * ignorable, it means that only one detector is in action, we
              * abandon this peak
              * */
-            peak_cur = peak_pos[ipeak];
+            int peak_cur = peak_pos[ipeak];
             // FIXME: consider a different threshold for 3-detector
             if (sqrt(pklist->cohsnr[peak_cur])
-                > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
+                > 1.414 + pklist->snglsnr[ifo_id][peak_cur]) {
                 cluster_peak_pos[final_peaks++] = peak_cur;
             } else
                 bubbled_peak_pos[bubbled_peaks++] = peak_cur;
@@ -1152,7 +1148,7 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
         /*
          * bubble out the rest peaks
          */
-        for (ipeak = final_peaks; ipeak < npeak; ipeak++)
+        for (int ipeak = final_peaks; ipeak < npeak; ipeak++)
             cluster_peak_pos[ipeak] = bubbled_peak_pos[ipeak - final_peaks];
 
         npeak = final_peaks;
@@ -1249,7 +1245,8 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
      * cur_nifo >=2 */
     for (int pivotal_ifo = 0; (pivotal_ifo < nifo) && (state->cur_nifo >= 2);
          pivotal_ifo++) {
-        if (state->cur_ifo_is_gap[pivotal_ifo]) continue;
+        int pivotal_ifo_id = state->write_ifo_mapping[pivotal_ifo];
+        if (state->ifo_is_gap[pivotal_ifo_id]) continue;
         PeakList *pklist = state->peak_list[pivotal_ifo];
         npeak            = pklist->npeak[0];
 
@@ -1283,10 +1280,10 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 output->chisq[ifo_id]    = pklist->chisq[ifo_id][peak_cur];
 
                 output->deff[ifo_id] =
-                  sqrt(state->sigmasq[pad_id][cur_tmplt_idx])
+                  sqrt(state->sigmasq[ifo_id][cur_tmplt_idx])
                   / pklist->snglsnr[ifo_id][peak_cur]; // in MPC
                 // Only record snr series on active IFOs
-                if (!state->cur_ifo_is_gap[pad_id]) {
+                if (!state->ifo_is_gap[ifo_id]) {
                     cuda_postcoh_record_snr_series(postcoh, output, pklist,
                                                    peak_cur, ifo_id);
                 }
@@ -1640,7 +1637,6 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
     GstPostcohCollectData *data;
     COMPLEX_F *one_take_snr, *snglsnr;
 
-    int i = 0, cur_ifo = 0;
     PostcohState *state = postcoh->state;
     gint one_take_size = postcoh->one_take_size, exe_size = postcoh->exe_size,
          snglsnr_cpy_size = postcoh->snglsnr_cpy_size,
@@ -1685,16 +1681,18 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
         /* copy the snr data to the right location for all detectors */
         state->cur_ifo_bits = 0;
         state->cur_nifo     = 0;
+        int i;
         for (i = 0, collectlist = pads->data; collectlist;
              collectlist = g_slist_next(collectlist), i++) {
             data    = collectlist->data;
-            cur_ifo = state->input_ifo_mapping[i];
-            state->cur_ifo_is_gap[cur_ifo] = flag_segments_is_gap(
+            int cur_ifo               = state->input_ifo_mapping[i];
+            int ifo_id                = state->write_ifo_mapping[i];
+            state->ifo_is_gap[ifo_id] = flag_segments_is_gap(
               data->flag_segments, postcoh->next_exe_t, ts_exe_end);
             state->snglsnr_max[cur_ifo] = 0;
             PeakList *pklist            = state->peak_list[cur_ifo];
 
-            if (!state->cur_ifo_is_gap[cur_ifo]) {
+            if (!state->ifo_is_gap[ifo_id]) {
                 state->cur_ifo_bits += 1 << cur_ifo;
                 state->cur_nifo += 1;
             }
@@ -1746,26 +1744,28 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
               state->ntmplt, postcoh->stream);
 
             cudaStreamSynchronize(postcoh->stream);
-            int ifo_id = state->write_ifo_mapping[cur_ifo];
             state->snr_history_per_template[ifo_id] = one_take_snr;
         }
-        cur_ifo = 0;
-        for (int iifo = 0; iifo < state->nifo; ++iifo)
-            if (!state->cur_ifo_is_gap[iifo]) {
-                strncpy(state->cur_ifos + IFO_LEN * cur_ifo,
-                        get_ifo_string(state->write_ifo_mapping[iifo]),
-                        sizeof(char) * IFO_LEN);
-                cur_ifo++;
-            }
 
-        g_assert(cur_ifo == state->cur_nifo);
+        int num_ifos_not_gap = 0;
+        for (int iifo = 0; iifo < state->nifo; ++iifo) {
+            int ifo_id = state->write_ifo_mapping[iifo];
+            if (!state->ifo_is_gap[ifo_id]) {
+                strncpy(state->cur_ifos + IFO_LEN * num_ifos_not_gap,
+                        get_ifo_string(ifo_id), sizeof(char) * IFO_LEN);
+                num_ifos_not_gap++;
+            }
+        }
+
+        g_assert(num_ifos_not_gap == state->cur_nifo);
 
         for (i = 0, collectlist = pads->data; collectlist;
              collectlist = g_slist_next(collectlist), i++) {
             data    = collectlist->data;
-            cur_ifo = state->input_ifo_mapping[i];
+            int cur_ifo = state->input_ifo_mapping[i];
+            int ifo_id  = state->write_ifo_mapping[i];
 
-            if (state->cur_nifo >= 2 && (!state->cur_ifo_is_gap[cur_ifo])) {
+            if (state->cur_nifo >= 2 && (!state->ifo_is_gap[ifo_id])) {
                 if (state->peak_list[cur_ifo]->npeak[0] > 0) {
                     cohsnr_and_chisq(state, cur_ifo, gps_idx,
                                      postcoh->output_skymap
@@ -1788,8 +1788,9 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
         /* make a buffer and send it out */
         cuda_postcoh_new_buffer_and_push(postcoh, exe_len);
 
-        for (collectlist = pads->data; collectlist;
-             collectlist = g_slist_next(collectlist)) {
+        for (i = 0, collectlist = pads->data; collectlist;
+             collectlist = g_slist_next(collectlist), i++) {
+            int cur_ifo = state->input_ifo_mapping[i];
             data = collectlist->data;
             /* move along */
             GST_DEBUG_OBJECT(postcoh, "flush adapter %d, size %d\n", cur_ifo,
