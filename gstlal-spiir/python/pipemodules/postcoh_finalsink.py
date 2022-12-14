@@ -1190,9 +1190,9 @@ class CoincsDocFromPostcoh(object):
     def assemble_coinc_map_table(self, trigger):
 
         coinc_map_table = lsctables.CoincMapTable.get_table(self.xmldoc)
-        for ifo_id, ifo in enumerate(re.findall('..', trigger.ifos)):
+        for trigger_ifo_id, ifo in enumerate(re.findall('..', trigger.ifos)):
             row = coinc_map_table.RowType()
-            row.event_id = "sngl_inspiral:event_id:%d" % ifo_id
+            row.event_id = "sngl_inspiral:event_id:%d" % trigger_ifo_id
             row.table_name = "sngl_inspiral"
             row.coinc_event_id = "coinc_event:coinc_event_id:1"
             coinc_map_table.append(row)
@@ -1348,7 +1348,7 @@ class CoincsDocFromPostcoh(object):
         """
 
         # Append snr_series data into XML document
-        for ifo_id, snr_series in enumerate(snr_series_list):
+        for trigger_ifo_id, snr_series in enumerate(snr_series_list):
             if snr_series:
                 epoch = LIGOTimeGPS(snr_series.epoch_gpsSeconds,
                                     snr_series.epoch_gpsNanoSeconds)
@@ -1365,7 +1365,7 @@ class CoincsDocFromPostcoh(object):
                 ligolw_snr_series_element = lal.series.build_COMPLEX8TimeSeries(
                     snr_time_series)
                 # Add event_id into the snr_time_series_element
-                event_id = "sngl_inspiral:event_id:%d" % ifo_id
+                event_id = "sngl_inspiral:event_id:%d" % trigger_ifo_id
                 ligolw_snr_series_element.appendChild(
                     ligolw_param.Param.build(u"event_id", u"ilwd:char",
                                              event_id))

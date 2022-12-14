@@ -132,7 +132,7 @@ static PyObject *
     PyObject *wrapped_snr_series_class =
       PyObject_GetAttrString(pyModule, "SNRSeries");
 
-    PyObject *wrapped_snr_series_list = PyList_New(MAX_NIFO);
+    PyObject *wrapped_snr_series_list = PyList_New(0);
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         COMPLEX8TimeSeries *complex8_snr_series =
           buffer_postcohtable->snr_series_list[ifo_id];
@@ -148,11 +148,8 @@ static PyObject *
             }
 
             wrapped_snr_series->complex8_snr_series = complex8_snr_series;
-            PyList_SetItem(wrapped_snr_series_list, ifo_id,
-                           (PyObject *)wrapped_snr_series);
-        } else {
-            PyList_SetItem(wrapped_snr_series_list, ifo_id, Py_None);
-            Py_INCREF(Py_None);
+            PyList_Append(wrapped_snr_series_list,
+                          (PyObject *)wrapped_snr_series);
         }
     }
     return wrapped_snr_series_list;
