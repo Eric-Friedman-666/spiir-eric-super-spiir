@@ -503,7 +503,6 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
                      postcoh->channels);
 
     state->nifo              = GST_ELEMENT(postcoh)->numsinkpads;
-    state->input_ifo_mapping = (gint *)malloc(sizeof(gint) * state->nifo);
     state->all_ifos =
       (gchar *)malloc(sizeof(gchar) * state->nifo * IFO_LEN + 1);
     state->peak_list = (PeakList **)malloc(sizeof(PeakList *) * state->nifo);
@@ -569,7 +568,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
 
     GST_OBJECT_LOCK(postcoh->collect);
 
-    /* find the enabled_ifos and input_ifo_mapping:
+    /* find the enabled_ifos and enabled_ifo_ids:
      * first find the ifos from the ifo streams
      * then, map ifo_id to its sinkpad's index */
     int i = 0;
@@ -594,7 +593,7 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
             strlen(ifo_set__get_string(enabled_ifos)));
     state->all_ifos[IFO_LEN * state->nifo] = '\0';
 
-    /* initialize input_ifo_mapping, snglsnr matrix, and peak_list */
+    /* initialize enabled_ifo_ids, snglsnr matrix, and peak_list */
     for (i = 0, sinkpads = GST_ELEMENT(postcoh)->sinkpads; sinkpads;
          sinkpads = g_list_next(sinkpads), i++) {
         GstPad *pad = GST_PAD(sinkpads->data);
@@ -602,10 +601,10 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
         for (int j = 0; j < state->nifo; j++)
             if (strncmp(data->ifo_name, state->all_ifos + IFO_LEN * j, IFO_LEN)
                 == 0) {
-                state->input_ifo_mapping[i] = j;
+                state->enabled_ifo_ids[i] = j;
                 break;
             }
-        int cur_ifo          = state->input_ifo_mapping[i];
+        int enabled_ifo_id   = state->enabled_ifo_ids[i];
         guint mem_alloc_size = state->snglsnr_len * postcoh->bps;
         // printf("device id %d, stream addr %p, alloc for snglsnr %d\n",
         // postcoh->device_id, postcoh->stream, mem_alloc_size);
@@ -614,19 +613,21 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
         printf("Free memory: %d MB  Total memory: %d MB\n",
                (int)(freemem / 1024 / 1024), (int)(totalmem / 1024 / 1024));
         printf("Allocating SNR series %u B, i.e. %d MB for ifo %d\n",
-               mem_alloc_size, (int)(mem_alloc_size / 1024 / 1024), cur_ifo);
+               mem_alloc_size, (int)(mem_alloc_size / 1024 / 1024),
+               enabled_ifo_id);
 
-        CUDA_CHECK(
-          cudaMalloc((void **)&(state->d_snglsnr[cur_ifo]), mem_alloc_size));
-        CUDA_CHECK(cudaMemsetAsync(state->d_snglsnr[cur_ifo], 0, mem_alloc_size,
+        CUDA_CHECK(cudaMalloc((void **)&(state->d_snglsnr[enabled_ifo_id]),
+                              mem_alloc_size));
+        CUDA_CHECK(cudaMemsetAsync(state->d_snglsnr[enabled_ifo_id], 0,
+                                   mem_alloc_size, postcoh->stream));
+        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_snglsnr[enabled_ifo_id]),
+                                   &(state->d_snglsnr[enabled_ifo_id]),
+                                   sizeof(COMPLEX_F *), cudaMemcpyHostToDevice,
                                    postcoh->stream));
-        CUDA_CHECK(cudaMemcpyAsync(
-          &(state->dd_snglsnr[cur_ifo]), &(state->d_snglsnr[cur_ifo]),
-          sizeof(COMPLEX_F *), cudaMemcpyHostToDevice, postcoh->stream));
         CUDA_CHECK(cudaStreamSynchronize(postcoh->stream));
         CUDA_CHECK(cudaPeekAtLastError());
 
-        state->peak_list[cur_ifo] =
+        state->peak_list[enabled_ifo_id] =
           create_peak_list(postcoh->state, postcoh->stream);
     }
     get_write_ifo_mapping(state->all_ifos, state->nifo,
@@ -1267,9 +1268,9 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             output->end_time = end_time;
 
             /* fill in the attributes for single detectors first */
-            for (int pad_id = 0; pad_id < nifo;
-                 end_time   = output->end_time, pad_id++) {
-                int ifo_id = state->write_ifo_mapping[pad_id];
+            for (int enabled_ifo_id = 0; enabled_ifo_id < nifo;
+                 end_time           = output->end_time, enabled_ifo_id++) {
+                int ifo_id = state->write_ifo_mapping[enabled_ifo_id];
 
                 XLALGPSAdd(&(end_time),
                            (double)pklist->ntoff[ifo_id][peak_cur] / exe_len);
@@ -1280,7 +1281,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                 output->chisq[ifo_id]    = pklist->chisq[ifo_id][peak_cur];
 
                 output->deff[ifo_id] =
-                  sqrt(state->sigmasq[ifo_id][cur_tmplt_idx])
+                  sqrt(state->sigmasq[enabled_ifo_id][cur_tmplt_idx])
                   / pklist->snglsnr[ifo_id][peak_cur]; // in MPC
                 // Only record snr series on active IFOs
                 if (!state->ifo_is_gap[ifo_id]) {
@@ -1535,13 +1536,13 @@ int timestamp_to_gps_idx(long gps_start, int gps_step, GstClockTime t) {
 
 static int peaks_over_thresh(COMPLEX_F *snglsnr,
                              PostcohState *state,
-                             int cur_ifo,
+                             int enabled_ifo_id,
                              cudaStream_t stream) {
     int exe_len = state->exe_len, ntmplt = state->ntmplt, itmplt, ilen, jlen,
         npeak = 0, max_npeak = state->max_npeak;
     COMPLEX_F *isnr = snglsnr;
     float tmp_abssnr, snglsnr_thresh = state->snglsnr_thresh;
-    PeakList *pklist  = state->peak_list[cur_ifo];
+    PeakList *pklist  = state->peak_list[enabled_ifo_id];
     float *tmp_maxsnr = state->tmp_maxsnr;
     int *tmp_tmpltidx = state->tmp_tmpltidx;
     int *peak_pos     = pklist->peak_pos;
@@ -1589,8 +1590,9 @@ static int peaks_over_thresh(COMPLEX_F *snglsnr,
 
     /* keep track of the maximum single snr in this snr chunk */
     for (ilen = 0; ilen < exe_len; ilen++) {
-        if (tmp_maxsnr[ilen] > state->snglsnr_max[cur_ifo])
-            state->snglsnr_max[cur_ifo] = tmp_maxsnr[ilen];
+        if (tmp_maxsnr[ilen] > state->snglsnr_max[enabled_ifo_id]) {
+            state->snglsnr_max[enabled_ifo_id] = tmp_maxsnr[ilen];
+        }
     }
 
     /* do clustering every PEAKFINDER_CLUSTER_WINDOW samples, FIXME: if set to
@@ -1615,18 +1617,10 @@ static int peaks_over_thresh(COMPLEX_F *snglsnr,
     memcpy(peak_pos, cluster_peak_pos, sizeof(int) * npeak);
     pklist->npeak[0] = npeak;
 
-    // printf("peaks_over_thresh , ifo %d, npeak %d\n", cur_ifo, npeak);
     CUDA_CHECK(cudaMemcpyAsync(pklist->d_npeak, pklist->npeak,
                                sizeof(int) * (pklist->peak_intlen),
                                cudaMemcpyHostToDevice, stream));
 
-#if 0
-	CUDA_CHECK(cudaMemcpyAsync(	pklist->d_maxsnglsnr, 
-			pklist->maxsnglsnr, 
-			sizeof(float) * (pklist->peak_floatlen), 
-			cudaMemcpyHostToDevice,
-			stream));
-#endif
     return npeak;
 }
 
@@ -1685,15 +1679,15 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
         for (i = 0, collectlist = pads->data; collectlist;
              collectlist = g_slist_next(collectlist), i++) {
             data    = collectlist->data;
-            int cur_ifo               = state->input_ifo_mapping[i];
-            int ifo_id                = state->write_ifo_mapping[i];
+            int enabled_ifo_id = state->enabled_ifo_ids[i];
+            int ifo_id         = state->write_ifo_mapping[enabled_ifo_id];
             state->ifo_is_gap[ifo_id] = flag_segments_is_gap(
               data->flag_segments, postcoh->next_exe_t, ts_exe_end);
-            state->snglsnr_max[cur_ifo] = 0;
-            PeakList *pklist            = state->peak_list[cur_ifo];
+            state->snglsnr_max[enabled_ifo_id] = 0;
+            PeakList *pklist = state->peak_list[enabled_ifo_id];
 
             if (!state->ifo_is_gap[ifo_id]) {
-                state->cur_ifo_bits += 1 << cur_ifo;
+                state->cur_ifo_bits += 1 << enabled_ifo_id;
                 state->cur_nifo += 1;
             }
 
@@ -1712,13 +1706,13 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
             snglsnr =
               (COMPLEX_F *)one_take_snr + postcoh->head_len * state->ntmplt;
 
-            c_npeak =
-              peaks_over_thresh(snglsnr, state, cur_ifo, postcoh->stream);
+            c_npeak = peaks_over_thresh(snglsnr, state, enabled_ifo_id,
+                                        postcoh->stream);
 
             GST_DEBUG_OBJECT(postcoh,
                              "gps %d, ifo %d, c_npeak %d, max_snglsnr %f\n",
-                             ligo_time.gpsSeconds, cur_ifo, c_npeak,
-                             state->snglsnr_max[cur_ifo]);
+                             ligo_time.gpsSeconds, enabled_ifo_id, c_npeak,
+                             state->snglsnr_max[enabled_ifo_id]);
 
             // this is necessory for new postcoh kernel
             // 1. expand temporal memory space if necessary
@@ -1737,11 +1731,12 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
                                        snglsnr_cpy_size, cudaMemcpyHostToDevice,
                                        postcoh->stream));
             // 3. do transpose, at the same time, snr data will be moved to
-            // proper positions in state->d_snglsnr[cur_ifo]
-            transpose_snglsnr(
-              (COMPLEX_F *)pklist->d_snglsnr_buffer, state->d_snglsnr[cur_ifo],
-              state->snglsnr_start_load, snglsnr_cpy_len, state->snglsnr_len,
-              state->ntmplt, postcoh->stream);
+            // proper positions in state->d_snglsnr[enabled_ifo_id]
+            transpose_snglsnr((COMPLEX_F *)pklist->d_snglsnr_buffer,
+                              state->d_snglsnr[enabled_ifo_id],
+                              state->snglsnr_start_load, snglsnr_cpy_len,
+                              state->snglsnr_len, state->ntmplt,
+                              postcoh->stream);
 
             cudaStreamSynchronize(postcoh->stream);
             state->snr_history_per_template[ifo_id] = one_take_snr;
@@ -1762,18 +1757,19 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
         for (i = 0, collectlist = pads->data; collectlist;
              collectlist = g_slist_next(collectlist), i++) {
             data    = collectlist->data;
-            int cur_ifo = state->input_ifo_mapping[i];
-            int ifo_id  = state->write_ifo_mapping[i];
+            int enabled_ifo_id = state->enabled_ifo_ids[i];
+            int ifo_id         = state->write_ifo_mapping[enabled_ifo_id];
 
             if (state->cur_nifo >= 2 && (!state->ifo_is_gap[ifo_id])) {
-                if (state->peak_list[cur_ifo]->npeak[0] > 0) {
-                    cohsnr_and_chisq(state, cur_ifo, gps_idx,
+                if (state->peak_list[enabled_ifo_id]->npeak[0] > 0) {
+                    cohsnr_and_chisq(state, enabled_ifo_id, gps_idx,
                                      postcoh->output_skymap
-                                       && state->snglsnr_max[cur_ifo]
+                                       && state->snglsnr_max[enabled_ifo_id]
                                             > postcoh->output_skymap,
                                      postcoh->stream);
                     GST_LOG("after coherent analysis for ifo %d, npeak %d",
-                            cur_ifo, state->peak_list[cur_ifo]->npeak[0]);
+                            enabled_ifo_id,
+                            state->peak_list[enabled_ifo_id]->npeak[0]);
                 }
             }
         }
@@ -1790,11 +1786,11 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
 
         for (i = 0, collectlist = pads->data; collectlist;
              collectlist = g_slist_next(collectlist), i++) {
-            int cur_ifo = state->input_ifo_mapping[i];
+            int enabled_ifo_id = state->enabled_ifo_ids[i];
             data = collectlist->data;
             /* move along */
-            GST_DEBUG_OBJECT(postcoh, "flush adapter %d, size %d\n", cur_ifo,
-                             exe_size);
+            GST_DEBUG_OBJECT(postcoh, "flush adapter %d, size %d\n",
+                             enabled_ifo_id, exe_size);
             gst_adapter_flush(data->adapter, exe_size);
         }
 

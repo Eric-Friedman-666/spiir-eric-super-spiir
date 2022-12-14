@@ -186,8 +186,8 @@ typedef struct _PostcohState {
     int snglsnr_start_load;
     int snglsnr_start_exe;
     gint nifo;
-    /* map the input sink to the right position of detector snr series */
-    gint *input_ifo_mapping;
+    /* map the input sink to the 'enabled_ifo_id' (its index in all_ifos) */
+    gint enabled_ifo_ids[MAX_NIFO];
     /* map the position of detector snr series to the position of output snr
      * instances */
     gint *write_ifo_mapping;
