@@ -132,7 +132,15 @@ static PyObject *
     PyObject *wrapped_snr_series_class =
       PyObject_GetAttrString(pyModule, "SNRSeries");
 
-    PyObject *wrapped_snr_series_list = PyList_New(0);
+    Py_ssize_t num_trigger_ifos = strlen(buffer_postcohtable->ifos) / IFO_LEN;
+    PyObject *wrapped_snr_series_list = PyList_New(num_trigger_ifos);
+    if (!wrapped_snr_series_list) {
+        PyErr_SetString(PyExc_ValueError,
+                        "Failed to create wrapped snr series list");
+        return NULL;
+    }
+
+    Py_ssize_t trigger_ifo_id = 0;
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         COMPLEX8TimeSeries *complex8_snr_series =
           buffer_postcohtable->snr_series_list[ifo_id];
@@ -148,9 +156,9 @@ static PyObject *
             }
 
             wrapped_snr_series->complex8_snr_series = complex8_snr_series;
-            PyList_Append(wrapped_snr_series_list,
-                          (PyObject *)wrapped_snr_series);
-            Py_DECREF(wrapped_snr_series);
+            PyList_SetItem(wrapped_snr_series_list, trigger_ifo_id,
+                           (PyObject *)wrapped_snr_series);
+            trigger_ifo_id++;
         }
     }
     return wrapped_snr_series_list;
@@ -442,28 +450,24 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
     Py_ssize_t length;
 
     if (!PyArg_ParseTuple(args, "s#", &data, &length)) return NULL;
-    const char *const end = data + length;
 
-    PyObject *trigger_list = PyList_New(0);
-
-    if (!trigger_list) {
-        PyErr_SetString(PyExc_ValueError, "trigger list error");
+    Py_ssize_t num_triggers = length / sizeof(PostcohInspiralTable);
+    if ((Py_ssize_t)(num_triggers * sizeof(PostcohInspiralTable)) != length) {
+        PyErr_SetString(PyExc_ValueError, "Buffer does not contain an integer "
+                                          "quantity of PostcohInspiralTable");
         return NULL;
     }
 
-    while (data < end) {
+    PyObject *trigger_list = PyList_New(num_triggers);
+    if (!trigger_list) {
+        PyErr_SetString(PyExc_ValueError, "Failed to create trigger list");
+        return NULL;
+    }
+
+    for (Py_ssize_t i = 0; i < num_triggers; i++) {
         /* memcpy postcoh postcohtable */
         const PostcohInspiralTable *buffer_postcohtable =
-          (const PostcohInspiralTable *)data;
-        data += sizeof(PostcohInspiralTable);
-        /* if the data read in is less then expected amount */
-        if (data > end) {
-            Py_DECREF(trigger_list);
-            PyErr_SetString(PyExc_ValueError,
-                            "overran end of buffer while deserializing a "
-                            "PostcohInspiralTable");
-            return NULL;
-        }
+          (const PostcohInspiralTable *)data + i;
 
         PyObject *postcohtrigger = new_postcohtrigger(buffer_postcohtable);
 
@@ -472,14 +476,7 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
             return NULL;
         }
 
-        PyList_Append(trigger_list, postcohtrigger);
-        Py_DECREF(postcohtrigger);
-    }
-
-    if (data != end) {
-        Py_DECREF(trigger_list);
-        PyErr_SetString(PyExc_ValueError, "did not consume entire buffer");
-        return NULL;
+        PyList_SetItem(trigger_list, i, postcohtrigger);
     }
 
     return trigger_list;
