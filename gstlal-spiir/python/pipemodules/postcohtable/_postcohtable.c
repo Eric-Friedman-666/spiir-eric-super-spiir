@@ -150,6 +150,7 @@ static PyObject *
             wrapped_snr_series->complex8_snr_series = complex8_snr_series;
             PyList_Append(wrapped_snr_series_list,
                           (PyObject *)wrapped_snr_series);
+            Py_DECREF(wrapped_snr_series);
         }
     }
     return wrapped_snr_series_list;
