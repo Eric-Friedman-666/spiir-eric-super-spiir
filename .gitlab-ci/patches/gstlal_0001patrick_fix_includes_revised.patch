@@ -1,0 +1,28 @@
+From 728d3df47273772381b0aea57d55aa74ea6f8582 Mon Sep 17 00:00:00 2001
+From: Patrick Clearwater <pclearwater@swinburne.edu.au>
+Date: Wed, 22 Apr 2020 15:18:36 +1000
+Subject: [PATCH] Fix includes in gstlal_simulation.c (new version).
+
+SPIIR won't compile on OzStar without this extra patch.
+
+This is a new version to work around the extra newline introduced in
+684bd84dfa.
+---
+ gstlal/gst/lal/gstlal_simulation.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/gstlal/gst/lal/gstlal_simulation.c b/gstlal/gst/lal/gstlal_simulation.c
+index 025a1176..c45abe8e 100644
+--- a/gstlal/gst/lal/gstlal_simulation.c
++++ b/gstlal/gst/lal/gstlal_simulation.c
+@@ -89,6 +89,8 @@
+ #include <gstlal/gstlal.h>
+ #include <gstlal/gstlal_tags.h>
+ #include <gstlal_simulation.h>
++#include <lal/LIGOMetadataUtils.h>
++#include <lal/LIGOMetadataInspiralUtils.h>
+ 
+ 
+ /*
+-- 
+2.18.0

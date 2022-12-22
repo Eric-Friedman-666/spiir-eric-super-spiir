@@ -1,0 +1,16 @@
+diff --git a/gst/gststructure.c b/gst/gststructure.c
+index fe54305c1..310380451 100644
+--- a/gst/gststructure.c
++++ b/gst/gststructure.c
+@@ -763,9 +763,9 @@ gst_structure_set_field (GstStructure * structure, GstStructureField * field)
+         g_value_unset (&field->value);
+         return;
+       } else {
+-        /* empty strings never make sense */
++        /* empty strings never make sense *
+         GIT_G_WARNING ("Trying to set empty string on taglist field '%s'. "
+-            "Please file a bug.", g_quark_to_string (field->name));
++            "Please file a bug.", g_quark_to_string (field->name)); */
+         g_value_unset (&field->value);
+         return;
+       }

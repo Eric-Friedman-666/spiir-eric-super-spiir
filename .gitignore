@@ -8,6 +8,7 @@
 .libs
 *.pyc
 *.swp
+*.dirstamp
 Makefile
 Makefile.in
 aclocal.m4
@@ -30,3 +31,4 @@ configure
 */gnuscripts/py-compile
 */gnuscripts/test-driver
 libtool
+artifacts

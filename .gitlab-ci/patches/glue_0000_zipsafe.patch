@@ -1,0 +1,12 @@
+diff --git a/setup.py b/setup.py
+index f4ee55d1..6da7b650 100644
+--- a/setup.py
++++ b/setup.py
+@@ -111,6 +111,7 @@ setup(
+   license = 'See file LICENSE',
+   packages = [ 'glue', 'glue.ligolw', 'glue.ligolw.utils', 'glue.segmentdb', 'glue.auth'],
+   install_requires=install_requires,
++  zip_safe = False,
+   cmdclass = {
+     'build_py' : glue_build_py,
+     'clean' : glue_clean,
