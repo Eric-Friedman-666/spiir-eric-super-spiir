@@ -1,0 +1,22 @@
+diff --git a/gstlal-spiir/python/pipemodules/postcoh_finalsink.py b/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
+index a73ef9aa0..2da2b9396 100644
+--- a/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
++++ b/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
+@@ -553,6 +553,8 @@ class FinalSink(object):
+         self.thread_upload_skymap = None
+ 
+     def __pass_test(self, postcoh_inspiral):
++        if postcoh_inspiral.cohsnr > 12:
++            return True
+         if postcoh_inspiral.far <= 0.0:
+             return False
+ 
+@@ -826,7 +828,7 @@ class FinalSink(object):
+         # if it is not one order of magnitude more significant than the last
+         # trigger or if it not more significant the last submitted trigger
+         # FIXME: what if there are two adjacent significant events
+-        if ((abs(float(trigger.end) - last_time) < 50
++        if ((abs(float(trigger.end) - last_time) < 50 and last_far > 0
+              and abs(trigger.far / last_far) > 0.5)) or (
+                  abs(float(trigger.end) - float(last_submitted_time)) < 100
+                  and trigger.far > last_submitted_far * 0.5):

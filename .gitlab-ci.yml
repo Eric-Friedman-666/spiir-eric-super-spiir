@@ -1,21 +1,307 @@
-image: docker:20.10.14
+default:
+  image: docker:20.10.20-git
+  interruptible: true
 
-build spiir:
+variables:
+  PYVER: -py2
+  ALL_IFOS: 0
+
+build-spiir:
+  stage: build
   script:
-    - cp /artifacts/iir_* . && cp /artifacts/*.patch .
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker pull $CI_REGISTRY/lscsoft/spiir:spiir-O4-EW-development${PYVER}${TAG} || true
+    - docker pull $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${PYVER}${TAG} || true
+    - if [[ -n "${ARGS}" ]]; then
+        for ARG in ${ARGS}; do
+          BUILD_ARGS="${BUILD_ARGS} --build-arg ${ARG}";
+        done
+      fi
     - DOCKER_BUILDKIT=1 docker build
-      -t spiir:${CI_COMMIT_REF_SLUG}
-      -f spiir.Dockerfile
+      -t $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${PYVER}${TAG}
+      -f .gitlab-ci/spiir${PYVER}.Dockerfile
       --progress=plain
       --build-arg BUILDKIT_INLINE_CACHE=1
+      --build-arg PATCH_FINALSINK=1
+      ${BUILD_ARGS}
       '.'
+  when: manual
+  timeout: 10h
   tags:
     - spiir,gpu
-  only:
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_REF_NAME == "spiir-O4-EW-development"
+
+push-spiir:
+  stage: deploy
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker push $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${PYVER}${TAG}
+  needs:
+    - build-spiir
+  tags:
+    - spiir,gpu
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_REF_NAME == "spiir-O4-EW-development"
+
+build-spiir-py3:
+  extends:
+    - build-spiir
+  variables:
+    PYVER: -py3
+
+push-spiir-py3:
+  extends:
+    - push-spiir
+  needs:
+    - build-spiir-py3
+  variables:
+    PYVER: -py3
+
+build-spiir-debug:
+  extends:
+    - build-spiir
+  variables:
+    TAG: -debug
+    ARGS: "DEBUG=1"
+
+push-spiir-debug:
+  extends:
+    - push-spiir
+  needs:
+    - build-spiir-debug
+  variables:
+    TAG: -debug
+
+build-spiir-py3-debug:
+  extends:
+    - build-spiir-py3
+  variables:
+    TAG: -debug
+    ARGS: "DEBUG=1"
+
+push-spiir-py3-debug:
+  extends:
+    - push-spiir
+  needs:
+    - build-spiir-py3-debug
+  variables:
+    PYVER: -py3
+    TAG: -debug
+
+build-spiir-debug-ASAN:
+  extends:
+    - build-spiir-debug
+  variables:
+    TAG: -debug-ASAN
+    ARGS: "DEBUG=1 DEBUGADDRESS=1"
+
+# TODO #93: MSAN requires all dependencies to be compiled with MSAN, valgrind is suitable for now.
+# build-spiir-debug-MSAN:
+#   extends:
+#     - build-spiir-debug
+#   variables:
+#     TAG: -debug-MSAN
+#     ARGS: "DEBUG=1 DEBUGMEMORY=1"
+
+# TODO #93: TSAN segfaults during ./configure for reasons unknown.
+# build-spiir-debug-TSAN:
+#   extends:
+#     - build-spiir-debug
+#   variables:
+#     TAG: -debug-TSAN
+#     ARGS: "DEBUG=1 DEBUGTHREADS=1"
+
+build-spiir-debug-UBSAN:
+  extends:
+    - build-spiir-debug
+  variables:
+    TAG: -debug-UBSAN
+    ARGS: "DEBUG=1 DEBUGUB=1"
+
+test-spiir:
+  stage: test
+  script:
+    - if [[ -n "${WRAPPER}" ]]; then
+        export WRAPPER;
+        sed -i 's/cmd = \[\]/cmd = \[$WRAPPER\]/g' gstlal-spiir/python/pipemodules/postcoh_finalsink.py;
+        WRAPPER="-w ${WRAPPER}";
+      fi
+    - RUNNING_CONTAINERS=$(docker ps -f NAME=test-spiir -q)
+    - if [[ -n "${RUNNING_CONTAINERS}" ]]; then
+        docker stop ${RUNNING_CONTAINERS};
+      fi
+    - docker run
+      --ulimit cpu=36000
+      --gpus all
+      --rm
+      --mount type=bind,source=/artifacts,target=/spiir/artifacts
+      --name test-spiir-${CI_COMMIT_REF_SLUG}${PYVER}${TAG}-${CI_JOB_ID}
+      --entrypoint /.gitlab-ci/submit_runs.sh
+      $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${PYVER}${TAG}
+        -a /spiir/artifacts
+        -s 1187006000
+        -d 300
+        -j ${CI_COMMIT_REF_SLUG}${PYVER}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA}
+        -l 0
+        -g 1
+        -i ${ALL_IFOS}
+        -y
+        "${WRAPPER}"
+    - cp -r /artifacts/HLVK-1187006000-300/${CI_COMMIT_REF_SLUG}${PYVER}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA} .
+  needs:
+    - build-spiir
+  timeout: 10h
+  artifacts:
+    paths:
+      - ./${CI_COMMIT_REF_SLUG}${PYVER}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA}
+    expire_in: 1 month
   when: manual
+  resource_group: gpu
+  tags:
+    - spiir,gpu
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_REF_NAME == "spiir-O4-EW-development"
+
+test-spiir-all-ifos:
+  extends:
+    - test-spiir
+  variables:
+    ALL_IFOS: 1
+
+test-spiir-py3:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir-py3
+  variables:
+    PYVER: -py3
+
+test-spiir-valgrind:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir-debug
+  variables:
+    TAG: -debug
+    WRAPPER: >
+      valgrind
+        --trace-children=yes
+        --num-callers=20
+        --suppressions=/usr/spiir/valgrind-python.supp
+        --suppressions=/usr/spiir/gst.supp
+        --suppressions=/usr/spiir/gst-plugins-base.supp
+        --suppressions=/usr/spiir/gst-plugins-good.supp
+        --suppressions=/usr/spiir/gstpython.supp
+        --suppressions=/usr/spiir/share/glib-2.0/glib.supp
+        --suppressions=/usr/spiir/pythonswig.supp
+        --suppressions=/usr/spiir/std.supp
+        --tool=memcheck
+        --leak-check=full
+        --track-origins=yes
+        --leak-resolution=high
+
+test-spiir-callgrind:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir
+  variables:
+    WRAPPER: >
+      valgrind
+        --trace-children=yes
+        --num-callers=20
+        --tool=callgrind
+
+# gstleaks is available in gstreamer 1.10
+test-spiir-gstleaks:
+  extends:
+    - test-spiir-py3
+  needs:
+    - build-spiir-py3-debug
+  variables:
+    TAG: -debug
+    WRAPPER: "GST_LEAKS_TRACER_STACK_TRACE=1 GST_DEBUG=GST_TRACER:7,$GST_DEBUG GST_TRACERS=leaks"
+
+test-spiir-compute-sanitizer-memcheck:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir-debug
+  variables:
+    TAG: -debug
+    WRAPPER: compute-sanitizer --target-processes all --kill no --tool memcheck --leak-check full
+  
+test-spiir-compute-sanitizer-racecheck:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir-debug
+  variables:
+    TAG: -debug
+    WRAPPER: compute-sanitizer --target-processes all --kill no --tool racecheck
+
+test-spiir-compute-sanitizer-initcheck:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir-debug
+  variables:
+    TAG: -debug
+    WRAPPER: compute-sanitizer --target-processes all --kill no --tool initcheck --track-unused-memory yes
+
+test-spiir-compute-sanitizer-synccheck:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir-debug
+  variables:
+    TAG: -debug
+    WRAPPER: compute-sanitizer --target-processes all --kill no --tool synccheck
+
+test-spiir-ASAN:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir-debug-ASAN
+  variables:
+    TAG: -debug-ASAN
+    WRAPPER: "LD_PRELOAD='/usr/lib/llvm-11/lib/clang/11.1.0/lib/linux/libclang_rt.asan-x86_64.so'"
+
+# TODO #93: MSAN requires all dependencies to be compiled with MSAN, valgrind is suitable for now.
+# test-spiir-MSAN:
+#   extends:
+#     - test-spiir
+#   needs:
+#     - build-spiir-debug-MSAN
+#   variables:
+#     TAG: -debug-MSAN
+#     WRAPPER: "LD_PRELOAD='/usr/lib/llvm-11/lib/clang/11.1.0/lib/linux/libclang_rt.asan-x86_64.so'"
+
+# TODO #93: TSAN segfaults during ./configure for reasons unknown.
+# test-spiir-TSAN:
+#   extends:
+#     - test-spiir
+#   needs:
+#     - build-spiir-debug-TSAN
+#   variables:
+#     TAG: -debug-TSAN
+#     WRAPPER: "LD_PRELOAD='/usr/lib/llvm-11/lib/clang/11.1.0/lib/linux/libclang_rt.asan-x86_64.so'"
+
+test-spiir-UBSAN:
+  extends:
+    - test-spiir
+  needs:
+    - build-spiir-debug-UBSAN
+  variables:
+    TAG: -debug-UBSAN
+    WRAPPER: "LD_PRELOAD='/usr/lib/llvm-11/lib/clang/11.1.0/lib/linux/libclang_rt.asan-x86_64.so'"
 
 check pep8 standards:
+  stage: build
   image: python:2.7
   before_script:
     - /usr/local/bin/python -m pip install --upgrade pip
@@ -25,10 +311,11 @@ check pep8 standards:
     - linter_errors=$(git diff -U0 --no-color --relative origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME | yapf-diff --style pep8)
     - echo "$linter_errors"
     - if [ ! -z "$linter_errors" ]; then echo "Detected yapf formatting issues; please fix"; exit 1; else echo "Yapf formatting is correct"; exit 0; fi
-  only:
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
 check clang standards:
+  stage: build
   image: ubuntu:20.04
   before_script:
     - apt-get update && apt-get install -y clang-format-9 git-core
@@ -37,5 +324,5 @@ check clang standards:
     - linter_errors=$(git-clang-format-9 --binary clang-format-9 --commit origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME -q --diff | grep -v --color=never "no modified files to format" || true)
     - echo "$linter_errors"
     - if [ ! -z "$linter_errors" ]; then echo "Detected clang formatting issues; please fix"; exit 1; else echo "Clang formatting is correct"; exit 0; fi
-  only:
-    - merge_requests
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
