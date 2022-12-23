@@ -58,6 +58,7 @@ extern "C" {
 #define THREADSPERBLOCK 256
 #define NB_MAX           32
 #define ALL_THREADS_MASK 0xFFFFFFFF
+// #define MULTIRATESPIIR_USE_WARP_REDUCE
 
 //#define ORIGINAL
 #define CUT_FILTERS 0 // set to 0 to keep all the filtering results
@@ -192,7 +193,9 @@ __global__ void
 
     // Compute which warp and which lane in that warp the thread is in
     int tLane = threadIdx.x & (WARPSIZE - 1);
+#ifdef MULTIRATESPIIR_USE_WARP_REDUCE
     int tWarp = threadIdx.x >> LOGWARPSIZE;
+#endif
 
     float fltrOutptReal;
     float fltrOutptImag;
@@ -201,7 +204,7 @@ __global__ void
 
     COMPLEX_F a1, b0;
     COMPLEX_F previousSnr;
-
+#ifdef MULTIRATESPIIR_USE_WARP_REDUCE
     // Shared memory for partial reduction results
     // Note this assumes that the number of warps is at most the warp size.
     // This is (currently) a safe assumption as CUDA fixes the warp size at 32
@@ -210,7 +213,7 @@ __global__ void
     // See https://developer.nvidia.com/blog/faster-parallel-reductions-kepler/
     static __shared__ float partialSumsReal[WARPSIZE];
     static __shared__ float partialSumsImag[WARPSIZE];
-
+#endif
     a1.re          = 0.0f;
     a1.im          = 0.0f;
     b0.re          = 0.0f;
@@ -250,6 +253,7 @@ __global__ void
               __shfl_down_sync(ALL_THREADS_MASK, fltrOutptImag, off, 2 * off);
         }
 
+#ifdef MULTIRATESPIIR_USE_WARP_REDUCE
         if (tLane == 0) {
             // Store the per-warp partial sum in shared memory
             partialSumsReal[tWarp] = fltrOutptReal;
@@ -287,6 +291,16 @@ __global__ void
         // Don't let other threads mutate shared memory until we are done with
         // it
         __syncthreads();
+#else
+        if (tLane == 0) {
+            atomicAdd(cudaSnr + (2 * blockIdx.x + 0) * mem_len + filt_len - 1
+                        + i,
+                      fltrOutptReal);
+            atomicAdd(cudaSnr + (2 * blockIdx.x + 1) * mem_len + filt_len - 1
+                        + i,
+                      fltrOutptImag);
+        }
+#endif
     }
 
     if (threadIdx.x < numFilters)
