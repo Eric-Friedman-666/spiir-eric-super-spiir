@@ -23,6 +23,7 @@ build-spiir:
       --progress=plain
       --build-arg BUILDKIT_INLINE_CACHE=1
       --build-arg PATCH_FINALSINK=1
+      --build-arg SET_DETERMINISTIC=1
       ${BUILD_ARGS}
       '.'
   when: manual

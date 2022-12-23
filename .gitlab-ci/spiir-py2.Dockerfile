@@ -1005,12 +1005,16 @@ FROM build AS runtime
 # If PATCH_FINALSINK=1, patch postcoh_finalsink.py to skip far validation and output coinc.xml's on small runs.
 ARG PATCH_FINALSINK
 
+# If SET_DETERMINISTIC=1, spiir will be built to be deterministic at the cost of performance.
+ARG SET_DETERMINISTIC
+
 COPY gstlal-spiir /spiir/gstlal-spiir
 COPY .gitlab-ci/patches/force_early_uploads.patch /.gitlab-ci/patches/force_early_uploads.patch
 RUN --mount=type=cache,target=/root/ccache \
 	<<EOF
 	cd /spiir
 	if [ -n "$PATCH_FINALSINK" ] ; then git apply /.gitlab-ci/patches/force_early_uploads.patch; fi
+	if [ -n "$SET_DETERMINISTIC" ] ; then CFLAGS="$CFLAGS -DMULTIRATESPIIR_USE_WARP_REDUCE"; fi
 	cd /spiir/gstlal-spiir
 	make distclean || true
 	yes | head -n1 | ./00init.sh
