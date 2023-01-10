@@ -993,8 +993,9 @@ RUN --mount=type=cache,target=/root/ccache \
 EOF
 
 # Spiir build debug flags
-ENV NVCCFLAGS=${SAN:+"-ccbin clang-11"}
-ENV NVCC_APPEND_FLAGS=${DEBUG:+"-g -G $NVCCFLAGS"}
+ENV NVCC_APPEND_FLAGS2=${SAN:+"-ccbin clang-11"}
+ENV NVCC_APPEND_FLAGS3=${DEBUG:+"-g -G"}
+ENV NVCC_APPEND_FLAGS="-gencode=arch=compute_86,code=sm_86 $NVCC_APPEND_FLAGS2 $NVCC_APPEND_FLAGS3"
 ENV DEBUGFLAGS2=${DEBUG:+"-fdebug-prefix-map=..=/spiir"}
 ENV LDFLAGS="$LDFLAGS $DEBUGFLAGS2"
 ENV CFLAGS="$CFLAGS $DEBUGFLAGS2"
