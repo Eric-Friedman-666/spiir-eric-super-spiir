@@ -45,9 +45,7 @@ import gst
 try:
     from ligo.gracedb.rest import GraceDb
 except ImportError:
-    print >> sys.stderr, "warning: gracedb import failed, \
-        program will crash if gracedb uploads are attempted"
-
+    print >> sys.stderr, "warning: gracedb import failed"
     GraceDb = None
 
 from glue import iterutils
@@ -100,8 +98,6 @@ lsctables.use_in(LIGOLWContentHandler)
 class SegmentDocument(object):
     def __init__(self, ifos, verbose=False):
 
-        self.get_another = lambda: SegmentDocument(ifos, verbose=verbose)
-
         self.filename = None
         #
         # build the XML document
@@ -119,10 +115,10 @@ class SegmentDocument(object):
                                      for instrument in re.findall('..', ifos))
         }
 
-    def set_filename(self, filename):
-        self.filename = filename
+    def close(self):
+        self.xmldoc.unlink()
 
-    def write_output_file(self, verbose=False):
+    def write_output_file(self, verbose=False, cleanup=True):
         assert self.filename is not None
         with ligolw_segments.LigolwSegments(self.xmldoc,
                                             self.process) as llwsegments:
@@ -138,13 +134,13 @@ class SegmentDocument(object):
                                         or "stdout").endswith(".gz"),
                                     verbose=verbose,
                                     trap_signals=None)
+        if cleanup:
+            self.close()
 
 
 #
 class PostcohDocument(object):
     def __init__(self, verbose=False):
-
-        self.get_another = lambda: PostcohDocument(verbose=verbose)
 
         self.filename = None
 
@@ -160,10 +156,10 @@ class PostcohDocument(object):
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(postcoh_table_def.PostcohInspiralTable))
 
-    def set_filename(self, filename):
-        self.filename = filename
+    def close(self):
+        self.xmldoc.unlink()
 
-    def write_output_file(self, verbose=False):
+    def write_output_file(self, verbose=False, cleanup=True):
         assert self.filename is not None
         ligolw_utils.write_filename(self.xmldoc,
                                     self.filename,
@@ -171,6 +167,8 @@ class PostcohDocument(object):
                                         or "stdout").endswith(".gz"),
                                     verbose=verbose,
                                     trap_signals=None)
+        if cleanup:
+            self.close()
 
 
 class OnlinePerformer(object):
@@ -429,7 +427,8 @@ class FinalSink(object):
                  gracedb_search="LowMass",
                  gracedb_pipeline="spiir",
                  gracedb_service_url="https://gracedb.ligo.org/api/",
-                 gracedb_offline_annote=None,
+                 gracedb_upload_attempts=3,
+                 is_offline_analysis=False,
                  output_skymap=0,
                  superevent_thresh=3.8e-7,
                  opa_cohsnr_thresh=8,
@@ -480,10 +479,9 @@ class FinalSink(object):
         self.gracedb_search = gracedb_search
         self.gracedb_pipeline = gracedb_pipeline
         self.gracedb_service_url = gracedb_service_url
-        if gracedb_offline_annote:
-            self.gracedb_offline_annote = True
-        else:
-            self.gracedb_offline_annote = False
+        self.gracedb_upload_attempts = gracedb_upload_attempts
+        self.is_offline_analysis = is_offline_analysis  # gracedb 'offline' arg
+        self.gracedb_client = None
         if GraceDb:
             self.gracedb_client = GraceDb(gracedb_service_url,
                                           reload_certificate=True)
@@ -509,6 +507,7 @@ class FinalSink(object):
                 self.cuda_postcoh_output_skymap = process_params[param]
         # snapshot parameters
         self.path = path
+        self.process_params = process_params
         self.output_prefix = output_prefix
         self.output_name = output_name
         self.snapshot_interval = snapshot_interval
@@ -673,7 +672,8 @@ class FinalSink(object):
                     self.__set_far(self.candidate.postcoh_inspiral)
                     if self.gracedb_far_threshold and self.__pass_test(
                             self.candidate.postcoh_inspiral):
-                        self.__do_gracedb_alert(self.candidate)
+                        self.__do_gracedb_alert(self.candidate,
+                                                self.gracedb_upload_attempts)
 
                     self.postcoh_table.append(self.candidate.postcoh_inspiral)
 
@@ -884,14 +884,12 @@ class FinalSink(object):
 
         return psd_frequency_series
 
-    def __do_gracedb_alert(self, trigger):
+    def __do_gracedb_alert(self, trigger, gracedb_upload_attempts=3):
 
         postcoh_inspiral = trigger.postcoh_inspiral
 
         if self.__need_trigger_control(postcoh_inspiral):
             return
-
-        gracedb_ids = []
 
         # TODO: Remove conditional bool here and in __init__ after tests
         if self.append_psd_to_coincs_doc:
@@ -903,83 +901,90 @@ class FinalSink(object):
             psds = None
 
         self.coincs_document.assemble_ligolw_xmldoc(trigger, psds)
-        xmldoc = self.coincs_document.xmldoc
         filename = "%s_%s_%d_%d.xml" % (
             postcoh_inspiral.ifos, postcoh_inspiral.end_time,
             postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx)
 
-        #
-        # construct message and send to gracedb.
-        # we go through the intermediate step of
-        # first writing the document into a string
-        # buffer incase there is some safety in
-        # doing so in the event of a malformed
-        # document;  instead of writing directly
-        # into gracedb's input pipe and crashing
-        # part way through.
-        #
-
-        message = StringIO.StringIO()
-        ligolw_utils.write_fileobj(xmldoc, message, gz=False)
-        ligolw_utils.write_filename(xmldoc,
+        print >> sys.stderr, "writing %s to disk ..." % filename
+        ligolw_utils.write_filename(self.coincs_document.xmldoc,
                                     filename,
                                     gz=False,
                                     trap_signals=None)
-        xmldoc.unlink()
 
-        print >> sys.stderr, "sending %s to gracedb ..." % filename
-        gracedb_upload_itrial = 1
-        # FIXME: make this optional from cmd line?
-        while gracedb_upload_itrial < 10:
-            try:
-                resp = self.gracedb_client.createEvent(
-                    self.gracedb_group,
-                    self.gracedb_pipeline,
-                    filename,
-                    filecontents=message.getvalue(),
-                    search=self.gracedb_search,
-                    offline=self.gracedb_offline_annote)
-                resp_json = resp.json()
-                if resp.status != httplib.CREATED:
-                    error_message = "graceid upload '%s' failed" % filename
-                    print >> sys.stderr, error_message
-                else:
-                    gid = resp_json["graceid"]
-                    print >> sys.stderr, "graceid upload '%s' succeeded" % gid
-                    gracedb_ids.append(gid)
-                    break
-            except Exception as e:
-                print(e)
-                gracedb_upload_itrial += 1
+        if self.gracedb_client is not None:
+            # Construct message and send to gracedb.
+            # We go through the intermediate step of first writing the xmldoc
+            # into a string buffer incase there is some safety in doing so in
+            # the event of a malformed document; instead of writing directly
+            # into gracedb's  input pipe and crashing part way through.
+            message = StringIO.StringIO()
+            ligolw_utils.write_fileobj(self.coincs_document.xmldoc,
+                                       message,
+                                       gz=False)
 
-        message.close()
+            print >> sys.stderr, "sending %s to gracedb ..." % filename
+            upload_attempt_limit = gracedb_upload_attempts + 1  # one-indexed
+            gracedb_id = None
 
-        gracedb_upload_itrial = 1
+            for i in range(1, upload_attempt_limit):
+                try:
+                    resp = self.gracedb_client.createEvent(
+                        self.gracedb_group,
+                        self.gracedb_pipeline,
+                        filename,
+                        filecontents=message.getvalue(),
+                        search=self.gracedb_search,
+                        offline=self.is_offline_analysis)
+                    resp_json = resp.json()
+                    if resp.status != httplib.CREATED:
+                        gracedb_msg = "[%d/%d] graceid upload '%s' failed" % \
+                            (i, upload_attempt_limit, filename)
+                        print >> sys.stderr, gracedb_msg
+                    else:
+                        gracedb_id = resp_json["graceid"]
+                        gracedb_msg = "[%d/%d] graceid upload '%s' succeeded with id '%s'" % \
+                            (i, upload_attempt_limit, filename, gracedb_id)
+                        print >> sys.stderr, gracedb_msg
+                        break
+                except Exception as e:
+                    print(e)
 
-        # TODO: Refactor xmldoc handling to be more pythonic, see #35
-        # delete the xmldoc and get a new empty one for next upload
-        coincs_document = self.coincs_document.get_another()
-        del self.coincs_document
-        self.coincs_document = coincs_document
-        if not gracedb_ids:
-            print "gracedb upload of '%s' failed completely" % filename
-            return
-        gid = gracedb_ids[0]
-        log_message = "Optimal ra and dec from this coherent pipeline: \
-            (%f, %f) in degrees" \
-                % (postcoh_inspiral.ra, postcoh_inspiral.dec)
-        while gracedb_upload_itrial < 10:
-            try:
-                resp = self.gracedb_client.writeLog(gid,
-                                                    log_message,
-                                                    filename=None,
-                                                    tagname="analyst_comments")
-                if resp.status != httplib.CREATED:
-                    print >> sys.stderr, "gracedb upload of log failed"
-                else:
-                    break
-            except:
-                gracedb_upload_itrial += 1
+            message.close()
+
+            if gracedb_id is not None:
+                log_message = "Optimal ra and dec from this coherent pipeline: \
+                    (%f, %f) in degrees" \
+                        % (postcoh_inspiral.ra, postcoh_inspiral.dec)
+
+                for i in range(1, upload_attempt_limit):
+                    try:
+                        resp = self.gracedb_client.writeLog(
+                            gracedb_id,
+                            log_message,
+                            filename=None,
+                            tagname="analyst_comments")
+                        if resp.status != httplib.CREATED:
+                            gracedb_msg = "[%d/%d] gracedb upload of log failed" % \
+                                (i, upload_attempt_limit)
+                            print >> sys.stderr, gracedb_msg
+                        else:
+                            gracedb_msg = "[%d/%d] gracedb upload of log succeeded" % \
+                                (i, upload_attempt_limit)
+                            print >> sys.stderr, gracedb_msg
+                            break
+                    except Exception as e:
+                        print(e)
+            else:
+                print "gracedb upload of '%s' failed completely" % filename
+
+        # close the xmldoc for garbage collection and prepare a new empty one
+        self.coincs_document.close()
+
+        # NOTE: It may make more sense to create this doc earlier elsewhere
+        #   rather than at the end of this function (separation of concerns)
+        self.coincs_document = CoincsDocFromPostcoh(self.path,
+                                                    self.process_params,
+                                                    self.channel_dict)
 
     def get_output_filename(self, output_prefix, output_name, t_snapshot_start,
                             snapshot_duration):
@@ -999,23 +1004,18 @@ class FinalSink(object):
                 and (self.thread_snapshot_segment.isAlive())):
             self.thread_snapshot_segment.join()
 
-        # free the last used memory
-        del self.thread_snapshot_segment
-        # copy the memory
-        seg_document_cpy = self.seg_document
-        seg_document_cpy.set_filename(filename)
         # free thread context
-        # start new thread
+        del self.thread_snapshot_segment
+
+        self.seg_document.filename = filename
         self.thread_snapshot_segment = threading.Thread(
-            target=seg_document_cpy.write_output_file,
-            args=(seg_document_cpy, ))
+            target=self.seg_document.write_output_file,
+            args=(self.seg_document, ))
         self.thread_snapshot_segment.start()
 
-        # set a new document for seg_document
-        seg_document = self.seg_document.get_another()
-        # remember to delete the old seg doc
+        #  NOTE: del may not be necessary, as we unlink after thread completion
         del self.seg_document
-        self.seg_document = seg_document
+        self.seg_document = SegmentDocument(self.ifos)
 
     def snapshot_output_file(self, filename, verbose=False):
         # make sure the last round of output dumping is finished
@@ -1023,22 +1023,18 @@ class FinalSink(object):
         if self.thread_snapshot is not None and self.thread_snapshot.isAlive():
             self.thread_snapshot.join()
 
-        # copy the memory
-        postcoh_document_cpy = self.postcoh_document
-        postcoh_document_cpy.set_filename(filename)
+        self.postcoh_document.filename = filename
         # free thread context
         del self.thread_snapshot
         self.thread_snapshot = threading.Thread(
-            target=postcoh_document_cpy.write_output_file,
-            args=(postcoh_document_cpy, ))
+            target=self.postcoh_document.write_output_file,
+            args=(self.postcoh_document, ))
         self.thread_snapshot.start()
 
-        # set a new document for postcoh_document
-        postcoh_document = self.postcoh_document.get_another()
-        # remember to delete the old postcoh doc
+        #  NOTE: del may not be necessary, as we unlink after thread completion
         del self.postcoh_table
         del self.postcoh_document
-        self.postcoh_document = postcoh_document
+        self.postcoh_document = PostcohDocument()
         self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
             self.postcoh_document.xmldoc)
 
@@ -1059,14 +1055,15 @@ class FinalSink(object):
         self.fapupdater.wait_last_process_finish(
             self.fapupdater.procs_combine_stats)
 
-    def write_output_file(self, filename=None, verbose=False):
+    def write_output_file(self, filename=None, verbose=False, cleanup=False):
         self.__wait_internal_process_finish()
-        self.__write_output_file(filename, verbose=verbose)
+        self.__write_output_file(filename, verbose=verbose, cleanup=cleanup)
 
-    def __write_output_file(self, filename=None, verbose=False):
+    def __write_output_file(self, filename=None, verbose=False, cleanup=False):
         if filename is not None:
-            self.postcoh_document.set_filename(filename)
-        self.postcoh_document.write_output_file(verbose=verbose)
+            self.postcoh_document.filename = filename
+        self.postcoh_document.write_output_file(verbose=verbose,
+                                                cleanup=cleanup)
         # FIXME: hard-coded segment filename
         if self.t_snapshot_start:
             seg_filename = "%s/%s_SEGMENTS_%d_%d.xml.gz" % (
@@ -1074,8 +1071,8 @@ class FinalSink(object):
                 self.snapshot_duration)
         else:
             seg_filename = "%s/%s_SEGMENTS.xml.gz" % (self.path, self.ifos)
-        self.seg_document.set_filename(seg_filename)
-        self.seg_document.write_output_file(verbose=verbose)
+        self.seg_document.filename = seg_filename
+        self.seg_document.write_output_file(verbose=verbose, cleanup=cleanup)
 
 
 class CoincsDocFromPostcoh(object):
@@ -1095,12 +1092,6 @@ class CoincsDocFromPostcoh(object):
         #
         # build the XML document
         #
-        self.get_another = lambda: CoincsDocFromPostcoh(
-            url=url,
-            process_params=process_params,
-            channel_dict=channel_dict,
-            comment=comment,
-            verbose=verbose)
 
         self.channel_dict = channel_dict
         self.url = url
@@ -1128,6 +1119,9 @@ class CoincsDocFromPostcoh(object):
             lsctables.New(lsctables.CoincInspiralTable))
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(postcoh_table_def.PostcohInspiralTable))
+
+    def close(self):
+        self.xmldoc.unlink()
 
     def assemble_ligolw_xmldoc(self, trigger, psds=None):
         postcoh_inspiral = trigger.postcoh_inspiral
