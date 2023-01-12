@@ -444,8 +444,8 @@ class FinalSink(object):
         self.is_first_buf = True
         self.is_first_event = True
         self.channel_dict = channel_dict
-        self.ifos = lsctables.ifos_from_instrument_set(
-            channel_dict.keys()).replace(",", "")  # format: "H1L1V1K1"
+        self.ifos = "".join(
+            [ifo for ifo in pipe_macro.IFO_MAP if ifo in channel_dict])
 
         # Track number of current buffers so we can process early when possible
         self.current_timestamp = None
