@@ -947,7 +947,7 @@ class FinalSink(object):
                         print >> sys.stderr, gracedb_msg
                         break
                 except Exception as e:
-                    print(e)
+                    print >> sys.stderr, e
 
             message.close()
 
@@ -973,7 +973,7 @@ class FinalSink(object):
                             print >> sys.stderr, gracedb_msg
                             break
                     except Exception as e:
-                        print(e)
+                        print >> sys.stderr, e
             else:
                 print "gracedb upload of '%s' failed completely" % filename
 

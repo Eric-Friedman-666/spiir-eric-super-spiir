@@ -344,6 +344,7 @@ def parse_command_line():
     )
     parser.add_option("--offline",
                       action="store_true",
+                      default=False,
                       help="Indicates pipeline is in offline analysis mode.")
     parser.add_option(
         "--finalsink-far-factor",
