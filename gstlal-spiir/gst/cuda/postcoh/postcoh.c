@@ -21,12 +21,7 @@
  * peaks from all detectors and for each peak, do null stream analysis.
  */
 
-#include <IFOMap.h>
-#include <chealpix.h>
-#include <cohfar/background_stats_utils.h>
-#include <cuda_debug.h>
-#include <flag_segment.h>
-
+// Standard and 3rd party includes
 // Suppresses a warning from gstreamer using deprecated mutexes.
 // Should be revisited after the gstreamer upgrade.
 // See #15
@@ -35,16 +30,24 @@
 #include <gst/gst.h>
 #pragma GCC diagnostic pop
 
+#include <chealpix.h>
 #include <lal/Date.h>
 #include <lal/LIGOMetadataTables.h>
 #include <lal/TimeSeries.h>
 #include <lal/Units.h>
 #include <math.h>
+#include <string.h>
+
+// Our includes
+#include <IFOMap.h>
+#include <cohfar/background_stats_utils.h>
+#include <cuda_debug.h>
+#include <flag_segment.h>
+#include <ifo_set.h>
 #include <pipe_macro.h>
 #include <postcoh/postcoh.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcoh/postcohtable_utils.h>
-#include <string.h>
 
 #define DEFAULT_DETRSP_FNAME      "H1L1V1K1_detrsp.xml"
 #define EPSILON                   5

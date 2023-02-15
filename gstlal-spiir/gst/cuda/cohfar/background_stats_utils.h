@@ -43,13 +43,8 @@
 #pragma diag_default 1217
 #endif
 
+#include <ifo_set.h>
 #include <postcohtable.h>
-
-const char *ifo_set__get_string(ifo_set_type ifo_set);
-
-// Parse IFO set from string representation. See implementation for details.
-bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos);
-ifo_set_type ifo_set__parse_or_empty(const char *ifos_str);
 
 Bins1D *bins1D_create_long(double cmin, double cmax, int nbin);
 
@@ -95,12 +90,6 @@ void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
 void trigger_stats_livetime_add(TriggerStats **stats_out,
                                 TriggerStats **stats_in,
                                 const int index);
-
-int ifo_set__count(const ifo_set_type ifos);
-
-int ifo_set__is_empty(const ifo_set_type ifos);
-
-int ifo_set__contains(const ifo_set_type ifos, const int ifo_id);
 
 int trigger_stats_num_stats(const ifo_set_type ifos);
 

@@ -28,15 +28,17 @@
 #ifndef __BACKGROUND_STATS_H__
 #define __BACKGROUND_STATS_H__
 
+// 3rd party includes
 #include <gsl/gsl_matrix.h>
 #include <gsl/gsl_vector.h>
+
+// Our includes
+#include <ifo_set.h>
 #include <pipe_macro.h>
 
 #define NSTATS_TO_PROMPT                                                       \
     50 // deprecated. supposed to be used to collect last 50 seconds of
        // background stats.
-
-typedef unsigned int ifo_set_type;
 
 typedef struct {
     double cmin;

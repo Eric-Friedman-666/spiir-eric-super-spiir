@@ -29,6 +29,7 @@
 #define __COHFAR_ACCUMBACKGROUND_H__
 
 #include <cohfar/background_stats.h>
+#include <ifo_set.h>
 
 // Suppresses a warning that only occurs on NVCC
 // It should be revisited after the gstreamer upgrade

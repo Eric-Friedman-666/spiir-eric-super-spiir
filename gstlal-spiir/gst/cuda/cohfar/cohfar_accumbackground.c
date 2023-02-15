@@ -60,6 +60,7 @@
 
 #include <cohfar/background_stats_utils.h>
 #include <cohfar/cohfar_accumbackground.h>
+#include <ifo_set.h>
 #include <pipe_macro.h>
 #include <postcohtable.h>
 #include <time.h>
