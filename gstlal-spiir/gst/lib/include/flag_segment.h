@@ -1,5 +1,5 @@
-#ifndef __GST_COMMON_HEADER__
-#define __GST_COMMON_HEADER__
+#ifndef __GST_FLAG_SEGMENT_HEADER__
+#define __GST_FLAG_SEGMENT_HEADER__
 
 #include <glib.h>
 // Suppresses a warning from gstreamer using deprecated mutexes.
@@ -24,4 +24,4 @@ void flag_segments_append(GArray *flag_segments,
                           GstClockTime stop,
                           gboolean is_gap);
 
-#endif /* __GST_COMMON_HEADER__ */
+#endif /* __GST_FLAG_SEGMENT_HEADER__ */

@@ -57,6 +57,7 @@
 
 #include <cohfar/background_stats_utils.h>
 #include <cohfar/cohfar_assignfar.h>
+#include <ifo_set.h>
 #include <postcohtable.h>
 #include <time.h>
 #define DEFAULT_STATS_NAME "stats.xml.gz"
