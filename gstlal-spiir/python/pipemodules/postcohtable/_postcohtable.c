@@ -34,6 +34,7 @@
 #include <numpy/ndarrayobject.h>
 #include <pipe_macro.h>
 #include <postcohtable.h>
+#include <stdbool.h>
 #include <structmember.h>
 
 // NOTE: This must be included after Python.h due to redefinition of
@@ -124,13 +125,37 @@ static PyTypeObject snr_series_wrapper_type = {
     .tp_dealloc = __del_snr_series__,
 };
 
-static PyObject *
-  new_wrapped_snr_series_list(const PostcohInspiralTable *buffer_postcohtable) {
-
+static Complex8TimeSeriesWrapper *
+  new_wrapped_snr_series(COMPLEX8TimeSeries *complex8_snr_series) {
     PyObject *pyModule =
       PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
     PyObject *wrapped_snr_series_class =
       PyObject_GetAttrString(pyModule, "SNRSeries");
+
+    if (complex8_snr_series && complex8_snr_series->data->length > 0) {
+        Complex8TimeSeriesWrapper *wrapped_snr_series =
+          (Complex8TimeSeriesWrapper *)PyType_GenericNew(
+            (PyTypeObject *)wrapped_snr_series_class, NULL, NULL);
+        if (!wrapped_snr_series) {
+            PyErr_SetString(
+              PyExc_ValueError,
+              "Failed to create wrapped snr series: constructor error");
+            return NULL;
+        }
+
+        wrapped_snr_series->complex8_snr_series = complex8_snr_series;
+        return wrapped_snr_series;
+    } else {
+        PyErr_SetString(PyExc_ValueError,
+                        "Failed to create wrapped snr series: "
+                        "COMPLEX8TimeSeries must not be null or empty.");
+        return NULL;
+    }
+}
+
+static PyObject *
+  new_wrapped_snr_series_list(const PostcohInspiralTable *buffer_postcohtable,
+                              bool is_heartbeat) {
 
     Py_ssize_t num_trigger_ifos = strlen(buffer_postcohtable->ifos) / IFO_LEN;
     PyObject *wrapped_snr_series_list = PyList_New(num_trigger_ifos);
@@ -140,27 +165,33 @@ static PyObject *
         return NULL;
     }
 
-    Py_ssize_t trigger_ifo_id = 0;
-    for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-        COMPLEX8TimeSeries *complex8_snr_series =
-          buffer_postcohtable->snr_series_list[ifo_id];
+    if (is_heartbeat) { return wrapped_snr_series_list; }
 
-        if (complex8_snr_series && complex8_snr_series->data->length > 0) {
+    for (Py_ssize_t trigger_ifo_id = 0; trigger_ifo_id < num_trigger_ifos;
+         trigger_ifo_id++) {
+        int ifo_id = -1;
+        char ifo_string[IFO_LEN + 1];
+        strncpy(ifo_string,
+                buffer_postcohtable->ifos + trigger_ifo_id * IFO_LEN, IFO_LEN);
+        ifo_string[IFO_LEN] = '\0';
+        if (try_get_ifo_id(ifo_string, &ifo_id)) {
             Complex8TimeSeriesWrapper *wrapped_snr_series =
-              (Complex8TimeSeriesWrapper *)PyType_GenericNew(
-                (PyTypeObject *)wrapped_snr_series_class, NULL, NULL);
-            if (!wrapped_snr_series) {
-                PyErr_SetString(PyExc_ValueError,
-                                "new wrapped_snr_series error");
+              new_wrapped_snr_series(
+                buffer_postcohtable->snr_series_list[ifo_id]);
+            if (wrapped_snr_series) {
+                PyList_SetItem(wrapped_snr_series_list, trigger_ifo_id,
+                               (PyObject *)wrapped_snr_series);
+            } else {
                 return NULL;
             }
-
-            wrapped_snr_series->complex8_snr_series = complex8_snr_series;
-            PyList_SetItem(wrapped_snr_series_list, trigger_ifo_id,
-                           (PyObject *)wrapped_snr_series);
-            trigger_ifo_id++;
+        } else {
+            PyErr_SetString(
+              PyExc_ValueError,
+              "Failed to set wrapped snr series list: Invalid ifos string.");
+            return NULL;
         }
     }
+
     return wrapped_snr_series_list;
 }
 
@@ -404,7 +435,8 @@ static PyTypeObject postcohtrigger_type = {
 };
 
 static PyObject *
-  new_postcohtrigger(const PostcohInspiralTable *buffer_postcohtable) {
+  new_postcohtrigger(const PostcohInspiralTable *buffer_postcohtable,
+                     bool is_heartbeat) {
     PyObject *pyModule =
       PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
     PyObject *postcohtrigger_class =
@@ -427,7 +459,7 @@ static PyObject *
     self->wrapped_postcohtable = wrapped_postcohtable;
 
     PyObject *wrapped_snr_series_list =
-      new_wrapped_snr_series_list(buffer_postcohtable);
+      new_wrapped_snr_series_list(buffer_postcohtable, is_heartbeat);
     if (!wrapped_snr_series_list) {
         Py_DECREF(self);
         return NULL;
@@ -469,7 +501,9 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
         const PostcohInspiralTable *buffer_postcohtable =
           (const PostcohInspiralTable *)data + i;
 
-        PyObject *postcohtrigger = new_postcohtrigger(buffer_postcohtable);
+        // The first trigger is a heartbeat that uses a limitted set of fields
+        PyObject *postcohtrigger =
+          new_postcohtrigger(buffer_postcohtable, i == 0);
 
         if (!postcohtrigger) {
             Py_DECREF(trigger_list);
