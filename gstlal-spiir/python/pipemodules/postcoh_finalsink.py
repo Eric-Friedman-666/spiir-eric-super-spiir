@@ -198,24 +198,28 @@ class FAPUpdater(object):
                  path,
                  input_prefix_list,
                  ifos,
+                 calcfap_interval,
                  output_list_string=None,
                  collect_walltime_string=None,
                  verbose=None):
         self.path = path
         self.input_prefix_list = input_prefix_list
         self.ifos = ifos
-        self.procs_combine_stats = []
-        self.procs_update_fap_stats = []
+        self.calcfap_interval = calcfap_interval
+        self.combine_stats_processes = []
         self.output = []
         if output_list_string is not None:
             self.output = output_list_string.split(",")
-
-        self.collect_walltime = []
         self.rm_fnames = []
+
+        self.start_time = None
+        self.collect_walltimes = []
+        self.calcfap_processes = []
         if collect_walltime_string is not None:
             times = collect_walltime_string.split(",")
             for itime in times:
-                self.collect_walltime.append(int(itime))
+                self.collect_walltimes.append(int(itime))
+                self.calcfap_processes.append(None)
 
         self.combine_duration = 86400 * 2
         self.max_nstats_perbank = 3
@@ -224,12 +228,12 @@ class FAPUpdater(object):
         # set the limit for maximum input string length
         # when the number of banks reaches 140,
         # it will give you a signal 7 error in OPA2
-        # FIXME: hard-coded, the first entry in collect_walltime is the longest
-        self.max_nstats_formargi = (
-            self.collect_walltime[0] / self.combine_duration +
+        # FIXME: hard-coded, the first entry in collect_walltimes is the longest
+        self.max_nstats_for_marignalization = (
+            self.collect_walltimes[0] / self.combine_duration +
             self.max_nstats_perbank + 1) * self.max_nbank_perjob
 
-        if self.output and len(self.output) != len(self.collect_walltime):
+        if self.output and len(self.output) != len(self.collect_walltimes):
             raise ValueError(
                 "number of input walltimes does match the number of input \
                     filenames: %s does not match %s" \
@@ -237,24 +241,25 @@ class FAPUpdater(object):
 
         self.verbose = verbose
 
-    def wait_last_process_finish(self, procs):
-        if len(procs) > 0:
-            for proc in procs:
-                if proc.poll() is None:
-                    (stdoutdata, stderrdata) = proc.communicate()
-                    if proc.returncode != 0:
-                        print >> sys.stderr, "last process return code", \
-                            proc.returncode, stderrdata
+    def await_process(self, process):
+        if process is not None and process.poll() is None:
+            (stdoutdata, stderrdata) = process.communicate()
+            if process.returncode != 0:
+                print >> sys.stderr, "last process return code", \
+                    process.returncode, stderrdata
 
-        # delete all update processes when they are finished
-        del procs[:]
+    def await_and_clear_processes(self, processes):
+        if len(processes) > 0:
+            for process in processes:
+                self.await_process(process)
+        del processes[:]
 
-    def get_fnames(self, keyword):
-        # both update_fap_stats and combine_stats need to access latest cleaned
-        # uped stats files
+    def get_filenames(self, keyword):
+        # both calcfap and combine_stats need to access latest cleaned
+        # stats files
         # make sure need-to-remove files have been removed
 
-        self.wait_last_process_finish(self.procs_combine_stats)
+        self.await_and_clear_processes(self.combine_stats_processes)
         # remove files that have been combined from last process
         try:
             map(lambda x: os.remove(x), self.rm_fnames)
@@ -285,51 +290,27 @@ class FAPUpdater(object):
                 valid_fnames.append("%s/%s" % (self.path, ifname))
         return valid_fnames
 
-    def update_fap_stats(self, cur_buftime):
-
-        logging.info("update fap %d" % cur_buftime)
-        self.wait_last_process_finish(self.procs_update_fap_stats)
-
-        # list all the files in the path
-        # FIXME: This assumes the format of the stats filename
-        #   e.g. bank16_stats_1187008882_1800.xml.gz
-        ls_fnames = self.get_fnames("stats")
+    def get_bankstats_filenames(self, boundary):
+        ls_fnames = self.get_filenames("stats")
         if ls_fnames is None or len(ls_fnames) == 0:
-            return
+            return []
 
-        for (i, collect_walltime) in enumerate(self.collect_walltime):
-            boundary = cur_buftime - collect_walltime
-            # find the files within the collection time
-            valid_fnames = self.get_valid_bankstats(ls_fnames, boundary)
+        # find the files within the collection time
+        bankstats_filenames = self.get_valid_bankstats(ls_fnames, boundary)
 
-            # reach the limit for maximum input string length
-            # when the number of banks reaches 140,
-            # it will give you a signal 7 error in OPA2
-            while len(valid_fnames) > self.max_nstats_formargi:
-                logging.info("update fap: %d stats files for marignalization, \
-                    over the input string length limit, combining" \
-                    % len(valid_fnames))
-                self.combine_stats()
-                ls_fnames = self.get_fnames("stats")
-                valid_fnames = self.get_valid_bankstats(ls_fnames, boundary)
+        # reach the limit for maximum input string length
+        # when the number of banks reaches 140,
+        # it will give you a signal 7 error in OPA2
+        while len(bankstats_filenames) > self.max_nstats_for_marignalization:
+            logging.info("update fap: %d stats files for marignalization, \
+                over the input string length limit, combining." \
+                % len(bankstats_filenames))
+            self.combine_stats()
+            ls_fnames = self.get_filenames("stats")
+            bankstats_filenames = self.get_valid_bankstats(ls_fnames, boundary)
+        return bankstats_filenames
 
-            if len(valid_fnames) > 0:
-                input_for_cmd = ",".join(valid_fnames)
-                # execute the cmd in a different process
-                proc = self.call_calcfap(self.output[i],
-                                         input_for_cmd,
-                                         self.ifos,
-                                         collect_walltime,
-                                         verbose=self.verbose)
-                self.procs_update_fap_stats.append(proc)
-
-    def call_calcfap(self,
-                     fout,
-                     fin,
-                     ifos,
-                     walltime,
-                     update_pdf=True,
-                     verbose=False):
+    def call_calcfap(self, fout, fin, ifos, update_pdf=True):
         cmd = []
         cmd += ["gstlal_cohfar_calc_fap"]
         cmd += ["--input", fin]
@@ -344,14 +325,38 @@ class FAPUpdater(object):
                                 stderr=subprocess.STDOUT)
         return proc
 
+    def run_calcfap(self, timestamp):
+        if self.calcfap_interval is None:
+            return
+
+        # Initialization
+        if self.start_time is None:
+            self.start_time = timestamp
+        # Check interval
+        duration = timestamp - self.start_time
+        if duration >= self.calcfap_interval:
+            self.start_time = timestamp
+            for (i, collect_walltime) in enumerate(self.collect_walltimes):
+                self.await_process(self.calcfap_processes[i])
+
+                bankstats_filenames = self.get_bankstats_filenames(
+                    timestamp - collect_walltime)
+                if len(bankstats_filenames) == 0:
+                    continue
+                joined_filenames = ",".join(bankstats_filenames)
+
+                # execute the cmd in a different process
+                self.calcfap_processes[i] = self.call_calcfap(
+                    self.output[i], joined_filenames, self.ifos)
+                logging.info("update '%s' fap %d" %
+                             (collect_walltime, timestamp))
+
     # combine stats every day
     def combine_stats(self):
-
-        logging.info("combine_stats")
-        # max number of files to be combined
-        ls_fnames = self.get_fnames("bank")
+        ls_fnames = self.get_filenames("bank")
         if ls_fnames is None or len(ls_fnames) == 0:
             return
+        logging.info("combine_stats")
 
         # FIXME: decode information assuming fixed stats name
         # e.g. bank16_stats_1187008882_1800.xml.gz
@@ -388,10 +393,8 @@ class FAPUpdater(object):
                     proc = self.call_calcfap(fout,
                                              ','.join(collected_fnames),
                                              self.ifos,
-                                             total_collected_walltime,
-                                             update_pdf=False,
-                                             verbose=self.verbose)
-                    self.procs_combine_stats.append(proc)
+                                             update_pdf=False)
+                    self.combine_stats_processes.append(proc)
                     # mark to remove collected_fnames
                     for frm in collected_fnames:
                         self.rm_fnames.append(frm)
@@ -415,7 +418,7 @@ class FinalSink(object):
                  far_factor,
                  cluster_window=0.5,
                  snapshot_interval=None,
-                 fapupdater_interval=None,
+                 calcfap_interval=None,
                  cohfar_accumbackground_output_prefix=None,
                  cohfar_accumbackground_output_name=None,
                  fapupdater_output_fname=None,
@@ -441,7 +444,6 @@ class FinalSink(object):
         #
         self.lock = threading.Lock()
         self.pipeline = pipeline
-        self.is_first_buf = True
         self.is_first_event = True
         self.channel_dict = channel_dict
         self.ifos = "".join(
@@ -457,7 +459,6 @@ class FinalSink(object):
         self.candidate = None
         self.cluster_boundary = None
         self.negative_latency = negative_latency
-        self.need_candidate_check = False
         self.cur_event_table = []
         self.chisq_ratio_thresh = chisq_ratio_veto_thresh
         self.superevent_thresh = superevent_thresh
@@ -469,7 +470,6 @@ class FinalSink(object):
         self.opa_thresh = 1e-6
         self.opa_cohsnr_thresh = opa_cohsnr_thresh
 
-        self.nevent_clustered = 0
         self.singlefar_veto_thresh = singlefar_veto_thresh
 
         # gracedb parameters
@@ -514,7 +514,7 @@ class FinalSink(object):
         self.thread_snapshot = None
         self.thread_snapshot_segment = None
         self.t_snapshot_start = None
-        self.snapshot_duration = None
+        self.last_buffer_timestamp = None
         # set logging to report status
         self.log_fname = "%s/finalsink_debug_log" % (path)
         logging.basicConfig(filename=self.log_fname,
@@ -522,16 +522,13 @@ class FinalSink(object):
                             level=logging.DEBUG)
 
         # background updater
-        self.total_duration = None
-        self.t_start = None
-        self.t_fapupdater_start = None
-        self.fapupdater_interval = fapupdater_interval
         self.fapupdater = FAPUpdater(
             path=path,
             input_prefix_list=cohfar_accumbackground_output_prefix,
             output_list_string=fapupdater_output_fname,
             collect_walltime_string=fapupdater_collect_walltime_string,
             ifos=self.ifos,
+            calcfap_interval=calcfap_interval,
             verbose=verbose)
 
         # online information performer
@@ -590,136 +587,139 @@ class FinalSink(object):
     def appsink_new_buffer(self, elem):
         with self.lock:
             buf = elem.emit("pull-buffer")
-            if buf.flag_is_set(gst.BUFFER_FLAG_GAP):
-                logging.info("buf gap at %d" % buf.timestamp)
-                return
+
+            # Parse buffer
             buf_timestamp = LIGOTimeGPS(0, buf.timestamp)
-            newevents = postcohtable.from_buffer(buf)
-            self.need_candidate_check = False
+            is_gap = buf.flag_is_set(gst.BUFFER_FLAG_GAP)
 
-            if len(newevents) == 0:
-                return
+            newevents = []
+            if not is_gap:
+                newevents = postcohtable.from_buffer(buf)
 
-            # FIXME: the first entry is used to add to the segments,
-            #   but its not really an event
-            participating_ifos = re.findall('..',
-                                            newevents[0].postcoh_inspiral.ifos)
-            buf_seg = segments.segment(
-                buf_timestamp, buf_timestamp + LIGOTimeGPS(0, buf.duration))
-            for segtype, one_type_dict in self.seg_document.seglistdict.items(
-            ):
-                for ifo in one_type_dict.keys():
-                    if ifo in participating_ifos:
-                        this_seglist = one_type_dict[ifo]
-                        this_seglist = this_seglist + segments.segmentlist(
-                            [buf_seg])
-                        this_seglist.coalesce()
-                        one_type_dict[ifo] = this_seglist
+            heartbeat = None
+            if len(newevents) > 0:
+                # FIXME: the first entry is used to add to the segments,
+                #   but its not really an event
+                heartbeat = newevents[0]
+                newevents = newevents[1:]
+            self.cluster_and_process_significant_triggers(
+                buf_timestamp, buf.duration, newevents)
 
-            # remove the first event entry
-            newevents = newevents[1:]
-            nevent = len(newevents)
+            self.fapupdater.run_calcfap(buf_timestamp)
 
-            # initialization
-            if self.is_first_buf:
-                self.t_snapshot_start = buf_timestamp
-                self.t_fapupdater_start = buf_timestamp
-                self.t_start = buf_timestamp
-                self.is_first_buf = False
+            if not is_gap and heartbeat is not None:
+                self.add_segments(heartbeat, buf_timestamp, buf.duration)
 
-            # Keep track of the latest timestamp seen on any buffer and number
-            # of buffers seen at that timestamp. If we have as many buffers as
-            # we are expecting we can process them now rather than waiting for
-            # the next buffer.
-            if self.current_timestamp is None \
-                    or buf_timestamp > self.current_timestamp:
-                self.current_timestamp = buf_timestamp
-                self.num_current_buffers = 0
+            self.run_snapshot(buf_timestamp)
 
-            if buf_timestamp == self.current_timestamp:
-                self.num_current_buffers += 1
+            if is_gap:
+                logging.info("buf gap at timestamp %d" % buf_timestamp)
+            elif heartbeat is None:
+                logging.warning(
+                    "Not in gap and no heartbeat at timestamp %d." %
+                    buf_timestamp)
 
-            have_latest_buffers = \
-                self.num_current_buffers == self.expected_buffers_per_timestamp
+    # This is named verbosely pending a refactor
+    # It should return a list of significant triggers to be processed instead of setting self.candidate
+    def cluster_and_process_significant_triggers(self, buf_timestamp, duration,
+                                                 newevents):
+        # Keep track of the latest timestamp seen on any buffer and number
+        # of buffers seen at that timestamp. If we have as many buffers as
+        # we are expecting we can process them now rather than waiting for
+        # the next buffer.
+        if self.current_timestamp is None \
+                or buf_timestamp > self.current_timestamp:
+            self.current_timestamp = buf_timestamp
+            self.num_current_buffers = 0
 
-            max_cluster_boundary = buf_timestamp
-            if have_latest_buffers:
-                max_cluster_boundary = buf_timestamp + LIGOTimeGPS(
-                    0, buf.duration)
-                self.cur_event_table.extend(newevents)
+        if buf_timestamp == self.current_timestamp:
+            self.num_current_buffers += 1
 
-            # The max (upper) bound of any cluster we are willing to process.
-            # Assume we have all buffers from before the start of this buffer
-            # Event end times are offset by negative latency if we are
-            # running early warning
-            max_cluster_boundary = max_cluster_boundary + self.negative_latency
-            if self.is_first_event and nevent > 0:
-                self.cluster_boundary = (max_cluster_boundary +
-                                         self.cluster_window)
-                self.is_first_event = False
+        have_latest_buffers = \
+            self.num_current_buffers == self.expected_buffers_per_timestamp
 
-            # NOTE: only consider clustered trigger for uploading to gracedb
-            # check if the newevents is over boundary
-            # this loop will exit when the cluster_boundary is incremented
-            # to be > the max_cluster_boundary, see diagram in self.cluster()
+        max_cluster_boundary = buf_timestamp
+        if have_latest_buffers:
+            max_cluster_boundary = buf_timestamp + LIGOTimeGPS(0, duration)
+            self.cur_event_table.extend(newevents)
 
-            while ((self.cluster_window > 0) and (self.cluster_boundary)
-                   and (max_cluster_boundary > self.cluster_boundary)):
-                self.cluster(self.cluster_window)
+        # The max (upper) bound of any cluster we are willing to process.
+        # Assume we have all buffers from before the start of this buffer
+        # Event end times are offset by negative latency if we are
+        # running early warning
+        max_cluster_boundary = max_cluster_boundary + self.negative_latency
+        if self.is_first_event and len(newevents) > 0:
+            self.cluster_boundary = (max_cluster_boundary +
+                                     self.cluster_window)
+            self.is_first_event = False
 
-                if self.need_candidate_check:
-                    self.nevent_clustered += 1
-                    self.__set_far(self.candidate.postcoh_inspiral)
-                    if self.gracedb_far_threshold and self.__pass_test(
-                            self.candidate.postcoh_inspiral):
-                        self.__do_gracedb_alert(self.candidate,
-                                                self.gracedb_upload_attempts)
+        # NOTE: only consider clustered trigger for uploading to gracedb
+        # check if the newevents is over boundary
+        # this loop will exit when the cluster_boundary is incremented
+        # to be > the max_cluster_boundary, see diagram in self.cluster()
 
-                    self.postcoh_table.append(self.candidate.postcoh_inspiral)
+        while ((self.cluster_window > 0) and (self.cluster_boundary)
+               and (max_cluster_boundary > self.cluster_boundary)):
+            if self.try_get_cluster_candidate():
+                self.__set_far(self.candidate.postcoh_inspiral)
+                if self.gracedb_far_threshold and self.__pass_test(
+                        self.candidate.postcoh_inspiral):
+                    self.__do_gracedb_alert(self.candidate,
+                                            self.gracedb_upload_attempts)
 
-                    if self.need_online_perform:
-                        self.onperformer.update_eye_candy(
-                            self.candidate.postcoh_inspiral)
-                    self.candidate = None
-                    self.need_candidate_check = False
+                self.postcoh_table.append(self.candidate.postcoh_inspiral)
 
-            # extend newevents to cur_event_table
-            # Has to be done after processing pre-existing events, because this
-            # buffer may contain events with end time before the buffer start
-            # Will have been done above if we could process this buffer early,
-            # so don't double up events if so.
-            if not have_latest_buffers:
-                self.cur_event_table.extend(newevents)
+                if self.need_online_perform:
+                    self.onperformer.update_eye_candy(
+                        self.candidate.postcoh_inspiral)
+                self.candidate = None
 
-            if self.cluster_window == 0:
-                self.postcoh_table.extend(
-                    [event.postcoh_inspiral for event in newevents])
-                del self.cur_event_table[:]
+        # extend newevents to cur_event_table
+        # Has to be done after processing pre-existing events, because this
+        # buffer may contain events with end time before the buffer start
+        # Will have been done above if we could process this buffer early,
+        # so don't double up events if so.
+        if not have_latest_buffers:
+            self.cur_event_table.extend(newevents)
 
-            # dump zerolag candidates when interval is reached
-            self.snapshot_duration = buf_timestamp - self.t_snapshot_start
-            if ((self.snapshot_interval is not None)
-                    and (self.snapshot_duration >= self.snapshot_interval)):
-                snapshot_filename = self.get_output_filename(
-                    self.output_prefix, self.output_name,
-                    self.t_snapshot_start, self.snapshot_duration)
-                self.snapshot_output_file(snapshot_filename)
-                self.snapshot_segment_file(self.t_snapshot_start,
-                                           self.snapshot_duration)
-                self.t_snapshot_start = buf_timestamp
-                self.nevent_clustered = 0
-                # also combine background_stats files
-                # so we don't end up with too many files
-                self.fapupdater.combine_stats()
+        if self.cluster_window == 0:
+            self.postcoh_table.extend(
+                [event.postcoh_inspiral for event in newevents])
+            del self.cur_event_table[:]
 
-            # do calcfap when interval is reached
-            fapupdater_duration = buf_timestamp - self.t_fapupdater_start
-            if ((self.fapupdater_interval is not None)
-                    and (fapupdater_duration >= self.fapupdater_interval)):
-                self.fapupdater.update_fap_stats(buf_timestamp)
-                self.t_fapupdater_start = buf_timestamp
+    def add_segments(self, heartbeat, buf_timestamp, duration):
+        participating_ifos = re.findall('..', heartbeat.postcoh_inspiral.ifos)
+        buf_seg = segments.segment(buf_timestamp,
+                                   buf_timestamp + LIGOTimeGPS(0, duration))
+        for segtype, one_type_dict in self.seg_document.seglistdict.items():
+            for ifo in one_type_dict.keys():
+                if ifo in participating_ifos:
+                    this_seglist = one_type_dict[ifo]
+                    this_seglist = this_seglist + segments.segmentlist(
+                        [buf_seg])
+                    this_seglist.coalesce()
+                    one_type_dict[ifo] = this_seglist
 
-    def cluster(self, cluster_window):
+    def run_snapshot(self, timestamp):
+        # Initialization
+        if self.t_snapshot_start is None:
+            self.t_snapshot_start = timestamp
+        # Check interval
+        duration = timestamp - self.t_snapshot_start
+        if ((self.snapshot_interval is not None)
+                and (duration >= self.snapshot_interval)):
+            self.fapupdater.combine_stats()
+            self.snapshot_segment_file(self.t_snapshot_start, duration)
+            zerolag_snapshot_filename = self.get_output_filename(
+                self.output_prefix, self.output_name, self.t_snapshot_start,
+                duration)
+            self.snapshot_output_file(zerolag_snapshot_filename)
+            self.t_snapshot_start = timestamp
+
+        # Record the last timestamp so remaining stats can be dumped on program end.
+        self.last_buffer_timestamp = timestamp
+
+    def try_get_cluster_candidate(self):
         # send candidate to be gracedb checked only when:
         # timestamp small ->->->-> large
         #                 |max_cluster_boundary
@@ -757,9 +757,8 @@ class FinalSink(object):
         # so need to check the candidate
         if peak_event is None:
             # no event within boundary, candidate is the peak, update boundary
-            self.cluster_boundary = self.cluster_boundary + cluster_window
-            self.need_candidate_check = self.candidate is not None
-            return
+            self.cluster_boundary = self.cluster_boundary + self.cluster_window
+            return self.candidate is not None
 
         if self.candidate is None or is_better_event(
                 peak_event.postcoh_inspiral, self.candidate.postcoh_inspiral):
@@ -771,8 +770,8 @@ class FinalSink(object):
             # update boundary
             # NOTE: cluster boundary does not necessarily align with
             #   buffer boundary
-            self.cluster_boundary = self.candidate.postcoh_inspiral.end + cluster_window
-            self.need_candidate_check = False
+            self.cluster_boundary = self.candidate.postcoh_inspiral.end + self.cluster_window
+            return False
         else:
             # FIXME: This seems to assume buffer length >= cluster_window
             # pop out candidate for gracedb uploading
@@ -780,8 +779,8 @@ class FinalSink(object):
                 lambda row: row.postcoh_inspiral.end > self.cluster_boundary,
                 self.cur_event_table)
             # update boundary
-            self.cluster_boundary = self.cluster_boundary + cluster_window
-            self.need_candidate_check = True
+            self.cluster_boundary = self.cluster_boundary + self.cluster_window
+            return True
 
     def __set_far(self, postcoh_inspiral):
         postcoh_inspiral.far = (max(postcoh_inspiral.far_2h,
@@ -1050,11 +1049,12 @@ class FinalSink(object):
                 and (self.thread_upload_skymap.isAlive())):
             self.thread_upload_skymap.join()
 
-        self.fapupdater.wait_last_process_finish(
-            self.fapupdater.procs_update_fap_stats)
-        self.fapupdater.wait_last_process_finish(
-            self.fapupdater.procs_combine_stats)
+        self.fapupdater.await_and_clear_processes(
+            self.fapupdater.calcfap_processes)
+        self.fapupdater.await_and_clear_processes(
+            self.fapupdater.combine_stats_processes)
 
+    # This may be run from the launch script once the run is finished.
     def write_output_file(self, filename=None, verbose=False, cleanup=False):
         self.__wait_internal_process_finish()
         self.__write_output_file(filename, verbose=verbose, cleanup=cleanup)
@@ -1065,10 +1065,10 @@ class FinalSink(object):
         self.postcoh_document.write_output_file(verbose=verbose,
                                                 cleanup=cleanup)
         # FIXME: hard-coded segment filename
-        if self.t_snapshot_start:
+        if self.last_buffer_timestamp and self.t_snapshot_start:
+            duration = self.last_buffer_timestamp - self.t_snapshot_start
             seg_filename = "%s/%s_SEGMENTS_%d_%d.xml.gz" % (
-                self.path, self.ifos, self.t_snapshot_start,
-                self.snapshot_duration)
+                self.path, self.ifos, self.t_snapshot_start, duration)
         else:
             seg_filename = "%s/%s_SEGMENTS.xml.gz" % (self.path, self.ifos)
         self.seg_document.filename = seg_filename
