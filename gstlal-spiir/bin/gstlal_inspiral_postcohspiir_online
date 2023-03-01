@@ -790,7 +790,7 @@ finalsink = postcoh_finalsink.FinalSink(
     cohfar_accumbackground_output_prefix,
     cohfar_accumbackground_output_name=options.
     cohfar_accumbackground_output_name,
-    fapupdater_interval=options.finalsink_fapupdater_interval,
+    calcfap_interval=options.finalsink_fapupdater_interval,
     fapupdater_output_fname=options.finalsink_fapupdater_output_fname,
     fapupdater_collect_walltime_string=options.
     finalsink_fapupdater_collect_walltime,
@@ -864,7 +864,8 @@ mainloop.run()
 #
 finalsink.write_output_file(filename=finalsink.get_output_filename(
     options.finalsink_output_prefix, options.finalsink_output_name,
-    finalsink.t_snapshot_start, finalsink.snapshot_duration),
+    finalsink.t_snapshot_start,
+    finalsink.last_buffer_timestamp - finalsink.t_snapshot_start),
                             verbose=options.verbose)
 
 # Shutdown the web interface servers
