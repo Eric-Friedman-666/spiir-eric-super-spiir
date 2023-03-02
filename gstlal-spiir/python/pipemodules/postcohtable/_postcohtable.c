@@ -178,12 +178,14 @@ static PyObject *
             Complex8TimeSeriesWrapper *wrapped_snr_series =
               new_wrapped_snr_series(
                 buffer_postcohtable->snr_series_list[ifo_id]);
-            if (wrapped_snr_series) {
-                PyList_SetItem(wrapped_snr_series_list, trigger_ifo_id,
-                               (PyObject *)wrapped_snr_series);
-            } else {
+            if (!wrapped_snr_series) {
+                // PyErr set in new_wrapped_snr_series
                 return NULL;
             }
+
+            PyList_SetItem(wrapped_snr_series_list, trigger_ifo_id,
+                           (PyObject *)wrapped_snr_series);
+            if (PyErr_Occurred()) { return NULL; }
         } else {
             PyErr_SetString(
               PyExc_ValueError,
@@ -394,6 +396,8 @@ static PostcohInspiralWrapper *
     self->deff =
       PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, self->postcohtable.deff);
 
+    if (PyErr_Occurred()) { return NULL; }
+
     return self;
 }
 
@@ -481,7 +485,9 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
     const char *data;
     Py_ssize_t length;
 
-    if (!PyArg_ParseTuple(args, "s#", &data, &length)) return NULL;
+    if (PyErr_Occurred()) { return NULL; }
+
+    if (!PyArg_ParseTuple(args, "s#", &data, &length)) { return NULL; }
 
     Py_ssize_t num_triggers = length / sizeof(PostcohInspiralTable);
     if ((Py_ssize_t)(num_triggers * sizeof(PostcohInspiralTable)) != length) {
@@ -511,7 +517,10 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
         }
 
         PyList_SetItem(trigger_list, i, postcohtrigger);
+        if (PyErr_Occurred()) { return NULL; }
     }
+
+    if (PyErr_Occurred()) { return NULL; }
 
     return trigger_list;
 }
