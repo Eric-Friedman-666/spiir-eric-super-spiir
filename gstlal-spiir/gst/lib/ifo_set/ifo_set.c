@@ -8,6 +8,8 @@
 #include <ifo_set.h>
 #include <pipe_macro.h>
 
+unsigned int ifo_set__to_uint(ifo_set_type ifos) { return ifos; }
+
 // We can determine if the IFO at ifo_id is in the ifo_set by
 // checking if that power of two exists in the ifo_set
 int ifo_set__contains(const ifo_set_type ifos, const int ifo_id) {
@@ -19,6 +21,14 @@ int ifo_set__has_shared_ifos(const ifo_set_type ifos_lhs,
     return ifos_lhs & ifos_rhs;
 }
 
+void ifo_set__set(ifo_set_type *ifos, const int ifo_id) {
+    *ifos |= 1 << ifo_id;
+}
+
+void ifo_set__unset(ifo_set_type *ifos, const int ifo_id) {
+    *ifos &= ~(1 << ifo_id);
+}
+
 int ifo_set__count(const ifo_set_type ifos) { return __builtin_popcount(ifos); }
 
 int ifo_set__is_empty(const ifo_set_type ifos) {
@@ -26,17 +36,17 @@ int ifo_set__is_empty(const ifo_set_type ifos) {
 }
 
 // { K1, V1, L1, H1 } bitset - note that H1 is the least-significant bit
-#define MAX_IFO_SET 0b1111
+#define MAX_IFO_SET 0b10000
 
 // Mapping from IFO set to string representation
 // Index is one less than the bitset representation of the set
 static const char *IFOComboMap[MAX_IFO_SET] = {
-    "H1",   "L1",   "H1L1",   "V1",   "H1V1",   "L1V1",   "H1L1V1",   "K1",
-    "H1K1", "L1K1", "H1L1K1", "V1K1", "H1V1K1", "L1V1K1", "H1L1V1K1",
+    "",   "H1",   "L1",   "H1L1",   "V1",   "H1V1",   "L1V1",   "H1L1V1",
+    "K1", "H1K1", "L1K1", "H1L1K1", "V1K1", "H1V1K1", "L1V1K1", "H1L1V1K1",
 };
 
 const char *ifo_set__get_string(const ifo_set_type ifo_set) {
-    return IFOComboMap[ifo_set - 1];
+    return IFOComboMap[ifo_set];
 }
 
 // Try to parse the set of IFOs specified by ifo_str of the form "H1V1".
@@ -66,7 +76,7 @@ bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos) {
             size_t ifo_name_len  = strlen(ifo_name);
             if (!strncmp(ifos_str, ifo_name, ifo_name_len)) {
                 // Insert into bitset and progress string
-                ifos |= 1 << ifo_id;
+                ifo_set__set(&ifos, ifo_id);
                 ifos_str += ifo_name_len;
                 found_ifo = true;
                 break;

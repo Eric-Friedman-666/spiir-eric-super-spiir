@@ -38,6 +38,7 @@ void peak_list_destroy(PeakList *pklist);
 void state_reset_npeak(PeakList *pklist);
 
 void cohsnr_and_chisq(PostcohState *state,
+                      unsigned int coh_ifo_bitset,
                       int iifo,
                       int gps_idx,
                       int output_skymap,

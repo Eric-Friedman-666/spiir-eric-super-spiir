@@ -24,6 +24,7 @@ extern "C" {
 
 #include <assert.h>
 #include <cuda_debug.h>
+#include <pipe_macro.h>
 #include <stdio.h>
 
 #ifdef __cplusplus
@@ -39,7 +40,6 @@ const int GAMMA_ITMAX = 50;
 #define ALL_THREADS_MASK 0xFFFFFFFF
 
 #define MIN_EPSILON       1e-7
-#define MAXIFOS           6
 #define NSKY_REDUCE_RATIO 4
 
 __device__ static inline float atomicMax(float *address, float val) {
@@ -256,7 +256,7 @@ __global__ void ker_coh_skymap(
 ) {
 
     int peak_cur, tmplt_cur, len_cur, ipeak_max;
-    COMPLEX_F dk[MAXIFOS];
+    COMPLEX_F dk[MAX_NIFO];
     int NtOff;
     int map_idx, ipix, i;
     float real, imag;
@@ -359,13 +359,21 @@ __global__ void ker_coh_skymap(
     }
 }
 
+static __host__ unsigned int bitset_count(const unsigned int bitset) {
+    return __builtin_popcount(bitset);
+}
+
+static __device__ unsigned int bitset_contains(const unsigned int bitset,
+                                               const int i) {
+    return (bitset >> i) & 1;
+}
+
 __global__ void ker_coh_max_and_chisq_versatile(
   COMPLEX_F *restrict *restrict snr, /* INPUT, (2, 3) * data_points */
   int iifo, /* INPUT, detector we are considering */
-  int nifo, /* INPUT, all detectors that are in this coherent analysis */
-  int cur_nifo, /* INPUT, all detectors that are in this coherent analysis */
-  int
-    cur_ifo_bits, /* INPUT, all detectors that are in this coherent analysis */
+  int nifo, /* INPUT, number of enabled detectors */
+  int num_coh_ifos, /* INPUT, number of coherent detectors */
+  unsigned int coh_ifo_bitset, /* INPUT, coherent detectors */
   int *restrict write_ifo_mapping, /* INPUT, write-ifo-mapping */
   int *restrict peak_pos, /* INPUT, place the location of the trigger */
   float *restrict *restrict snglsnr, /* INPUT, maximum single snr    */
@@ -412,8 +420,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
     int wn  = blockDim.x >> LOG_WARP_SIZE;
     int wID = threadIdx.x >> LOG_WARP_SIZE;
 
-    int srcLane = threadIdx.x & 0x1f, ipix,
-        check_bit; // binary: 11111, decimal 31
+    int srcLane = threadIdx.x & 0x1f, ipix; // binary: 11111, decimal 31
     // store snr_max, nullstream_max and sky_idx, each has (blockDim.x /
     // WARP_SIZE) elements
     extern __shared__ float smem[];
@@ -424,7 +431,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
 
     // float    *mu;    // matrix u for certain sky direction
     int peak_cur, tmplt_cur;
-    COMPLEX_F dk[MAXIFOS];
+    COMPLEX_F dk[MAX_NIFO];
     int NtOff;
     int map_idx;
     float real, imag;
@@ -471,14 +478,12 @@ __global__ void ker_coh_max_and_chisq_versatile(
                 dk[j] = snr[j][tmplt_cur * len
                                + ring_index(start_exe + len_cur + NtOff, len)];
             }
-            if (cur_nifo == 2) {
+            if (num_coh_ifos == 2) {
                 for (int k = 0; k < nifo; ++k) {
-                    check_bit = 1 << k;
-                    snr_tmp += (cur_ifo_bits & check_bit ? 1 : 0)
+                    snr_tmp += bitset_contains(coh_ifo_bitset, k)
                                * (dk[k].re * dk[k].re + dk[k].im * dk[k].im);
                 }
                 al_all = 0.0;
-
             } else {
                 for (int j = 0; j < nifo; ++j) {
                     real = 0.0f;
@@ -611,9 +616,8 @@ __global__ void ker_coh_max_and_chisq_versatile(
                     chisq_cur = laneChi2 / autocorr_norm[j][tmplt_cur];
                     // the location of chisq_* is indexed from maxsnglsnr
                     chisq[write_ifo_mapping[j]][peak_cur] = chisq_cur;
-
-                    if (((1 << j) & cur_ifo_bits) > 0)
-                        cmbchisq[peak_cur] += chisq_cur;
+                    cmbchisq[peak_cur] +=
+                      bitset_contains(coh_ifo_bitset, j) * chisq_cur;
                     // printf("peak %d, itrial %d, cohsnr %f, nullstream %f,
                     // ipix %d, chisq %f\n", ipeak, itrial, cohsnr[peak_cur],
                     // nullsnr[peak_cur], pix_idx[peak_cur],
@@ -669,17 +673,14 @@ __global__ void ker_coh_max_and_chisq_versatile(
                       snr[j][len * tmplt_cur
                              + ring_index(start_exe + len_cur + offset, len)];
                 }
-                if (cur_nifo == 2) {
+                if (num_coh_ifos == 2) {
                     for (int k = 0; k < nifo; ++k) {
-                        check_bit = 1 << k;
                         snr_tmp +=
-                          (cur_ifo_bits & check_bit ? 1 : 0)
+                          bitset_contains(coh_ifo_bitset, k)
                           * (dk[k].re * dk[k].re + dk[k].im * dk[k].im);
                     }
                     al_all = 0.0;
-
                 } else {
-
                     for (int j = 0; j < nifo; ++j) {
                         real = 0.0f;
                         imag = 0.0f;
@@ -755,9 +756,9 @@ __global__ void ker_coh_max_and_chisq_versatile(
 
             cmbchisq_bg[output_offset] = 0.0;
 
-            // sometimes skipping too much for (int j = 0; j < nifo; (1<<(j+1))
-            // &cur_ifo_bits? ++j: j = j+2)
             for (int j = 0; j < nifo; ++j) {
+                if (!bitset_contains(coh_ifo_bitset, j)) { continue; }
+
                 laneChi2 = 0.0f;
                 /* this is a simplified algorithm to get map_idx */
                 map_idx = iifo * nifo + j;
@@ -807,8 +808,6 @@ __global__ void ker_coh_max_and_chisq_versatile(
                     chisq_bg[write_ifo_mapping[j]][output_offset] = chisq_cur;
                     cmbchisq_bg[output_offset] += chisq_cur;
                 }
-
-                if (((1 << (j + 1)) & cur_ifo_bits) == 0) j++;
 
                 __syncthreads();
             }
@@ -911,6 +910,7 @@ void peakfinder(PostcohState *state, int iifo, cudaStream_t stream) {
 
 /* calculate cohsnr, null stream, chisq of a peak list and copy it back */
 void cohsnr_and_chisq(PostcohState *state,
+                      unsigned int coh_ifo_bitset,
                       int iifo,
                       int gps_idx,
                       int output_skymap,
@@ -922,8 +922,8 @@ void cohsnr_and_chisq(PostcohState *state,
     int npeak        = pklist->npeak[0];
 
     ker_coh_max_and_chisq_versatile<<<npeak, threads, sharedsize, stream>>>(
-      state->dd_snglsnr, iifo, state->nifo, state->cur_nifo,
-      state->cur_ifo_bits, state->d_write_ifo_mapping, pklist->d_peak_pos,
+      state->dd_snglsnr, iifo, state->nifo, bitset_count(coh_ifo_bitset),
+      coh_ifo_bitset, state->d_write_ifo_mapping, pklist->d_peak_pos,
       pklist->d_snglsnr, pklist->d_snglsnr_bg, pklist->npeak[0],
       state->d_U_map[gps_idx], state->d_diff_map[gps_idx], state->npix,
       state->snglsnr_len, state->max_npeak, state->snglsnr_start_exe, state->dt,
