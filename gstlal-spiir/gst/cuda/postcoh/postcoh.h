@@ -20,6 +20,7 @@
 #ifndef __CUDA_POSTCOH_H__
 #define __CUDA_POSTCOH_H__
 
+// Standard and 3rd party includes
 #include <cuda_runtime.h>
 
 // Suppresses a warning that only occurs on NVCC
@@ -43,6 +44,8 @@
 #include <gst/gst.h>
 #pragma GCC diagnostic pop
 
+// Our includes
+#include <ifo_set.h>
 #include <pipe_macro.h>
 
 // FIXME: hack for cuda-6.5 and lal header to work
@@ -169,31 +172,35 @@ typedef struct _PeakList {
 } PeakList;
 
 typedef struct _PostcohState {
-    /* parent pointer in host device, each children pointer is in host device,
-     * pointing to a detector snglsnr array in GPU device */
-    COMPLEX_F **d_snglsnr;
-    /* parent pointer in host device, each children pointer is in GPU device,
-     * pointing to a detector snglsnr array in GPU device*/
-    COMPLEX_F **dd_snglsnr;
+    // Redundant, use postcoh equivalent instead
+    int head_len;
+    int exe_len;
+    // Immutable pointer with immutable data outside of init/setcaps
     /* parent pointer in host device, each children pointer is in GPU device,
      * pointing to a detector autocorrelation array in GPU device*/
     COMPLEX_F **dd_autocorr_matrix;
     /* parent pointer in host device, each children pointer is in GPU device,
      * pointing to a detector autocorrealtion norm value in GPU device*/
     float **dd_autocorr_norm;
-    int autochisq_len;
-    int snglsnr_len;
-    int snglsnr_start_load;
-    int snglsnr_start_exe;
-    gint nifo;
-    /* map the input sink to the 'enabled_ifo_id' (its index in all_ifos) */
-    gint enabled_ifo_ids[MAX_NIFO];
     /* map the position of detector snr series to the position of output snr
      * instances */
     gint *write_ifo_mapping;
     gint *d_write_ifo_mapping;
     /* sigmasq read from bank to compute effective distance */
     double **sigmasq;
+    char *all_ifos;
+    // Immutable outside of init/setcaps
+    gint nifo;
+    int max_npeak;
+    int ntmplt;
+    float dt;
+    float snglsnr_thresh;
+    gint hist_trials;
+    gint trial_sample_inv;
+    float snglsnr_max[MAX_NIFO];
+    gint is_member_init;
+    // Immutable pointer with immutable data outside of init/setcaps and detrsp
+    // refresh
     /* parent pointer in host device, each children pointer is in host device,
      * pointing to the coherent U map of a certain time in GPU device*/
     float **d_U_map;
@@ -201,30 +208,27 @@ typedef struct _PostcohState {
      * pointing to the coherent time arrival diff map of a certain time in GPU
      * device*/
     float **d_diff_map;
+    // Immutable outside of init/setcaps and detrsp refresh
+    int autochisq_len;
+    int snglsnr_len;
+    int snglsnr_start_load;
+    int snglsnr_start_exe;
+    /* map the input sink to the 'enabled_ifo_id' (its index in all_ifos) */
+    gint enabled_ifo_ids[MAX_NIFO];
     int gps_step;
     /* be careful that long has different length in different machines */
     long gps_start;
     unsigned long nside;
     int npix;
+    // Immutable pointers with mutable data
+    /* parent pointer in host device, each children pointer is in host device,
+     * pointing to a detector snglsnr array in GPU device */
+    COMPLEX_F **d_snglsnr;
+    /* parent pointer in host device, each children pointer is in GPU device,
+     * pointing to a detector snglsnr array in GPU device*/
+    COMPLEX_F **dd_snglsnr;
     PeakList **peak_list;
-    int head_len;
-    int exe_len;
-    int max_npeak;
-    int ntmplt;
-    float dt;
-    float snglsnr_thresh;
-    gint hist_trials;
-    gint trial_sample_inv;
-    char cur_ifos[MAX_ALLIFO_LEN];
-    gint cur_nifo;
-    gboolean ifo_is_gap[MAX_NIFO];
-    int skymap_peakcur[MAX_NIFO];
-    gint cur_ifo_bits;
-    char *all_ifos;
-    gint is_member_init;
-    float snglsnr_max[MAX_NIFO];
-    float *tmp_maxsnr;
-    int *tmp_tmpltidx;
+    // Mutable
     COMPLEX_F *snr_history_per_template[MAX_NIFO];
 } PostcohState;
 

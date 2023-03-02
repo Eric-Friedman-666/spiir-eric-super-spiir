@@ -5,6 +5,12 @@
 
 typedef unsigned int ifo_set_type;
 
+unsigned int ifo_set__to_uint(ifo_set_type ifos);
+
+void ifo_set__set(ifo_set_type *ifos, const int ifo_id);
+
+void ifo_set__unset(ifo_set_type *ifos, const int ifo_id);
+
 int ifo_set__contains(const ifo_set_type ifos, const int ifo_id);
 
 int ifo_set__has_shared_ifos(const ifo_set_type ifos_lhs,
