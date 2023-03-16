@@ -533,6 +533,7 @@ class FinalSink(object):
         if GraceDb:
             self.gracedb_client = GraceDb(gracedb_service_url,
                                           reload_certificate=True)
+        self.threads_gracedb_upload = []
 
         # keep a record of segments and is snapshotted
         # our segments is determined by if incoming buf is GAP
@@ -669,6 +670,11 @@ class FinalSink(object):
                 logging.warning(
                     "Not in gap and no heartbeat at timestamp %d." %
                     buf_timestamp)
+
+            # Delete finished threads from list
+            self.threads_gracedb_upload = [
+                t for t in self.threads_gracedb_upload if t.is_alive()
+            ]
 
     # This is named verbosely pending a refactor
     # It should return a list of significant triggers to be processed instead of setting self.candidate
@@ -933,6 +939,59 @@ class FinalSink(object):
 
         return psd_frequency_series
 
+    def upload_to_gracedb(self, gracedb_upload_attempts, filename,
+                          coinc_message, log_message):
+        upload_attempt_limit = gracedb_upload_attempts + 1  # one-indexed
+        gracedb_id = None
+
+        for i in range(1, upload_attempt_limit):
+            try:
+                resp = self.gracedb_client.createEvent(
+                    self.gracedb_group,
+                    self.gracedb_pipeline,
+                    filename,
+                    filecontents=coinc_message.getvalue(),
+                    search=self.gracedb_search,
+                    offline=self.is_offline_analysis)
+                resp_json = resp.json()
+                if resp.status != httplib.CREATED:
+                    gracedb_msg = "[%d/%d] graceid upload '%s' failed" % \
+                        (i, upload_attempt_limit, filename)
+                    print >> sys.stderr, gracedb_msg
+                else:
+                    gracedb_id = resp_json["graceid"]
+                    gracedb_msg = "[%d/%d] graceid upload '%s' succeeded with id '%s'" % \
+                        (i, upload_attempt_limit, filename, gracedb_id)
+                    print >> sys.stderr, gracedb_msg
+                    break
+            except Exception as e:
+                print >> sys.stderr, e
+
+        coinc_message.close()
+
+        if gracedb_id is not None:
+
+            for i in range(1, upload_attempt_limit):
+                try:
+                    resp = self.gracedb_client.writeLog(
+                        gracedb_id,
+                        log_message,
+                        filename=None,
+                        tagname="analyst_comments")
+                    if resp.status != httplib.CREATED:
+                        gracedb_msg = "[%d/%d] gracedb upload of log failed" % \
+                            (i, upload_attempt_limit)
+                        print >> sys.stderr, gracedb_msg
+                    else:
+                        gracedb_msg = "[%d/%d] gracedb upload of log succeeded" % \
+                            (i, upload_attempt_limit)
+                        print >> sys.stderr, gracedb_msg
+                        break
+                except Exception as e:
+                    print >> sys.stderr, e
+        else:
+            print "gracedb upload of '%s' failed completely" % filename
+
     def __do_gracedb_alert(self, trigger, gracedb_upload_attempts=3):
 
         postcoh_inspiral = trigger.postcoh_inspiral
@@ -966,65 +1025,23 @@ class FinalSink(object):
             # into a string buffer incase there is some safety in doing so in
             # the event of a malformed document; instead of writing directly
             # into gracedb's  input pipe and crashing part way through.
-            message = StringIO.StringIO()
+            coinc_message = StringIO.StringIO()
             ligolw_utils.write_fileobj(self.coincs_document.xmldoc,
-                                       message,
+                                       coinc_message,
                                        gz=False)
 
             print >> sys.stderr, "sending %s to gracedb ..." % filename
-            upload_attempt_limit = gracedb_upload_attempts + 1  # one-indexed
-            gracedb_id = None
 
-            for i in range(1, upload_attempt_limit):
-                try:
-                    resp = self.gracedb_client.createEvent(
-                        self.gracedb_group,
-                        self.gracedb_pipeline,
-                        filename,
-                        filecontents=message.getvalue(),
-                        search=self.gracedb_search,
-                        offline=self.is_offline_analysis)
-                    resp_json = resp.json()
-                    if resp.status != httplib.CREATED:
-                        gracedb_msg = "[%d/%d] graceid upload '%s' failed" % \
-                            (i, upload_attempt_limit, filename)
-                        print >> sys.stderr, gracedb_msg
-                    else:
-                        gracedb_id = resp_json["graceid"]
-                        gracedb_msg = "[%d/%d] graceid upload '%s' succeeded with id '%s'" % \
-                            (i, upload_attempt_limit, filename, gracedb_id)
-                        print >> sys.stderr, gracedb_msg
-                        break
-                except Exception as e:
-                    print >> sys.stderr, e
+            log_message = "Optimal ra and dec from this coherent pipeline: \
+                (%f, %f) in degrees" \
+                    % (postcoh_inspiral.ra, postcoh_inspiral.dec)
 
-            message.close()
-
-            if gracedb_id is not None:
-                log_message = "Optimal ra and dec from this coherent pipeline: \
-                    (%f, %f) in degrees" \
-                        % (postcoh_inspiral.ra, postcoh_inspiral.dec)
-
-                for i in range(1, upload_attempt_limit):
-                    try:
-                        resp = self.gracedb_client.writeLog(
-                            gracedb_id,
-                            log_message,
-                            filename=None,
-                            tagname="analyst_comments")
-                        if resp.status != httplib.CREATED:
-                            gracedb_msg = "[%d/%d] gracedb upload of log failed" % \
-                                (i, upload_attempt_limit)
-                            print >> sys.stderr, gracedb_msg
-                        else:
-                            gracedb_msg = "[%d/%d] gracedb upload of log succeeded" % \
-                                (i, upload_attempt_limit)
-                            print >> sys.stderr, gracedb_msg
-                            break
-                    except Exception as e:
-                        print >> sys.stderr, e
-            else:
-                print "gracedb upload of '%s' failed completely" % filename
+            gracedb_upload_thread = threading.Thread(
+                target=self.upload_to_gracedb,
+                args=(gracedb_upload_attempts, filename, coinc_message,
+                      log_message))
+            gracedb_upload_thread.start()
+            self.threads_gracedb_upload.append(gracedb_upload_thread)
 
         # close the xmldoc for garbage collection and prepare a new empty one
         self.coincs_document.close()
@@ -1098,6 +1115,10 @@ class FinalSink(object):
         if ((self.thread_upload_skymap is not None)
                 and (self.thread_upload_skymap.isAlive())):
             self.thread_upload_skymap.join()
+
+        for thread in self.threads_gracedb_upload:
+            if thread.isAlive():
+                thread.join()
 
         self.fapupdater.await_and_clear_processes(
             self.fapupdater.calcfap_processes)
