@@ -586,13 +586,9 @@ static gboolean cuda_postcoh_sink_setcaps(GstPad *pad, GstCaps *caps) {
     }
     state->all_ifos[IFO_LEN * state->nifo] = '\0';
     // TODO: Consider using ifo_set__try_parse to check for errors
-    ifo_set_type enabled_ifos = ifo_set__parse_or_empty(state->all_ifos);
-    // sizeof() only works for arrays that we've statically created, so
-    // we use strlen() to get the length of the combination name
+    state->enabled_ifos = ifo_set__parse_or_empty(state->all_ifos);
     /* overwrite the sinkpad's ifos with the standardized ifo_set string */
-    strncpy(state->all_ifos, ifo_set__get_string(enabled_ifos),
-            strlen(ifo_set__get_string(enabled_ifos)));
-    state->all_ifos[IFO_LEN * state->nifo] = '\0';
+    strcpy(state->all_ifos, ifo_set__get_string(state->enabled_ifos));
 
     /* initialize enabled_ifo_ids, snglsnr matrix, and peak_list */
     for (i = 0, sinkpads = GST_ELEMENT(postcoh)->sinkpads; sinkpads;
@@ -1104,7 +1100,10 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
     for (int enabled_ifo_id = 0; enabled_ifo_id < state->nifo;
          enabled_ifo_id++) {
         int ifo_id = state->write_ifo_mapping[enabled_ifo_id];
-        if (!ifo_set__contains(coh_ifos, enabled_ifo_id)) { continue; }
+        if (!ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
+                                          enabled_ifo_id)) {
+            continue;
+        }
         int final_peaks             = 0;
         PeakList *pklist               = state->peak_list[enabled_ifo_id];
         int npeak                   = pklist->npeak[0];
@@ -1249,7 +1248,10 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
     if (ifo_set__count(coh_ifos) < 2) { return write_entries; }
 
     for (int pivotal_ifo = 0; pivotal_ifo < nifo; pivotal_ifo++) {
-        if (!ifo_set__contains(coh_ifos, pivotal_ifo)) { continue; }
+        if (!ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
+                                          pivotal_ifo)) {
+            continue;
+        }
 
         PeakList *pklist = state->peak_list[pivotal_ifo];
         npeak            = pklist->npeak[0];
@@ -1287,7 +1289,8 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                   sqrt(state->sigmasq[enabled_ifo_id][cur_tmplt_idx])
                   / pklist->snglsnr[ifo_id][peak_cur]; // in MPC
                 // Only record snr series on active IFOs
-                if (ifo_set__contains(coh_ifos, enabled_ifo_id)) {
+                if (ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
+                                                 enabled_ifo_id)) {
                     cuda_postcoh_record_snr_series(postcoh, output, pklist,
                                                    peak_cur, ifo_id);
                 }
@@ -1694,7 +1697,7 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
 
             if (!flag_segments_is_gap(data->flag_segments, postcoh->next_exe_t,
                                       ts_exe_end)) {
-                ifo_set__set(&coh_ifos, enabled_ifo_id);
+                ifo_set__set(&coh_ifos, ifo_id);
             }
 
             state->snglsnr_max[enabled_ifo_id] = 0;
@@ -1757,14 +1760,16 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
             int enabled_ifo_id = state->enabled_ifo_ids[i];
 
             if (ifo_set__count(coh_ifos) >= 2
-                && ifo_set__contains(coh_ifos, enabled_ifo_id)) {
+                && ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
+                                                enabled_ifo_id)) {
                 if (state->peak_list[enabled_ifo_id]->npeak[0] > 0) {
-                    cohsnr_and_chisq(state, ifo_set__to_uint(coh_ifos),
-                                     enabled_ifo_id, gps_idx,
-                                     postcoh->output_skymap
-                                       && state->snglsnr_max[enabled_ifo_id]
-                                            > postcoh->output_skymap,
-                                     postcoh->stream);
+                    cohsnr_and_chisq(
+                      state, ifo_set__renumber(coh_ifos, state->enabled_ifos),
+                      enabled_ifo_id, gps_idx,
+                      postcoh->output_skymap
+                        && state->snglsnr_max[enabled_ifo_id]
+                             > postcoh->output_skymap,
+                      postcoh->stream);
                     GST_LOG("after coherent analysis for ifo %d, npeak %d",
                             enabled_ifo_id,
                             state->peak_list[enabled_ifo_id]->npeak[0]);
