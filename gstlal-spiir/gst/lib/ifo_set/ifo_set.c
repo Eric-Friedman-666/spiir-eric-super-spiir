@@ -1,4 +1,5 @@
 // Standard includes
+#include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -7,8 +8,6 @@
 #include <IFOMap.h>
 #include <ifo_set.h>
 #include <pipe_macro.h>
-
-unsigned int ifo_set__to_uint(ifo_set_type ifos) { return ifos; }
 
 // We can determine if the IFO at ifo_id is in the ifo_set by
 // checking if that power of two exists in the ifo_set
@@ -45,8 +44,8 @@ static const char *IFOComboMap[MAX_IFO_SET] = {
     "K1", "H1K1", "L1K1", "H1L1K1", "V1K1", "H1V1K1", "L1V1K1", "H1L1V1K1",
 };
 
-const char *ifo_set__get_string(const ifo_set_type ifo_set) {
-    return IFOComboMap[ifo_set];
+const char *ifo_set__get_string(const ifo_set_type ifos) {
+    return IFOComboMap[ifos];
 }
 
 // Try to parse the set of IFOs specified by ifo_str of the form "H1V1".
@@ -104,4 +103,63 @@ ifo_set_type ifo_set__parse_or_empty(const char *ifos_str) {
                 ifos_str);
     }
     return parsed_ifos;
+}
+
+#ifndef NDEBUG
+static void assert_subset(const ifo_set_type subset_ifos,
+                          const ifo_set_type superset_ifos) {
+    for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
+        assert(ifo_set__contains(superset_ifos, ifo_id)
+               || (!ifo_set__contains(superset_ifos, ifo_id)
+                   && !ifo_set__contains(subset_ifos, ifo_id)));
+    }
+}
+#endif
+
+// Produce an unsigned integer bitset by renumbering the bits in `src_ifos`
+// according to the mask specified in `ifos_mask`.
+// Bit i in the output is set iff bit j is set on both inputs, where j is the
+// place of the i-th set bit in `ifos_mask`.
+// That is, the return value is the bitset `src_ifos` as if the bit places not
+// set in `ifos_mask` are removed.
+// Note that the order of bits (i.e. interferometers) is not affected, just
+// which ones are represented in the output.
+// (If a bit is set in `src_ifos` but not in `ifos_mask`, panic with an
+// assertion failure.)
+// The utility of this is taking an `ifo_set`, which is a bitset representing
+// all detectors, and returning a corresponding bitset where bits exist for
+// only a subset of detectors.
+unsigned int ifo_set__renumber(const ifo_set_type src_ifos,
+                               const ifo_set_type ifos_mask) {
+#ifndef NDEBUG
+    assert_subset(src_ifos, ifos_mask);
+#endif
+
+    unsigned int ifos    = 0;
+    int renumbered_index = 0;
+    for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
+        if (ifo_set__contains(ifos_mask, ifo_id)) {
+            if (ifo_set__contains(src_ifos, ifo_id)) {
+                ifos |= 1 << renumbered_index;
+            }
+            renumbered_index++;
+        }
+    }
+
+    return ifos;
+}
+
+// Check if the i-th ifo contained in `ifos_mask` is also contained in `ifos`
+// ifos: The ifo_set to be queried
+// ifos_mask: An ifo_set to be used as a mask to renumber `ifos`
+// renumbered_index: The index to check in the renumbered `ifos`
+// return: True if ifos contains the i-th ifo in `ifos_mask`, and false
+// otherwise.
+bool ifo_set__renumbered_contains(const ifo_set_type ifos,
+                                  const ifo_set_type ifos_mask,
+                                  const int renumbered_index) {
+    assert(renumbered_index < ifo_set__count(ifos_mask));
+
+    unsigned int renumbered_ifos = ifo_set__renumber(ifos, ifos_mask);
+    return renumbered_ifos & (1 << renumbered_index);
 }

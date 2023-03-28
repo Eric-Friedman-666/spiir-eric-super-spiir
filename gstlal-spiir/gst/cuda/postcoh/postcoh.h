@@ -191,6 +191,8 @@ typedef struct _PostcohState {
     char *all_ifos;
     // Immutable outside of init/setcaps
     gint nifo;
+    ifo_set_type enabled_ifos;
+    gint enabled_ifo_ids[MAX_NIFO];
     int max_npeak;
     int ntmplt;
     float dt;
@@ -214,7 +216,6 @@ typedef struct _PostcohState {
     int snglsnr_start_load;
     int snglsnr_start_exe;
     /* map the input sink to the 'enabled_ifo_id' (its index in all_ifos) */
-    gint enabled_ifo_ids[MAX_NIFO];
     int gps_step;
     /* be careful that long has different length in different machines */
     long gps_start;

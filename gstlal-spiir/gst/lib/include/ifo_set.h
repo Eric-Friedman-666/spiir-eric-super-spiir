@@ -1,11 +1,9 @@
-#ifndef __GST_IFO_SET_HEADER__
-#define __GST_IFO_SET_HEADER__
+#ifndef __IFO_SET_HEADER__
+#define __IFO_SET_HEADER__
 
 #include <stdbool.h>
 
 typedef unsigned int ifo_set_type;
-
-unsigned int ifo_set__to_uint(ifo_set_type ifos);
 
 void ifo_set__set(ifo_set_type *ifos, const int ifo_id);
 
@@ -26,4 +24,11 @@ const char *ifo_set__get_string(const ifo_set_type ifo_set);
 bool ifo_set__try_parse(const char *ifos_str, ifo_set_type *parsed_ifos);
 ifo_set_type ifo_set__parse_or_empty(const char *ifos_str);
 
-#endif /* __GST_IFO_SET_HEADER__ */
+unsigned int ifo_set__renumber(const ifo_set_type src_ifos,
+                               const ifo_set_type ifos_mask);
+
+bool ifo_set__renumbered_contains(const ifo_set_type ifos,
+                                  const ifo_set_type ifos_mask,
+                                  const int renumbered_index);
+
+#endif /* __IFO_SET_HEADER__ */
