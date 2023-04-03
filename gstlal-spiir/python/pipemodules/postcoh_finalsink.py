@@ -963,6 +963,12 @@ class FinalSink(object):
                     gracedb_msg = "[%d/%d] graceid upload '%s' succeeded with id '%s'" % \
                         (i, upload_attempt_limit, filename, gracedb_id)
                     print >> sys.stderr, gracedb_msg
+                    #Add an EARLY_WARNING label for EW pipelines
+                    if self.negative_latency != 0:
+                        label_name="EARLY_WARNING"
+                        resp_ew = self.gracedb_client.writeLabel(gracedb_id, label_name)
+                        if resp_ew.status != httplib.CREATED:
+                            print >>sys.stderr, "gracedb labelling failed"               
                     break
             except Exception as e:
                 print >> sys.stderr, e
