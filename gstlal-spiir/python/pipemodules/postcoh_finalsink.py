@@ -946,13 +946,19 @@ class FinalSink(object):
 
         for i in range(1, upload_attempt_limit):
             try:
+                #FIXME: Hardcoded an EARLY_WARNING label for EW runs.
+                #FIXME: In the future, when necessary, use a dedicated label argument. See #120.
+                label_name = None
+                if self.negative_latency != 0:
+                    label_name = "EARLY_WARNING"
                 resp = self.gracedb_client.createEvent(
                     self.gracedb_group,
                     self.gracedb_pipeline,
                     filename,
                     filecontents=coinc_message.getvalue(),
                     search=self.gracedb_search,
-                    offline=self.is_offline_analysis)
+                    offline=self.is_offline_analysis,
+                    labels=label_name)
                 resp_json = resp.json()
                 if resp.status != httplib.CREATED:
                     gracedb_msg = "[%d/%d] graceid upload '%s' failed" % \
