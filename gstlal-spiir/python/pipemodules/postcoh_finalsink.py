@@ -957,7 +957,7 @@ class FinalSink(object):
                         filecontents=coinc_message.getvalue(),
                         search=self.gracedb_search,
                         offline=self.is_offline_analysis,
-                        label=label_name)
+                        labels=label_name)
                 else:
                     resp = self.gracedb_client.createEvent(
                         self.gracedb_group,
