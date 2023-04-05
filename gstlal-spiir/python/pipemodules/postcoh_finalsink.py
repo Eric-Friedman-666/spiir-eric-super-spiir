@@ -946,13 +946,26 @@ class FinalSink(object):
 
         for i in range(1, upload_attempt_limit):
             try:
-                resp = self.gracedb_client.createEvent(
-                    self.gracedb_group,
-                    self.gracedb_pipeline,
-                    filename,
-                    filecontents=coinc_message.getvalue(),
-                    search=self.gracedb_search,
-                    offline=self.is_offline_analysis)
+                #FIXME: Hardcoded an EARLY_WARNING label for EW runs.
+                #FIXME: In the future, when necessary,  use a dedicated label argument.
+                if self.negative_latency != 0:
+                    label_name = "EARLY_WARNING"
+                    resp = self.gracedb_client.createEvent(
+                        self.gracedb_group,
+                        self.gracedb_pipeline,
+                        filename,
+                        filecontents=coinc_message.getvalue(),
+                        search=self.gracedb_search,
+                        offline=self.is_offline_analysis,
+                        label=label_name)
+                else:
+                    resp = self.gracedb_client.createEvent(
+                        self.gracedb_group,
+                        self.gracedb_pipeline,
+                        filename,
+                        filecontents=coinc_message.getvalue(),
+                        search=self.gracedb_search,
+                        offline=self.is_offline_analysis)
                 resp_json = resp.json()
                 if resp.status != httplib.CREATED:
                     gracedb_msg = "[%d/%d] graceid upload '%s' failed" % \
@@ -963,12 +976,6 @@ class FinalSink(object):
                     gracedb_msg = "[%d/%d] graceid upload '%s' succeeded with id '%s'" % \
                         (i, upload_attempt_limit, filename, gracedb_id)
                     print >> sys.stderr, gracedb_msg
-                    #Add an EARLY_WARNING label for EW pipelines
-                    if self.negative_latency != 0:
-                        label_name="EARLY_WARNING"
-                        resp_ew = self.gracedb_client.writeLabel(gracedb_id, label_name)
-                        if resp_ew.status != httplib.CREATED:
-                            print >>sys.stderr, "gracedb labelling failed"               
                     break
             except Exception as e:
                 print >> sys.stderr, e
