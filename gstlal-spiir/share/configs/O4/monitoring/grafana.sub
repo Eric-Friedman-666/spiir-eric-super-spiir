@@ -1,0 +1,12 @@
+universe = local
+accounting_group_user  =  $ENV(USER)
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+kill_sig = 15
+executable = /home/spiir/monitoring/grafana-9.3.6/bin/grafana-server
+arguments = "-homepath /home/spiir/monitoring/grafana-9.3.6"
+request_disk = 1GB
+log = logs/grafana.dag.log
+error = logs/grafana-$(cluster)-$(process).err
+output = logs/grafana-$(cluster)-$(process).out
+notification = Always
+queue 1

@@ -1,0 +1,12 @@
+universe = local
+accounting_group_user  =  $ENV(USER)
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+kill_sig = 15
+executable = /home/spiir/monitoring/prometheus-2.42.0.linux-amd64/prometheus
+arguments = "--config.file=/home/spiir/monitoring/prometheus-2.42.0.linux-amd64/prometheus.yml"
+request_disk = 1GB
+log = logs/prometheus.dag.log
+error = logs/prometheus-$(cluster)-$(process).err
+output = logs/prometheus-$(cluster)-$(process).out
+notification = Always
+queue 1

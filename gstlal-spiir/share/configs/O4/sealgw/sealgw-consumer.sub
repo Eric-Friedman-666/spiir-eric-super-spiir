@@ -1,0 +1,23 @@
+universe = Vanilla
+accounting_group_user  =  $ENV(USER)
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+Requirements  = (Target.Online_CBC_IIR_GPU_X2200 =?= True)
+kill_sig = 15
++Online_CBC_IIR_GPU_X2200 = True
++OpSysAndVer = "SL7"
+transfer_executable = False
+executable = /home/spiir/.conda/envs/spiir-py310/bin/python
+arguments = "sealgw-consumer.py \
+    $(seal_config) \
+    --out './results/' \
+    $(flags) \
+    --group 'gracedb-playground' \
+    --username '$(username)' \
+    --log-file './logs/sealgw-consumer.log' \
+    --debug"
+request_disk = 1GB
+log = logs/sealgw-consumer.dag.log
+error = logs/sealgw-consumer-$(cluster)-$(process).err
+output = logs/sealgw-consumer-$(cluster)-$(process).out
+notification = Always
+queue 1
