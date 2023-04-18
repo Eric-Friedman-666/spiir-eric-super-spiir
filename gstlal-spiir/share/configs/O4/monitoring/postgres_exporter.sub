@@ -1,0 +1,13 @@
+universe = local
+accounting_group_user  =  $ENV(USER)
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+kill_sig = 15
+executable = /home/spiir/monitoring/postgres_exporter/postgres_exporter
+arguments = "--auto-discover-databases"
+environment = "DATA_SOURCE_NAME=postgresql://luke.davis:monitoring@ldas-pcdev11:5432/monitoring?sslmode=disable"
+request_disk = 1GB
+log = logs/postgres_exporter.dag.log
+error = logs/postgres_exporter-$(cluster)-$(process).err
+output = logs/postgres_exporter-$(cluster)-$(process).out
+notification = Always
+queue 1

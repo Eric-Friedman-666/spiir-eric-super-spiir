@@ -1,0 +1,12 @@
+universe = local
+accounting_group_user  =  $ENV(USER)
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+kill_sig = 15
+executable = /home/spiir/monitoring/pgsql/bin/postgres
+arguments = "-D /home/spiir/monitoring/pgsql/data"
+request_disk = 1GB
+log = logs/postgres.dag.log
+error = logs/postgres-$(cluster)-$(process).err
+output = logs/postgres-$(cluster)-$(process).out
+notification = Always
+queue 1

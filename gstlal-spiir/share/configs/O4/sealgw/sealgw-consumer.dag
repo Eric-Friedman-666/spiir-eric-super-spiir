@@ -1,0 +1,7 @@
+JOB sealgw-consumer-test_spiir_allsky sealgw-consumer.sub
+RETRY sealgw-consumer-test_spiir_allsky 10
+VARS sealgw-consumer-test_spiir_allsky username="luke.davis-9a879216" flags="--upload-gracedb -t 'test_spiir_allsky' 'cbc_spiir_allsky'" seal_config="config_LHV_O4ExpectedPSD.json"
+
+JOB sealgw-consumer-test_spiir_earlywarning sealgw-consumer.sub
+RETRY sealgw-consumer-test_spiir_earlywarning 10
+VARS sealgw-consumer-test_spiir_earlywarning username="luke.davis-9a879216" flags="-t 'test_spiir_earlywarning' 'cbc_spiir_earlywarning'" seal_config="config_LHV_O4ExpectedPSD.json"

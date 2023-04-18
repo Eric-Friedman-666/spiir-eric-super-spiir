@@ -1,0 +1,14 @@
+JOB grafana grafana.sub
+RETRY grafana 100
+
+JOB prometheus prometheus.sub
+RETRY prometheus 100
+
+JOB node_exporter node_exporter.sub
+RETRY node_exporter 100
+
+JOB postgres_exporter postgres_exporter.sub
+RETRY postgres_exporter 100
+
+JOB postgres postgres.sub
+RETRY postgres 100

@@ -1,0 +1,39 @@
+name: spiir-monitor
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - pip
+  - wheel
+  - setuptools
+
+  # format and lint
+  - black
+  - black[jupyter]
+  - mdformat
+  - isort
+  - flake8
+
+  # utilities
+  - click
+  - tqdm
+  - toml
+
+  # notebooks
+  - ipykernel
+  - jupyter
+
+  # data
+  - matplotlib
+  - pandas
+
+  # databases
+  - aiosqlite
+  - asyncpg
+  - psycopg2
+  - sqlalchemy  
+
+  - pip:
+    - git+https://git.ligo.org/spiir-group/spiir.git
+
+prefix: /home/spiir/.conda/envs/spiir-monitor

@@ -1,0 +1,12 @@
+universe = local
+accounting_group_user  =  $ENV(USER)
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+kill_sig = 15
+executable = /home/spiir/monitoring/node_exporter-1.5.0.linux-amd64/node_exporter
+arguments = "--collector.systemd --collector.processes"
+request_disk = 1GB
+log = logs/node_exporter.dag.log
+error = logs/node_exporter-$(cluster)-$(process).err
+output = logs/node_exporter-$(cluster)-$(process).out
+notification = Always
+queue 1
