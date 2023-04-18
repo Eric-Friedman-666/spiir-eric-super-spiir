@@ -22,7 +22,7 @@ then
     exit
 fi
 
-while getopts a:s:d:j:w:l:t:r:x:c: flag
+while getopts a:s:d:j:w:l:t:r:u:x:c: flag
 do
     case "${flag}" in
         a) ARTIFACTS_DIR=$OPTARG;;
@@ -33,10 +33,13 @@ do
         l) SLURM=$OPTARG;;
         t) POSTCOH_IFOS=$OPTARG;;
 		r) RUN_ID=$OPTARG;;
+		u) RUN_DIR=$OPTARG;;
 		x) USE_TMUX=$OPTARG;;
 		c) SCRIPT_DIR=$OPTARG;;
     esac
 done
+
+RUN_DIR="${RUN_DIR:-${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}}"
 
 echo "";
 echo "Running pipeline.";
@@ -50,6 +53,7 @@ echo "	Wrapper commands (w): $WRAPPER";
 echo "	Using Slurm? (l): $SLURM";
 echo "	Postcoh IFOs (t): $POSTCOH_IFOS";
 echo "	Run ID (r): $RUN_ID";
+echo "	Run dir (u): $RUN_DIR";
 echo "  TMUX the run output (x): $USE_TMUX";
 echo "	Script dir (c): $SCRIPT_DIR";
 echo "";
@@ -64,15 +68,15 @@ cmd () {
 	psd=${ARTIFACTS_DIR}/reference_PSD.xml.gz
 
 	map=${ARTIFACTS_DIR}/detrsp_map.xml
-	macrofarinput=${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}/marginalized_stats_2w.xml.gz,${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}/marginalized_stats_1d.xml.gz,${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}/marginalized_stats_2h.xml.gz
+	macrofarinput=${RUN_DIR}/${NODE_ID}/marginalized_stats_2w.xml.gz,${RUN_DIR}/${NODE_ID}/marginalized_stats_1d.xml.gz,${RUN_DIR}/${NODE_ID}/marginalized_stats_2h.xml.gz
 
-	macrolocfapoutput=${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}/marginalized_stats_2w.xml.gz,${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}/marginalized_stats_1d.xml.gz,${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}/marginalized_stats_2h.xml.gz
-	macrojobtag=${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}
+	macrolocfapoutput=${RUN_DIR}/${NODE_ID}/marginalized_stats_2w.xml.gz,${RUN_DIR}/${NODE_ID}/marginalized_stats_1d.xml.gz,${RUN_DIR}/${NODE_ID}/marginalized_stats_2h.xml.gz
+	macrojobtag=${RUN_DIR}/${NODE_ID}
 
 	# Banks are the only artifact which are not yet generated and so a single set of banks are available for every job in the top-most folder.
 	bankdir="${ARTIFACTS_DIR}/.."
 
-	mkdir -p ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}
+	mkdir -p ${RUN_DIR}/${NODE_ID}
 
 	for bank in $(seq -f "%04g" $(( ${bank_start}+${bank_count}*${i} )) $(( ${bank_start}+${bank_count}*($i+1)-1 )) ); do
 		if [[ "$RUN_ID" == *"H"* ]]; then
@@ -95,11 +99,11 @@ cmd () {
 	done
 
 	for bank in $(seq -f "%04g" $(( ${bank_start}+${bank_count}*${i} )) $(( ${bank_start}+${bank_count}*($i+1)-1 )) ); do
-		macrostatsprefix="${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}/bank${bank}_stats"
+		macrostatsprefix="${RUN_DIR}/${NODE_ID}/bank${bank}_stats"
 		macrostatsprefixes="${macrostatsprefixes} --cohfar-accumbackground-output-prefix ${macrostatsprefix}"
 	done
 
-	macrooutprefix=${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/${NODE_ID}/zerolag
+	macrooutprefix=${RUN_DIR}/${NODE_ID}/zerolag
 
 	if [[ "$RUN_ID" == *"H"* ]]; then
 		channels="--channel-name H1=FAKE_INJECTIONS"
@@ -114,8 +118,10 @@ cmd () {
 		channels="${channels} --channel-name K1=FAKE_INJECTIONS"
 	fi
 
+	export GSTLAL_LL_JOB=${macrojobtag}
+
 	# These values were chosen without any scientific basis, and are purely used for functionality testing.
-	CMD="$WRAPPER python $(which gstlal_inspiral_postcohspiir_online) \
+	CMD="$WRAPPER python2 $(type -p gstlal_inspiral_postcohspiir_online) \
 		--job-tag ${macrojobtag} \
 		--tmp-space _CONDOR_SCRATCH_ARTIFACTS_DIR \
 		${macroiirbanks} \
@@ -152,12 +158,14 @@ cmd () {
 		--finalsink-singlefar-veto-thresh 0.5 \
 		--finalsink-superevent-thresh 0.0001 \
 		--reference-psd ${psd} \
+		--finalsink-need-online-perform 1 \
+		--finalsink-gracedb-upload-attempts 0 \
 		--psd-fft-length 32"
 		# For bypass: --coherent-search-ifos ${POSTCOH_IFOS}"
 	echo $CMD
 }
 
-cd ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}
+cd ${RUN_DIR}
 
 if [ $SLURM -eq 1 ]
 then
@@ -173,16 +181,16 @@ else
 		i=$TID
 		n=${#nodes[@]}
 		cmd
-		echo "STD output at ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.out.txt" > ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.out.txt
-		echo "ERR output at ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.err.txt" > ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.err.txt
-		eval $CMD 1>> ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.out.txt 2>> ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.err.txt &
+		echo "STD output at ${RUN_DIR}/logs/pipe_${TID}.out.txt" > ${RUN_DIR}/logs/pipe_${TID}.out.txt
+		echo "ERR output at ${RUN_DIR}/logs/pipe_${TID}.err.txt" > ${RUN_DIR}/logs/pipe_${TID}.err.txt
+		eval $CMD 1>> ${RUN_DIR}/logs/pipe_${TID}.out.txt 2>> ${RUN_DIR}/logs/pipe_${TID}.err.txt &
 		pid=$!
 		if [ $USE_TMUX -eq 1 ]; then
 			SESSION=tmux-${RUN_ID}
 			tmux -q new-session -d -s "$SESSION"
-			tmux -q split-window -t "$SESSION" "tail --pid=$pid -F ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.out.txt"
+			tmux -q split-window -t "$SESSION" "tail --pid=$pid -F ${RUN_DIR}/logs/pipe_${TID}.out.txt"
 			tmux -q select-layout -t "$SESSION" tiled
-			tmux -q split-window -t "$SESSION" "tail --pid=$pid -F ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.err.txt"
+			tmux -q split-window -t "$SESSION" "tail --pid=$pid -F ${RUN_DIR}/logs/pipe_${TID}.err.txt"
 			tmux -q select-layout -t "$SESSION" tiled
 			tmux -q kill-pane -t "${SESSION}.0"
 			tmux -q select-pane -t "${SESSION}.0"
@@ -190,7 +198,7 @@ else
 			tmux -q set-window-option -t "$SESSION" synchronize-panes on
 			tmux -q attach -t "$SESSION" >/dev/null 2>&1
 		else
-			tail --pid=$pid -F ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.out.txt ${ARTIFACTS_DIR}/${JOB_ID}/${RUN_ID}/logs/pipe_${TID}.err.txt
+			tail --pid=$pid -F ${RUN_DIR}/logs/pipe_${TID}.out.txt ${RUN_DIR}/logs/pipe_${TID}.err.txt
 		fi
 		wait "$pid"
 	done

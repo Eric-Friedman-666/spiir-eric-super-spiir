@@ -21,14 +21,6 @@ then
     exit
 fi
 
-export ARTIFACTS_DIR=${ARTIFACTS_DIR:-artifacts}
-export START=${START:-1187006000}
-export DURATION=${DURATION:-300}
-ARTIFACTS_DIR=$(realpath ${ARTIFACTS_DIR})
-ARTIFACTS_DIR="$ARTIFACTS_DIR/HLVK-${START}-${DURATION}"
-export SLURM=${SLURM:-0}
-export SCRIPT_DIR=${SCRIPT_DIR:-$(dirname $( realpath "$0"  ) )}
-
 while getopts a:s:d:l:c: flag
 do
     case "${flag}" in
@@ -39,6 +31,13 @@ do
         c) SCRIPT_DIR=$OPTARG;;
     esac
 done
+
+export START=${START:-1187006000}
+export DURATION=${DURATION:-300}
+export SLURM=${SLURM:-0}
+export SCRIPT_DIR=${SCRIPT_DIR:-$(dirname $( realpath "$0"  ) )}
+export ARTIFACTS_DIR=${ARTIFACTS_DIR:-artifacts/HLVK-${START}-${DURATION}}
+ARTIFACTS_DIR=$(realpath ${ARTIFACTS_DIR})
 
 echo ""
 echo "Generating pipeline artifacts."
@@ -75,7 +74,7 @@ if [ -d "$ARTIFACTS_DIR/fake_frames_inj" ]; then
     echo "fake frames already generated."
 else
     mkdir $ARTIFACTS_DIR/fake_frames_inj
-    if [ $SLURM == 1 ]; then
+    if [ $SLURM -eq 1 ]; then
         # Partition frame generation across available slurm nodes.
         DURATION_PER_JOB=2000
         SLURM_JOBS="--dependency=afterok"
@@ -84,7 +83,7 @@ else
         NUM_IFOS=4 #HLVK
         CORES=$(grep -c ^processor /proc/cpuinfo)
         CORES_PER_IFO=$(($CORES/$NUM_IFOS))
-        if [ $CORES_PER_IFO <= 1 ]; then 
+        if [ $CORES_PER_IFO -le 1 ]; then 
             DURATION_PER_JOB=$DURATION
         else
             DURATION_PER_JOB=$(( $DURATION / $CORES_PER_IFO ))
@@ -94,17 +93,17 @@ else
     JOB_END=$(($START+$DURATION_PER_JOB))
     while true; do
         CMD="$SCRIPT_DIR/generate_fake_frames.sh -a ${ARTIFACTS_DIR} -s ${JOB_START} -e ${JOB_END}"
-        if [ $SLURM == 1 ]; then
+        if [ $SLURM -eq 1 ]; then
             echo "$SCMD $CMD"
             SLURM_JOBS="$SLURM_JOBS:$($SCMD $CMD)"
         else
             echo $CMD
             bash $CMD &
         fi
-        if [ $JOB_END == $END ]; then break; fi
+        if [ $JOB_END -eq $END ]; then break; fi
         JOB_START=$(($JOB_START+$DURATION_PER_JOB))
         JOB_END=$(($JOB_END+$DURATION_PER_JOB))
-        if [[ $JOB_END > $END ]]; then JOB_END=$END; fi
+        if [[ $JOB_END -gt $END ]]; then JOB_END=$END; fi
     done
 fi
 
@@ -122,12 +121,12 @@ if test -f ${ARTIFACTS_DIR}/fake_frames.cache; then
     echo "frame cache file already generated."
 else
     CMD="ls ${ARTIFACTS_DIR}/fake_frames_inj/*/*.gwf | lalapps_path2cache >> ${ARTIFACTS_DIR}/fake_frames.cache"
-    if [ $SLURM == 1 ]; then
+    if [ $SLURM -eq 1 ]; then
         echo "$SCMD $SLURM_JOBS --wrap=\"$CMD\""
         SLURM_JOB="--dependency=afterok:$($SCMD $SLURM_JOBS --wrap="$CMD")"
     else
         echo $CMD
-        $CMD
+        eval $CMD
     fi
 fi
 
@@ -139,7 +138,7 @@ if test -f ${ARTIFACTS_DIR}/reference_PSD.xml.gz; then
 else
     CHANNELS="--channel-name=H1=FAKE_INJECTIONS --channel-name=L1=FAKE_INJECTIONS --channel-name=V1=FAKE_INJECTIONS --channel-name=K1=FAKE_INJECTIONS"
     CMD="gstlal_reference_psd --data-source frames --frame-cache ${ARTIFACTS_DIR}/fake_frames.cache --gps-start-time=${START} --gps-end-time=${END} ${CHANNELS} --write-psd ${ARTIFACTS_DIR}/reference_PSD.xml.gz --verbose --psd-fft-length 16"
-    if [ $SLURM == 1 ]; then
+    if [ $SLURM -eq 1 ]; then
         echo "$SCMD $SLURM_JOB $SBIG --wrap=\"$CMD\""
         SLURM_JOB="--dependency=afterok:$($SCMD $SLURM_JOB $SBIG --wrap="$CMD")"
     else
@@ -154,7 +153,7 @@ if test -f ${ARTIFACTS_DIR}/detrsp_map.xml; then
 else
     HORIZONS="--ifo-horizons H1:111,L1:212,V1:56,K1:56"
     CMD="gstlal_postcoh_gen_detrsp_map ${HORIZONS} --chealpix-order 5 --output-coh-coeff ${ARTIFACTS_DIR}/detrsp_map.xml --output-prob-coeff ${ARTIFACTS_DIR}/prob_map.xml --gps-time ${START}"
-    if [ $SLURM == 1 ]; then
+    if [ $SLURM -eq 1 ]; then
         echo "$SCMD $SLURM_JOB $SBIG --wrap=\"$CMD\" --wait"
         $SCMD $SLURM_JOB $SBIG --wrap="$CMD" --wait
     else
