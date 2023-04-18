@@ -171,6 +171,7 @@ class PostcohDocument(object):
             self.close()
 
 
+#
 class OnlinePerformer(object):
     def __init__(self, parent_lock):
         # setup bottle routes
@@ -378,6 +379,12 @@ class FAPUpdater(object):
         if (self.last_calfap_time
                 is not None) and (duration >= self.calcfap_interval):
             if self.try_run_calcfap(timestamp):
+                delay = timestamp - self.last_calfap_time \
+                    - self.calcfap_interval
+                if delay > 0:
+                    logging.info(
+                        "Calcfap launched at '%f' after '%f' second delay." %
+                        (timestamp, delay))
                 self.last_calfap_time = timestamp
 
     # combine stats every day
@@ -451,6 +458,12 @@ class FAPUpdater(object):
         if (self.last_combine_stats_time
                 is not None) and (duration >= self.combine_stats_interval):
             if self.try_combine_stats():
+                delay = timestamp - self.last_combine_stats_time \
+                    - self.combine_stats_interval
+                if delay > 0:
+                    logging.info(
+                        "Combine stats launched at '%f' after '%f' second delay."
+                        % (timestamp, delay))
                 self.last_combine_stats_time = timestamp
 
 
