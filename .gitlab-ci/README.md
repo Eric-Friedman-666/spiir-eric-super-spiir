@@ -62,6 +62,10 @@ Generate inputs (g):
 Run pipeline on all IFO combinations (i):  
     If set to 1 (default is 0), the script will run the pipeline on all IFO combinations instead of just a single test combination.  
 
+Compare pipeline output with a control (c):
+    Set this to a short commit SHA or branch name to compare this run with the last run pipeline that matches the chosen string.  
+    By default this is set to `spiir-O4-EW-development`.
+
 Use Tmux (x):  
     If set to 1 (defualt is 0), the script will run Tmux and tail the .out and .err logs as they are produced.  
 
@@ -110,6 +114,6 @@ ${ARTIFACTS_DIR}/
 A python 2 and python 3 dockerfile is available that should be able to run the pipeline on any architecture that supports docker, as long as a GPU is passed into it.  
 GPU usage requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) to be installed.  
 The command for building the docker container is:  
-`DOCKER_BUILDKIT=1 docker build -t spiir:<ANY_TAG_HERE> -f .gitlab-ci/spiir-py2.Dockerfile --progress=plain --build-arg BUILDKIT_INLINE_CACHE=1 .`  
+`DOCKER_BUILDKIT=1 docker build -t spiir:<ANY_TAG_HERE> -f .gitlab-ci/Dockerfile --progress=plain --build-arg BUILDKIT_INLINE_CACHE=1 .`  
 Once the image is built and you have an ./artifacts directory containing the split bank files, you can run the container with the artifacts folder mounted:  
-`docker run --gpus all -it --mount=type=bind,src=<ARTIFACTS DIR PATH>,dst=/spiir/artifacts --rm --entrypoint /.gitlab-ci/submit_runs.sh spiir:<ANY_TAG_HERE>`  
+`docker run --gpus all -it --mount=type=bind,src=<ARTIFACTS DIR PATH>,dst=/repo/artifacts --rm --entrypoint /repo/.gitlab-ci/submit_runs.sh spiir:<ANY_TAG_HERE>`  

@@ -3,27 +3,40 @@ default:
   interruptible: true
 
 variables:
-  PYVER: -py2
   ALL_IFOS: 0
+  START: 1187006000
+  DURATION: 300
+  COMPARE: spiir-O4-EW-development
+  FORCE_EARLY_UPLOADS: 1
+  SET_DETERMINISTIC: 1
 
 build-spiir:
   stage: build
   script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker pull $CI_REGISTRY/lscsoft/spiir:spiir-O4-EW-development${PYVER}${TAG} || true
-    - docker pull $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${PYVER}${TAG} || true
+    - docker pull $CI_REGISTRY/lscsoft/spiir:spiir-O4-EW-development${TAG} || true
+    - docker pull $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${TAG} || true
     - if [[ -n "${ARGS}" ]]; then
         for ARG in ${ARGS}; do
           BUILD_ARGS="${BUILD_ARGS} --build-arg ${ARG}";
         done
       fi
     - DOCKER_BUILDKIT=1 docker build
-      -t $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${PYVER}${TAG}
-      -f .gitlab-ci/spiir${PYVER}.Dockerfile
+      --target build
+      -t $CI_REGISTRY/lscsoft/spiir:base-${CI_COMMIT_REF_SLUG}${TAG}
+      -f .gitlab-ci/Dockerfile
       --progress=plain
       --build-arg BUILDKIT_INLINE_CACHE=1
-      --build-arg PATCH_FINALSINK=1
-      --build-arg SET_DETERMINISTIC=1
+      ${BUILD_ARGS}
+      '.'
+    - DOCKER_BUILDKIT=1 docker build
+      --target runtime
+      -t $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${TAG}
+      -f .gitlab-ci/Dockerfile
+      --progress=plain
+      --build-arg BUILDKIT_INLINE_CACHE=1
+      --build-arg FORCE_EARLY_UPLOADS=${FORCE_EARLY_UPLOADS}
+      --build-arg SET_DETERMINISTIC=${SET_DETERMINISTIC}
       ${BUILD_ARGS}
       '.'
   when: manual
@@ -38,7 +51,8 @@ push-spiir:
   stage: deploy
   script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker push $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${PYVER}${TAG}
+    - docker push $CI_REGISTRY/lscsoft/spiir:base-${CI_COMMIT_REF_SLUG}${TAG}
+    - docker push $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${TAG}
   needs:
     - build-spiir
   tags:
@@ -46,20 +60,6 @@ push-spiir:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_REF_NAME == "spiir-O4-EW-development"
-
-build-spiir-py3:
-  extends:
-    - build-spiir
-  variables:
-    PYVER: -py3
-
-push-spiir-py3:
-  extends:
-    - push-spiir
-  needs:
-    - build-spiir-py3
-  variables:
-    PYVER: -py3
 
 build-spiir-debug:
   extends:
@@ -74,22 +74,6 @@ push-spiir-debug:
   needs:
     - build-spiir-debug
   variables:
-    TAG: -debug
-
-build-spiir-py3-debug:
-  extends:
-    - build-spiir-py3
-  variables:
-    TAG: -debug
-    ARGS: "DEBUG=1"
-
-push-spiir-py3-debug:
-  extends:
-    - push-spiir
-  needs:
-    - build-spiir-py3-debug
-  variables:
-    PYVER: -py3
     TAG: -debug
 
 build-spiir-debug-ASAN:
@@ -138,26 +122,27 @@ test-spiir:
       --ulimit cpu=36000
       --gpus all
       --rm
-      --mount type=bind,source=/artifacts,target=/spiir/artifacts
-      --name test-spiir-${CI_COMMIT_REF_SLUG}${PYVER}${TAG}-${CI_JOB_ID}
-      --entrypoint /.gitlab-ci/submit_runs.sh
-      $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${PYVER}${TAG}
-        -a /spiir/artifacts
-        -s 1187006000
-        -d 300
-        -j ${CI_COMMIT_REF_SLUG}${PYVER}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA}
+      --mount type=bind,source=/artifacts,target=/repo/artifacts
+      --name test-spiir-${CI_COMMIT_REF_SLUG}${TAG}-${CI_JOB_ID}
+      --entrypoint /repo/.gitlab-ci/submit_runs.sh
+      $CI_REGISTRY/lscsoft/spiir:${CI_COMMIT_REF_SLUG}${TAG}
+        -a /repo/artifacts
+        -s ${START}
+        -d ${DURATION}
+        -j ${CI_COMMIT_REF_SLUG}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA}
         -l 0
         -g 1
         -i ${ALL_IFOS}
+        -c ${COMPARE}
         -y
         "${WRAPPER}"
-    - cp -r /artifacts/HLVK-1187006000-300/${CI_COMMIT_REF_SLUG}${PYVER}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA} .
+    - cp -r /artifacts/HLVK-${START}-${DURATION}/${CI_COMMIT_REF_SLUG}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA} .
   needs:
     - build-spiir
   timeout: 10h
   artifacts:
     paths:
-      - ./${CI_COMMIT_REF_SLUG}${PYVER}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA}
+      - ./${CI_COMMIT_REF_SLUG}${TAG}-${CI_JOB_ID}-${CI_COMMIT_SHORT_SHA}
     expire_in: 1 month
   when: manual
   resource_group: gpu
@@ -172,14 +157,6 @@ test-spiir-all-ifos:
     - test-spiir
   variables:
     ALL_IFOS: 1
-
-test-spiir-py3:
-  extends:
-    - test-spiir
-  needs:
-    - build-spiir-py3
-  variables:
-    PYVER: -py3
 
 test-spiir-valgrind:
   extends:
@@ -199,6 +176,7 @@ test-spiir-valgrind:
         --suppressions=/usr/spiir/gstpython.supp
         --suppressions=/usr/spiir/share/glib-2.0/glib.supp
         --suppressions=/usr/spiir/pythonswig.supp
+        --suppressions=/usr/spiir/python3/pythonswig.supp
         --suppressions=/usr/spiir/std.supp
         --tool=memcheck
         --leak-check=full
@@ -220,9 +198,9 @@ test-spiir-callgrind:
 # gstleaks is available in gstreamer 1.10
 test-spiir-gstleaks:
   extends:
-    - test-spiir-py3
+    - test-spiir
   needs:
-    - build-spiir-py3-debug
+    - build-spiir-debug
   variables:
     TAG: -debug
     WRAPPER: "GST_LEAKS_TRACER_STACK_TRACE=1 GST_DEBUG=GST_TRACER:7,$GST_DEBUG GST_TRACERS=leaks"

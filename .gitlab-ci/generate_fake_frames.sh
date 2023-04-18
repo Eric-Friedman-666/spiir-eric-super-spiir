@@ -21,13 +21,6 @@ then
     exit
 fi
 
-ARTIFACTS_DIR=${ARTIFACTS_DIR:-artifacts}
-START=${START:-1187006000}
-END=${END:-1187006300}
-DURATION=$(($START-$END))
-ARTIFACTS_DIR=$(realpath ${ARTIFACTS_DIR})
-ARTIFACTS_DIR="$ARTIFACTS_DIR/HLVK-${START}-${DURATION}"
-
 while getopts a:s:e: flag
 do
     case "${flag}" in
@@ -37,11 +30,16 @@ do
     esac
 done
 
+START=${START:-1187006000}
+END=${END:-1187006300}
+DURATION=$(($START-$END))
+ARTIFACTS_DIR=${ARTIFACTS_DIR:-artifacts/HLVK-${START}-${DURATION}}
+ARTIFACTS_DIR=$(realpath ${ARTIFACTS_DIR})
+
 echo ""
-echo "Generating pipeline artifacts."
+echo "Generating fake frames."
 echo "  Artifacts dir (a): $ARTIFACTS_DIR";
 echo "  Start time (s): $START";
-echo "  Duration: $DURATION";
 echo "  End (e): $END";
 echo ""
 

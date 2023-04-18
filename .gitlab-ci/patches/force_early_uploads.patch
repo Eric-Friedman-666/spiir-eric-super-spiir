@@ -6,7 +6,7 @@ index a73ef9aa0..2da2b9396 100644
          self.thread_upload_skymap = None
  
      def __pass_test(self, postcoh_inspiral):
-+        if postcoh_inspiral.cohsnr > 12:
++        if postcoh_inspiral.cohsnr > 37:
 +            return True
          if postcoh_inspiral.far <= 0.0:
              return False
