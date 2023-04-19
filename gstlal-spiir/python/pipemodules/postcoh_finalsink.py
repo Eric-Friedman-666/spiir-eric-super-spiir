@@ -187,10 +187,11 @@ class OnlinePerformer(object):
                 yield "%f %e %f %f\n" % (time, latency, cohsnr, cmbchisq)
 
     def update_eye_candy(self, postcoh_inspiral):
-        latency_val = (
-            float(postcoh_inspiral.end),
-            float(lal.UTCToGPS(time.gmtime()) - postcoh_inspiral.end),
-            postcoh_inspiral.cohsnr, postcoh_inspiral.cmbchisq)
+        current_gps_second = float(lal.UTCToGPS(time.gmtime()))
+        current_ms_remainder = time.time() % 1
+        latency_ms = current_gps_second + current_ms_remainder - postcoh_inspiral.end
+        latency_val = (float(postcoh_inspiral.end), latency_ms,
+                       postcoh_inspiral.cohsnr, postcoh_inspiral.cmbchisq)
         self.latency_history.append(latency_val)
 
 
