@@ -96,6 +96,7 @@ lsctables.use_in(LIGOLWContentHandler)
 
 #
 class SegmentDocument(object):
+
     def __init__(self, ifos, verbose=False):
 
         self.filename = None
@@ -140,6 +141,7 @@ class SegmentDocument(object):
 
 #
 class PostcohDocument(object):
+
     def __init__(self, verbose=False):
 
         self.filename = None
@@ -173,29 +175,41 @@ class PostcohDocument(object):
 
 #
 class OnlinePerformer(object):
-    def __init__(self, parent_lock):
+
+    def __init__(self, parent_lock, should_record_latencies):
         # setup bottle routes
         bottle.route("/latency_history.txt")(self.web_get_latency_history)
 
         self.latency_history = deque(maxlen=1000)
         self.parent_lock = parent_lock
+        self.should_record_latencies = should_record_latencies
 
     def web_get_latency_history(self):
         with self.parent_lock:
             # first one in the list is sacrificed for a time stamp
-            for time, latency, cohsnr, cmbchisq in self.latency_history:
-                yield "%f %e %f %f\n" % (time, latency, cohsnr, cmbchisq)
+            for (end_time, latency, cohsnr, cmbchisq,
+                coinc_upload_latency, log_upload_latency) \
+                    in self.latency_history:
+                yield "%f %f %f %f %f %f\n" % (end_time, latency, cohsnr,
+                                               cmbchisq, coinc_upload_latency,
+                                               log_upload_latency)
 
-    def update_eye_candy(self, postcoh_inspiral):
-        current_gps_second = float(lal.UTCToGPS(time.gmtime()))
-        current_ms_remainder = time.time() % 1
-        latency_ms = current_gps_second + current_ms_remainder - postcoh_inspiral.end
-        latency_val = (float(postcoh_inspiral.end), latency_ms,
-                       postcoh_inspiral.cohsnr, postcoh_inspiral.cmbchisq)
-        self.latency_history.append(latency_val)
+    def update_eye_candy(self,
+                         postcoh_inspiral,
+                         coinc_upload_latency=0.0,
+                         log_upload_latency=0.0):
+        if self.should_record_latencies:
+            current_gps_second = float(lal.UTCToGPS(time.gmtime()))
+            current_ms_remainder = time.time() % 1
+            latency_ms = current_gps_second + current_ms_remainder - postcoh_inspiral.end
+            latency_val = (float(postcoh_inspiral.end), latency_ms,
+                           postcoh_inspiral.cohsnr, postcoh_inspiral.cmbchisq,
+                           coinc_upload_latency, log_upload_latency)
+            self.latency_history.append(latency_val)
 
 
 class FAPUpdater(object):
+
     def __init__(self,
                  path,
                  input_prefix_list,
@@ -240,8 +254,8 @@ class FAPUpdater(object):
 
         if self.output and len(self.output) != len(self.collect_walltimes):
             raise ValueError(
-                "number of input walltimes does match the number of input \
-                    filenames: %s does not match %s" \
+                "number of input walltimes does match the number of " \
+                    "input filenames: %s does not match %s" \
                     % (collect_walltime_string, output_list_string))
 
         self.verbose = verbose
@@ -317,8 +331,9 @@ class FAPUpdater(object):
         # when the number of banks reaches 140,
         # it will give you a signal 7 error in OPA2
         if len(bankstats_filenames) > self.max_nstats_for_marignalization:
-            logging.info("update fap: %d stats files for marignalization, \
-                over the input string length limit, combining." \
+            logging.info("update fap: %d stats files for " \
+                "marignalization, over the input string length limit, "\
+                "combining." \
                 % len(bankstats_filenames))
             self.try_combine_stats()
             return None
@@ -469,6 +484,7 @@ class FAPUpdater(object):
 
 
 class FinalSink(object):
+
     def __init__(self,
                  channel_dict,
                  process_params,
@@ -560,8 +576,6 @@ class FinalSink(object):
 
         # coinc doc to be uploaded to gracedb
         self.append_psd_to_coincs_doc = append_psd_to_coincs_doc
-        self.coincs_document = CoincsDocFromPostcoh(path, process_params,
-                                                    channel_dict)
         # get values needed for skymap accompanying the trigger uploads
         for param in process_params:
             if param == 'cuda_postcoh_detrsp_fname':
@@ -596,23 +610,23 @@ class FinalSink(object):
             verbose=verbose)
 
         # online information performer
-        self.need_online_perform = need_online_perform
-        self.onperformer = OnlinePerformer(parent_lock=self.lock)
+        self.onperformer = OnlinePerformer(
+            parent_lock=self.lock, should_record_latencies=need_online_perform)
 
         # trigger control
         self.trigger_control_doc = "trigger_control.txt"
         if not os.path.exists(self.trigger_control_doc):
             file(self.trigger_control_doc, 'w').close()
-        self.last_trigger = []
-        self.last_submitted_trigger = []
-        self.last_trigger.append((0, 1))
-        self.last_submitted_trigger.append((0, 1))
+        self.last_submitted_trigger = (0, 1)
 
         # skymap
         self.output_skymap = output_skymap
         self.thread_upload_skymap = None
 
-    def __pass_test(self, postcoh_inspiral):
+    def __is_significant_trigger(self, postcoh_inspiral):
+        if not self.gracedb_far_threshold:
+            return False
+
         if postcoh_inspiral.far <= 0.0:
             return False
 
@@ -690,6 +704,28 @@ class FinalSink(object):
                 t for t in self.threads_gracedb_upload if t.is_alive()
             ]
 
+    # Records the candidate to gracedb, disk, trigger control, and
+    # the online monitor depending on its significance.
+    def record_candidate(self):
+        postcoh_inspiral = self.candidate.postcoh_inspiral
+        is_trigger_submitted = False
+        if self.__is_significant_trigger(postcoh_inspiral):
+            if not self.__is_trigger_control_required(postcoh_inspiral):
+                coincs_document = self.__create_coinc_document(self.candidate)
+                filename = "%s_%s_%d_%d.xml" % (
+                    postcoh_inspiral.ifos, postcoh_inspiral.end_time,
+                    postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx)
+                self.__do_gracedb_alert(postcoh_inspiral, coincs_document,
+                                        filename, self.gracedb_upload_attempts)
+                self.__write_coinc_to_disk(coincs_document, filename)
+                # close the xmldoc for garbage collection
+                coincs_document.close()
+                is_trigger_submitted = True
+            self.__append_to_trigger_control(
+                postcoh_inspiral, is_trigger_submitted=is_trigger_submitted)
+        if not is_trigger_submitted or self.gracedb_client is None:
+            self.onperformer.update_eye_candy(postcoh_inspiral)
+
     # This is named verbosely pending a refactor
     # It should return a list of significant triggers to be processed instead of setting self.candidate
     def cluster_and_process_significant_triggers(self, buf_timestamp, duration,
@@ -733,16 +769,8 @@ class FinalSink(object):
                and (max_cluster_boundary > self.cluster_boundary)):
             if self.try_get_cluster_candidate():
                 self.__set_far(self.candidate.postcoh_inspiral)
-                if self.gracedb_far_threshold and self.__pass_test(
-                        self.candidate.postcoh_inspiral):
-                    self.__do_gracedb_alert(self.candidate,
-                                            self.gracedb_upload_attempts)
-
                 self.postcoh_table.append(self.candidate.postcoh_inspiral)
-
-                if self.need_online_perform:
-                    self.onperformer.update_eye_candy(
-                        self.candidate.postcoh_inspiral)
+                self.record_candidate()
                 self.candidate = None
 
         # extend newevents to cur_event_table
@@ -864,66 +892,57 @@ class FinalSink(object):
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
             postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
 
-    def __need_trigger_control(self, trigger):
+    def __is_trigger_control_required(self, postcoh_inspiral):
         # do trigger control
         # FIXME: implement a sql solution for node communication ?
 
         with open(self.trigger_control_doc, "r") as f:
             content = f.read().splitlines()
 
-        is_submitted_idx = -1
         if len(content) > 0:
-            (last_time, last_far, is_submitted) = content[-1].split(",")
-            last_time = float(last_time)
-            last_far = float(last_far)
-            while is_submitted == "0" and len(content) + is_submitted_idx > 0:
-                is_submitted_idx = is_submitted_idx - 1
+            # index in content array; start at end (-1) and work backwards
+            trigger_index = -1
+            (last_time, last_far,
+             is_submitted) = content[trigger_index].split(",")
+            # TODO: Consider comparing against `last_submitted_trigger`
+            while is_submitted == "0" and len(content) + trigger_index > 0:
+                trigger_index = trigger_index - 1
                 (last_time, last_far,
-                 is_submitted) = content[is_submitted_idx].split(",")
+                 is_submitted) = content[trigger_index].split(",")
             last_time = float(last_time)
             last_far = float(last_far)
         else:
-            last_time = self.last_trigger[-1][0]
-            last_far = self.last_trigger[-1][1]
+            last_time = self.last_submitted_trigger[0]
+            last_far = self.last_submitted_trigger[1]
 
-        last_submitted_time = last_time
-        last_submitted_far = last_far
-
-        trigger_is_submitted = 0
-
+        self.last_submitted_trigger = (last_time, last_far)
         # suppress the trigger
         # if it is not one order of magnitude more significant than the last
-        # trigger or if it not more significant the last submitted trigger
-        # FIXME: what if there are two adjacent significant events
-        if ((abs(float(trigger.end) - last_time) < 50
-             and abs(trigger.far / last_far) > 0.5)) or (
-                 abs(float(trigger.end) - float(last_submitted_time)) < 100
-                 and trigger.far > last_submitted_far * 0.5):
-            print >> sys.stderr, "trigger controled, time %f, FAR %f, \
-                last_far %f, last_submitted time %f, last_submitted far %f" \
-                    % (float(trigger.end), trigger.far, last_far,
-                    last_submitted_time, last_submitted_far)
-            self.last_trigger.append((trigger.end, trigger.far))
-            line = "%f,%e,%d\n" % (float(
-                trigger.end), trigger.far, trigger_is_submitted)
-            with open(self.trigger_control_doc, "a") as f:
-                f.write(line)
-            return True
+        # recent trigger
+        is_recent = abs(float(postcoh_inspiral.end) - last_time) < 100
+        is_significant_improvement = postcoh_inspiral.far <= 0.5 * last_far
 
-        print >> sys.stderr, "trigger passed, time %f, FAR %f, last_far %f, \
-            last_submitted time %f, last_submitted_far %f" \
-                % (float(trigger.end), trigger.far, last_far,
-                last_submitted_time, last_submitted_far)
+        return is_recent and not is_significant_improvement
 
-        trigger_is_submitted = 1
-        #self.last_trigger.append((trigger.end, trigger.far))
-        #self.last_submitted_trigger.append((trigger.end, trigger.far))
+    def __append_to_trigger_control(self, postcoh_inspiral,
+                                    is_trigger_submitted):
+        trigger_control_log = "time %f, FAR %f, " \
+                    "last_submitted time %f, last_submitted_far %f" \
+                    % (float(postcoh_inspiral.end), postcoh_inspiral.far,
+                    self.last_submitted_trigger[0], self.last_submitted_trigger[1])
+        if is_trigger_submitted:
+            self.last_submitted_trigger = (float(postcoh_inspiral.end),
+                                           postcoh_inspiral.far)
+            print >> sys.stderr, "trigger passed, %s" \
+                    % trigger_control_log
+        else:
+            print >> sys.stderr, "trigger controlled, %s" \
+                    % trigger_control_log
+
         line = "%f,%e,%d\n" % (float(
-            trigger.end), trigger.far, trigger_is_submitted)
+            postcoh_inspiral.end), postcoh_inspiral.far, is_trigger_submitted)
         with open(self.trigger_control_doc, "a") as f:
             f.write(line)
-
-        return False
 
     def get_current_lal_psd_frequency_series(self, ifo):
         """Retrieves the mean-psd element from the pipeline for a
@@ -957,6 +976,7 @@ class FinalSink(object):
                           coinc_message, log_message):
         upload_attempt_limit = gracedb_upload_attempts + 1  # one-indexed
         gracedb_id = None
+        t_start_coinc_upload = time.time()
 
         for i in range(1, upload_attempt_limit):
             try:
@@ -987,6 +1007,8 @@ class FinalSink(object):
             except Exception as e:
                 print >> sys.stderr, e
 
+        t_end_coinc_upload = time.time()
+
         coinc_message.close()
 
         if gracedb_id is not None:
@@ -1012,33 +1034,40 @@ class FinalSink(object):
         else:
             print "gracedb upload of '%s' failed completely" % filename
 
-    def __do_gracedb_alert(self, trigger, gracedb_upload_attempts=3):
+        t_end_log_upload = time.time()
+        coinc_upload_latency = t_end_coinc_upload - t_start_coinc_upload
+        log_upload_latency = t_end_log_upload - t_end_coinc_upload
+        self.onperformer.update_eye_candy(self.candidate.postcoh_inspiral,
+                                          coinc_upload_latency,
+                                          log_upload_latency)
 
-        postcoh_inspiral = trigger.postcoh_inspiral
-
-        if self.__need_trigger_control(postcoh_inspiral):
-            return
-
+    def __create_coinc_document(self, trigger):
+        coincs_document = CoincsDocFromPostcoh(self.path, self.process_params,
+                                               self.channel_dict)
         # TODO: Remove conditional bool here and in __init__ after tests
         if self.append_psd_to_coincs_doc:
             psds = {
                 ifo: self.get_current_lal_psd_frequency_series(ifo)
-                for ifo in re.findall("..", postcoh_inspiral.ifos)
+                for ifo in re.findall("..", trigger.postcoh_inspiral.ifos)
             }
         else:
             psds = None
 
-        self.coincs_document.assemble_ligolw_xmldoc(trigger, psds)
-        filename = "%s_%s_%d_%d.xml" % (
-            postcoh_inspiral.ifos, postcoh_inspiral.end_time,
-            postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx)
+        coincs_document.assemble_ligolw_xmldoc(trigger, psds)
+        return coincs_document
 
+    def __write_coinc_to_disk(self, coincs_document, filename):
         print >> sys.stderr, "writing %s to disk ..." % filename
-        ligolw_utils.write_filename(self.coincs_document.xmldoc,
+        ligolw_utils.write_filename(coincs_document.xmldoc,
                                     filename,
                                     gz=False,
                                     trap_signals=None)
 
+    def __do_gracedb_alert(self,
+                           postcoh_inspiral,
+                           coincs_document,
+                           filename,
+                           gracedb_upload_attempts=3):
         if self.gracedb_client is not None:
             # Construct message and send to gracedb.
             # We go through the intermediate step of first writing the xmldoc
@@ -1046,7 +1075,7 @@ class FinalSink(object):
             # the event of a malformed document; instead of writing directly
             # into gracedb's  input pipe and crashing part way through.
             coinc_message = StringIO.StringIO()
-            ligolw_utils.write_fileobj(self.coincs_document.xmldoc,
+            ligolw_utils.write_fileobj(coincs_document.xmldoc,
                                        coinc_message,
                                        gz=False)
 
@@ -1062,15 +1091,6 @@ class FinalSink(object):
                       log_message))
             gracedb_upload_thread.start()
             self.threads_gracedb_upload.append(gracedb_upload_thread)
-
-        # close the xmldoc for garbage collection and prepare a new empty one
-        self.coincs_document.close()
-
-        # NOTE: It may make more sense to create this doc earlier elsewhere
-        #   rather than at the end of this function (separation of concerns)
-        self.coincs_document = CoincsDocFromPostcoh(self.path,
-                                                    self.process_params,
-                                                    self.channel_dict)
 
     def get_output_filename(self, output_prefix, output_name, t_snapshot_start,
                             snapshot_duration):
