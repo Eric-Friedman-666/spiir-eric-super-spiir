@@ -284,7 +284,7 @@ check pep8 standards:
   image: python:2.7
   before_script:
     - /usr/local/bin/python -m pip install --upgrade pip
-    - pip install yapf
+    - pip install yapf==0.32
   script:
     - cd gstlal-spiir
     - linter_errors=$(git diff -U0 --no-color --relative origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME | yapf-diff --style pep8)
