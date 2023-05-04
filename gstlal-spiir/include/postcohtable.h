@@ -41,6 +41,18 @@ typedef struct tagPostcohInspiralTable {
     LIGOTimeGPS end_time_sngl[MAX_NIFO];
     INT4 is_background;
     INT4 livetime;
+    INT4 livetime_1w_sngl[MAX_NIFO];
+    INT4 livetime_1d_sngl[MAX_NIFO];
+    INT4 livetime_2h_sngl[MAX_NIFO];
+    INT4 livetime_1w;
+    INT4 livetime_1d;
+    INT4 livetime_2h;
+    INT4 nevent_1w_sngl[MAX_NIFO];
+    INT4 nevent_1d_sngl[MAX_NIFO];
+    INT4 nevent_2h_sngl[MAX_NIFO];
+    INT4 nevent_1w;
+    INT4 nevent_1d;
+    INT4 nevent_2h;
     CHAR ifos[MAX_ALLIFO_LEN];
     CHAR pivotal_ifo[MAX_IFO_LEN];
     INT4 tmplt_idx;
