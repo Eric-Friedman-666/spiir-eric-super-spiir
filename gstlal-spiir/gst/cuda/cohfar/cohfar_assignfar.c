@@ -179,6 +179,42 @@ static void _update_fars(PostcohInspiralTable *table,
       table->far_1w, table->far_1d, table->far_2h);
 }
 
+static void _set_background_stats(PostcohInspiralTable *table,
+                                  CohfarAssignfar *element) {
+    int cmb_stats_idx = trigger_stats_num_stats(element->enabled_ifos) - 1;
+    TriggerStatsXML *stats_1w = element->bgstats_1w;
+    TriggerStatsXML *stats_1d = element->bgstats_1d;
+    TriggerStatsXML *stats_2h = element->bgstats_2h;
+
+    table->livetime_1w = stats_1w->multistats[cmb_stats_idx]->livetime;
+    table->livetime_1d = stats_1d->multistats[cmb_stats_idx]->livetime;
+    table->livetime_2h = stats_2h->multistats[cmb_stats_idx]->livetime;
+
+    table->nevent_1w = stats_1w->multistats[cmb_stats_idx]->nevent;
+    table->nevent_1d = stats_1d->multistats[cmb_stats_idx]->nevent;
+    table->nevent_2h = stats_2h->multistats[cmb_stats_idx]->nevent;
+
+    for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+        if (ifo_set__contains(element->enabled_ifos, ifo_id)) {
+            table->livetime_1w_sngl[ifo_id] =
+              stats_1w->multistats[stats_idx]->livetime;
+            table->livetime_1d_sngl[ifo_id] =
+              stats_1d->multistats[stats_idx]->livetime;
+            table->livetime_2h_sngl[ifo_id] =
+              stats_2h->multistats[stats_idx]->livetime;
+
+            table->nevent_1w_sngl[ifo_id] =
+              stats_1w->multistats[stats_idx]->nevent;
+            table->nevent_1d_sngl[ifo_id] =
+              stats_1d->multistats[stats_idx]->nevent;
+            table->nevent_2h_sngl[ifo_id] =
+              stats_2h->multistats[stats_idx]->nevent;
+
+            stats_idx++;
+        }
+    }
+}
+
 /*
  * ============================================================================
  *
@@ -283,6 +319,8 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
                 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
                 _update_fars(table, element);
             }
+
+            _set_background_stats(table, element);
         }
     }
 
