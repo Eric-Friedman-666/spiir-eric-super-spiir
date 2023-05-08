@@ -103,6 +103,7 @@ enum property {
     PROP_0,
     PROP_IFOS,
     PROP_REFRESH_INTERVAL,
+    PROP_REFRESH_OFFSET,
     PROP_SILENT_TIME,
     PROP_INPUT_FNAME
 };
@@ -268,7 +269,8 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
 
     /* Check if it is time to refresh the background stats */
     if (element->pass_silent_time && element->refresh_interval > 0
-        && (t_cur - element->t_roll_start) / GST_SECOND
+        && MIN(0, (t_cur - element->t_roll_start) / GST_SECOND
+                    - element->refresh_offset)
              > (unsigned)element->refresh_interval) {
         element->t_roll_start = t_cur;
         /* FIXME: the order of input fnames must match the stats order */
@@ -402,6 +404,10 @@ static void cohfar_assignfar_set_property(GObject *object,
         element->refresh_interval = g_value_get_int(value);
         break;
 
+    case PROP_REFRESH_OFFSET:
+        element->refresh_offset = g_value_get_int(value);
+        break;
+
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec); break;
     }
 
@@ -440,6 +446,11 @@ static void cohfar_assignfar_get_property(GObject *object,
     case PROP_REFRESH_INTERVAL:
         g_value_set_int(value, element->refresh_interval);
         break;
+
+    case PROP_REFRESH_OFFSET:
+        g_value_set_int(value, element->refresh_offset);
+        break;
+
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec); break;
     }
     GST_OBJECT_UNLOCK(element);
@@ -522,7 +533,14 @@ static void cohfar_assignfar_class_init(CohfarAssignfarClass *klass) {
       g_param_spec_int(
         "refresh-interval", "refresh interval",
         "(0) never refresh stats; (N) refresh stats every N seconds. ", 0,
-        G_MAXINT, 600, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+        G_MAXINT, 1800, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_REFRESH_OFFSET,
+      g_param_spec_int("refresh-offset", "refresh offset",
+                       "(N) negate N seconds offset from refresh stats time. ",
+                       G_MININT, G_MAXINT, 180,
+                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
       gobject_class, PROP_SILENT_TIME,

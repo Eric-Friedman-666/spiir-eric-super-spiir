@@ -81,6 +81,7 @@ typedef struct {
     int silent_time;
     gboolean pass_silent_time;
     int refresh_interval;
+    int refresh_offset;
     gchar **input_fnames;
     int ninput;
 

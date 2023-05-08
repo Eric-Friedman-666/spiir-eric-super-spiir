@@ -295,6 +295,7 @@ struct _CudaPostcoh {
     cudaStream_t stream;
     GstClockTime t_roll_start;
     int refresh_interval;
+    int refresh_offset;
 };
 
 struct _CudaPostcohClass {

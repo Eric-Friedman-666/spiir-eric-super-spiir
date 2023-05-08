@@ -127,17 +127,18 @@ def mkcudapostcoh(pipeline,
                   snglsnr_thresh=4.0,
                   cohsnr_thresh=5.0,
                   output_skymap=0,
-                  detrsp_refresh_interval=0,
+                  detrsp_refresh_interval=86400,
+                  detrsp_refresh_offset=8640,
                   trial_interval=0.1,
                   stream_id=0):
     properties = dict((name, value) for name, value in zip((
         "detrsp-fname", "autocorrelation-fname", "sngl-tmplt-fname",
         "hist-trials", "snglsnr-thresh", "cohsnr_thresh", "output-skymap",
-        "detrsp-refresh-interval", "trial-interval",
+        "detrsp-refresh-interval", "detrsp-refresh-offset", "trial-interval",
         "stream-id"), (detrsp_fname, autocorrelation_fname, sngl_tmplt_fname,
                        hist_trials, snglsnr_thresh, cohsnr_thresh,
-                       output_skymap, detrsp_refresh_interval, trial_interval,
-                       stream_id)))
+                       output_skymap, detrsp_refresh_interval,
+                       detrsp_refresh_offset, trial_interval, stream_id)))
     if "name" in properties:
         elem = gst.element_factory_make("cuda_postcoh", properties.pop("name"))
     else:
@@ -202,12 +203,14 @@ def mkcohfar_accumbackground(pipeline,
 def mkcohfar_assignfar(pipeline,
                        src,
                        ifos="H1L1",
-                       assignfar_refresh_interval=14400,
+                       assignfar_refresh_interval=1800,
+                       assignfar_refresh_offset=180,
                        silent_time=2147483647,
                        input_fname=None):
     properties = {
         "ifos": ifos,
         "refresh_interval": assignfar_refresh_interval,
+        "refresh_offset": assignfar_refresh_offset,
         "silent_time": silent_time,
     }
     if input_fname is not None:

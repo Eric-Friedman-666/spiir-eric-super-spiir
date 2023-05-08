@@ -692,12 +692,14 @@ def mkPostcohSPIIROnline(pipeline,
                          cuda_postcoh_detrsp_fname=None,
                          cuda_postcoh_hist_trials=1,
                          cuda_postcoh_output_skymap=0,
-                         cuda_postcoh_detrsp_refresh_interval=0,
+                         cuda_postcoh_detrsp_refresh_interval=86400,
+                         cuda_postcoh_detrsp_refresh_offset=8640,
                          cohfar_file_path=None,
                          cohfar_accumbackground_output_prefix=None,
                          cohfar_accumbackground_output_name=None,
                          cohfar_accumbackground_snapshot_interval=0,
-                         cohfar_assignfar_refresh_interval=86400,
+                         cohfar_assignfar_refresh_interval=1800,
+                         cohfar_assignfar_refresh_offset=180,
                          cohfar_assignfar_silent_time=2147483647,
                          cohfar_assignfar_input_fname=None):
     #
@@ -876,6 +878,7 @@ def mkPostcohSPIIROnline(pipeline,
                     output_skymap=cuda_postcoh_output_skymap,
                     detrsp_refresh_interval=
                     cuda_postcoh_detrsp_refresh_interval,
+                    detrsp_refresh_offset=cuda_postcoh_detrsp_refresh_offset,
                     stream_id=bankid)
             else:
                 snr.link_pads(None, postcoh, instrument)
@@ -908,6 +911,7 @@ def mkPostcohSPIIROnline(pipeline,
             postcoh,
             ifos=ifos,
             assignfar_refresh_interval=cohfar_assignfar_refresh_interval,
+            assignfar_refresh_offset=cohfar_assignfar_refresh_offset,
             silent_time=cohfar_assignfar_silent_time,
             input_fname=cohfar_assignfar_input_fname)
         #head = mkpostcohfilesink(pipeline, postcoh, location = output_prefix[i_dict], compression = 1, snapshot_interval = snapshot_interval)
