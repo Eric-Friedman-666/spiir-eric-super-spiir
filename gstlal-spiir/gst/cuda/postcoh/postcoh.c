@@ -163,7 +163,8 @@ enum {
     PROP_COHSNR_THRESH,
     PROP_SNGLSNR_THRESH,
     PROP_STREAM_ID,
-    PROP_REFRESH_INTERVAL
+    PROP_REFRESH_INTERVAL,
+    PROP_REFRESH_OFFSET
 };
 
 static void cuda_postcoh_device_set_init(CudaPostcoh *element) {
@@ -274,6 +275,10 @@ static void cuda_postcoh_set_property(GObject *object,
         element->refresh_interval = g_value_get_int(value);
         break;
 
+    case PROP_REFRESH_OFFSET:
+        element->refresh_offset = g_value_get_int(value);
+        break;
+
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
     }
     GST_OBJECT_UNLOCK(element);
@@ -321,6 +326,10 @@ static void cuda_postcoh_get_property(GObject *object,
 
     case PROP_REFRESH_INTERVAL:
         g_value_set_int(value, element->refresh_interval);
+        break;
+
+    case PROP_REFRESH_OFFSET:
+        g_value_set_int(value, element->refresh_offset);
         break;
 
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
@@ -1657,7 +1666,8 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
     /* Refresh the detector response U and Dt matrices if reached the refresh
      * interval */
     if (postcoh->refresh_interval > 0
-        && (ts - postcoh->t_roll_start) / GST_SECOND
+        && MIN(0, (ts - postcoh->t_roll_start) / GST_SECOND
+                    - postcoh->refresh_offset)
              > (unsigned)postcoh->refresh_interval) {
         postcoh->t_roll_start = ts;
         /* re-read matrices and send them to GPU */
@@ -1996,7 +2006,14 @@ static void cuda_postcoh_class_init(CudaPostcohClass *klass) {
       g_param_spec_int(
         "detrsp-refresh-interval", "detector response refresh interval",
         "(0) never refresh stats; (N) refresh stats every N seconds. ", 0,
-        G_MAXINT, 600, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+        G_MAXINT, 86400, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_REFRESH_OFFSET,
+      g_param_spec_int(
+        "detrsp-refresh-offset", "detector response refresh offset",
+        "(N) negate an N seconds offset from refresh stats time. ", G_MININT,
+        G_MAXINT, 8640, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static void cuda_postcoh_init(CudaPostcoh *postcoh, CudaPostcohClass *klass) {
@@ -2034,4 +2051,5 @@ static void cuda_postcoh_init(CudaPostcoh *postcoh, CudaPostcohClass *klass) {
     postcoh->cur_event_id     = 0;
     postcoh->t_roll_start     = GST_CLOCK_TIME_NONE;
     postcoh->refresh_interval = 0;
+    postcoh->refresh_offset   = 0;
 }

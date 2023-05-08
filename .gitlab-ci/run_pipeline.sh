@@ -133,32 +133,33 @@ cmd () {
 		--cuda-postcoh-hist-trials 100 \
 		--cuda-postcoh-detrsp-fname ${map} \
 		--cuda-postcoh-output-skymap 100 \
-		--cuda-postcoh-detrsp-refresh-interval 86400 \
+		--cuda-postcoh-detrsp-refresh-interval 3600 \
+		--cuda-postcoh-detrsp-refresh-offset 360 \
 		--check-time-stamp \
 		--finalsink-output-prefix ${macrooutprefix} \
-		--finalsink-snapshot-interval 1800 \
+		--finalsink-snapshot-interval 43200 \
 		--cohfar-accumbackground-snapshot-interval 3600 \
 		${macrostatsprefixes} \
 		--cohfar-assignfar-input-fname ${macrofarinput} \
 		--cohfar-assignfar-silent-time 0 \
-		--cohfar-assignfar-refresh-interval 3600 \
+		--cohfar-assignfar-refresh-interval 1800 \
+		--cohfar-assignfar-refresh-offset 180 \
 		--finalsink-fapupdater-interval 1800 \
 		--finalsink-cluster-window 1 \
 		--finalsink-fapupdater-collect-walltime 604800,86400,7200 \
 		--finalsink-far-factor ${n} \
-		--finalsink-gracedb-far-thresh 0.0001 \
+		--finalsink-gracedb-far-thresh 0.00014 \
 		--finalsink-need-online-perform 0 \
 		--finalsink-gracedb-group Test \
-		--finalsink-gracedb-search MDC \
+		--finalsink-gracedb-search AllSky \
 		--finalsink-gracedb-service-url https://gracedb-playground.ligo.org/api/ \
-		--code-version bypass_snrseries \
+		--code-version ${RUN_DIR} \
 		--frame-cache ${cache} \
 		--gps-start-time ${START} \
 		--gps-end-time ${END} \
 		--finalsink-singlefar-veto-thresh 0.5 \
 		--finalsink-superevent-thresh 0.0001 \
 		--reference-psd ${psd} \
-		--finalsink-need-online-perform 1 \
 		--finalsink-gracedb-upload-attempts 0 \
 		--psd-fft-length 32"
 		# For bypass: --coherent-search-ifos ${POSTCOH_IFOS}"

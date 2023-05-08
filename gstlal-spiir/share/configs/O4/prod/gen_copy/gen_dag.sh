@@ -153,6 +153,7 @@ cat <<-EOF >gstlal_inspiral_postcohspiir_${user}.sub
 		--finalsink-fapupdater-output-fname \$(macrolocfapoutput) \
 		--cohfar-assignfar-silent-time ${FAR_silent} \
 		--cohfar-assignfar-refresh-interval ${FAR_refresh} \
+		--cohfar-assignfar-refresh-offset $(({FAR_refresh}/10))
 		--finalsink-cluster-window ${tcluster} \
 		--finalsink-fapupdater-interval ${Tfapupdate} \
 		--finalsink-fapupdater-collect-walltime ${wtime1},${wtime2},${wtime3} \
@@ -163,6 +164,7 @@ cat <<-EOF >gstlal_inspiral_postcohspiir_${user}.sub
 		--finalsink-gracedb-search ${SearchType} \
 		--finalsink-gracedb-service-url ${GraceDB_URL} \
 		--cuda-postcoh-detrsp-refresh-interval ${Tmap} \
+		--cuda-postcoh-detrsp-refresh-offset $(({Tmap}/10))
 		--code-version ${version_spiir} \
 		--finalsink-singlefar-veto-thresh ${FAR_single_thres} \
 		--finalsink-superevent-thresh ${FAR_event_thres} \

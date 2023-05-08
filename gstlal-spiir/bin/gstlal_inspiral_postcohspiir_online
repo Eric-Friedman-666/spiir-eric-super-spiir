@@ -244,8 +244,14 @@ def parse_command_line():
         "--cohfar-assignfar-refresh-interval",
         type="int",
         metavar="seconds",
-        default=86400,
+        default=1800,
         help="How often to update the marginalized stats files. (optional)")
+    parser.add_option(
+        "--cohfar-assignfar-refresh-offset",
+        type="int",
+        metavar="seconds",
+        default=180,
+        help="An offset to add between writing and reading marginalized stats files. (optional)")
     parser.add_option(
         "--cohfar-assignfar-silent-time",
         type="int",
@@ -465,10 +471,15 @@ def parse_command_line():
                       default=0,
                       help="output skymap single snr thresh")
     parser.add_option("--cuda-postcoh-detrsp-refresh-interval",
-                      metavar="refresh-interval",
+                      metavar="seconds",
                       type="int",
-                      default=800,
+                      default=86400,
                       help="interval to refresh detrsp map.")
+    parser.add_option("--cuda-postcoh-detrsp-refresh-offset",
+                      metavar="seconds",
+                      type="int",
+                      default=8640,
+                      help="An offset to add between writing and reading the detrsp file. (optional)")
 
     # gpu acceleartion support
     parser.add_option("--gpu-acc",
@@ -756,6 +767,8 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     cuda_postcoh_output_skymap=options.cuda_postcoh_output_skymap,
     cuda_postcoh_detrsp_refresh_interval=options.
     cuda_postcoh_detrsp_refresh_interval,
+    cuda_postcoh_detrsp_refresh_offset=options.
+    cuda_postcoh_detrsp_refresh_offset,
     cohfar_file_path=options.job_tag,
     cohfar_accumbackground_output_prefix=options.
     cohfar_accumbackground_output_prefix,
@@ -765,6 +778,8 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     cohfar_accumbackground_snapshot_interval,
     cohfar_assignfar_refresh_interval=options.
     cohfar_assignfar_refresh_interval,
+    cohfar_assignfar_refresh_offset=options.
+    cohfar_assignfar_refresh_offset,
     cohfar_assignfar_silent_time=options.cohfar_assignfar_silent_time,
     cohfar_assignfar_input_fname=options.cohfar_assignfar_input_fname
     # or "%s-%s_Postcoh-%d-%d.xml.gz" % (lsctables.ifos_from_instrument_set(detectors.channel_dict.keys()).replace(",", ""), options.job_tag, int(detectors.seg[0]), int(abs(detectors.seg))),
