@@ -104,7 +104,15 @@ def parse_command_line():
     return options
 
 
+def sleep_until_next_interval(start_time, period):
+    time_since_last_interval = (time.time() - start_time) % period
+    time_to_next_interval = period - time_since_last_interval
+    time.sleep(time_to_next_interval)
+
+
 options = parse_command_line()
+start_time = time.time()
+period = int(options.period)
 
 while True:
     # list all the files in the data_loc folder and find the latest one
@@ -112,7 +120,7 @@ while True:
     grep_out = [fname for fname in ls_out if options.data_keyword in fname]
     if len(grep_out) == 0:
         print "no data file yet"
-        time.sleep(int(options.period))
+        sleep_until_next_interval(start_time, period)
         continue
 
     data_name = grep_out[-1]  # lastest timestamp
@@ -137,4 +145,4 @@ while True:
     if options.verbose:
         print "finished detrsp map at %s gps time" % str(gps_time)
 
-    time.sleep(int(options.period))
+    sleep_until_next_interval(start_time, period)
