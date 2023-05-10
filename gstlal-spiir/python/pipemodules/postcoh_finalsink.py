@@ -919,8 +919,8 @@ class FinalSink(object):
         # suppress the trigger
         # if it is not one order of magnitude more significant than the last
         # recent trigger
-        is_recent = abs(float(postcoh_inspiral.end) - last_time) < 100
-        is_significant_improvement = postcoh_inspiral.far <= 0.5 * last_far
+        is_recent = abs(float(postcoh_inspiral.end) - last_time) < 5
+        is_significant_improvement = postcoh_inspiral.far <= last_far
 
         return is_recent and not is_significant_improvement
 
