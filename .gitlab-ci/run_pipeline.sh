@@ -158,7 +158,6 @@ cmd () {
 		--gps-start-time ${START} \
 		--gps-end-time ${END} \
 		--finalsink-singlefar-veto-thresh 0.5 \
-		--finalsink-superevent-thresh 0.0001 \
 		--reference-psd ${psd} \
 		--finalsink-gracedb-upload-attempts 0 \
 		--psd-fft-length 32"
