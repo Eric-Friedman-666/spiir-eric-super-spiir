@@ -61,8 +61,6 @@
 #include <postcohtable.h>
 #include <time.h>
 #define DEFAULT_STATS_NAME "stats.xml.gz"
-/* required minimal background events */
-#define MIN_BACKGROUND_NEVENT 1000000
 /* make sure the far value to be 0 to indicate no background event yet, or >
  * FLT_MIN */
 #define BOUND(a, b) (((b) > 0) ? ((b) < (a) ? (a) : (b)) : 0)
@@ -130,8 +128,7 @@ static float
                             * stats->nevent / (stats->livetime * hist_trials));
 }
 
-static void _update_fars(PostcohInspiralTable *table,
-                         CohfarAssignfar *element) {
+static void _set_fars(PostcohInspiralTable *table, CohfarAssignfar *element) {
     int hist_trials   = element->hist_trials;
     int cmb_stats_idx = trigger_stats_num_stats(element->enabled_ifos) - 1;
     TriggerStatsXML *stats_1w = element->bgstats_1w;
@@ -293,7 +290,6 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
         }
     }
 
-    TriggerStats *cur_stats;
     if (element->pass_silent_time) {
         ifo_set_type enabled_ifos;
         PostcohInspiralTable *table =
@@ -312,16 +308,11 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
             // This overwrites table->ifos, but not element->enabled_ifos
             enabled_ifos = scan_trigger_ifos(enabled_ifos, table);
             if (ifo_set__is_empty(enabled_ifos)) {
-                fprintf(stderr, "enabled_ifos not found, cohfar_assignfar\n");
-                exit(0);
-            }
-            int num_stats = trigger_stats_num_stats(element->enabled_ifos);
-            cur_stats     = element->bgstats_1w->multistats[num_stats - 1];
-            if (!ifo_set__is_empty(enabled_ifos)
-                && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
-                _update_fars(table, element);
+                fprintf(stderr,
+                        "Trigger found with no snglsnr on listed IFOs.\n");
             }
 
+            _set_fars(table, element);
             _set_background_stats(table, element);
         }
     }

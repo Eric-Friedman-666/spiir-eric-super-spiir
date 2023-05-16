@@ -627,7 +627,7 @@ class FinalSink(object):
         if not self.gracedb_far_threshold:
             return False
 
-        if postcoh_inspiral.far <= 0.0:
+        if postcoh_inspiral.nevent_1w <= 1000000:
             return False
 
         # just submit it if is a low-significance trigger
