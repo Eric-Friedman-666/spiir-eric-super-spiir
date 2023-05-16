@@ -97,7 +97,6 @@ gstlal_postcohspiir_inspiral_online
         --finalsink-cluster-window 1 
         --finalsink-far-factor 2 
         --finalsink-singlefar-veto-thresh 0.5
-        --finalsink-superevent-thresh 0.0001
         --finalsink-need-online-perform 1 
         --finalsink-gracedb-far-threshold 0.0001
         --finalsink-gracedb-service-url https://gracedb.ligo.org/api/
@@ -142,7 +141,6 @@ gstlal_postcohspiir_inspiral_online
  - `finalsink-cluster-window`: all the zerolags of a job will be clustered over a window given here first before dumped.
  - `finalsink-far-factor`: a factor that will be multiplied to the FAR of any zerolag of any job before uploading to the database. This is because FAR estimation of each job is consistent with itself. This number should be set to the number of pipelines that run at the same time.
  - `finalsink-singlefar-veto-thresh`: apply single FAR threshold on superevents defined below. Usually set to 0.5 Hz meaning that at least two detectors have the FARs < 0.5 Hz.
- - `finalsink-superevent-thresh`: the FAR thresh for spiir triggers that we apply singlefar veto.
  - `finalsink-need-online-perform`: set to 1 if tracking latencies and coherent SNRs of last 1000 coherent events, no matter what FARs are, of a job. Set to 0 for no tracking.
  - `finalsink-gracedb-far-threshold`: the threshold below which triggers will be submitted to appointed database.
  - `code-version`: the git commit hash used for this run.

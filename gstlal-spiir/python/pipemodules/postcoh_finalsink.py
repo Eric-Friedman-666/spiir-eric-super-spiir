@@ -511,7 +511,6 @@ class FinalSink(object):
                  gracedb_upload_attempts=3,
                  is_offline_analysis=False,
                  output_skymap=0,
-                 superevent_thresh=3.8e-7,
                  opa_cohsnr_thresh=8,
                  negative_latency=0,
                  append_psd_to_coincs_doc=True,
@@ -539,7 +538,6 @@ class FinalSink(object):
         self.negative_latency = negative_latency
         self.cur_event_table = []
         self.chisq_ratio_thresh = chisq_ratio_veto_thresh
-        self.superevent_thresh = superevent_thresh
         # FIXME: hard-coded the opa_thresh that all triggers less than
         # this thresh will be tested
         # if their cohsnr SNRs are smaller than the given opa_cohsnr_snr
@@ -630,11 +628,6 @@ class FinalSink(object):
         if postcoh_inspiral.nevent_1w <= 1000000:
             return False
 
-        # just submit it if is a low-significance trigger
-        if ((postcoh_inspiral.far < self.gracedb_far_threshold)
-                and (postcoh_inspiral.far > self.superevent_thresh)):
-            return True
-
         if ((postcoh_inspiral.far < self.opa_thresh)
                 and (postcoh_inspiral.cohsnr < self.opa_cohsnr_thresh)):
             # print "suppressed", postcoh_inspiral.cohsnr, postcoh_inspiral.far
@@ -651,15 +644,17 @@ class FinalSink(object):
             far < self.singlefar_veto_thresh and far > 0.
             for far in postcoh_inspiral.far_sngl
         ]
-        if postcoh_inspiral.far < self.superevent_thresh:
-            return sum([
-                i for (i, v) in zip(ifo_fars_ok, ifo_active) if v
-            ]) >= 2 and all(
-                (lambda x:
-                 [i1 / i2 < self.chisq_ratio_thresh for i1 in x for i2 in x])([
-                     i
-                     for (i, v) in zip(postcoh_inspiral.chisq, ifo_active) if v
-                 ]))
+
+        active_ifos_with_valid_far = [
+            i for (i, v) in zip(ifo_fars_ok, ifo_active) if v
+        ]
+        active_ifo_pairs_within_chisq_ratio = (
+            lambda x:
+            [i1 / i2 < self.chisq_ratio_thresh for i1 in x for i2 in x])(
+                [i for (i, v) in zip(postcoh_inspiral.chisq, ifo_active) if v])
+        return postcoh_inspiral.far < self.gracedb_far_threshold and \
+            sum(active_ifos_with_valid_far) >= 2 and \
+            all(active_ifo_pairs_within_chisq_ratio)
 
     # TODO: Refactor/rewrite appsink_new_buffer() and cluster(), see #36
     def appsink_new_buffer(self, elem):

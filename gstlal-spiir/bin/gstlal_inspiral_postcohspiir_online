@@ -372,11 +372,6 @@ def parse_command_line():
         default=8,
         help="any two detectors have chisq ratio less than this threshold. ")
     parser.add_option(
-        "--finalsink-superevent-thresh",
-        type="float",
-        default=3.8e-7,
-        help="the superevent thresh which we will apply all kinds of vetoes. ")
-    parser.add_option(
         "--finalsink-opa-cohsnr-thresh",
         type="float",
         default=8,
@@ -811,7 +806,6 @@ finalsink = postcoh_finalsink.FinalSink(
     finalsink_fapupdater_collect_walltime,
     singlefar_veto_thresh=options.finalsink_singlefar_veto_thresh,
     chisq_ratio_veto_thresh=options.finalsink_chisq_ratio_thresh,
-    superevent_thresh=options.finalsink_superevent_thresh,
     opa_cohsnr_thresh=options.finalsink_opa_cohsnr_thresh,
     gracedb_far_threshold=options.finalsink_gracedb_far_threshold,
     gracedb_group=options.finalsink_gracedb_group,

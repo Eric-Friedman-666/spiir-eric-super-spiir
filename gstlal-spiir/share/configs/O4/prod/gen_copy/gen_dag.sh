@@ -167,7 +167,6 @@ cat <<-EOF >gstlal_inspiral_postcohspiir_${user}.sub
 		--cuda-postcoh-detrsp-refresh-offset $(({Tmap}/10))
 		--code-version ${version_spiir} \
 		--finalsink-singlefar-veto-thresh ${FAR_single_thres} \
-		--finalsink-superevent-thresh ${FAR_event_thres} \
 		--fir-whitener ${newwhiten}"
 	want_graceful_removal = True
 	+General_Use_AMD = True
