@@ -1666,10 +1666,10 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
     /* Refresh the detector response U and Dt matrices if reached the refresh
      * interval */
     if (postcoh->refresh_interval > 0
-        && MIN(0, (ts - postcoh->t_roll_start) / GST_SECOND
+        && MIN(0, (int)((ts - postcoh->t_roll_start) / GST_SECOND)
                     - postcoh->refresh_offset)
-             > (unsigned)postcoh->refresh_interval) {
-        postcoh->t_roll_start = ts;
+             > postcoh->refresh_interval) {
+        postcoh->t_roll_start = ts - postcoh->refresh_offset;
         /* re-read matrices and send them to GPU */
         CUDA_CHECK(cudaSetDevice(postcoh->device_id));
         cuda_postcoh_map_from_xml(postcoh->detrsp_fname, postcoh->state,
@@ -2006,14 +2006,14 @@ static void cuda_postcoh_class_init(CudaPostcohClass *klass) {
       g_param_spec_int(
         "detrsp-refresh-interval", "detector response refresh interval",
         "(0) never refresh stats; (N) refresh stats every N seconds. ", 0,
-        G_MAXINT, 86400, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+        G_MAXINT, 43200, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
       gobject_class, PROP_REFRESH_OFFSET,
       g_param_spec_int(
         "detrsp-refresh-offset", "detector response refresh offset",
         "(N) negate an N seconds offset from refresh stats time. ", G_MININT,
-        G_MAXINT, 8640, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+        G_MAXINT, 600, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static void cuda_postcoh_init(CudaPostcoh *postcoh, CudaPostcohClass *klass) {
