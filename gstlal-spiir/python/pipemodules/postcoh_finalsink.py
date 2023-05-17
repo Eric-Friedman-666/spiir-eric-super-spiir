@@ -625,6 +625,9 @@ class FinalSink(object):
         if not self.gracedb_far_threshold:
             return False
 
+        if postcoh_inspiral.far <= 0.0:
+            return False
+
         if postcoh_inspiral.nevent_1w <= 1000000:
             return False
 
@@ -633,12 +636,10 @@ class FinalSink(object):
             # print "suppressed", postcoh_inspiral.cohsnr, postcoh_inspiral.far
             return False
 
-        # FIXME: any two of the sngl fars need to be < singlefar_veto_thresh
-        # single far veto for high-significance trigger
-        # add an upper limit for the chisq for uploaded event compared to the
-        # last line, hardcoded to have uploaded event with chisq < 3
+        # Single far veto for high-significance trigger
+        # add a limits for chisq and check chisq ratio for upload.
         ifo_active = [
-            chisq != 0 and chisq < 3 for chisq in postcoh_inspiral.chisq
+            chisq > 0 and chisq < 3 for chisq in postcoh_inspiral.chisq
         ]
         ifo_fars_ok = [
             far < self.singlefar_veto_thresh and far > 0.

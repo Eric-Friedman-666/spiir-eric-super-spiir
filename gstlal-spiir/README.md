@@ -86,8 +86,8 @@ gstlal_postcohspiir_inspiral_online
         --cuda-postcoh-snglsnr-thresh 4 
         --cuda-postcoh-hist-trials 100 
         --cuda-postcoh-detrsp-fname H1L1V1_detrsp_map.xml 
-        --cuda-postcoh-detrsp-refresh-interval 86400
-        --cuda-postcoh-detrsp-refresh-offset 8640
+        --cuda-postcoh-detrsp-refresh-interval 43200
+        --cuda-postcoh-detrsp-refresh-offset 600
         --cuda-postcoh-output-skymap 7
         --check-time-stamp 
         --finalsink-fapupdater-collect-walltime 604800,86400,7200
@@ -130,7 +130,7 @@ gstlal_postcohspiir_inspiral_online
  - `cuda-postcoh-snglsnr-thresh`: threshold to pick single triggers from each detector to do coherent searches, default is 4.0.
  - `cuda-postcoh-hist-trials`: number of time-shifts to collect background histogram, usually set to 100. Each time-shift is 0.1 second apart.
  - `cuda-postcoh-detrsp-fname`: the detector response file, which contains the sampled U and arrival time difference matrices, used to generate coherent SNR and skymap.
- - `cuda-postcoh-detrsp-refresh-interval`: reread the detrsp-fname specified above at multiples of this interval. This is to capture the change of the location of Earth every single day.
+ - `cuda-postcoh-detrsp-refresh-interval`: reread the detrsp-fname specified above at multiples of this interval. This is to capture the change of the location of Earth every single day. If the file stores one day of data, the file should be both written and read twice per day. That way, even if the read is just before the next write, we'll still have sufficient data until the next update.
  - `cuda-postcoh-detrsp-refresh-offset`: An offset to add between writing and reading the detrsp file. This is to avoid a write/read race condition. (See #92)
  - `cuda-postcoh-output-skymap`: threshold to output skymap, normally set to 7. If it is set to 0, will not output skymaps at all.
  - `check-time-stamp`: check if the data is continously flowing in the pipeline.

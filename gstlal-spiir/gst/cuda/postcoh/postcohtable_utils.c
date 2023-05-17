@@ -49,6 +49,52 @@ void postcohtable_init(XmlTable *table) {
     g_array_append_val(table->type_names, *g_string_new("int_4s"));
     g_array_append_val(table->names, *g_string_new("postcoh:livetime"));
     g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    g_array_append_val(table->names, *g_string_new("postcoh:livetime_1w"));
+    g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    g_array_append_val(table->names, *g_string_new("postcoh:livetime_1d"));
+    g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    g_array_append_val(table->names, *g_string_new("postcoh:livetime_2h"));
+    g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        g_array_append_val(
+          table->names,
+          *g_string_append(g_string_new("postcoh:livetime_1w_sngl_"),
+                           get_ifo_string(i)));
+        g_array_append_val(table->type_names, *g_string_new("int_4s"));
+        g_array_append_val(
+          table->names,
+          *g_string_append(g_string_new("postcoh:livetime_1d_sngl_"),
+                           get_ifo_string(i)));
+        g_array_append_val(table->type_names, *g_string_new("int_4s"));
+        g_array_append_val(
+          table->names,
+          *g_string_append(g_string_new("postcoh:livetime_2h_sngl_"),
+                           get_ifo_string(i)));
+        g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    }
+    g_array_append_val(table->names, *g_string_new("postcoh:nevent_1w"));
+    g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    g_array_append_val(table->names, *g_string_new("postcoh:nevent_1d"));
+    g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    g_array_append_val(table->names, *g_string_new("postcoh:nevent_2h"));
+    g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    for (int i = 0; i < MAX_NIFO; ++i) {
+        g_array_append_val(
+          table->names,
+          *g_string_append(g_string_new("postcoh:nevent_1w_sngl_"),
+                           get_ifo_string(i)));
+        g_array_append_val(table->type_names, *g_string_new("int_4s"));
+        g_array_append_val(
+          table->names,
+          *g_string_append(g_string_new("postcoh:nevent_1d_sngl_"),
+                           get_ifo_string(i)));
+        g_array_append_val(table->type_names, *g_string_new("int_4s"));
+        g_array_append_val(
+          table->names,
+          *g_string_append(g_string_new("postcoh:nevent_2h_sngl_"),
+                           get_ifo_string(i)));
+        g_array_append_val(table->type_names, *g_string_new("int_4s"));
+    }
     g_array_append_val(table->names, *g_string_new("postcoh:ifos"));
     g_array_append_val(table->type_names, *g_string_new("lstring"));
     g_array_append_val(table->names, *g_string_new("postcoh:pivotal_ifo"));

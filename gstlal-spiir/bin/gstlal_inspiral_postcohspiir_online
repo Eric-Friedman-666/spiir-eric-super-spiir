@@ -251,7 +251,9 @@ def parse_command_line():
         type="int",
         metavar="seconds",
         default=180,
-        help="An offset to add between writing and reading marginalized stats files. (optional)")
+        help=
+        "An offset to add between writing and reading marginalized stats files. (optional)"
+    )
     parser.add_option(
         "--cohfar-assignfar-silent-time",
         type="int",
@@ -468,13 +470,16 @@ def parse_command_line():
     parser.add_option("--cuda-postcoh-detrsp-refresh-interval",
                       metavar="seconds",
                       type="int",
-                      default=86400,
+                      default=43200,
                       help="interval to refresh detrsp map.")
-    parser.add_option("--cuda-postcoh-detrsp-refresh-offset",
-                      metavar="seconds",
-                      type="int",
-                      default=8640,
-                      help="An offset to add between writing and reading the detrsp file. (optional)")
+    parser.add_option(
+        "--cuda-postcoh-detrsp-refresh-offset",
+        metavar="seconds",
+        type="int",
+        default=600,
+        help=
+        "An offset to add between writing and reading the detrsp file. (optional)"
+    )
 
     # gpu acceleartion support
     parser.add_option("--gpu-acc",
@@ -773,8 +778,7 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     cohfar_accumbackground_snapshot_interval,
     cohfar_assignfar_refresh_interval=options.
     cohfar_assignfar_refresh_interval,
-    cohfar_assignfar_refresh_offset=options.
-    cohfar_assignfar_refresh_offset,
+    cohfar_assignfar_refresh_offset=options.cohfar_assignfar_refresh_offset,
     cohfar_assignfar_silent_time=options.cohfar_assignfar_silent_time,
     cohfar_assignfar_input_fname=options.cohfar_assignfar_input_fname
     # or "%s-%s_Postcoh-%d-%d.xml.gz" % (lsctables.ifos_from_instrument_set(detectors.channel_dict.keys()).replace(",", ""), options.job_tag, int(detectors.seg[0]), int(abs(detectors.seg))),

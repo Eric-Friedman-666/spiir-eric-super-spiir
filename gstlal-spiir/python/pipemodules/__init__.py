@@ -127,8 +127,8 @@ def mkcudapostcoh(pipeline,
                   snglsnr_thresh=4.0,
                   cohsnr_thresh=5.0,
                   output_skymap=0,
-                  detrsp_refresh_interval=86400,
-                  detrsp_refresh_offset=8640,
+                  detrsp_refresh_interval=43200,
+                  detrsp_refresh_offset=600,
                   trial_interval=0.1,
                   stream_id=0):
     properties = dict((name, value) for name, value in zip((
