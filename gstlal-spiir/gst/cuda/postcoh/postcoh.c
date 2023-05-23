@@ -1666,8 +1666,8 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
     /* Refresh the detector response U and Dt matrices if reached the refresh
      * interval */
     if (postcoh->refresh_interval > 0
-        && MIN(0, (int)((ts - postcoh->t_roll_start) / GST_SECOND)
-                    - postcoh->refresh_offset)
+        && GST_CLOCK_DIFF(postcoh->t_roll_start, ts) / GST_SECOND
+               - postcoh->refresh_offset
              > postcoh->refresh_interval) {
         postcoh->t_roll_start = ts - postcoh->refresh_offset;
         /* re-read matrices and send them to GPU */
