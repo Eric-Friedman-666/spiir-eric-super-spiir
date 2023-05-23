@@ -235,8 +235,8 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
 
     /* Check that we have collected enough backgrounds */
     if (!GST_CLOCK_TIME_IS_VALID(element->t_roll_start)
-        && (t_cur - element->t_start) / GST_SECOND
-             >= (unsigned)element->silent_time) {
+        && GST_CLOCK_DIFF(element->t_start, t_cur) / GST_SECOND
+             >= element->silent_time) {
         /* FIXME: the order of input fnames must match the stats order */
         // printf("read input stats to assign far %s, %s, %s\n",
         // element->input_fnames[STATS_FNAME_1W_IDX],
@@ -266,8 +266,8 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
 
     /* Check if it is time to refresh the background stats */
     if (element->pass_silent_time && element->refresh_interval > 0
-        && MIN(0, (int)((t_cur - element->t_roll_start) / GST_SECOND)
-                    - element->refresh_offset)
+        && GST_CLOCK_DIFF(element->t_roll_start, t_cur) / GST_SECOND
+               - element->refresh_offset
              > element->refresh_interval) {
         element->t_roll_start = t_cur - element->refresh_offset;
         /* FIXME: the order of input fnames must match the stats order */
