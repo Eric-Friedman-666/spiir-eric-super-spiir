@@ -59,27 +59,27 @@ parameters may be renamed appropriately.
 
 ## signal-removal
 
-Name: Signal removal
+*Name*: Signal removal
 
-Feature flag: `--feature-signal-removal-bg`
+*Feature flag*: `--feature-signal-removal-bg`
 
-Parameters: (see `--help` for full details)
+*Parameters*: (see `--help` for full details)
  * --feature-signal-removal-bg-threshold
 
-Short description: Improve FARs by removing known signals from background.
+*Short description*: Improve FARs by removing known signals from background.
 
-Relevant merge requests: lscsoft/spiir!189
+*Relevant merge requests*: lscsoft/spiir!189
 
-Relevant review slides:
+*Relevant review slides*:
 
-Production plan: Aim to review this during O4a. When the feature flag is
+*Production plan*: Aim to review this during O4a. When the feature flag is
 removed, it will be on all the time but can be effectively disabled by settng a
 very high threshold.
 
-History:
+*History*:
  * (as of 2023-06-27) currently in branch `signal_removal_bg`
 
-Other notes:
+*Other notes*:
 
 
 # SPIIR past feature flags
@@ -92,27 +92,27 @@ Copy, paste and replace!
 
 ## feature-flag-name
 
-Name: Short, human-comprehensible name
+*Name*: Short, human-comprehensible name
 
-Feature flag: `--feature-xyz`
+*Feature flag*: `--feature-xyz`
 
-Parameters: (see `--help` for full details)
+*Parameters*: (see `--help` for full details)
  * list all parameters for this feature flag here
 
-Short description: A short description of the scientific or computing impact of
+*Short description*: A short description of the scientific or computing impact of
 this feature flag. Include a link to a paper/technical note/set of slides if
 able
 
-Relevant merge requests: list all relevant merge requests here
+*Relevant merge requests*: list all relevant merge requests here
 
-Relevant review slides: list links to all review slides here
+*Relevant review slides*: list links to all review slides here
 
-Production plan: A short description of the plan for how this
+*Production plan*: A short description of the plan for how this
 
-History:
+*History*:
  * (202x-xx-xx) Merged work-in-progress in to `spiir-O4-EW-development`
  * (202x-yy-yy) Now feature complete (see MR 123)
  * (202x-zz-zz) Fixed bugs (see MR 456)
  * (202x-tt-tt) Subject of review call: http://wiki.ligo.org/...
 
-Other notes: Anything else of relevance
+*Other notes*: Anything else of relevance
