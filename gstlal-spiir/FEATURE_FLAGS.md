@@ -39,7 +39,7 @@ called:
 
     --feature-flooble-alpha=123.456
     --feature-flooble-beta=1.2e-4
-	--feature-flooble-use-wobbly
+    --feature-flooble-use-wobbly
 
 Generally speaking, feature flags are for hiding features that are not yet
 stable or well-tested enough to be run in production.
