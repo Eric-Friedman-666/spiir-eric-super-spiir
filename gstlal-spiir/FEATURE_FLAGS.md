@@ -66,7 +66,8 @@ parameters may be renamed appropriately.
 *Parameters*: (see `--help` for full details)
  * --feature-signal-removal-bg-threshold
 
-*Short description*: Improve FARs by removing known signals from background.
+*Short description*: Improve FARs by removing signal-like backgrounds from the
+background statistics calculations.
 
 *Relevant merge requests*: lscsoft/spiir!189
 
