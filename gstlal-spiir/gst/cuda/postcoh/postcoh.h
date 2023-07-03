@@ -284,6 +284,9 @@ struct _CudaPostcoh {
     char *sngl_tmplt_fname;
     SnglInspiralTable *sngl_table;
 
+    gboolean enable_signal_removal_bg;
+    float signal_removal_bg_threshold;
+
     /* sink event handling */
     GstPadEventFunction collect_event;
 

@@ -136,6 +136,8 @@ cmd () {
 		--cuda-postcoh-detrsp-refresh-interval 3600 \
 		--cuda-postcoh-detrsp-refresh-offset 360 \
 		--check-time-stamp \
+		--feature-signal-removal-bg \
+		--feature-signal-removal-bg-threshold 8.5 \
 		--finalsink-output-prefix ${macrooutprefix} \
 		--finalsink-snapshot-interval 43200 \
 		--cohfar-accumbackground-snapshot-interval 3600 \
