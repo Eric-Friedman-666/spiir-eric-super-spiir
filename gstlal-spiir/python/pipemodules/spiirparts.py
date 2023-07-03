@@ -701,7 +701,9 @@ def mkPostcohSPIIROnline(pipeline,
                          cohfar_assignfar_refresh_interval=1800,
                          cohfar_assignfar_refresh_offset=180,
                          cohfar_assignfar_silent_time=2147483647,
-                         cohfar_assignfar_input_fname=None):
+                         cohfar_assignfar_input_fname=None,
+                         feature_signal_removal_bg=False,
+                         feature_signal_removal_bg_threshold=8.5):
     #
     # check for recognized value of chisq_type
     #
@@ -879,6 +881,9 @@ def mkPostcohSPIIROnline(pipeline,
                     detrsp_refresh_interval=
                     cuda_postcoh_detrsp_refresh_interval,
                     detrsp_refresh_offset=cuda_postcoh_detrsp_refresh_offset,
+                    feature_signal_removal_bg=feature_signal_removal_bg,
+                    feature_signal_removal_bg_threshold=
+                    feature_signal_removal_bg_threshold,
                     stream_id=bankid)
             else:
                 snr.link_pads(None, postcoh, instrument)
