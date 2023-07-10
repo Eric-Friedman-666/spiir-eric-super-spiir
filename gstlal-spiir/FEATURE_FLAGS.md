@@ -44,11 +44,16 @@ called:
 Generally speaking, feature flags are for hiding features that are not yet
 stable or well-tested enough to be run in production.
 
-This means that, usually, running the pipeline in production with a `--feature`
-enabled should be avoided. The exception is if a code freeze occurs when some
-feature is undergoing final testing/review (but we're confident it works fine).
-In that case it might make sense to begin the run with the feature disabled,
-and turn it on when there has been signoff.
+Ultimately, it's a goal that the version of the pipeline in production has no
+`--feature` flags enabled. In practice, given the timelines for reviews makes
+this difficult, we don't regard it as a mistake or failure if the final
+production configuration has a feature flag enabled. Similarly, in rare cases
+a critical bug might be identified in a feature while the pipeline is running
+with that feature in production: in such cases it might make more sense to
+turn the flag off rather than produce, and review, a new pipeline version.
+
+Nevertheless, it's crucially important that the final proposed production
+configuration is reviewed and tested thoroughly.
 
 When the feature is considered stable, has been thoroughly tested, and has
 completed an LSC review, the `feature` nomenclature should be dropped and the
