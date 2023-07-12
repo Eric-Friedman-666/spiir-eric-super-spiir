@@ -1,0 +1,16 @@
+JOB coinc-consumer-cbc coinc-consumer.sub
+RETRY coinc-consumer-cbc 100
+VARS coinc-consumer-cbc username="luke.davis-3d7d1d43" flags="--upload-gracedb -t 'cbc_spiir_allsky' 'cbc_spiir_earlywarning' --group 'gracedb'"
+
+JOB coinc-consumer-test coinc-consumer.sub
+RETRY coinc-consumer-test 100
+VARS coinc-consumer-test username="luke.davis-3d7d1d43" flags="--upload-gracedb -t 'test_spiir_allsky' 'test_spiir_earlywarning' --group 'gracedb'"
+
+
+JOB coinc-consumer_playground coinc-consumer.sub
+RETRY coinc-consumer_playground 100
+VARS coinc-consumer_playground username="luke.davis-9a879216" flags="--upload-gracedb -t 'test_spiir_allsky' 'cbc_spiir_allsky' 'test_spiir_earlywarning' 'cbc_spiir_earlywarning' --group 'gracedb-playground'"
+
+JOB coinc-consumer_test coinc-consumer.sub
+RETRY coinc-consumer_test 100
+VARS coinc-consumer_test username="luke.davis-9a879216" flags="--upload-gracedb -t 'test_spiir_allsky' 'cbc_spiir_allsky' 'test_spiir_earlywarning' 'cbc_spiir_earlywarning' --group 'gracedb-test'"

@@ -1,0 +1,33 @@
+JOB p-astro-consumer-cbc_spiir_allsky p-astro-consumer.sub
+RETRY p-astro-consumer-cbc_spiir_allsky 100
+VARS p-astro-consumer-cbc_spiir_allsky username="luke.davis-3d7d1d43" flags="--upload-gracedb -t 'cbc_spiir_allsky' --group 'gracedb'" signal_config="./fgmc.pkl" source_config="./mchirp_area.pkl"
+
+JOB p-astro-consumer-cbc_spiir_earlywarning p-astro-consumer.sub
+RETRY p-astro-consumer-cbc_spiir_earlywarning 100
+VARS p-astro-consumer-cbc_spiir_earlywarning username="luke.davis-3d7d1d43" flags="--upload-gracedb -t 'cbc_spiir_earlywarning' --group 'gracedb'" signal_config="./fgmc_o4sim.pkl" source_config="./mchirp_area_o4sim.pkl"
+
+
+JOB p-astro-consumer-test_spiir_allsky p-astro-consumer.sub
+RETRY p-astro-consumer-test_spiir_allsky 100
+VARS p-astro-consumer-test_spiir_allsky username="luke.davis-3d7d1d43" flags="--upload-gracedb -t 'test_spiir_allsky' --group 'gracedb'" signal_config="./fgmc.pkl" source_config="./mchirp_area.pkl"
+
+JOB p-astro-consumer-test_spiir_earlywarning p-astro-consumer.sub
+RETRY p-astro-consumer-test_spiir_earlywarning 100
+VARS p-astro-consumer-test_spiir_earlywarning username="luke.davis-3d7d1d43" flags="--upload-gracedb -t 'test_spiir_earlywarning' --group 'gracedb'" signal_config="./fgmc_o4sim.pkl" source_config="./mchirp_area_o4sim.pkl"
+
+
+JOB p-astro-consumer_playground_allsky p-astro-consumer.sub
+RETRY p-astro-consumer_playground_allsky 100
+VARS p-astro-consumer_playground_allsky username="luke.davis-9a879216" flags="--upload-gracedb -t 'test_spiir_allsky' 'cbc_spiir_allsky' --group 'gracedb-playground'" signal_config="./fgmc.pkl" source_config="./mchirp_area.pkl"
+
+JOB p-astro-consumer_playground_earlywarning p-astro-consumer.sub
+RETRY p-astro-consumer_playground_earlywarning 100
+VARS p-astro-consumer_playground_earlywarning username="luke.davis-9a879216" flags="--upload-gracedb -t 'test_spiir_earlywarning' 'cbc_spiir_earlywarning' --group 'gracedb-playground'" signal_config="./fgmc_o4sim.pkl" source_config="./mchirp_area_o4sim.pkl"
+
+JOB p-astro-consumer_test_allsky p-astro-consumer.sub
+RETRY p-astro-consumer_test_allsky 100
+VARS p-astro-consumer_test_allsky username="luke.davis-9a879216" flags="--upload-gracedb -t 'test_spiir_allsky' 'cbc_spiir_allsky' --group 'gracedb-test'" signal_config="./fgmc.pkl" source_config="./mchirp_area.pkl"
+
+JOB p-astro-consumer_test_earlywarning p-astro-consumer.sub
+RETRY p-astro-consumer_test_earlywarning 100
+VARS p-astro-consumer_test_earlywarning username="luke.davis-9a879216" flags="--upload-gracedb -t 'test_spiir_earlywarning' 'cbc_spiir_earlywarning' --group 'gracedb-test'" signal_config="./fgmc_o4sim.pkl" source_config="./mchirp_area_o4sim.pkl"

@@ -35,6 +35,9 @@ echo Commit subject: $commit_subject
 regex="Merge branch '(.*)' into .*"
 [[ $commit_subject =~ $regex ]] || true
 branch_name=$(git rev-parse --abbrev-ref HEAD | sed -E 's/\//__/g')
+if [[ "${branch_name}" == "HEAD" ]]; then
+	branch_name=$(git tag --points-at HEAD)
+fi
 if [[ -z "${BASH_REMATCH[1]}" ]]; then
     echo "Not a merge commit."
 else
@@ -43,7 +46,7 @@ fi
 popd
 
 if [[ -n "${TAG}" ]]; then
-    branch_name=$TAG-$branch_name
+	branch_name=$TAG-$branch_name
 fi
 
 if [[ -z "${RUN_DIR}" ]]; then

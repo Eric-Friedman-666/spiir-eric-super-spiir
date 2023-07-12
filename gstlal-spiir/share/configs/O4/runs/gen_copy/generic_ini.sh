@@ -11,31 +11,31 @@
 ######################################################
 # You may also use LowMass, MDC, O2VirgoTest, and AllSky
 ######################################################
-SearchType=AllSky
-
+SearchType=${SearchType:=AllSky}
 ######################################################
 #  use banks with no cut-off (0), or early warning cut-off (5, 10)
 #  so the template is cut 5/10 seconds before merger
 ######################################################
 
-latency=0
+latency=${latency:=0}
 
 ######################################################
 #  which gracedb group to upload, test (1) or CBC (0)
 ######################################################
 
-iftest=1
+iftest=${iftest:=1}
 
 ######################################################
 #  live streaming data (1) or O2replay data (0)
 ######################################################
 
-iflive=0
+iflive=${iflive:=0}
+
 ######################################################
 # raw data ?
 ######################################################
 
-ifraw=0
+ifraw=${ifraw:=0}
 if ((${iflive} == 0)); then
     ifraw=0
 fi
@@ -107,25 +107,29 @@ fi
 # number of detectors
 ######################################################
 
-ndet=3
+ndet=${ndet:=3}
 
 ######################################################
 # set the location of the banks (O2 template placement with ER13 PSD)
 ######################################################
-bankdir=/home/spiir/pre-O4/banks/O3/O3b/FB
+if ((${iflive} == 1)); then
+    bankdir=/home/spiir/pre-O4/banks/O4/FB
+else
+    bankdir=/home/spiir/pre-O4/banks/O3/O3b/FB
+fi
 ######################################################
 #  --cohfar-assignfar-silent-time ${FAR_silent}
 ######################################################
-FAR_silent=0
+FAR_silent=${FAR_silent:=7200}
 
 ######################################################
 #  --finalsink-fapupdater-collect-walltime ${wtime1},${wtime2},${wtime3}
 #  background accum wall time
 ######################################################
 # Use longer background to ensure enough background data points
-wtime1=604800
-wtime2=86400
-wtime3=7200
+wtime1=${wtime1:=604800}
+wtime2=${wtime2:=86400}
+wtime3=${wtime3:=7200}
 
 ######################################################
 #
@@ -144,42 +148,42 @@ wtime3=7200
 ######################################################
 # BBH [  384-415] [380 - 415] 32 banks = 8  /  6 nodes
 
-#RUN_TYPE=BNS
-#start=0
-#njob=25
-#nbank=99
+RunType=${RunType:=BBH}
 
-#RUN_TYPE=NSBH
-#start=100
-#njob=71
-#nbank=383
-
-#RUN_TYPE=BBH
-start=384
-njob=8
-nbank=415
-
-#if (( ${ndet} == 3 )); then # if 3-detector and main search
-#    if [ "${SearchType}" == "HighMass" ]; then # higmass
-#       start=100
-#       njob=79
-#    else
-#       if [ "${SearchType}" == "LowMass" ]; then # lowmass
-#           start=0
-#           njob=25
-#       fi
-#   fi
-#  else # if two-detector and for the main search
-#   if [ "${SearchType}" == "HighMass" ]; then # higmass
-#          start=98
-#        njob=53
-#  else
-#       if [ "${SearchType}" == "LowMass" ]; then # lowmass
-#           start=0   # 0-101
-#        njob=17
-#   fi
-#   fi
-#  fi
+if [ "${RunType}" == "BNS" ]; then
+    if ((${ndet} == 2)); then
+        start=0
+        njob=17
+        nbank=101
+    else
+        start=0
+        njob=25
+        nbank=99
+    fi
+elif [ "${RunType}" == "NSBH" ]; then
+    if ((${ndet} == 2)); then
+        start=100
+        njob=47
+        nbank=381
+    else
+        start=100
+        njob=71
+        nbank=383
+    fi
+elif [ "${RunType}" == "BBH" ]; then
+	if ((${ndet} == 2)); then
+		start=380
+		njob=6
+		nbank=415
+	else
+	    start=384
+		njob=8
+	    nbank=415
+	fi
+else
+	echo "RunType ${RunType} is not valid."
+	exit
+fi
 
 ######################################################
 # Horizon distances given a 1.4+ 1.4 source
@@ -191,19 +195,23 @@ if ((${iflive} == 0)); then # O2replay psd
     dhH=112
     dhV=50
 else # ER14 psd
-    dhL=140
-    dhH=112
-    dhV=50
+    dhL=160
+    dhH=160
+    dhV=80
 fi
 
 ######################################################
 # User Input
 ######################################################
 
+######################################################
+
 if ((${ifplayground} == 1)); then
-    GraceDB_URL=https://gracedb-playground.ligo.org/api/
+	GraceDBType=${GraceDBType:=playground}
+    GraceDB_URL=https://gracedb-${GraceDBType}.ligo.org/api/
     myaccgroup=ligo.dev.o4.cbc.em.gstlal_spiir
 else
+    GraceDBType=production
     GraceDB_URL=https://gracedb.ligo.org/api/
     myaccgroup=ligo.prod.o4.cbc.em.gstlal_spiir
 fi
@@ -213,6 +221,9 @@ if ((${iftest} == 1)); then
 else
     GraceDB_Group=CBC
 fi
+
+gracedbgroupL=$(echo "${GraceDB_Group}" | tr '[:upper:]' '[:lower:]')
+searchtypeL=$(echo "${SearchType}" | tr '[:upper:]' '[:lower:]')
 
 ######################################################
 #  bpj: number of banks that can be processed in one node
@@ -231,7 +242,7 @@ fi
 ######################################################
 #  Use FIR whitening (1) or FFT whitening (0)
 ######################################################
-newwhiten=0
+newwhiten=${newwhiten:=0}
 
 ######################################################
 # --finalsink-far-factor == number of total jobs
@@ -243,12 +254,12 @@ nfac=$((njob)) # BBH on its own count.  3det8+2det6 = 15.  132 #3det79+2det53=13
 #  --ht-gate-threshold
 #  to eliminate single glitch event from the start
 ####################################################
-htgate_thres=15
+htgate_thres=${htgate_thres:=15}
 
 ######################################################
 # if failed, number of reruns for gstlal_inspiral_postcohspiir_job
 ######################################################
-nretry=100
+nretry=${nretry:=100}
 
 ######################################################
 mkdir -p ${myrundir}/logs
@@ -261,6 +272,7 @@ log_dir=${myrundir}/logs
 ######################################################
 DataDir=/dev/shm
 mydatasrc="lvshm"
+
 # TODO: Find KAGRA partitions
 if ((${iflive} == 0)); then # run on o2replay
     if ((${ndet} == 2)); then
@@ -285,25 +297,25 @@ fi
 ######################################################
 mynodename="postcohspiir"
 if ((${iflive} == 1)); then
-    onbits=7
-    onbits_V=1027
+    onbits=145
+    onbits_V=145
 else
     onbits=7      #7
     onbits_V=1027 #1027
 fi
 
 if ((${ifraw} == 1)); then
-    onbits=0
-    onbits_V=0
+    onbits=1
+    onbits_V=1
 fi
 
 # TODO: Find KAGRA channels
 if ((${iflive} == 1)); then
     if ((${ndet} == 2)); then
-        mychannel="H1=GDS-GATED_STRAIN --channel-name L1=GDS-GATED_STRAIN"
+        mychannel="H1=GDS-CALIB_STRAIN_CLEAN --channel-name L1=GDS-CALIB_STRAIN_CLEAN"
         mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0"
     else
-        mychannel="H1=GDS-GATED_STRAIN --channel-name L1=GDS-GATED_STRAIN  --channel-name V1=Hrec_hoft_16384Hz_Gated"
+        mychannel="H1=GDS-CALIB_STRAIN_CLEAN --channel-name L1=GDS-CALIB_STRAIN_CLEAN  --channel-name V1=Hrec_hoft_16384Hz"
         mystate="H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-channel-name V1=DQ_ANALYSIS_STATE_VECTOR --state-vector-on-bits H1=${onbits} --state-vector-on-bits L1=${onbits} --state-vector-on-bits V1=${onbits_V}  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0  --state-vector-off-bits V1=0"
     fi
 else # O2 replay
@@ -320,34 +332,35 @@ fi
 ######################################################
 #  --cuda-postcoh-hist-trials ${Nhist}
 ######################################################
-Nhist=100
+Nhist=${Nhist:=100}
 
 ######################################################
 #  --finalsink-snapshot-interval ${ZeroLag_T}
 #  Uplate Zerolag output internal to files
 ######################################################
-ZeroLag_T=43200
+ZeroLag_T=${ZeroLag_T:=43200}
 
 ######################################################
 #  --cuda-postcoh-snglsnr-thresh ${snr_thres}
 ######################################################
-snr_thres=4
+snr_thres=${snr_thres:=4}
 
 ######################################################
 #  --cohfar-accumbackground-snapshot-interval ${FAR_T}
 #  background snapshot time
 ######################################################
-FAR_T=3600
+FAR_T=${FAR_T:=3600}
 
 ######################################################
 #  --cohfar-assignfar-refresh-interval ${FAR_refresh}
 ######################################################
-FAR_refresh=1800
+FAR_refresh=${FAR_refresh:=1800}
+FAR_refresh_offset=${FAR_refresh_offset:=180}
 
 ######################################################
 #  --finalsink-gracedb-far-thresh ${far_thres}
 ######################################################
-far_thres=0.0001
+far_thres=${far_thres:=0.00014}
 
 ######################################################
 #  --finalsink-singlefar-veto-thresh ${FAR_single_thres}
@@ -355,19 +368,17 @@ far_thres=0.0001
 # fix code is different using 0.0001
 # change it to 0.5  for production code
 ######################################################
-#FAR_single_thres=0.02
-FAR_single_thres=0.5
-#FAR_single_thres=0.001
+FAR_single_thres=${FAR_single_thres:=0.5}
 
 ######################################################
 #  --finalsink-fapupdater-interval ${Tfapupdate}
 ######################################################
-Tfapupdate=1800
+Tfapupdate=${Tfapupdate:=1800}
 
 ######################################################
 #  --finalsink-cluster-window ${tcluster}
 ######################################################
-tcluster=1
+tcluster=${tcluster:=1}
 
 ######################################################
 #  set parameters for: gstlal_inspiral_postcohspiir.sub
@@ -392,19 +403,27 @@ else
     mymap_prob=H1L1V1K1_prob_map.xml
 fi
 
-Tmap=86400
-H1DataDir=${DataDir}/kafka/H1_O3ReplayMDC
-npix=5
-MapUpdate_T=43201
+Tmap=${Tmap:=43200}
+Tmap_offset=${Tmap_offset:=900}
+
+if ((${iflive} == 0)); then
+    H1DataDir=${DataDir}/kafka/H1_O3ReplayMDC
+else
+	H1DataDir=${DataDir}/kafka/H1
+fi
+
+npix=${npix:=5}
+MapUpdate_T=${MapUpdate_T:=43200}
 
 ######################################################
 #  --cuda-postcoh-output-skymap ${SNRmap}
 ######################################################
-SNRmap=7
+SNRmap=${SNRmap:=12}
+
 ############################
 #  --psd-fft-length ${psd_len}
 ############################
-psd_len=4
+psd_len=${psd_len:=4}
 
 ##################################################################
 #
@@ -437,11 +456,13 @@ for ((i = 0; i < ${njob}; i++)); do
         K1bank=${bankdir}/iir_K1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
         if ((${ndet} == 2)); then
             echo -n " macroiirbank=\"H1:${H1bank},L1:${L1bank}"
+			#echo -n " macroiirbank=\"H1:${H1bank},V1:${V1bank}"
         elif ((${ndet} == 3)); then
             echo -n " macroiirbank=\"H1:${H1bank},L1:${L1bank},V1:${V1bank}"
         else
             echo -n " macroiirbank=\"H1:${H1bank},L1:${L1bank},V1:${V1bank},K1:${K1bank}"
         fi
+
     done
 
     endbank=$((${start} + ${bpj} * ($i + 1) - 1))
@@ -483,3 +504,78 @@ cat <<-EOF
 	RETRY monitor_pipeline_0001 100
 EOF
 
+cat <<EOF >ini_vars.txt
+ifplayground=${ifplayground}
+
+Configurable variables:
+    SearchType=${SearchType}
+    latency=${latency}
+    iftest=${iftest}
+    iflive=${iflive}
+    ifraw=${ifraw}
+    SPIIR_PATH=${SPIIR_PATH}
+    USER=${USER}
+    ndet=${ndet}
+    FAR_silent=${FAR_silent}
+    wtime1=${wtime1}
+    wtime2=${wtime2}
+    wtime3=${wtime3}
+    RunType=${RunType}
+    GraceDBType=${GraceDBType}
+    newwhiten=${newwhiten}
+    htgate_thres=${htgate_thres}
+    nretry=${nretry}
+    Nhist=${Nhist}
+    ZeroLag_T=${ZeroLag_T}
+    snr_thres=${snr_thres}
+    FAR_T=${FAR_T}
+    FAR_refresh=${FAR_refresh}
+    FAR_refresh_offset=${FAR_refresh_offset}
+    far_thres=${far_thres}
+    FAR_single_thres=${FAR_single_thres}
+    FAR_event_thres=${FAR_event_thres}
+    Tfapupdate=${Tfapupdate}
+    tcluster=${tcluster}
+    Tmap=${Tmap}
+    Tmap_offset=${Tmap_offset}
+    npix=${npix}
+    MapUpdate_T=${MapUpdate_T}
+    SNRmap=${SNRmap}
+    psd_len=${psd_len}
+
+Computed variables:
+    myrundir=${myrundir}
+    version_spiir=${version_spiir}
+    mylocation=${mylocation}
+    user=${user}
+    submitter=${submitter}
+    mytag=${mytag}
+    bankdir=${bankdir}
+    start=${start}
+    njob=${njob}
+    nbank=${nbank}
+    dhL=${dhL}
+    dhH=${dhH}
+    dhV=${dhV}
+    GraceDBType=${GraceDBType}
+    GraceDB_URL=${GraceDB_URL}
+    myaccgroup=${myaccgroup}
+    GraceDB_Group=${GraceDB_Group}
+    gracedbgroupL=${gracedbgroupL}
+    searchtypeL=${searchtypeL}
+    bpj=${bpj}
+    nfac=${nfac}
+    log_dir=${log_dir}
+    DataDir=${DataDir}
+    mydatasrc=${mydatasrc}
+    mymem=${mymem}
+    mynodename=${mynodename}
+    onbits=${onbits}
+    onbits_V=${onbits_V}
+    mychannel=${mychannel}
+    mystate=${mystate}
+    mydq=${mydq}
+    mymap=${mymap}
+    mymap_prob=${mymap_prob}
+    H1DataDir=${H1DataDir}
+EOF

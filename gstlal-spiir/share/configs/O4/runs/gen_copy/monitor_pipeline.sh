@@ -6,8 +6,8 @@ set -o pipefail
 set -o xtrace
 
 monitor_dir=$1
-run_dir=$2
-node=$3
+run_dir=$(pwd)
+node=$2
 host=$(hostname)
 node_sd_dir="${monitor_dir}/prometheus-2.42.0.linux-amd64/node_sd"
 node_exporter_exe="${monitor_dir}/node_exporter-1.5.0.linux-amd64/node_exporter --collector.systemd --collector.processes"
@@ -71,12 +71,6 @@ cleanup()
     exit
 }
 
-export PATH="$SPIIR_PATH/install/bin:$PATH"
-export PYTHONPATH="$SPIIR_PATH/install/lib/python2.7/site-packages:$SPIIR_PATH/install/lib64/python2.7/site-packages:/usr/spiir/lib/python2.7/site-packages:$PYTHONPATH"
-export PKG_CONFIG_PATH="$SPIIR_PATH/install/lib/pkgconfig:$PKG_CONFIG_PATH"
-export GST_PLUGIN_PATH="$SPIIR_PATH/install/lib/gstreamer-0.10:$GST_PLUGIN_PATH"
-export LD_LIBRARY_PATH="$SPIIR_PATH/install/lib:$SPIIR_PATH/install/lib64:$LD_LIBRARY_PATH"
-
-${@:4}
+${@:3}
 
 cleanup()

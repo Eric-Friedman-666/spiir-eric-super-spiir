@@ -1,0 +1,16 @@
+JOB igwn-consumer-cbc igwn-consumer.sub
+RETRY igwn-consumer-cbc 100
+VARS igwn-consumer-cbc username="luke.davis-3d7d1d43" flags="-t 'cbc_spiir_allsky' 'cbc_spiir_earlywarning' --group 'gracedb'"
+
+JOB igwn-consumer-test igwn-consumer.sub
+RETRY igwn-consumer-test 100
+VARS igwn-consumer-test username="luke.davis-3d7d1d43" flags="-t 'test_spiir_allsky' 'test_spiir_earlywarning' --group 'gracedb'"
+
+
+JOB igwn-consumer_playground igwn-consumer.sub
+RETRY igwn-consumer_playground 100
+VARS igwn-consumer_playground username="luke.davis-9a879216" flags="-t 'test_spiir_allsky' 'cbc_spiir_allsky' 'test_spiir_earlywarning' 'cbc_spiir_earlywarning' --group 'gracedb-playground'"
+
+JOB igwn-consumer_test igwn-consumer.sub
+RETRY igwn-consumer_test 100
+VARS igwn-consumer_test username="luke.davis-9a879216" flags="-t 'test_spiir_allsky' 'cbc_spiir_allsky' 'test_spiir_earlywarning' 'cbc_spiir_earlywarning' --group 'gracedb-test'"

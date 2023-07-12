@@ -7,7 +7,7 @@ from astropy.time import Time
 import time
 import signal
 import pandas as pd
-from sqlalchemy import create_engine, Table, Column, Integer, String, MetaData, Double, UniqueConstraint, BigInteger
+from sqlalchemy import create_engine, Table, Column, Integer, String, MetaData, Double, UniqueConstraint, BigInteger, Text
 from sqlalchemy.sql import text
 import hashlib
 
@@ -33,9 +33,8 @@ runs = Table(
                      sqlite_on_conflict='IGNORE'))
 
 hosts = Table(
-    'hosts', meta, Column('unixtime', Double), Column('gpstime', Double),
-    Column('run_id', Integer), Column('node_id', String),
-    Column('host', String),
+    'hosts', meta, Column('unixtime', BigInteger), Column('gpstime', Double),
+    Column('run_id', Integer), Column('node_id', Text), Column('host', Text),
     UniqueConstraint('run_id',
                      'node_id',
                      'unixtime',
@@ -43,10 +42,12 @@ hosts = Table(
                      sqlite_on_conflict='IGNORE'))
 
 latencies = Table(
-    'latencies', meta, Column('unixtime', Double), Column('gpstime', Double),
-    Column('run_id', Integer), Column('node_id', String),
+    'latencies', meta, Column('unixtime',
+                              BigInteger), Column('gpstime', Double),
+    Column('run_id', Integer), Column('node_id', Text),
     Column('latency', Double), Column('cohsnr', Double),
-    Column('cmbchisq', Double),
+    Column('cmbchisq', Double), Column('coinc_upload_latency', Double),
+    Column('log_upload_latency', Double),
     UniqueConstraint('run_id',
                      'node_id',
                      'unixtime',
@@ -54,10 +55,9 @@ latencies = Table(
                      sqlite_on_conflict='IGNORE'))
 
 state_vector = Table(
-    'state_vector', meta, Column('unixtime', Double),
+    'state_vector', meta, Column('unixtime', BigInteger),
     Column('gpstime', Double), Column('run_id', Integer),
-    Column('node_id', String), Column('ifo',
-                                      String), Column('on_col', Integer),
+    Column('node_id', Text), Column('ifo', Text), Column('on_col', Integer),
     Column('off', Integer), Column('gap', Integer),
     UniqueConstraint('run_id',
                      'node_id',
@@ -67,10 +67,9 @@ state_vector = Table(
                      sqlite_on_conflict='IGNORE'))
 
 strain = Table(
-    'strain', meta, Column('unixtime', Double), Column('gpstime', Double),
-    Column('run_id', Integer), Column('node_id', String),
-    Column('ifo', String), Column('add_col', Integer),
-    Column('drop_col', Integer),
+    'strain', meta, Column('unixtime', BigInteger), Column('gpstime', Double),
+    Column('run_id', Integer), Column('node_id', Text), Column('ifo', Text),
+    Column('add_col', Integer), Column('drop_col', Integer),
     UniqueConstraint('run_id',
                      'node_id',
                      'ifo',
@@ -341,7 +340,8 @@ class Monitor:
 
         # Get int from first 32 bits of sha256 hashed run_dir string.
         self.run_id = int.from_bytes(hashlib.sha256(
-            bytes(self.run_dir.name, encoding='utf-8')).digest()[:4],
+            bytes(str(self.run_dir.absolute()),
+                  encoding='utf-8')).digest()[:4],
                                      'little',
                                      signed=True)
 
@@ -357,16 +357,16 @@ class Monitor:
         meta.create_all(self.sqliteEngine)
         meta.create_all(self.psqlEngine)
 
-        result = re.match('^run-.*-([0-9]*)-([a-z0-9]*)$', self.run_dir.name)
+        result = re.match('^.*/run-.*-([0-9]*)-([a-z0-9]*)$',
+                          str(self.run_dir.absolute()))
         if result:
-            unixtime = result.group(1)
+            unixtime = int(result.group(1)) * 1000000
             commit = result.group(2)
         else:
-            unixtime = '0'
+            unixtime = 0
             commit = '0'
 
-        sqlcmd = 'INSERT INTO "runs" ("run_id", "unixtime", "run_dir", "commit") VALUES (\'%s\', \'%s\', \'%s\', \'%s\')' % (
-            self.run_id, unixtime, self.run_dir.name, commit)
+        sqlcmd = f'INSERT INTO "runs" ("run_id", "unixtime", "run_dir", "commit") VALUES (\'{self.run_id}\', \'{unixtime}\', \'{self.run_dir.absolute()}\', \'{commit}\')'
 
         self.sqliteConn.execute(text(sqlcmd))
         self.psqlConn.execute(
@@ -376,7 +376,7 @@ class Monitor:
         self.psqlConn.commit()
 
         self.lastTimes = {}
-        sqlcmd = 'SELECT node_id, max(end_time) as last_time FROM "postcoh" WHERE run_id=\'%s\' GROUP BY node_id;' % self.run_id
+        sqlcmd = f'SELECT node_id, max(end_time) as last_time FROM "postcoh" WHERE run_id=\'{self.run_id}\' GROUP BY node_id;'
 
         result = self.sqliteConn.execute(text(sqlcmd))
         for row in result:
@@ -384,7 +384,7 @@ class Monitor:
 
         result = self.psqlConn.execute(text(sqlcmd))
         for row in result:
-            if row[1] > self.lastTimes[row[0]]:
+            if row[0] not in self.lastTimes or row[1] > self.lastTimes[row[0]]:
                 self.lastTimes[row[0]] = row[1]
 
     def exit_gracefully(self, *args):
@@ -403,18 +403,19 @@ class Monitor:
         return utc_times.value
 
     def doExecute(self, table_name, records):
-        sqlinsert = "INSERT INTO \"%s\"(" % table_name
+        sqlinsert = f"INSERT INTO \"{table_name}\"("
         sqlvalues = ") VALUES("
         for key in records[0].keys():
-            sqlinsert += "\"%s\", " % key
-            sqlvalues += ":%s, " % key
+            sqlinsert += f"\"{key}\", "
+            sqlvalues += f":{key}, "
         sqlcmd = sqlinsert[:-2] + sqlvalues[:-2] + ")"
 
         self.sqliteConn.execute(text(sqlcmd), records)
         self.psqlConn.execute(
-            text(sqlcmd +
-                 " ON CONFLICT ON CONSTRAINT \"unique_%s\" DO NOTHING" %
-                 table_name), records)
+            text(
+                sqlcmd +
+                f" ON CONFLICT ON CONSTRAINT \"unique_{table_name}\" DO NOTHING"
+            ), records)
 
         self.sqliteConn.commit()
         self.psqlConn.commit()
@@ -426,8 +427,10 @@ class Monitor:
                     break
                 if subpath.parent.name + subpath.name in self.xmls:
                     continue
+
+                # Upload node info.
                 if re.match('^[0-9][0-9][0-9]_registry.txt$', subpath.name):
-                    logger.info("Loading %s" % subpath.name)
+                    logger.info(f"Loading {subpath.name}")
                     host_fqdn = open(subpath, 'r').readlines()[0]
                     host_match = re.match('http://(.*):.*', host_fqdn)
                     if host_match:
@@ -443,49 +446,57 @@ class Monitor:
                             'host': host,
                             'node_id': node_id
                         }
-                        self.doExecute(table_name='hosts',
-                                       records=[{
-                                           'run_id':
-                                           self.run_id,
-                                           'node_id':
-                                           node_id,
-                                           'host':
-                                           host,
-                                           'unixtime':
-                                           Time(Time.now(),
-                                                format="unix").value
-                                       }])
+                        self.doExecute(
+                            table_name='hosts',
+                            records=[{
+                                'run_id':
+                                self.run_id,
+                                'node_id':
+                                node_id,
+                                'host':
+                                host,
+                                'unixtime':
+                                int(
+                                    Time(Time.now(), format="unix").value *
+                                    1000000)
+                            }])
                     continue
 
+                # Upload latency.
                 if re.match('^latency_history.txt$', subpath.name):
                     node_id = subpath.parent.name
-                    logger.info("Loading %s/latency_history.txt" % node_id)
-                    data = pd.read_csv(
-                        subpath,
-                        sep=' ',
-                        names=['gpstime', 'latency', 'cohsnr', 'cmbchisq'])
+                    logger.info(f"Loading {node_id}/latency_history.txt")
+                    data = pd.read_csv(subpath,
+                                       sep=' ',
+                                       names=[
+                                           'gpstime', 'latency', 'cohsnr',
+                                           'cmbchisq', 'coinc_upload_latency',
+                                           'log_upload_latency'
+                                       ])
                     data['gpstime'] = pd.to_numeric(data['gpstime'])
                     data['unixtime'] = self.convert_gps_to_unix_timestamp(
-                        data['gpstime'])
+                        data['gpstime']).astype(int) * 1000000
                     data['run_id'] = self.run_id
                     data['node_id'] = node_id
+                    data.fillna(0.0)
                     if len(data) > 0:
                         self.doExecute(table_name='latencies',
                                        records=data.to_dict('records'))
                     continue
 
+                # Upload state_vector
                 if re.match('^state_vector_on_off_gap.txt$', subpath.name):
                     IFO = subpath.parent.name
                     node_id = subpath.parent.parent.name
-                    logger.info("Loading %s/state_vector_on_off_gap.txt" %
-                                node_id)
+                    logger.info(
+                        f"Loading {node_id}/state_vector_on_off_gap.txt")
                     data = pd.read_csv(
                         subpath,
                         sep=' ',
                         names=['gpstime', 'on_col', 'off', 'gap'])
                     data['gpstime'] = pd.to_numeric(data['gpstime'])
                     data['unixtime'] = self.convert_gps_to_unix_timestamp(
-                        data['gpstime'])
+                        data['gpstime']).astype(int) * 1000000
                     data['run_id'] = self.run_id
                     data['node_id'] = node_id
                     data['ifo'] = IFO
@@ -494,17 +505,18 @@ class Monitor:
                                        records=data.to_dict('records'))
                     continue
 
+                # Upload strain.
                 if re.match('^strain_add_drop.txt$', subpath.name):
                     IFO = subpath.parent.name
                     node_id = subpath.parent.parent.name
-                    logger.info("Loading %s/strain_add_drop.txt" % node_id)
+                    logger.info(f"Loading {node_id}/strain_add_drop.txt")
                     data = pd.read_csv(
                         subpath,
                         sep=' ',
                         names=['gpstime', 'add_col', 'drop_col'])
                     data['gpstime'] = pd.to_numeric(data['gpstime'])
                     data['unixtime'] = self.convert_gps_to_unix_timestamp(
-                        data['gpstime'])
+                        data['gpstime']).astype(int) * 1000000
                     data['run_id'] = self.run_id
                     data['node_id'] = node_id
                     data['ifo'] = IFO
@@ -513,6 +525,7 @@ class Monitor:
                                        records=data.to_dict('records'))
                     continue
 
+                # Upload segments and zerolags.
                 xmlMatch = re.match(
                     '^[A-Z0-9]*_SEGMENTS_([0-9]*)_([0-9]*).xml.gz$',
                     subpath.name)
@@ -521,7 +534,7 @@ class Monitor:
                         '^[0-9]*_zerolag_([0-9]*)_([0-9]*).xml.gz$',
                         subpath.name)
                 if xmlMatch:
-                    logger.info("Loading %s" % subpath.name)
+                    logger.info(f"Loading {subpath.name}")
                     startTime = int(xmlMatch.group(1))
                     duration = int(xmlMatch.group(2))
                     node_id = subpath.parent.name
@@ -532,14 +545,31 @@ class Monitor:
                         df = spiir.io.ligolw.table.get_tables_from_xmldoc(
                             xmldoc)
                         for tbl in df:
-                            logger.info("Loading %s: %d rows" %
-                                        (tbl, len(df[tbl])))
+                            logger.info(f"Loading {tbl}: {len(df[tbl])} rows")
                             if len(df[tbl]) == 0:
                                 continue
                             df[tbl]['run_id'] = self.run_id
                             df[tbl]['node_id'] = node_id
                             self.doExecute(table_name=tbl,
                                            records=df[tbl].to_dict('records'))
+                    self.xmls[subpath.parent.name + subpath.name] = True
+                    continue
+
+                # Upload coincs
+                xmlMatch = re.match('^.*[A-Z0-9]*_([0-9]*)_[0-9]*_[0-9]*.xml$',
+                                    subpath.name)
+                if xmlMatch:
+                    logger.info("Loading %s" % subpath.name)
+                    xmldoc = spiir.io.ligolw.load_ligolw_xmldoc(subpath)
+                    df = spiir.io.ligolw.table.get_tables_from_xmldoc(xmldoc)
+                    for tbl in df:
+                        logger.info("Loading %s: %d rows" %
+                                    (tbl, len(df[tbl])))
+                        if len(df[tbl]) == 0:
+                            continue
+                        df[tbl]['run_id'] = self.run_id
+                        self.doExecute(table_name=tbl,
+                                       records=df[tbl].to_dict('records'))
                     self.xmls[subpath.parent.name + subpath.name] = True
                     continue
 
@@ -550,6 +580,7 @@ class Monitor:
 @click.option('--run_dir',
               prompt='Run directory: ',
               help='Run directory.',
+              default=Path().absolute(),
               type=Path)
 def main(run_dir):
 
