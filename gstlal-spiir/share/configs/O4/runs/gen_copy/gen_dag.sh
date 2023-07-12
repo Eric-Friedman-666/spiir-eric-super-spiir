@@ -13,6 +13,8 @@ source ./generic_ini.sh
 ##################################################################
 ##################################################################
 
+PERMISSION_VARS="X509_USER_PROXY=$X509_USER_PROXY X509_USER_KEY=$X509_USER_KEY X509_USER_CERT=$X509_USER_CERT KRB5_KTNAME=$KRB5_KTNAME"
+
 monitor_dir="/home/spiir/monitoring"
 run_dir=$(pwd)
 
@@ -24,8 +26,9 @@ read -r -d '' COMMON_VARS <<- EOF
 	kill_sig = 15
 	+Online_CBC_IIR_GPU_X2200 = True
 	+OpSysAndVer = "SL7"
-	environment = "GST_DEBUG=$GST_DEBUG GST_REGISTRY_UPDATE=no GST_REGISTRY=$(pwd)/gst-registry.bin X509_USER_PROXY=$X509_USER_PROXY X509_USER_KEY=$X509_USER_KEY X509_USER_CERT=$X509_USER_CERT KRB5_KTNAME=$KRB5_KTNAME SPIIR_PATH=$SPIIR_PATH"
+	environment = "$PERMISSION_VARS GST_DEBUG=$GST_DEBUG GST_REGISTRY_UPDATE=no GST_REGISTRY=$(pwd)/gst-registry.bin PATH=$SPIIR_PATH/install/bin:\$PATH PYTHONPATH=$SPIIR_PATH/install/lib/python2.7/site-packages:$SPIIR_PATH/install/lib64/python2.7/site-packages:/usr/spiir/lib/python2.7/site-packages:\$PYTHONPATH PKG_CONFIG_PATH=$SPIIR_PATH/install/lib/pkgconfig:\$PKG_CONFIG_PATH GST_PLUGIN_PATH=$SPIIR_PATH/install/lib/gstreamer-0.10:\$GST_PLUGIN_PATH LD_LIBRARY_PATH=$SPIIR_PATH/install/lib:$SPIIR_PATH/install/lib64:\$LD_LIBRARY_PATH"
 	transfer_executable = False
+	on_exit_hold = ExitBySignal == true
 	notification = Always
 	queue 1
 EOF
@@ -38,13 +41,14 @@ cat <<-EOF >monitor_pipeline_${user}.sub
 	kill_sig = 15
 	+Online_CBC_IIR_GPU_X2200 = True
 	+OpSysAndVer = "SL7"
-	transfer_executable = False
 	executable = /home/spiir/.conda/envs/spiir-monitor/bin/python
 	arguments = "$run_dir/monitor_pipeline.py --run_dir $run_dir"
 	request_disk = 1GB
 	log = ${log_dir}/monitor_pipeline_${user}.dag.log
 	error = ${log_dir}/monitor_pipeline_${user}-\$(cluster)-\$(process).err
 	output = ${log_dir}/monitor_pipeline_${user}-\$(cluster)-\$(process).out
+	transfer_executable = False
+	on_exit_hold = ExitBySignal == true
 	notification = Always
 	queue 1
 EOF
@@ -58,7 +62,7 @@ done
 cat <<-EOF >get_url_${user}.sub
 	universe = Vanilla
 	executable = /bin/bash
-	arguments = "$run_dir/monitor_pipeline.sh $monitor_dir $run_dir get_url $mylocation/bin/gstlal_periodic_get_urls $args"
+	arguments = "$run_dir/monitor_pipeline.sh $monitor_dir get_url $mylocation/bin/gstlal_periodic_get_urls $args"
 	request_disk = 1GB
 	log = ${log_dir}/get_url_${user}.dag.log
 	error = ${log_dir}/get_url_${user}-\$(cluster)-\$(process).err
@@ -82,7 +86,7 @@ fi
 cat <<-EOF >update_map_${user}.sub
 	universe = Vanilla
 	executable = /bin/bash
-	arguments = "$run_dir/monitor_pipeline.sh $monitor_dir $run_dir update_detrspmap $mylocation/bin/gstlal_periodic_postcoh_update_detrspmap --data-loc ${H1DataDir} --ifo-horizons ${ifo_horizons} --chealpix-order ${npix} --output-coh-coeff ${mymap} --output-prob-coeff ${mymap_prob} --period ${MapUpdate_T}"
+	arguments = "$run_dir/monitor_pipeline.sh $monitor_dir update_detrspmap $mylocation/bin/gstlal_periodic_postcoh_update_detrspmap --data-loc ${H1DataDir} --ifo-horizons ${ifo_horizons} --chealpix-order ${npix} --output-coh-coeff ${mymap} --output-prob-coeff ${mymap_prob} --period ${MapUpdate_T}"
 	request_disk = 1GB
 	log = ${log_dir}/update_map_${user}.dag.log
 	error = ${log_dir}/update_map_${user}-\$(cluster)-\$(process).err
@@ -107,7 +111,7 @@ fi
 cat <<-EOF >clean_skymap_${user}.sub
 	universe = Vanilla
 	executable = /bin/bash
-	arguments = "$run_dir/monitor_pipeline.sh $monitor_dir $run_dir clean_skymap ${mylocation}/bin/gstlal_periodic_clean_skymap --data-loc ${H1DataDir} --clean-days-ago 0.5 --period 1200 --skymap-loc $clean_place"
+	arguments = "$run_dir/monitor_pipeline.sh $monitor_dir clean_skymap ${mylocation}/bin/gstlal_periodic_clean_skymap --data-loc ${H1DataDir} --clean-days-ago 0.5 --period 1200 --skymap-loc $clean_place"
 	request_disk = 1GB
 	log = ${log_dir}/clean_skymap_${user}.dag.log
 	error = ${log_dir}/clean_skymap_${user}-\$(cluster)-\$(process).err
@@ -124,50 +128,64 @@ EOF
 #
 ##################################################################
 
+# Depending on the code version these arguments will be required.
+maybe_args_list=( "cohfar-assignfar-refresh-offset" "cuda-postcoh-detrsp-refresh-offset" "finalsink-superevent-thresh" )
+maybe_vals_list=( "${FAR_refresh_offset}"           "${Tmap_offset}"                     "${FAR_event_thres}" )
+maybe_args=""
+
+for idx in "${!maybe_args_list[@]}"
+do
+	if grep -Fq "${maybe_args_list[$idx]}" "$mylocation/bin/gstlal_inspiral_postcohspiir_online"
+	then
+	    maybe_args="${maybe_args} --${maybe_args_list[$idx]} ${maybe_vals_list[$idx]}"
+	fi
+done
+
 cat <<-EOF >gstlal_inspiral_postcohspiir_${user}.sub
 	universe = vanilla
 	executable = /bin/bash
-	arguments = "$run_dir/monitor_pipeline.sh $monitor_dir $run_dir \$(macrojobtag) $mylocation/bin/gstlal_inspiral_postcohspiir_online \
-		--job-tag \$(macrojobtag) \
-		--tmp-space _CONDOR_SCRATCH_DIR \
-		--iir-bank \$(macroiirbank) \
-		--data-source ${mydatasrc} \
-		--request-data ${mytag} \
-		--track-psd \
-		--psd-fft-length ${psd_len} \
-		--channel-name ${mychannel} \
-		--state-channel-name ${mystate} \
-		--gpu-acc on \
-		--ht-gate-threshold ${htgate_thres} \
-		--shared-memory-partition ${mymem} \
-		--cuda-postcoh-snglsnr-thresh ${snr_thres} \
-		--cuda-postcoh-hist-trials ${Nhist} \
-		--cuda-postcoh-detrsp-fname ${mymap} \
-		--cuda-postcoh-output-skymap ${SNRmap} \
-		--check-time-stamp \
-		--finalsink-output-prefix \$(macrooutprefix) \
-		--finalsink-snapshot-interval ${ZeroLag_T} \
-		--cohfar-accumbackground-snapshot-interval ${FAR_T} \
-		--cohfar-accumbackground-output-prefix \$(macrostatsprefix) \
-		--cohfar-assignfar-input-fname \$(macrofarinput) \
-		--finalsink-fapupdater-output-fname \$(macrolocfapoutput) \
-		--cohfar-assignfar-silent-time ${FAR_silent} \
-		--cohfar-assignfar-refresh-interval ${FAR_refresh} \
-		--cohfar-assignfar-refresh-offset $(({FAR_refresh}/10))
-		--finalsink-cluster-window ${tcluster} \
-		--finalsink-fapupdater-interval ${Tfapupdate} \
-		--finalsink-fapupdater-collect-walltime ${wtime1},${wtime2},${wtime3} \
-		--finalsink-far-factor $nfac \
-		--finalsink-gracedb-far-thresh ${far_thres} \
-		--finalsink-need-online-perform 1 \
-		--finalsink-gracedb-group ${GraceDB_Group} \
-		--finalsink-gracedb-search ${SearchType} \
-		--finalsink-gracedb-service-url ${GraceDB_URL} \
-		--cuda-postcoh-detrsp-refresh-interval ${Tmap} \
-		--cuda-postcoh-detrsp-refresh-offset $(({Tmap}/10))
-		--code-version ${version_spiir} \
-		--finalsink-singlefar-veto-thresh ${FAR_single_thres} \
-		--fir-whitener ${newwhiten}"
+	arguments = "$run_dir/monitor_pipeline.sh $monitor_dir \$(macrojobtag) $mylocation/bin/gstlal_inspiral_postcohspiir_online \\
+		--job-tag \$(macrojobtag) \\
+		--tmp-space _CONDOR_SCRATCH_DIR \\
+		--iir-bank \$(macroiirbank) \\
+		--data-source ${mydatasrc} \\
+		--request-data ${mytag} \\
+		--track-psd \\
+		--psd-fft-length ${psd_len} \\
+		--channel-name ${mychannel} \\
+		--state-channel-name ${mystate} \\
+		--gpu-acc on \\
+		--ht-gate-threshold ${htgate_thres} \\
+		--shared-memory-partition ${mymem} \\
+		--cuda-postcoh-snglsnr-thresh ${snr_thres} \\
+		--cuda-postcoh-hist-trials ${Nhist} \\
+		--cuda-postcoh-detrsp-fname ${mymap} \\
+		--cuda-postcoh-output-skymap ${SNRmap} \\
+		--check-time-stamp \\
+		--finalsink-output-prefix \$(macrooutprefix) \\
+		--finalsink-snapshot-interval ${ZeroLag_T} \\
+		--cohfar-accumbackground-snapshot-interval ${FAR_T} \\
+		--cohfar-accumbackground-output-prefix \$(macrostatsprefix) \\
+		--cohfar-assignfar-input-fname \$(macrofarinput) \\
+		--finalsink-fapupdater-output-fname \$(macrolocfapoutput) \\
+		--cohfar-assignfar-silent-time ${FAR_silent} \\
+		--cohfar-assignfar-refresh-interval ${FAR_refresh} \\
+		--cohfar-assignfar-refresh-offset $(({FAR_refresh}/10)) \\
+		--finalsink-cluster-window ${tcluster} \\
+		--finalsink-fapupdater-interval ${Tfapupdate} \\
+		--finalsink-fapupdater-collect-walltime ${wtime1},${wtime2},${wtime3} \\
+		--finalsink-far-factor $nfac \\
+		--finalsink-gracedb-far-thresh ${far_thres} \\
+		--finalsink-need-online-perform 1 \\
+		--finalsink-gracedb-group ${GraceDB_Group} \\
+		--finalsink-gracedb-search ${SearchType} \\
+		--finalsink-gracedb-service-url ${GraceDB_URL} \\
+		--cuda-postcoh-detrsp-refresh-interval ${Tmap} \\
+		--cuda-postcoh-detrsp-refresh-offset $(({Tmap}/10)) \\
+		--code-version ${version_spiir} \\
+		--finalsink-singlefar-veto-thresh ${FAR_single_thres} \\
+		--fir-whitener ${newwhiten} \\
+		${maybe_args}"
 	want_graceful_removal = True
 	+General_Use_AMD = True
 	request_cpus = Target.Cpus
@@ -180,4 +198,3 @@ cat <<-EOF >gstlal_inspiral_postcohspiir_${user}.sub
 	stream_output = True
 	$COMMON_VARS
 EOF
-

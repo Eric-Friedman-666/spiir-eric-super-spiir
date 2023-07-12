@@ -1,7 +1,0 @@
-JOB p-astro-consumer-test_spiir_allsky p-astro-consumer.sub
-RETRY p-astro-consumer-test_spiir_allsky 10
-VARS p-astro-consumer-test_spiir_allsky username="luke.davis-9a879216" flags="--upload-gracedb -t 'test_spiir_allsky' 'cbc_spiir_allsky'" signal_config="p_astro/models/fgmc.pkl" source_config="p_astro/models/mchirp_area.pkl"
-
-JOB p-astro-consumer-test_spiir_earlywarning p-astro-consumer.sub
-RETRY p-astro-consumer-test_spiir_earlywarning 10
-VARS p-astro-consumer-test_spiir_earlywarning username="luke.davis-9a879216" flags="-t 'test_spiir_earlywarning' 'cbc_spiir_earlywarning'" signal_config="p_astro/models/fgmc.pkl" source_config="p_astro/models/mchirp_area.pkl"

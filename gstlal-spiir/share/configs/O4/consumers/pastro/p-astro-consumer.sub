@@ -1,24 +1,24 @@
 universe = Vanilla
-accounting_group_user  =  $ENV(USER)
-accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+accounting_group_user = $ENV(USER)
+accounting_group = ligo.prod.o4.cbc.em.gstlal_spiir
 Requirements  = (Target.Online_CBC_IIR_GPU_X2200 =?= True)
 kill_sig = 15
 +Online_CBC_IIR_GPU_X2200 = True
 +OpSysAndVer = "SL7"
-transfer_executable = False
-executable = /home/spiir/.conda/envs/spiir-py310/bin/python
+executable = /home/spiir/.conda/envs/spiir-py38/bin/python
 arguments = "p-astro-consumer.py \
     $(signal_config) \
     $(source_config) \
     --out './results/' \
     $(flags) \
-    --group 'gracedb-playground' \
     --username '$(username)' \
     --log-file './logs/p-astro-consumer.log' \
     --debug"
+environment = "X509_USER_PROXY=/home/spiir/.cert/O4_cilogon_cert/x509up_u100019 X509_USER_KEY=/home/spiir/.cert/O4_cilogon_cert/CERT_KEY.pem X509_USER_CERT=/home/spiir/.cert/O4_cilogon_cert/CERT_KEY.pem KRB5_KTNAME=/home/spiir/.cert/O4_cilogon_cert/spiir-spiir_robot_spiir.ligo.caltech.edu.keytab"
 request_disk = 1GB
 log = logs/p-astro-consumer.dag.log
 error = logs/p-astro-consumer-$(cluster)-$(process).err
 output = logs/p-astro-consumer-$(cluster)-$(process).out
 notification = Always
+on_exit_hold = ExitBySignal == true
 queue 1

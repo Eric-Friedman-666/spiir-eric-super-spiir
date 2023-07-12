@@ -1,0 +1,22 @@
+universe = Vanilla
+accounting_group_user = $ENV(USER)
+accounting_group = ligo.prod.o4.cbc.em.gstlal_spiir
+Requirements  = (Target.Online_CBC_IIR_GPU_X2200 =?= True)
+kill_sig = 15
++Online_CBC_IIR_GPU_X2200 = True
++OpSysAndVer = "SL7"
+executable = /home/spiir/.conda/envs/spiir-py38/bin/python
+arguments = "coinc-consumer.py \
+    --save_dir './results/' \
+    $(flags) \
+    --username '$(username)' \
+    --log-file './logs/coinc-consumer.log' \
+    --debug"
+environment = "X509_USER_PROXY=/home/spiir/.cert/O4_cilogon_cert/x509up_u100019 X509_USER_KEY=/home/spiir/.cert/O4_cilogon_cert/CERT_KEY.pem X509_USER_CERT=/home/spiir/.cert/O4_cilogon_cert/CERT_KEY.pem KRB5_KTNAME=/home/spiir/.cert/O4_cilogon_cert/spiir-spiir_robot_spiir.ligo.caltech.edu.keytab"
+request_disk = 1GB
+log = logs/coinc-consumer.dag.log
+error = logs/coinc-consumer-$(cluster)-$(process).err
+output = logs/coinc-consumer-$(cluster)-$(process).out
+notification = Always
+on_exit_hold = ExitBySignal == true
+queue 1
