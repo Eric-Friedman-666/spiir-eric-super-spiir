@@ -968,8 +968,8 @@ class FinalSink(object):
 
         return psd_frequency_series
 
-    def upload_to_gracedb(self, gracedb_upload_attempts, filename,
-                          coinc_message, log_message):
+    def upload_to_gracedb(self, postcoh_inspiral, gracedb_upload_attempts,
+                          filename, coinc_message, log_message):
         upload_attempt_limit = gracedb_upload_attempts + 1  # one-indexed
         gracedb_id = None
         t_start_coinc_upload = time.time()
@@ -1028,12 +1028,12 @@ class FinalSink(object):
                 except Exception as e:
                     print >> sys.stderr, e
         else:
-            print "gracedb upload of '%s' failed completely" % filename
+            print >> sys.stderr, "gracedb upload of '%s' failed completely" % filename
 
         t_end_log_upload = time.time()
         coinc_upload_latency = t_end_coinc_upload - t_start_coinc_upload
         log_upload_latency = t_end_log_upload - t_end_coinc_upload
-        self.onperformer.update_eye_candy(self.candidate.postcoh_inspiral,
+        self.onperformer.update_eye_candy(postcoh_inspiral,
                                           coinc_upload_latency,
                                           log_upload_latency)
 
@@ -1083,8 +1083,8 @@ class FinalSink(object):
 
             gracedb_upload_thread = threading.Thread(
                 target=self.upload_to_gracedb,
-                args=(gracedb_upload_attempts, filename, coinc_message,
-                      log_message))
+                args=(postcoh_inspiral, gracedb_upload_attempts, filename,
+                      coinc_message, log_message))
             gracedb_upload_thread.start()
             self.threads_gracedb_upload.append(gracedb_upload_thread)
 
