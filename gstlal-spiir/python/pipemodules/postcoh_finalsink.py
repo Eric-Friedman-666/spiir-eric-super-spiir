@@ -639,7 +639,7 @@ class FinalSink(object):
         # Single far veto for high-significance trigger
         # add a limits for chisq and check chisq ratio for upload.
         ifo_active = [
-            chisq > 0 and chisq < 3 for chisq in postcoh_inspiral.chisq
+            chisq > 0.3 and chisq < 3 for chisq in postcoh_inspiral.chisq
         ]
         ifo_fars_ok = [
             far < self.singlefar_veto_thresh and far > 0.
