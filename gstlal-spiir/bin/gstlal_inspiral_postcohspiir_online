@@ -547,10 +547,10 @@ def parse_command_line():
 
     # parse the datasource specific information and do option checking
     detectors = datasource.GWDataSourceInfo(options)
-    if len(detectors.channel_dict) < 2:
-        raise ValueError(
-            "only coherent searches are supported:    must process data from at least two antennae"
-        )
+    # if len(detectors.channel_dict) < 2:
+    #     raise ValueError(
+    #         "only coherent searches are supported:    must process data from at least two antennae"
+    #     )
 
     # Get the banks and make the detectors
 

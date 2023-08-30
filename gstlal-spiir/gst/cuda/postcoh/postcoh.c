@@ -1248,8 +1248,9 @@ static int cuda_postcoh_select_foreground(CudaPostcoh *postcoh,
              * */
             int peak_cur = peak_pos[ipeak];
             // FIXME: consider a different threshold for 3-detector
-            if (sqrt(pklist->cohsnr[peak_cur])
-                > 1.414 + pklist->snglsnr[ifo_id][peak_cur]) {
+            if (ifo_set__count(coh_ifos) == 1
+                || sqrt(pklist->cohsnr[peak_cur])
+                     > 1.414 + pklist->snglsnr[ifo_id][peak_cur]) {
                 cluster_peak_pos[final_peaks++] = peak_cur;
             } else
                 bubbled_peak_pos[bubbled_peaks++] = peak_cur;
@@ -1351,7 +1352,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
      * and cmbchisq = single chisq */
     /* only output multi-detector events, cohsnr, cmbchisq only make sense when
      * there multiple ifos are not in a gap */
-    if (ifo_set__count(coh_ifos) < 2) { return write_entries; }
+    // if (ifo_set__count(coh_ifos) < 2) { return write_entries; }
 
     for (int pivotal_ifo = 0; pivotal_ifo < nifo; pivotal_ifo++) {
         if (!ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
@@ -1564,12 +1565,12 @@ static GstFlowReturn cuda_postcoh_new_buffer_and_push(CudaPostcoh *postcoh,
     int skymap_peakcur[MAX_NIFO];
 
     /* NOTE: explicitly add one more entry to indicate the participating IFOs */
-    if (ifo_set__count(coh_ifos) >= 2) {
-        left_entries =
-          cuda_postcoh_select_foreground(postcoh, coh_ifos, skymap_peakcur) + 1;
-    } else if (ifo_set__count(coh_ifos) == 1) {
-        left_entries = 1;
-    }
+    // if (ifo_set__count(coh_ifos) >= 2) {
+    left_entries =
+      cuda_postcoh_select_foreground(postcoh, coh_ifos, skymap_peakcur) + 1;
+    // } else if (ifo_set__count(coh_ifos) == 1) {
+    //     left_entries = 1;
+    // }
 
     int out_size = sizeof(PostcohInspiralTable) * left_entries;
 
@@ -1863,9 +1864,9 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
             data    = collectlist->data;
             int enabled_ifo_id = state->enabled_ifo_ids[i];
 
-            if (ifo_set__count(coh_ifos) >= 2
-                && ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
-                                                enabled_ifo_id)) {
+            // if (ifo_set__count(coh_ifos) >= 2 &&
+            if (ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
+                                             enabled_ifo_id)) {
                 if (state->peak_list[enabled_ifo_id]->npeak[0] > 0) {
                     cohsnr_and_chisq(
                       state, ifo_set__renumber(coh_ifos, state->enabled_ifos),
@@ -1921,7 +1922,7 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
     g_mutex_unlock(&postcoh->prop_lock);
 
     CUDA_CHECK(cudaSetDevice(postcoh->device_id));
-    GstElement *element = GST_ELEMENT(postcoh);
+    // GstElement *element = GST_ELEMENT(postcoh);
     GstClockTime t_latest_start;
     GstFlowReturn res;
     guint64 offset_latest_start = 0;
@@ -1929,12 +1930,12 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
 
     GST_DEBUG_OBJECT(postcoh, "collected");
     /* Assure that we have enough sink pads. */
-    if (element->numsinkpads < 2) {
-        GST_ERROR_OBJECT(
-          postcoh, "not enough sink pads, 2 required but only %d are present",
-          element->numsinkpads < 2);
-        return GST_FLOW_ERROR;
-    }
+    // if (element->numsinkpads < 2) {
+    //     GST_ERROR_OBJECT(
+    //       postcoh, "not enough sink pads, 2 required but only %d are
+    //       present", element->numsinkpads < 2);
+    //     return GST_FLOW_ERROR;
+    // }
 
     if (!postcoh->set_starttime) {
         /* get the latest timestamp */
