@@ -296,8 +296,14 @@ int main(int argc, char *argv[]) {
     int *update_pdf = (int *)malloc(sizeof(int));
 
     parse_opts(argc, argv, pin, pfmt, pout, pifos, ptype, update_pdf);
-    int num_stats = strlen(*pifos) / IFO_LEN + 1;
-    int rc        = 0; // return value
+
+    // We only create TriggerStats for each individual IFO and their final
+    // total combination (e.g. (H1, L1, H1L1) or (H1, L1, V1, H1L1V1))
+    // Thus, the total number of combinations is the number of individual IFOs
+    // in the ifo_set + 1 (unless only one detector is used)
+    int ifos_count = strlen(*pifos) / IFO_LEN;
+    int num_stats  = ifos_count == 1 ? 1 : ifos_count + 1;
+    int rc         = 0; // return value
 
     gchar **in_fnames =
       g_strsplit(*pin, ",", -1); // split the string completely
