@@ -344,7 +344,7 @@ EOF
 
 RUN --mount=type=cache,target="/src" \
 	--mount=type=cache,target="/root/ccache" \
-	SOURCE="${IGWN_SOURCE}/metaio-8.3.0.tar.gz" build_package
+	SOURCE="${IGWN_SOURCE}/metaio-8.4.0.tar.gz" build_package
 
 RUN --mount=type=cache,target="/src" \
 	--mount=type=cache,target="/root/ccache" \
