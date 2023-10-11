@@ -127,7 +127,7 @@ cmd () {
 		${macroiirbanks} \
 		--data-source frames \
 		${channels} \
-		--gpu-acc on \
+		--gpu-acc \
 		--ht-gate-threshold 15.0 \
 		--cuda-postcoh-snglsnr-thresh 4 \
 		--cuda-postcoh-hist-trials 100 \
@@ -138,6 +138,8 @@ cmd () {
 		--check-time-stamp \
 		--feature-signal-removal-bg \
 		--feature-signal-removal-bg-threshold 8.5 \
+		--feature-best-far \
+		--feature-best-far-threshold 10000000 \
 		--finalsink-output-prefix ${macrooutprefix} \
 		--finalsink-snapshot-interval 43200 \
 		--cohfar-accumbackground-snapshot-interval 3600 \
