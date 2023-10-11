@@ -87,6 +87,31 @@ very high threshold.
 
 *Other notes*:
 
+## best-far
+
+*Name*: Best FAR
+
+*Feature flag*: `--feature-best-far`
+
+*Parameters*: (see `--help` for full details)
+ * --feature-best-far-threshold
+
+*Short description*: Improve FARs by selecting the best (lowest) FAR rather 
+than the worst (highest) FAR from the three timescales.
+
+*Relevant merge requests*: lscsoft/spiir!195
+
+*Relevant review slides*: 
+
+*Production plan*: Aim to review this during O4a. When the feature flag is 
+removed, it will become the default behaviour. It may be tuned by setting
+different background collection timescales or a different threshold.
+
+*History*:
+ * (as of 2023-09-19) currently in branch `use_best_far`
+
+*Other notes*:
+The threshold may be dependent on detector sensitivity.
 
 # SPIIR past feature flags
 
