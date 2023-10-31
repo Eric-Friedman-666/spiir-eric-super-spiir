@@ -504,6 +504,12 @@ cat <<-EOF
 	RETRY monitor_pipeline_0001 100
 EOF
 
+weight_cmbchisq=${weight_cmbchisq:=0}
+
+if ((${weight_cmbchisq} == 1)); then
+    feature_weight_cmbchisq="--feature-weight-cmbchisq"
+fi
+
 cat <<EOF >ini_vars.txt
 ifplayground=${ifplayground}
 
@@ -542,6 +548,9 @@ Configurable variables:
     MapUpdate_T=${MapUpdate_T}
     SNRmap=${SNRmap}
     psd_len=${psd_len}
+
+Features:
+    weight_cmbchisq=${weight_cmbchisq}
 
 Computed variables:
     myrundir=${myrundir}

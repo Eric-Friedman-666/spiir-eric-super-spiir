@@ -42,6 +42,7 @@ void cohsnr_and_chisq(PostcohState *state,
                       int iifo,
                       int gps_idx,
                       int output_skymap,
+                      int weight_cmbchisq,
                       cudaStream_t stream);
 
 void cohsnr_and_chisq_background(PostcohState *state,

@@ -286,6 +286,12 @@ def parse_command_line():
         "The minimum number of events for a background timescale to be considered. Enabled with --feature-best-far."
     )
     parser.add_option(
+        "--feature-weight-cmbchisq",
+        action="store_true",
+        help=
+        "Enable to weight cmbchisq by each detector's contribution to coherent snr."
+    )
+    parser.add_option(
         "--finalsink-fapupdater-collect-walltime",
         metavar="seconds,seconds,seconds",
         default=None,
@@ -815,7 +821,8 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     cohfar_assignfar_input_fname=options.cohfar_assignfar_input_fname,
     feature_signal_removal_bg=options.feature_signal_removal_bg,
     feature_signal_removal_bg_threshold=options.
-    feature_signal_removal_bg_threshold
+    feature_signal_removal_bg_threshold,
+    feature_weight_cmbchisq=options.feature_weight_cmbchisq
     # or "%s-%s_Postcoh-%d-%d.xml.gz" % (lsctables.ifos_from_instrument_set(detectors.channel_dict.keys()).replace(",", ""), options.job_tag, int(detectors.seg[0]), int(abs(detectors.seg))),
 )
 # get the negative_latency value from the first bank of the first detector

@@ -388,32 +388,33 @@ __global__ void ker_coh_max_and_chisq_versatile(
   float dt, /* INPUT, 1/ sampling rate */
   int ntmplt, /* INPUT, number of templates */
   int autochisq_len, /* INPUT, auto-chisq length */
-  COMPLEX_F *restrict *restrict
-    autocorr_matrix, /* INPUT, autocorrelation matrix for all templates */
+  COMPLEX_F *restrict *restrict autocorr_matrix, /* INPUT, autocorrelation
+                                                    matrix for all templates */
   float *restrict *restrict autocorr_norm, /* INPUT, autocorrelation
                             normalization matrix for all templates */
   int hist_trials, /* INPUT, trial number */
   int trial_sample_inv, /* INPUT, trial interval in samples */
   int *restrict pix_idx, /* OUTPUT, sky direction index */
   int *restrict pix_idx_bg, /* OUTPUT, sky direction index for the background */
-  float *restrict
-    cohsnr, /* OUTPUT, the coherent SNR for combination of detectors */
-  float *restrict
-    nullsnr, /* OUTPUT, the nullsnr for the combination of detectors */
+  float *restrict cohsnr, /* OUTPUT, the coherent SNR for combination of
+                             detectors */
+  float *restrict nullsnr, /* OUTPUT, the nullsnr for the combination of
+                              detectors */
   float *restrict
     cmbchisq, /* OUTPUT, the chisq for the combination of detectors */
   float *restrict
     cohsnr_bg, /* OUTPUT, the coherent SNR for the background noise */
   float *restrict nullsnr_bg, /* OUTPUT, the nullsnr for the background noise */
-  float *restrict
-    cmbchisq_bg, /* OUTPUT, the combined chisq for the background noise */
+  float *restrict cmbchisq_bg, /* OUTPUT, the combined chisq for the background
+                                  noise */
   float *restrict *restrict coaphase,
   float *restrict *restrict coaphase_bg,
   int *restrict *restrict ntoff,
   float *restrict *restrict chisq,
   float *restrict *restrict chisq_bg,
   int *restrict len_idx,
-  int *restrict tmplt_idx) {
+  int *restrict tmplt_idx,
+  int should_weight_cmbchisq) {
     int bid = blockIdx.x;
     int bn  = gridDim.x;
 
@@ -616,6 +617,16 @@ __global__ void ker_coh_max_and_chisq_versatile(
                     chisq_cur = laneChi2 / autocorr_norm[j][tmplt_cur];
                     // the location of chisq_* is indexed from maxsnglsnr
                     chisq[write_ifo_mapping[j]][peak_cur] = chisq_cur;
+
+                    if (should_weight_cmbchisq) {
+                        chisq_cur = chisq_cur
+                                    * snglsnr[write_ifo_mapping[j]][peak_cur]
+                                    * snglsnr[write_ifo_mapping[j]][peak_cur]
+                                    / cohsnr[peak_cur];
+                    } else {
+                        chisq_cur /= num_coh_ifos;
+                    }
+
                     cmbchisq[peak_cur] +=
                       bitset_contains(coh_ifo_bitset, j) * chisq_cur;
                     // printf("peak %d, itrial %d, cohsnr %f, nullstream %f,
@@ -806,6 +817,16 @@ __global__ void ker_coh_max_and_chisq_versatile(
                     chisq_cur = laneChi2 / autocorr_norm[j][tmplt_cur];
                     // set d_chisq_bg_* from snglsnr_bg
                     chisq_bg[write_ifo_mapping[j]][output_offset] = chisq_cur;
+
+                    if (should_weight_cmbchisq) {
+                        chisq_cur = chisq_cur
+                                    * snglsnr[write_ifo_mapping[j]][peak_cur]
+                                    * snglsnr[write_ifo_mapping[j]][peak_cur]
+                                    / cohsnr[peak_cur];
+                    } else {
+                        chisq_cur /= num_coh_ifos;
+                    }
+
                     cmbchisq_bg[output_offset] += chisq_cur;
                 }
 
@@ -914,6 +935,7 @@ void cohsnr_and_chisq(PostcohState *state,
                       int iifo,
                       int gps_idx,
                       int output_skymap,
+                      int weight_cmbchisq,
                       cudaStream_t stream) {
     int threads = 256;
     int sharedsize =
@@ -933,7 +955,8 @@ void cohsnr_and_chisq(PostcohState *state,
       pklist->d_nullsnr, pklist->d_cmbchisq, pklist->d_cohsnr_bg,
       pklist->d_nullsnr_bg, pklist->d_cmbchisq_bg, pklist->d_coaphase,
       pklist->d_coaphase_bg, pklist->d_ntoff, pklist->d_chisq,
-      pklist->d_chisq_bg, pklist->d_len_idx, pklist->d_tmplt_idx);
+      pklist->d_chisq_bg, pklist->d_len_idx, pklist->d_tmplt_idx,
+      weight_cmbchisq);
 
     CUDA_CHECK(cudaStreamSynchronize(stream));
     CUDA_CHECK(cudaPeekAtLastError());

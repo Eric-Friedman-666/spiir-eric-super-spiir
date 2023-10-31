@@ -140,6 +140,7 @@ cmd () {
 		--feature-signal-removal-bg-threshold 8.5 \
 		--feature-best-far \
 		--feature-best-far-threshold 10000000 \
+		--feature-weight_cmbchisq \
 		--finalsink-output-prefix ${macrooutprefix} \
 		--finalsink-snapshot-interval 43200 \
 		--cohfar-accumbackground-snapshot-interval 3600 \
