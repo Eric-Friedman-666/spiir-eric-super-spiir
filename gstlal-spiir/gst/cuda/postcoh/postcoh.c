@@ -2130,6 +2130,13 @@ static void cuda_postcoh_class_init(CudaPostcohClass *klass) {
         "Signal removal from backgrounds threshold",
         "Newsnr threshold to remove single IFO signals from backgrounds.", 0.0,
         G_MAXFLOAT, 8.5, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_WEIGHT_CMBCHISQ,
+      g_param_spec_boolean(
+        "feature-weight-cmbchisq", "Weight cmbchisq by snr.",
+        "Enable to weight cmbchisq based on single detector snr.", FALSE,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static void cuda_postcoh_init(CudaPostcoh *postcoh, CudaPostcohClass *klass) {
