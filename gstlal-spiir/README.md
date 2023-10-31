@@ -93,6 +93,7 @@ gstlal_postcohspiir_inspiral_online
         --feature-signal-removal-bg-threshold 8.5
         --feature-best-far
         --feature-best-far-threshold 10000000
+        --feature-weight-cmbchisq
         --finalsink-fapupdater-collect-walltime 604800,86400,7200
         --finalsink-fapupdater-update-interval 1800
         --finalsink-output-prefix lzerolag 
@@ -141,6 +142,7 @@ gstlal_postcohspiir_inspiral_online
  - `feature-signal-removal-bg-threshold`: The newsnr threshold on single detectors to classify signals for removal from backgroud.
  - `feature-best-far`: Enable the feature 'best-far' to select the best, rather than worst, far from the three timescales.
  - `feature-best-far-threshold`: The minimum number of events for a background timescale to be considered. Enabled with --feature-best-far.
+ - `feature-weight-cmbchisq`: Enable to weight cmbchisq by each detector's contribution to coherent snr.
  - `finalsink-output-prefix`: the prefix for the zerolag output files.
  - `finalsink-fapupdater-collect-walltime`: How long we collect backgrounds for FAR estimations. Usually three scales spanning 1week, 1day, or 2hours. 
  - `finalsink-fapupdater-update-interval`: A FAR mapping is derived from the collected background for each of different scales set above.

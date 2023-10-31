@@ -287,6 +287,8 @@ struct _CudaPostcoh {
     gboolean enable_signal_removal_bg;
     float signal_removal_bg_threshold;
 
+    gboolean enable_weight_cmbchisq;
+
     /* sink event handling */
     GstPadEventFunction collect_event;
 

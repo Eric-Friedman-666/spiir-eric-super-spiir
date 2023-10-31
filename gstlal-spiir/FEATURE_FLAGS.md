@@ -113,6 +113,32 @@ different background collection timescales or a different threshold.
 *Other notes*:
 The threshold may be dependent on detector sensitivity.
 
+## weight-cmbchisq
+
+*Name*: Weight combined chisq
+
+*Feature flag*: `--feature-weight-cmbchisq`
+
+*Parameters*: (see `--help` for full details)
+ * None
+
+*Short description*: Weight the combined chisq by summing each detector's
+reduced chisq, weighted by its contribution to coherent snr.
+e.g. `cmbchisq = (snr_H1^2 * chisq_H1 + snr_L1^2 * chisq_L1) / coherent_snr`
+
+*Relevant merge requests*: lscsoft/spiir!200
+
+*Relevant review slides*: 
+
+*Production plan*: Aim to review this during O4a. The new method is still being
+considered. If correct, once reviewed, the feature flag may be removed and the
+feature will be enabled permanently.
+
+*History*:
+ * (as of 2023-10-30) Currently in branch `tdavies__weight_cmbchisq`
+
+*Other notes*: 
+
 # SPIIR past feature flags
 
 None so far.

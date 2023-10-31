@@ -185,7 +185,8 @@ cat <<-EOF >gstlal_inspiral_postcohspiir_${user}.sub
 		--code-version ${version_spiir} \\
 		--finalsink-singlefar-veto-thresh ${FAR_single_thres} \\
 		--fir-whitener ${newwhiten} \\
-		${maybe_args}"
+		${maybe_args} \\
+		${feature_weight_cmbchisq}"
 	want_graceful_removal = True
 	+General_Use_AMD = True
 	request_cpus = Target.Cpus

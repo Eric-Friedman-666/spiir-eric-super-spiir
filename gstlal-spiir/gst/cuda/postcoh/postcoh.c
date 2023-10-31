@@ -166,7 +166,8 @@ enum {
     PROP_REFRESH_INTERVAL,
     PROP_REFRESH_OFFSET,
     PROP_SIGNAL_REMOVAL_BG,
-    PROP_SIGNAL_REMOVAL_BG_THRESHOLD
+    PROP_SIGNAL_REMOVAL_BG_THRESHOLD,
+    PROP_WEIGHT_CMBCHISQ
 };
 
 static void cuda_postcoh_device_set_init(CudaPostcoh *element) {
@@ -289,6 +290,10 @@ static void cuda_postcoh_set_property(GObject *object,
         element->signal_removal_bg_threshold = g_value_get_float(value);
         break;
 
+    case PROP_WEIGHT_CMBCHISQ:
+        element->enable_weight_cmbchisq = g_value_get_boolean(value);
+        break;
+
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
     }
     GST_OBJECT_UNLOCK(element);
@@ -348,6 +353,10 @@ static void cuda_postcoh_get_property(GObject *object,
 
     case PROP_SIGNAL_REMOVAL_BG_THRESHOLD:
         g_value_set_float(value, element->signal_removal_bg_threshold);
+        break;
+
+    case PROP_WEIGHT_CMBCHISQ:
+        g_value_set_boolean(value, element->enable_weight_cmbchisq);
         break;
 
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
@@ -1415,8 +1424,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
               sqrt(pklist->cohsnr[peak_cur]); /* the returned snr from cuda
                                                  kernel is snr^2 */
             output->nullsnr  = sqrt(pklist->nullsnr[peak_cur]);
-            output->cmbchisq =
-              pklist->cmbchisq[peak_cur] / ifo_set__count(coh_ifos);
+            output->cmbchisq      = pklist->cmbchisq[peak_cur];
             output->spearman_pval = 0;
             output->fap           = 0;
             output->far           = 0;
@@ -1519,8 +1527,7 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
                     // peak_cur];
                     output->cohsnr  = sqrt(pklist->cohsnr_bg[peak_cur_bg]);
                     output->nullsnr = sqrt(pklist->nullsnr_bg[peak_cur_bg]);
-                    output->cmbchisq = pklist->cmbchisq_bg[peak_cur_bg]
-                                       / ifo_set__count(coh_ifos);
+                    output->cmbchisq = pklist->cmbchisq_bg[peak_cur_bg];
                     output->spearman_pval   = 0;
                     output->fap             = 0;
                     output->far             = 0;
@@ -1873,7 +1880,7 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
                       postcoh->output_skymap
                         && state->snglsnr_max[enabled_ifo_id]
                              > postcoh->output_skymap,
-                      postcoh->stream);
+                      postcoh->enable_weight_cmbchisq, postcoh->stream);
                     GST_LOG("after coherent analysis for ifo %d, npeak %d",
                             enabled_ifo_id,
                             state->peak_list[enabled_ifo_id]->npeak[0]);
