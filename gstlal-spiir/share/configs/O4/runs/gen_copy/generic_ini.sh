@@ -504,6 +504,12 @@ cat <<-EOF
 	RETRY monitor_pipeline_0001 100
 EOF
 
+rescale_chisq_dof=${rescale_chisq_dof:=0}
+
+if ((${rescale_chisq_dof} == 1)); then
+    feature_rescale_chisq_dof="--feature-rescale-chisq-dof"
+fi
+
 weight_cmbchisq=${weight_cmbchisq:=0}
 
 if ((${weight_cmbchisq} == 1)); then
@@ -550,6 +556,7 @@ Configurable variables:
     psd_len=${psd_len}
 
 Features:
+    rescale_chisq_dof=${rescale_chisq_dof}
     weight_cmbchisq=${weight_cmbchisq}
 
 Computed variables:

@@ -113,6 +113,32 @@ different background collection timescales or a different threshold.
 *Other notes*:
 The threshold may be dependent on detector sensitivity.
 
+## rescale-chisq-dof
+
+*Name*: Rescale Chisq Degrees Of Freedom
+
+*Feature flag*: `--feature-rescale-chisq-dof`
+
+*Parameters*: (see `--help` for full details)
+ * None
+
+*Short description*: Improve reduced chisq calculation by rescaling the chisq 
+degrees of freedom. Without this feature, chisq dof may be overestimated.
+
+*Relevant merge requests*: lscsoft/spiir!205
+
+*Relevant review slides*: 
+
+*Production plan*: Aim to review this during O4a. The new method is still being
+considered. If correct, once reviewed, the feature flag may be removed and the
+feature will be enabled permanently.
+
+*History*:
+ * (as of 2023-10-30) currently in branch `rescale_chisq_dof`
+
+*Other notes*: 
+
+
 ## weight-cmbchisq
 
 *Name*: Weight combined chisq

@@ -2,6 +2,10 @@
 extern "C" {
 #endif
 
+// Standard and third party includes
+#include <stdbool.h>
+
+// Our includes
 #include <postcoh/postcoh.h>
 
 #ifdef __cplusplus
@@ -23,6 +27,7 @@ void cuda_postcoh_map_from_xml(char *fname,
 
 void cuda_postcoh_autocorr_from_xml(char *fname,
                                     PostcohState *state,
+                                    bool rescale_chisq_dof,
                                     cudaStream_t stream);
 
 void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state);
