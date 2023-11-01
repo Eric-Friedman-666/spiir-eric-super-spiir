@@ -132,19 +132,22 @@ def mkcudapostcoh(pipeline,
                   trial_interval=0.1,
                   feature_signal_removal_bg=False,
                   feature_signal_removal_bg_threshold=8.5,
+                  feature_rescale_chisq_dof=False,
                   feature_weight_cmbchisq=False,
                   stream_id=0):
     properties = dict((name, value) for name, value in zip((
-        "detrsp-fname", "autocorrelation-fname", "sngl-tmplt-fname",
-        "hist-trials", "snglsnr-thresh", "cohsnr_thresh", "output-skymap",
-        "detrsp-refresh-interval", "detrsp-refresh-offset", "trial-interval",
-        "feature-signal-removal-bg", "feature-signal-removal-bg-threshold",
-        "feature-weight-cmbchisq", "stream-id"), (
-            detrsp_fname, autocorrelation_fname, sngl_tmplt_fname,
-            hist_trials, snglsnr_thresh, cohsnr_thresh, output_skymap,
-            detrsp_refresh_interval, detrsp_refresh_offset, trial_interval,
-            feature_signal_removal_bg, feature_signal_removal_bg_threshold,
-            feature_weight_cmbchisq, stream_id)))
+        "feature-rescale-chisq-dof", "detrsp-fname", "autocorrelation-fname",
+        "sngl-tmplt-fname", "hist-trials", "snglsnr-thresh", "cohsnr_thresh",
+        "output-skymap", "detrsp-refresh-interval", "detrsp-refresh-offset",
+        "trial-interval", "feature-signal-removal-bg",
+        "feature-signal-removal-bg-threshold", "feature-weight-cmbchisq",
+        "stream-id"), (feature_rescale_chisq_dof, detrsp_fname,
+                       autocorrelation_fname, sngl_tmplt_fname, hist_trials,
+                       snglsnr_thresh, cohsnr_thresh, output_skymap,
+                       detrsp_refresh_interval, detrsp_refresh_offset,
+                       trial_interval, feature_signal_removal_bg,
+                       feature_signal_removal_bg_threshold,
+                       feature_weight_cmbchisq, stream_id)))
     if "name" in properties:
         elem = gst.element_factory_make("cuda_postcoh", properties.pop("name"))
     else:

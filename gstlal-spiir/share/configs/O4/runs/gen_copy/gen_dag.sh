@@ -186,6 +186,7 @@ cat <<-EOF >gstlal_inspiral_postcohspiir_${user}.sub
 		--finalsink-singlefar-veto-thresh ${FAR_single_thres} \\
 		--fir-whitener ${newwhiten} \\
 		${maybe_args} \\
+		${feature_rescale_chisq_dof} \\
 		${feature_weight_cmbchisq}"
 	want_graceful_removal = True
 	+General_Use_AMD = True

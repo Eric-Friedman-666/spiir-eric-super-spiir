@@ -17,7 +17,7 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#include <IFOMap.h>
+// Standard and third party includes
 #include <LIGOLwHeader.h>
 #include <chealpix.h>
 #include <cuda_debug.h>
@@ -31,6 +31,8 @@
 #include <gst/gst.h>
 #pragma GCC diagnostic pop
 
+// Our includes
+#include <IFOMap.h>
 #include <pipe_macro.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
@@ -612,6 +614,7 @@ void cuda_postcoh_map_from_xml(char *fname,
 
 void cuda_postcoh_autocorr_from_xml(char *fname,
                                     PostcohState *state,
+                                    bool rescale_chisq_dof,
                                     cudaStream_t stream) {
 #ifdef __DEBUG__
     printf("read in autocorr from xml %s\n", fname);
@@ -693,7 +696,11 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
                   (float)((double *)(array_autocorr[1].data))[k * ntmplt + j];
                 tmp_autocorr[j * autochisq_len + k].re = tmp_re;
                 tmp_autocorr[j * autochisq_len + k].im = tmp_im;
-                tmp_norm[j] += 2 - (tmp_re * tmp_re + tmp_im * tmp_im);
+                if (rescale_chisq_dof) {
+                    tmp_norm[j] += 2 - 2 * (tmp_re * tmp_re + tmp_im * tmp_im);
+                } else {
+                    tmp_norm[j] += 2 - (tmp_re * tmp_re + tmp_im * tmp_im);
+                }
             }
 #ifdef __DEBUG__
             printf("ifo ind %d, norm %d: %f\n", ifo_ind, j, tmp_norm[j]);

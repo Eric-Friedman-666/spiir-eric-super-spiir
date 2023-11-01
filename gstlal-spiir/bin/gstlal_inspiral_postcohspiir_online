@@ -271,6 +271,9 @@ def parse_command_line():
         help=
         "Single detector newsnr threshold at which a background event will be removed. Enabled with --feature-signal-removal-bg."
     )
+    parser.add_option("--feature-rescale-chisq-dof",
+                      action="store_true",
+                      help="Enable to rescale the chisq degrees of freedom.")
     parser.add_option(
         "--feature-best-far",
         action="store_true",
@@ -822,6 +825,7 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     feature_signal_removal_bg=options.feature_signal_removal_bg,
     feature_signal_removal_bg_threshold=options.
     feature_signal_removal_bg_threshold,
+    feature_rescale_chisq_dof=options.feature_rescale_chisq_dof,
     feature_weight_cmbchisq=options.feature_weight_cmbchisq
     # or "%s-%s_Postcoh-%d-%d.xml.gz" % (lsctables.ifos_from_instrument_set(detectors.channel_dict.keys()).replace(",", ""), options.job_tag, int(detectors.seg[0]), int(abs(detectors.seg))),
 )

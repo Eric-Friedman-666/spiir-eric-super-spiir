@@ -704,6 +704,7 @@ def mkPostcohSPIIROnline(pipeline,
                          cohfar_assignfar_input_fname=None,
                          feature_signal_removal_bg=False,
                          feature_signal_removal_bg_threshold=8.5,
+                         feature_rescale_chisq_dof=False,
                          feature_weight_cmbchisq=False):
     #
     # check for recognized value of chisq_type
@@ -885,6 +886,7 @@ def mkPostcohSPIIROnline(pipeline,
                     feature_signal_removal_bg=feature_signal_removal_bg,
                     feature_signal_removal_bg_threshold=
                     feature_signal_removal_bg_threshold,
+                    feature_rescale_chisq_dof=feature_rescale_chisq_dof,
                     feature_weight_cmbchisq=feature_weight_cmbchisq,
                     stream_id=bankid)
             else:

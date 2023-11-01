@@ -167,6 +167,7 @@ enum {
     PROP_REFRESH_OFFSET,
     PROP_SIGNAL_REMOVAL_BG,
     PROP_SIGNAL_REMOVAL_BG_THRESHOLD,
+    PROP_RESCALE_CHISQ_DOF,
     PROP_WEIGHT_CMBCHISQ
 };
 
@@ -218,8 +219,9 @@ static void cuda_postcoh_set_property(GObject *object,
         cuda_postcoh_device_set_init(element);
         CUDA_CHECK(cudaSetDevice(element->device_id));
         element->spiir_bank_fname = g_value_dup_string(value);
-        cuda_postcoh_autocorr_from_xml(element->spiir_bank_fname,
-                                       element->state, element->stream);
+        cuda_postcoh_autocorr_from_xml(
+          element->spiir_bank_fname, element->state,
+          element->enable_rescale_chisq_dof, element->stream);
         cuda_postcoh_sigmasq_from_xml(element->spiir_bank_fname,
                                       element->state);
         GST_DEBUG("autocorrelation and sigma have been read in, broad cast the "
@@ -290,6 +292,10 @@ static void cuda_postcoh_set_property(GObject *object,
         element->signal_removal_bg_threshold = g_value_get_float(value);
         break;
 
+    case PROP_RESCALE_CHISQ_DOF:
+        element->enable_rescale_chisq_dof = g_value_get_boolean(value);
+        break;
+
     case PROP_WEIGHT_CMBCHISQ:
         element->enable_weight_cmbchisq = g_value_get_boolean(value);
         break;
@@ -353,6 +359,10 @@ static void cuda_postcoh_get_property(GObject *object,
 
     case PROP_SIGNAL_REMOVAL_BG_THRESHOLD:
         g_value_set_float(value, element->signal_removal_bg_threshold);
+        break;
+
+    case PROP_RESCALE_CHISQ_DOF:
+        g_value_set_boolean(value, element->enable_rescale_chisq_dof);
         break;
 
     case PROP_WEIGHT_CMBCHISQ:
@@ -2130,6 +2140,13 @@ static void cuda_postcoh_class_init(CudaPostcohClass *klass) {
         "Signal removal from backgrounds threshold",
         "Newsnr threshold to remove single IFO signals from backgrounds.", 0.0,
         G_MAXFLOAT, 8.5, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_RESCALE_CHISQ_DOF,
+      g_param_spec_boolean("feature-rescale-chisq-dof",
+                           "Rescale Chisq Degrees of Freedom.",
+                           "Enable to rescale the chisq degrees of freedom.",
+                           FALSE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
       gobject_class, PROP_WEIGHT_CMBCHISQ,
