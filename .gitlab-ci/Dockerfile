@@ -569,6 +569,7 @@ EOF
 
 ARG LIGO_GIT=https://git.ligo.org/lscsoft
 
+COPY .gitlab-ci/patches/LALInspiralIIR.patch /repo/.gitlab-ci/patches/LALInspiralIIR.patch
 RUN --mount=type=cache,target="/src" \
 	--mount=type=cache,target="/root/ccache" \
 	<<EOF
@@ -579,6 +580,7 @@ RUN --mount=type=cache,target="/src" \
 	CFLAGS="-Wno-error ${CFLAGS}"
 	CXXFLAGS="-Wno-error ${CXXFLAGS}"
 	PRE_CONFIGURE="./00boot"
+	PRE_BUILD="git apply /repo/.gitlab-ci/patches/LALInspiralIIR.patch"
 	CONFIGURE_FLAGS="--enable-swig-python"
 	build_package
 EOF
