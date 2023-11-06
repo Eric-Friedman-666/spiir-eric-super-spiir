@@ -140,6 +140,7 @@ cmd () {
 		--feature-signal-removal-bg-threshold 8.5 \
 		--feature-best-far \
 		--feature-best-far-threshold 10000000 \
+		--feature-cluster-available-triggers \
 		--feature-rescale-chisq-dof \
 		--feature-weight-cmbchisq \
 		--finalsink-output-prefix ${macrooutprefix} \

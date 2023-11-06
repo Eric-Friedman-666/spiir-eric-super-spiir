@@ -112,6 +112,31 @@ different background collection timescales or a different threshold.
 
 *Other notes*:
 The threshold may be dependent on detector sensitivity.
+## cluster-available-triggers
+
+*Name*: Cluster available triggers
+
+*Feature flag*: `--feature-cluster-available-triggers`
+
+*Parameters*: (see `--help` for full details)
+ * None
+
+*Short description*: Enable to cluster upload candidates only in the second 
+they are received, saving at least a second of latency.
+Without this flag, SPIIR will wait to receive an additional second of data,
+and will only upload a trigger if it finds no better trigger in that data.
+
+*Relevant merge requests*: https://git.ligo.org/lscsoft/spiir/-/merge_requests/172
+
+*Relevant review slides*:
+
+*Production plan*: Aim to review this during O4a. When the feature flag is 
+removed, it will be on all the time.
+
+*History*:
+ * (as of 2023-10-09) currently in branch `tdavies__cluster_best_each_second`
+
+*Other notes*:
 
 ## rescale-chisq-dof
 

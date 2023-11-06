@@ -504,6 +504,12 @@ cat <<-EOF
 	RETRY monitor_pipeline_0001 100
 EOF
 
+cluster_available_triggers=${cluster_available_triggers:=0}
+
+if ((${cluster_available_triggers} == 1)); then
+    feature_cluster_available_triggers="--feature-cluster-available-triggers"
+fi
+
 rescale_chisq_dof=${rescale_chisq_dof:=0}
 
 if ((${rescale_chisq_dof} == 1)); then
@@ -556,6 +562,7 @@ Configurable variables:
     psd_len=${psd_len}
 
 Features:
+    cluster_available_triggers=${cluster_available_triggers}
     rescale_chisq_dof=${rescale_chisq_dof}
     weight_cmbchisq=${weight_cmbchisq}
 
