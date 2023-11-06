@@ -1,0 +1,20 @@
+diff --git a/lalinspiral/src/LALInspiralIIR.c b/lalinspiral/src/LALInspiralIIR.c
+index 954385644a..0852803a8a 100644
+--- a/lalinspiral/src/LALInspiralIIR.c
++++ b/lalinspiral/src/LALInspiralIIR.c
+@@ -65,8 +65,13 @@ int XLALInspiralGenerateIIRSet(REAL8Vector *amp, REAL8Vector *phase, double epsi
+ 		phase_ddot = fabs(phase_ddot);
+ 		phase_tdot = fabs(phase_tdot);
+ 
+-		if (phase_ddot < 0 || phase_ddot > 8*epsilon){
+-				j = j - 1;
++		if (phase_ddot < 1e-8 || phase_ddot > 8 * epsilon){
++			j = j - 1;
++			continue;
++		}
++  
++		if (phase_tdot < 1e-8){
++			j = j - 1;
+ 			continue;
+ 		}
+ 
