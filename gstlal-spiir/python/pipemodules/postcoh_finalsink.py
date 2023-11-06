@@ -517,6 +517,7 @@ class FinalSink(object):
                  expected_buffers_per_timestamp=None,
                  feature_best_far=False,
                  feature_best_far_threshold=0,
+                 feature_cluster_available_triggers=False,
                  verbose=False):
         #
         # initialize
@@ -627,6 +628,9 @@ class FinalSink(object):
         self.enable_feature_best_far = feature_best_far
         self.best_far_threshold = feature_best_far_threshold
 
+        # cluster available triggers
+        self.feature_cluster_available_triggers = feature_cluster_available_triggers
+
     def __is_significant_trigger(self, postcoh_inspiral):
         if not self.gracedb_far_threshold:
             return False
@@ -729,7 +733,8 @@ class FinalSink(object):
             self.onperformer.update_eye_candy(postcoh_inspiral)
 
     # This is named verbosely pending a refactor
-    # It should return a list of significant triggers to be processed instead of setting self.candidate
+    # It should return a list of significant triggers to be processed
+    # in another function
     def cluster_and_process_significant_triggers(self, buf_timestamp, duration,
                                                  newevents):
         # Keep track of the latest timestamp seen on any buffer and number
@@ -765,15 +770,20 @@ class FinalSink(object):
         # NOTE: only consider clustered trigger for uploading to gracedb
         # check if the newevents is over boundary
         # this loop will exit when the cluster_boundary is incremented
-        # to be > the max_cluster_boundary, see diagram in self.cluster()
+        # to be > the max_cluster_boundary
 
         while ((self.cluster_window > 0) and (self.cluster_boundary)
-               and (max_cluster_boundary > self.cluster_boundary)):
+               and (max_cluster_boundary >= self.cluster_boundary)):
             if self.try_get_cluster_candidate():
                 self.__set_far(self.candidate.postcoh_inspiral)
                 self.postcoh_table.append(self.candidate.postcoh_inspiral)
                 self.record_candidate()
                 self.candidate = None
+            if self.feature_cluster_available_triggers:
+                iterutils.inplace_filter(
+                    lambda row: row.postcoh_inspiral.end > self.
+                    cluster_boundary, self.cur_event_table)
+                self.cluster_boundary = self.cluster_boundary + self.cluster_window
 
         # extend newevents to cur_event_table
         # Has to be done after processing pre-existing events, because this
@@ -820,17 +830,7 @@ class FinalSink(object):
         self.last_buffer_timestamp = timestamp
 
     def try_get_cluster_candidate(self):
-        # send candidate to be gracedb checked only when:
-        # timestamp small ->->->-> large
-        #                 |max_cluster_boundary
-        #      ___________(cur_table)
-        #          |boundary
-        #       |candidate to check = end time of cur_table peak < boundary
-        #            |candidate remain = end time of cur_table peak > boundary
-        # afterwards:
-        #                     |max_cluster_boundary
-        #                 ____(cur_table cleaned)
-        #                           |boundary incremented
+        # Select the best trigger with end time up to the cluster boundary
 
         # Compare cohsnr for statistical significance, with tie-breaks. See #45
         def is_better_event(lhs, rhs):
@@ -853,34 +853,39 @@ class FinalSink(object):
                     row.postcoh_inspiral, peak_event.postcoh_inspiral):
                 peak_event = row
 
-        # cur_table is empty and we do have a candidate,
-        # so need to check the candidate
-        if peak_event is None:
-            # no event within boundary, candidate is the peak, update boundary
-            self.cluster_boundary = self.cluster_boundary + self.cluster_window
-            return self.candidate is not None
-
-        if self.candidate is None or is_better_event(
-                peak_event.postcoh_inspiral, self.candidate.postcoh_inspiral):
-            # slide window so the centre becomes the peak_event
+        if self.feature_cluster_available_triggers:
             self.candidate = peak_event
-            iterutils.inplace_filter(
-                lambda row: row.postcoh_inspiral.end > self.cluster_boundary,
-                self.cur_event_table)
-            # update boundary
-            # NOTE: cluster boundary does not necessarily align with
-            #   buffer boundary
-            self.cluster_boundary = self.candidate.postcoh_inspiral.end + self.cluster_window
-            return False
+            return self.candidate is not None
         else:
-            # FIXME: This seems to assume buffer length >= cluster_window
-            # pop out candidate for gracedb uploading
-            iterutils.inplace_filter(
-                lambda row: row.postcoh_inspiral.end > self.cluster_boundary,
-                self.cur_event_table)
-            # update boundary
-            self.cluster_boundary = self.cluster_boundary + self.cluster_window
-            return True
+            # cur_table is empty and we do have a candidate,
+            # so need to check the candidate
+            if peak_event is None:
+                # no event within boundary, candidate is the peak, update boundary
+                self.cluster_boundary = self.cluster_boundary + self.cluster_window
+                return self.candidate is not None
+
+            if self.candidate is None or is_better_event(
+                    peak_event.postcoh_inspiral,
+                    self.candidate.postcoh_inspiral):
+                # slide window so the centre becomes the peak_event
+                self.candidate = peak_event
+                iterutils.inplace_filter(
+                    lambda row: row.postcoh_inspiral.end > self.
+                    cluster_boundary, self.cur_event_table)
+                # update boundary
+                # NOTE: cluster boundary does not necessarily align with
+                #   buffer boundary
+                self.cluster_boundary = self.candidate.postcoh_inspiral.end + self.cluster_window
+                return False
+            else:
+                # FIXME: This seems to assume buffer length >= cluster_window
+                # pop out candidate for gracedb uploading
+                iterutils.inplace_filter(
+                    lambda row: row.postcoh_inspiral.end > self.
+                    cluster_boundary, self.cur_event_table)
+                # update boundary
+                self.cluster_boundary = self.cluster_boundary + self.cluster_window
+                return True
 
     def __filter_zero_fars(self, fars):
         filtered_fars = []
