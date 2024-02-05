@@ -228,7 +228,7 @@ class FAPUpdater(object):
         self.output = []
         if output_list_string is not None:
             self.output = output_list_string.split(",")
-        self.rm_fnames = []
+        self.files_being_combined = []
 
         self.last_calfap_time = None
         self.last_combine_stats_time = None
@@ -260,45 +260,81 @@ class FAPUpdater(object):
 
         self.verbose = verbose
 
-    def await_process(self, process):
+    def _await_process(self, process):
         if process is not None and process.poll() is None:
             (stdoutdata, stderrdata) = process.communicate()
             if process.returncode != 0:
                 print >> sys.stderr, "last process return code", \
                     process.returncode, stderrdata
 
-    def await_and_clear_processes(self, processes):
-        if len(processes) > 0:
-            for process in processes:
-                self.await_process(process)
-        del processes[:]
-
-    def get_running_processes(self, processes):
+    def _get_running_processes(self, processes):
         return [
             process for process in processes
             if process is not None and process.poll() is None
         ]
 
-    def get_available_filenames(self, keyword):
-        # both calcfap and combine_stats need to access latest cleaned
-        # stats files
-        # make sure need-to-remove files have been removed
-        self.combine_stats_processes = self.get_running_processes(
-            self.combine_stats_processes)
-        if len(self.combine_stats_processes) > 0:
-            return None
+    def _is_combine_stats_running(self):
+        return len(self._get_running_processes(
+            self.combine_stats_processes)) > 0
 
-        # remove files that have been combined from last process
+    def _is_calcfap_running(self):
+        return len(self._get_running_processes(self.calcfap_processes)) > 0
+
+    def _clear_completed_processes(self):
+        self.combine_stats_processes = self._get_running_processes(
+            self.combine_stats_processes)
+
+        # The calcfap processes list must maintain its size & order.
+        for i, process in enumerate(self.calcfap_processes):
+            if process is not None and process.poll() is None:
+                continue
+            self.calcfap_processes[i] = None
+
+    def await_processes(self):
+        '''Awaits any ongoing subprocesses belonging to FAPUpdater.'''
+        if self._is_calcfap_running():
+            for process in self.calcfap_processes:
+                self._await_process(process)
+
+        if self._is_combine_stats_running():
+            for process in self.combine_stats_processes:
+                self._await_process(process)
+
+        self._clear_completed_processes()
+
+    def _try_cleanup_combined_files(self):
+        """Removes files that have finished being combined.
+
+        Returns True on success.
+        
+        Returns False if an error occurs or if they have 
+        not finished combining."""
+        if self._is_combine_stats_running():
+            return False
+
         try:
-            map(lambda x: os.remove(x), self.rm_fnames)
-            self.rm_fnames = []
+            map(lambda x: os.remove(x), self.files_being_combined)
+            self.files_being_combined = []
+            return True
         except:
-            print >> sys.stderr, "remove files failed, rm_fnames %s" \
-                % ', '.join(self.rm_fnames)
+            print >> sys.stderr, "Failed to remove the following files: %s" \
+                % ', '.join(self.files_being_combined)
+            return False
+
+    def _get_bankstats_filepaths(self):
+        """Find the list of available files containing 'bank'.
+
+        Returns None if files are currently being combined, or if an error occurs.
+        Otherwise returns the list of files, which may be empty."""
+        # Both calcfap and combine_stats require the latest combined stats files
+        if not self._try_cleanup_combined_files():
             return None
 
         ls_fnames = sorted(os.listdir(str(self.path)))
-        grep_fnames = [fname for fname in ls_fnames if keyword in fname]
+        bankstats_keyword = 'bank'
+        grep_fnames = [
+            fname for fname in ls_fnames if bankstats_keyword in fname
+        ]
         # remove file names that contain "next" which are temporary files
         valid_fnames = [
             one_fname for one_fname in grep_fnames
@@ -306,7 +342,7 @@ class FAPUpdater(object):
         ]
         return valid_fnames
 
-    def get_valid_bankstats(self, ls_fnames, boundary):
+    def _filter_bankstats(self, ls_fnames, lower_bound_timestamp):
         valid_fnames = []
         for ifname in ls_fnames:
             ifname_split = ifname.split("_")
@@ -314,36 +350,25 @@ class FAPUpdater(object):
             #   e.g. bank16_stats_1187008882_1800.xml.gz
             if len(ifname_split) > 1 and ifname[
                     -4:] != "next" and ifname_split[-2].isdigit() and int(
-                        ifname_split[-2]) > boundary:
+                        ifname_split[-2]) > lower_bound_timestamp:
                 valid_fnames.append("%s/%s" % (self.path, ifname))
         return valid_fnames
 
-    def get_available_bankstats_filenames(self, boundary):
-        ls_fnames = self.get_available_filenames("stats")
-        if ls_fnames is None:
-            return None
-        if len(ls_fnames) == 0:
-            return ls_fnames
-        # find the files within the collection time
-        bankstats_filenames = self.get_valid_bankstats(ls_fnames, boundary)
-
-        # reach the limit for maximum input string length
-        # when the number of banks reaches 140,
-        # it will give you a signal 7 error in OPA2
-        if len(bankstats_filenames) > self.max_nstats_for_marignalization:
+    def _is_combine_stats_required(self, filepaths):
+        """Checks if `combine_stats` would be required to prevent
+        `filepaths` causing a signal 7 error due to excessive string length."""
+        if len(filepaths) > self.max_nstats_for_marignalization:
             logging.info("update fap: %d stats files for " \
-                "marignalization, over the input string length limit, "\
-                "combining." \
-                % len(bankstats_filenames))
-            self.try_combine_stats()
-            return None
-        return bankstats_filenames
+                "marignalization, over the input string length limit." \
+                % len(filepaths))
+            return True
+        return False
 
-    def call_calcfap(self,
-                     output_filename,
-                     input_filenames,
-                     ifos,
-                     update_pdf=True):
+    def _call_calcfap(self,
+                      output_filename,
+                      input_filenames,
+                      ifos,
+                      update_pdf=True):
         if len(input_filenames) == 0:
             return None
         joined_input_filenames = ",".join(input_filenames)
@@ -362,23 +387,35 @@ class FAPUpdater(object):
                                 stderr=subprocess.STDOUT)
         return proc
 
-    def try_run_calcfap(self, timestamp):
-        if len(self.get_running_processes(self.calcfap_processes)) > 0:
+    def _try_run_calcfap(self, timestamp):
+        '''
+        Try to launch the 'calcfap' subprocess.
+
+        Returns True on success,
+        Returns False if a conflicting process is in progress,
+        or if a an error occurs.
+        '''
+        if self._is_calcfap_running() or self._is_combine_stats_running():
             return False
 
         bankstats_filenames = []
         for (i, collect_walltime) in enumerate(self.collect_walltimes):
-            bankstats_filenames.append(
-                self.get_available_bankstats_filenames(timestamp -
-                                                       collect_walltime))
+            filepaths = self._get_bankstats_filepaths()
+            if filepaths == None:
+                return False
 
-        # Only launch calcfap if no other process is modifying bankstats
-        if any([filenames is None for filenames in bankstats_filenames]):
-            return False
+            walltime_filepaths = self._filter_bankstats(
+                filepaths, timestamp - collect_walltime)
+
+            if self._is_combine_stats_required(walltime_filepaths):
+                self._try_combine_stats()
+                return False
+
+            bankstats_filenames.append(walltime_filepaths)
 
         for (i, collect_walltime) in enumerate(self.collect_walltimes):
             # execute the cmd in a different process
-            self.calcfap_processes[i] = self.call_calcfap(
+            self.calcfap_processes[i] = self._call_calcfap(
                 self.output[i], bankstats_filenames[i], self.ifos)
             logging.info("update '%s' fap %d" % (collect_walltime, timestamp))
         return True
@@ -394,7 +431,7 @@ class FAPUpdater(object):
         duration = timestamp - self.last_calfap_time
         if (self.last_calfap_time
                 is not None) and (duration >= self.calcfap_interval):
-            if self.try_run_calcfap(timestamp):
+            if self._try_run_calcfap(timestamp):
                 delay = timestamp - self.last_calfap_time \
                     - self.calcfap_interval
                 if delay > 0:
@@ -404,8 +441,8 @@ class FAPUpdater(object):
                 self.last_calfap_time = timestamp
 
     # combine stats every day
-    def try_combine_stats(self):
-        ls_fnames = self.get_available_filenames("bank")
+    def _try_combine_stats(self):
+        ls_fnames = self._get_bankstats_filepaths()
         if ls_fnames is None:
             return False
         if len(ls_fnames) == 0:
@@ -445,14 +482,15 @@ class FAPUpdater(object):
                         self.path, bankid, start_banktime,
                         total_collected_walltime)
 
-                    proc = self.call_calcfap(fout,
-                                             collected_fnames,
-                                             self.ifos,
-                                             update_pdf=False)
+                    proc = self._call_calcfap(fout,
+                                              collected_fnames,
+                                              self.ifos,
+                                              update_pdf=False)
+                    self._clear_completed_processes()
                     self.combine_stats_processes.append(proc)
                     # mark to remove collected_fnames
-                    for frm in collected_fnames:
-                        self.rm_fnames.append(frm)
+                    for fname in collected_fnames:
+                        self.files_being_combined.append(fname)
                     collected_fnames = []
                     collected_fnames.append("%s/%s" %
                                             (self.path, one_bank_fname))
@@ -473,7 +511,7 @@ class FAPUpdater(object):
         duration = timestamp - self.last_combine_stats_time
         if (self.last_combine_stats_time
                 is not None) and (duration >= self.combine_stats_interval):
-            if self.try_combine_stats():
+            if self._try_combine_stats():
                 delay = timestamp - self.last_combine_stats_time \
                     - self.combine_stats_interval
                 if delay > 0:
@@ -1221,10 +1259,7 @@ class FinalSink(object):
             if thread.isAlive():
                 thread.join()
 
-        self.fapupdater.await_and_clear_processes(
-            self.fapupdater.calcfap_processes)
-        self.fapupdater.await_and_clear_processes(
-            self.fapupdater.combine_stats_processes)
+        self.fapupdater.await_processes()
 
     # This may be run from the launch script once the run is finished.
     def write_output_file(self, filename=None, verbose=False, cleanup=False):
