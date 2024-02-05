@@ -51,25 +51,18 @@ except ImportError:
 from glue import iterutils
 from glue import segments
 from glue.ligolw import ligolw
-from glue.ligolw import dbtables
-from glue.ligolw import ilwd
-from glue.ligolw import table
 from glue.ligolw import lsctables
 from glue.ligolw import array as ligolw_array
 from glue.ligolw import param as ligolw_param
 from glue.ligolw import utils as ligolw_utils
 
-from glue.ligolw.utils import ligolw_sqlite
-from glue.ligolw.utils import ligolw_add
 from glue.ligolw.utils import process as ligolw_process
-from glue.ligolw.utils import search_summary as ligolw_search_summary
 from glue.ligolw.utils import segments as ligolw_segments
 
 import lal
 from lal import LIGOTimeGPS
 
 from gstlal import bottle
-from gstlal import reference_psd
 from gstlal.pipemodules.postcohtable import postcoh_table_def
 from gstlal.pipemodules.postcohtable import postcohtable
 from gstlal.pipemodules import pipe_macro
@@ -139,38 +132,84 @@ class SegmentDocument(object):
             self.close()
 
 
-#
+# A class for writing zerolag files and clearing their write threads
+class PostcohDocumentWriter(object):
+
+    def __init__(self):
+        self.output_docs = []
+
+    def __del__(self):
+        self.await_writes()
+
+    def _clear_completed_docs(self):
+        self.output_docs = [
+            doc for doc in self.output_docs if doc.has_unfinished_write()
+        ]
+
+    def write_output_file(self, postcoh_document, filepath, verbose=False):
+        postcoh_document.write_output_file(filepath, verbose)
+        self.output_docs.append(postcoh_document)
+        # Cleanup completed docs with each new write.
+        self._clear_completed_docs()
+
+    def await_writes(self):
+        for doc in self.output_docs:
+            doc.await_write()
+        self._clear_completed_docs()
+
+
+# A class for zerolag files
 class PostcohDocument(object):
 
-    def __init__(self, verbose=False):
-
-        self.filename = None
-
-        #
-        # build the XML document
-        #
-
-        self.xmldoc = ligolw.Document()
-        self.xmldoc.appendChild(ligolw.LIGO_LW())
-
+    def __init__(self):
+        self.thread = None
         # FIXME: process table, search summary table
         # FIXME: should be implemented as lsctables.PostcohInspiralTable
+        self.xmldoc = ligolw.Document()
+        self.xmldoc.appendChild(ligolw.LIGO_LW())
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(postcoh_table_def.PostcohInspiralTable))
+        self.table = postcoh_table_def.PostcohInspiralTable.get_table(
+            self.xmldoc)
 
-    def close(self):
+    def __del__(self):
+        self.await_write()
         self.xmldoc.unlink()
 
-    def write_output_file(self, verbose=False, cleanup=True):
-        assert self.filename is not None
+    def _write(self, filename, verbose=False):
+        assert filename is not None
         ligolw_utils.write_filename(self.xmldoc,
-                                    self.filename,
-                                    gz=(self.filename
-                                        or "stdout").endswith(".gz"),
+                                    filename,
+                                    gz=(filename or "stdout").endswith(".gz"),
                                     verbose=verbose,
                                     trap_signals=None)
-        if cleanup:
-            self.close()
+
+    def has_unfinished_write(self):
+        return self.thread is not None and self.thread.isAlive()
+
+    def await_write(self):
+        if self.has_unfinished_write():
+            self.thread.join()
+
+    def write_output_file(self, filepath, verbose=False):
+        if filepath is None or filepath.isspace():
+            logging.error(
+                "Cannot write output file as filepath '%s' is invalid." %
+                filepath)
+            return
+
+        if self.thread is not None:
+            logging.warning(
+                "Ignoring call to write output file as the write is "\
+                "already in progress or completed."
+            )
+            return
+
+        logging.info("Snapshotting '%s'." % filepath)
+
+        self.thread = threading.Thread(target=self._write,
+                                       args=(filepath, verbose))
+        self.thread.start()
 
 
 #
@@ -556,7 +595,14 @@ class FinalSink(object):
                  feature_best_far=False,
                  feature_best_far_threshold=0,
                  feature_cluster_available_triggers=False,
+                 feature_dump_all_zerolags=False,
                  verbose=False):
+        # feature flags
+        self.enable_feature_best_far = feature_best_far
+        self.best_far_threshold = feature_best_far_threshold
+        self.feature_cluster_available_triggers = feature_cluster_available_triggers
+        self.feature_dump_all_zerolags = feature_dump_all_zerolags
+
         #
         # initialize
         #
@@ -610,8 +656,10 @@ class FinalSink(object):
 
         # the postcoh doc stores clustered postcoh triggers and is snapshotted
         self.postcoh_document = PostcohDocument()
-        self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
-            self.postcoh_document.xmldoc)
+        self.zerolags_doc_writer = PostcohDocumentWriter()
+
+        if self.feature_dump_all_zerolags:
+            self.all_zerolags_document = PostcohDocument()
 
         # coinc doc to be uploaded to gracedb
         self.append_psd_to_coincs_doc = append_psd_to_coincs_doc
@@ -627,7 +675,6 @@ class FinalSink(object):
         self.output_prefix = output_prefix
         self.output_name = output_name
         self.snapshot_interval = snapshot_interval
-        self.thread_snapshot = None
         self.thread_snapshot_segment = None
         self.t_snapshot_start = None
         self.last_buffer_timestamp = None
@@ -661,13 +708,6 @@ class FinalSink(object):
         # skymap
         self.output_skymap = output_skymap
         self.thread_upload_skymap = None
-
-        # best far
-        self.enable_feature_best_far = feature_best_far
-        self.best_far_threshold = feature_best_far_threshold
-
-        # cluster available triggers
-        self.feature_cluster_available_triggers = feature_cluster_available_triggers
 
     def __is_significant_trigger(self, postcoh_inspiral):
         if not self.gracedb_far_threshold:
@@ -779,6 +819,10 @@ class FinalSink(object):
         # of buffers seen at that timestamp. If we have as many buffers as
         # we are expecting we can process them now rather than waiting for
         # the next buffer.
+        if self.feature_dump_all_zerolags:
+            self.all_zerolags_document.table.extend(
+                [event.postcoh_inspiral for event in newevents])
+
         if self.current_timestamp is None \
                 or buf_timestamp > self.current_timestamp:
             self.current_timestamp = buf_timestamp
@@ -814,7 +858,8 @@ class FinalSink(object):
                and (max_cluster_boundary >= self.cluster_boundary)):
             if self.try_get_cluster_candidate():
                 self.__set_far(self.candidate.postcoh_inspiral)
-                self.postcoh_table.append(self.candidate.postcoh_inspiral)
+                self.postcoh_document.table.append(
+                    self.candidate.postcoh_inspiral)
                 self.record_candidate()
                 self.candidate = None
             if self.feature_cluster_available_triggers:
@@ -832,7 +877,7 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
         if self.cluster_window == 0:
-            self.postcoh_table.extend(
+            self.postcoh_document.table.extend(
                 [event.postcoh_inspiral for event in newevents])
             del self.cur_event_table[:]
 
@@ -858,10 +903,10 @@ class FinalSink(object):
         if ((self.snapshot_interval is not None)
                 and (duration >= self.snapshot_interval)):
             self.snapshot_segment_file(self.t_snapshot_start, duration)
-            zerolag_snapshot_filename = self.get_output_filename(
+            zerolag_snapshot_filestem = self.get_zerolags_filestem(
                 self.output_prefix, self.output_name, self.t_snapshot_start,
                 duration)
-            self.snapshot_output_file(zerolag_snapshot_filename)
+            self._snapshot_zerolags(zerolag_snapshot_filestem)
             self.t_snapshot_start = timestamp
 
         # Record the last timestamp so remaining stats can be dumped on program end.
@@ -1191,11 +1236,11 @@ class FinalSink(object):
             gracedb_upload_thread.start()
             self.threads_gracedb_upload.append(gracedb_upload_thread)
 
-    def get_output_filename(self, output_prefix, output_name, t_snapshot_start,
-                            snapshot_duration):
+    def get_zerolags_filestem(self, output_prefix, output_name,
+                              t_snapshot_start, snapshot_duration):
         if output_prefix is not None:
-            fname = "%s_%d_%d.xml.gz" % (output_prefix, t_snapshot_start,
-                                         snapshot_duration)
+            fname = "%s_%d_%d" % (output_prefix, t_snapshot_start,
+                                  snapshot_duration)
             return fname
         assert output_name is not None
         return output_name
@@ -1222,31 +1267,24 @@ class FinalSink(object):
         del self.seg_document
         self.seg_document = SegmentDocument(self.ifos)
 
-    def snapshot_output_file(self, filename, verbose=False):
-        # make sure the last round of output dumping is finished
-        logging.info("snapshotting %s" % filename)
-        if self.thread_snapshot is not None and self.thread_snapshot.isAlive():
-            self.thread_snapshot.join()
+    def _snapshot_zerolags(self, filestem, verbose=False):
+        if filestem is None or filestem.isspace():
+            logging.error(
+                "Cannot snapshot zerolags file as filestem '%s' is invalid." %
+                filestem)
 
-        self.postcoh_document.filename = filename
-        # free thread context
-        del self.thread_snapshot
-        self.thread_snapshot = threading.Thread(
-            target=self.postcoh_document.write_output_file,
-            args=(self.postcoh_document, ))
-        self.thread_snapshot.start()
-
-        #  NOTE: del may not be necessary, as we unlink after thread completion
-        del self.postcoh_table
-        del self.postcoh_document
+        zerolags_filepath = "%s.xml.gz" % filestem
+        self.zerolags_doc_writer.write_output_file(self.postcoh_document,
+                                                   zerolags_filepath, verbose)
         self.postcoh_document = PostcohDocument()
-        self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
-            self.postcoh_document.xmldoc)
+
+        if self.feature_dump_all_zerolags:
+            all_zerolags_filepath = "%s_all.xml.gz" % filestem
+            self.zerolags_doc_writer.write_output_file(
+                self.all_zerolags_document, all_zerolags_filepath, verbose)
+            self.all_zerolags_document = PostcohDocument()
 
     def __wait_internal_process_finish(self):
-        if self.thread_snapshot is not None and self.thread_snapshot.isAlive():
-            self.thread_snapshot.join()
-
         if ((self.thread_snapshot_segment is not None)
                 and (self.thread_snapshot_segment.isAlive())):
             self.thread_snapshot_segment.join()
@@ -1261,16 +1299,13 @@ class FinalSink(object):
 
         self.fapupdater.await_processes()
 
-    # This may be run from the launch script once the run is finished.
-    def write_output_file(self, filename=None, verbose=False, cleanup=False):
-        self.__wait_internal_process_finish()
-        self.__write_output_file(filename, verbose=verbose, cleanup=cleanup)
+        self.zerolags_doc_writer.await_writes()
 
-    def __write_output_file(self, filename=None, verbose=False, cleanup=False):
-        if filename is not None:
-            self.postcoh_document.filename = filename
-        self.postcoh_document.write_output_file(verbose=verbose,
-                                                cleanup=cleanup)
+    def __write_output_file(self,
+                            zerolags_filestem=None,
+                            verbose=False,
+                            cleanup=False):
+        self._snapshot_zerolags(zerolags_filestem, verbose)
         # FIXME: hard-coded segment filename
         if self.last_buffer_timestamp and self.t_snapshot_start:
             duration = self.last_buffer_timestamp - self.t_snapshot_start
@@ -1280,6 +1315,16 @@ class FinalSink(object):
             seg_filename = "%s/%s_SEGMENTS.xml.gz" % (self.path, self.ifos)
         self.seg_document.filename = seg_filename
         self.seg_document.write_output_file(verbose=verbose, cleanup=cleanup)
+
+    # This may be run from the launch script once the run is finished.
+    def write_output_file(self,
+                          zerolags_filestem=None,
+                          verbose=False,
+                          cleanup=False):
+        self.__write_output_file(zerolags_filestem,
+                                 verbose=verbose,
+                                 cleanup=cleanup)
+        self.__wait_internal_process_finish()
 
 
 class CoincsDocFromPostcoh(object):

@@ -112,6 +112,7 @@ different background collection timescales or a different threshold.
 
 *Other notes*:
 The threshold may be dependent on detector sensitivity.
+
 ## cluster-available-triggers
 
 *Name*: Cluster available triggers
@@ -189,6 +190,25 @@ feature will be enabled permanently.
  * (as of 2023-10-30) Currently in branch `tdavies__weight_cmbchisq`
 
 *Other notes*: 
+
+## dump-all-zerolags
+
+*Name*: Dump zerolags before clustering
+
+*Feature flag*: `--feature-dump-all-zerolags`
+
+*Parameters*: (see `--help` for full details)
+ * None
+
+*Short description*: Enable to record all zerolags received by finalsink, rather than just zerolags which survive clustering. Each file is dumped in snapshots alongside the usual zerolags file. The new filenames follow the old format, with an additional `_all` suffix. e.g. `013_zerolag_1186642720_7982_all.xml.gz`
+
+*Relevant merge requests*: 
+
+*Relevant review slides*: 
+
+*Production plan*: This flag may be enabled on background test runs, but will otherwise become an optional debug flag.
+
+*History*:
 
 # SPIIR past feature flags
 

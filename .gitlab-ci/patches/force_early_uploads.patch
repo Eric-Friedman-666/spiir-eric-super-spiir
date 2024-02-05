@@ -1,9 +1,9 @@
 diff --git a/gstlal-spiir/python/pipemodules/postcoh_finalsink.py b/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
-index b9f66e27b..68101489a 100644
+index 0424506cc..a409b5a2c 100644
 --- a/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
 +++ b/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
-@@ -632,6 +632,9 @@ class FinalSink(object):
-         self.feature_cluster_available_triggers = feature_cluster_available_triggers
+@@ -672,6 +672,9 @@ class FinalSink(object):
+         self.thread_upload_skymap = None
  
      def __is_significant_trigger(self, postcoh_inspiral):
 +        if postcoh_inspiral.cohsnr > 37:

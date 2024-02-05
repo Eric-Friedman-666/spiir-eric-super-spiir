@@ -94,6 +94,7 @@ gstlal_postcohspiir_inspiral_online
         --feature-best-far
         --feature-best-far-threshold 10000000
         --feature-cluster-available-triggers
+        --feature-dump-all-zerolags
         --feature-rescale-chisq-dof
         --feature-weight-cmbchisq
         --finalsink-fapupdater-collect-walltime 604800,86400,7200
@@ -145,6 +146,7 @@ gstlal_postcohspiir_inspiral_online
  - `feature-best-far`: Enable the feature 'best-far' to select the best, rather than worst, far from the three timescales.
  - `feature-best-far-threshold`: The minimum number of events for a background timescale to be considered. Enabled with --feature-best-far.
  - `feature-cluster-available-triggers`: Enable to cluster upload candidates only in the second they are received.
+ - `feature-dump-all-zerolags`: Enable to snapshot all zerolags, instead of only those that pass clustering.
  - `feature-rescale-chisq-dof`: Enable the feature 'rescale-chisq-dof' to rescale the chisq degrees of freedom.
  - `feature-weight-cmbchisq`: Enable to weight cmbchisq by each detector's contribution to coherent snr.
  - `finalsink-output-prefix`: the prefix for the zerolag output files.
