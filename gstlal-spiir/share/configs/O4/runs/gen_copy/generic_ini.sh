@@ -510,6 +510,12 @@ if ((${cluster_available_triggers} == 1)); then
     feature_cluster_available_triggers="--feature-cluster-available-triggers"
 fi
 
+dump_all_zerolags=${dump_all_zerolags:=0}
+
+if ((${dump_all_zerolags} == 1)); then
+    feature_dump_all_zerolags="--feature-dump-all-zerolags"
+fi
+
 rescale_chisq_dof=${rescale_chisq_dof:=0}
 
 if ((${rescale_chisq_dof} == 1)); then
@@ -563,6 +569,7 @@ Configurable variables:
 
 Features:
     cluster_available_triggers=${cluster_available_triggers}
+    dump_all_zerolags=${dump_all_zerolags}
     rescale_chisq_dof=${rescale_chisq_dof}
     weight_cmbchisq=${weight_cmbchisq}
 

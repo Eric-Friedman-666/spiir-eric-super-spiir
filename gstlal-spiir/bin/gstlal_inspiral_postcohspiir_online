@@ -295,6 +295,12 @@ def parse_command_line():
         "Enable to cluster upload candidates only in the second they are received."
     )
     parser.add_option(
+        "--feature-dump-all-zerolags",
+        action="store_true",
+        help=
+        " Enable to snapshot all zerolags, instead of only those that pass clustering."
+    )
+    parser.add_option(
         "--feature-weight-cmbchisq",
         action="store_true",
         help=
@@ -878,6 +884,7 @@ finalsink = postcoh_finalsink.FinalSink(
     feature_best_far_threshold=options.feature_best_far_threshold,
     feature_cluster_available_triggers=options.
     feature_cluster_available_triggers,
+    feature_dump_all_zerolags=options.feature_dump_all_zerolags,
     verbose=options.verbose)
 
 if options.verbose:
@@ -931,7 +938,7 @@ mainloop.run()
 #
 # write output file
 #
-finalsink.write_output_file(filename=finalsink.get_output_filename(
+finalsink.write_output_file(zerolags_filestem=finalsink.get_zerolags_filestem(
     options.finalsink_output_prefix, options.finalsink_output_name,
     finalsink.t_snapshot_start,
     finalsink.last_buffer_timestamp - finalsink.t_snapshot_start),

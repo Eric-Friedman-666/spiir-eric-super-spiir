@@ -187,6 +187,7 @@ cat <<-EOF >gstlal_inspiral_postcohspiir_${user}.sub
 		--fir-whitener ${newwhiten} \\
 		${maybe_args} \\
 		${feature_cluster_available_triggers} \\
+		${feature_dump_all_zerolags} \\
 		${feature_rescale_chisq_dof} \\
 		${feature_weight_cmbchisq}"
 	want_graceful_removal = True
