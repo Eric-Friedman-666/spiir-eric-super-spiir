@@ -25,10 +25,10 @@ void cuda_postcoh_map_from_xml(char *fname,
                                PostcohState *state,
                                cudaStream_t stream);
 
-void cuda_postcoh_autocorr_from_xml(char *fname,
-                                    PostcohState *state,
-                                    bool rescale_chisq_dof,
-                                    cudaStream_t stream);
+void cuda_postcoh_load_autocorr_on_gpu(const char *ifo_bankpaths,
+                                       PostcohState *state,
+                                       bool rescale_chisq_dof,
+                                       cudaStream_t stream);
 
 void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state);
 

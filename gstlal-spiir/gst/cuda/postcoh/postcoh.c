@@ -219,7 +219,7 @@ static void cuda_postcoh_set_property(GObject *object,
         cuda_postcoh_device_set_init(element);
         CUDA_CHECK(cudaSetDevice(element->device_id));
         element->spiir_bank_fname = g_value_dup_string(value);
-        cuda_postcoh_autocorr_from_xml(
+        cuda_postcoh_load_autocorr_on_gpu(
           element->spiir_bank_fname, element->state,
           element->enable_rescale_chisq_dof, element->stream);
         cuda_postcoh_sigmasq_from_xml(element->spiir_bank_fname,
