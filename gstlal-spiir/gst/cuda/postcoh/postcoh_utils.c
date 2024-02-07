@@ -612,117 +612,163 @@ void cuda_postcoh_map_from_xml(char *fname,
     free(xns);
 }
 
-void cuda_postcoh_autocorr_from_xml(char *fname,
-                                    PostcohState *state,
-                                    bool rescale_chisq_dof,
-                                    cudaStream_t stream) {
+/**
+ * @brief Write the autocorrelation and normalization to GPU for
+ * the provided template banks.
+ *
+ * The autocorrelation data is provided in the template banks
+ * themselves, while the normalization (degrees of freedom) are
+ * calculated using that data.
+ *
+ * @param ifo_bankpaths a comma separated list of the bank
+ * filepaths for each ifo, with a colon separating IFO and bank.
+ * e.g. "H1:path/to/bank.xml,L1:path/to/other_bank.xml"
+ * @param state The postcoh state storing pointers to gpu memory,
+ * and autochisq_len.
+ * @param stream The cuda stream.
+ */
+void cuda_postcoh_load_autocorr_on_gpu(const char *ifo_bankpaths,
+                                       PostcohState *state,
+                                       bool rescale_chisq_dof,
+                                       cudaStream_t stream) {
 #ifdef __DEBUG__
-    printf("read in autocorr from xml %s\n", fname);
+    printf("read in autocorrelation from xml %s\n", ifo_bankpaths);
 #endif
 
-    gchar **iauto, **auto_fnames = g_strsplit(fname, ",", -1);
-    int mem_alloc_size = 0, autochisq_len = 0, ntmplt = 0, nifo = 0;
-
-    /* parsing for nifo */
-    for (iauto = auto_fnames; *iauto; iauto++) nifo++;
+    gchar **split_ifo_bankpaths = g_strsplit(ifo_bankpaths, ",", -1);
+    int nifo                    = g_strv_length(split_ifo_bankpaths);
 
 #ifdef __DEBUG__
-    printf("autocorr from %d ifo\n", nifo);
+    printf("autocorrelation from %d ifos.\n", nifo);
 #endif
 
-    XmlNodeStruct *xns = (XmlNodeStruct *)malloc(sizeof(XmlNodeStruct) * 2);
-    XmlArray *array_autocorr = (XmlArray *)malloc(sizeof(XmlArray) * 2);
+    XmlNodeStruct *bank_xml =
+      (XmlNodeStruct *)malloc(sizeof(XmlNodeStruct) * 2);
+    XmlArray *parsed_arrays = (XmlArray *)malloc(sizeof(XmlArray) * 2);
 
-    COMPLEX_F *tmp_autocorr = NULL;
-    float *tmp_norm         = NULL;
-    /* allocate memory for host autocorr list pointer and device auto list
-     * pointer*/
-    COMPLEX_F **autocorr  = (COMPLEX_F **)malloc(sizeof(COMPLEX_F *) * nifo);
-    float **autocorr_norm = (float **)malloc(sizeof(float *) * nifo);
     CUDA_CHECK(cudaMalloc((void **)&(state->dd_autocorr_matrix),
                           sizeof(COMPLEX_F *) * nifo));
     CUDA_CHECK(
       cudaMalloc((void **)&(state->dd_autocorr_norm), sizeof(float *) * nifo));
 
-    sprintf((char *)xns[0].tag, "autocorrelation_bank_real:array");
-    xns[0].processPtr = readArray;
-    xns[0].data       = &(array_autocorr[0]);
+    sprintf((char *)bank_xml[0].tag, "autocorrelation_bank_real:array");
+    bank_xml[0].processPtr = readArray;
+    bank_xml[0].data       = &(parsed_arrays[0]);
 
-    sprintf((char *)xns[1].tag, "autocorrelation_bank_imag:array");
-    xns[1].processPtr = readArray;
-    xns[1].data       = &(array_autocorr[1]);
+    sprintf((char *)bank_xml[1].tag, "autocorrelation_bank_imag:array");
+    bank_xml[1].processPtr = readArray;
+    bank_xml[1].data       = &(parsed_arrays[1]);
 
-    /* parsing for all_ifos */
-    int num_parsed_ifos = 0;
-    for (int i = 0; i < MAX_NIFO; i++) {
-        // Find auto_fname that matches ifo i, if any
-        gchar *matched_fname = NULL;
-        for (iauto = auto_fnames; *iauto; iauto++) {
-            if (strncmp(*iauto, get_ifo_string(i), IFO_LEN) == 0) {
-                matched_fname = *iauto;
-            }
+    COMPLEX_F **bank_autocorr =
+      (COMPLEX_F **)malloc(sizeof(COMPLEX_F *) * nifo);
+    float **bank_normalization = (float **)malloc(sizeof(float *) * nifo);
+
+    // Read the autocorrelation array for each IFO and write to GPU
+    COMPLEX_F *ifo_autocorr  = NULL;
+    float *ifo_normalization = NULL;
+    int num_templates;
+    int autochisq_len;
+    int ifo_autocorr_size;
+    for (int enabled_ifo_id = 0; enabled_ifo_id < nifo; enabled_ifo_id++) {
+        // Parse the IFO and bank filepath from "ifo:bankpath"
+        int ifo_id = -1;
+        char ifo_string[IFO_LEN + 1];
+        strncpy(ifo_string, split_ifo_bankpaths[enabled_ifo_id], IFO_LEN);
+        ifo_string[IFO_LEN] = '\0';
+        if (!try_get_ifo_id(ifo_string, &ifo_id)) {
+            fprintf(stderr, "Could not find an IFO matching %s in bank %s\n",
+                    ifo_string, split_ifo_bankpaths[enabled_ifo_id]);
+            exit(1);
         }
-        if (!matched_fname) continue;
-        int ifo_ind            = num_parsed_ifos++;
-        gchar **this_ifo_split = g_strsplit(matched_fname, ":", -1);
-        parseFile(this_ifo_split[1], xns, 2);
-        ntmplt        = array_autocorr[0].dim[1];
-        autochisq_len = array_autocorr[0].dim[0];
+        int delimiter_len = 1;
+        gchar *bank_filepath =
+          split_ifo_bankpaths[enabled_ifo_id] + IFO_LEN + delimiter_len;
 
+        // Read the IFO's autocorrelation arrays from its bankfile.
+        parseFile(bank_filepath, bank_xml, 2);
+
+        // Read the autocorrelation dimensions from the first IFO.
+        if (ifo_autocorr == NULL) {
+            autochisq_len = parsed_arrays[0].dim[0];
+            num_templates = parsed_arrays[0].dim[1];
+            ifo_autocorr_size =
+              sizeof(COMPLEX_F) * num_templates * autochisq_len;
+            ifo_autocorr      = (COMPLEX_F *)malloc(ifo_autocorr_size);
+            ifo_normalization = (float *)malloc(sizeof(float) * num_templates);
+
+            state->autochisq_len = autochisq_len;
+        } else if (autochisq_len != parsed_arrays[0].dim[0]
+                   || num_templates != parsed_arrays[0].dim[1]) {
+            fprintf(
+              stderr,
+              "All IFO banks must have the same autochisq length and number of "
+              "templates.\n"
+              "The first IFO in %s has '%d' autochiq_len and '%d' templates,\n"
+              "but IFO '%s' has '%d' autochiq_len and '%d' templates. "
+              "Exiting.\n",
+              ifo_bankpaths, autochisq_len, num_templates, ifo_string,
+              parsed_arrays[0].dim[0], parsed_arrays[0].dim[1]);
+            exit(1);
+        }
 #ifdef __DEBUG__
-        printf("this auto %s, this ifo %s, ifo ind %d,ntmplt %d,auto "
-               "len %d \n",
-               *iauto, this_ifo_split[0], ifo_ind, ntmplt, autochisq_len);
+        printf("this filename %s, this ifo %s, enabled_ifo_id %d, "
+               "num_templates %d, autochisq_len %d \n",
+               matched_ifo_bankname, ifo_string, enabled_ifo_id, num_templates,
+               autochisq_len);
 #endif
 
-        mem_alloc_size = sizeof(COMPLEX_F) * ntmplt * autochisq_len;
-        CUDA_CHECK(cudaMalloc((void **)&(autocorr[ifo_ind]), mem_alloc_size));
-        CUDA_CHECK(cudaMalloc((void **)&(autocorr_norm[ifo_ind]),
-                              sizeof(float) * ntmplt));
+        // Record autocorrelation and normalization in CPU memory as floats
+        double *autocorr_res = parsed_arrays[0].data;
+        double *autocorr_ims = parsed_arrays[1].data;
+        memset(ifo_normalization, 0, sizeof(float) * num_templates);
+        for (int i_template = 0; i_template < num_templates; i_template++) {
+            for (int i_sample = 0; i_sample < autochisq_len; i_sample++) {
+                size_t original_idx   = i_sample * num_templates + i_template;
+                size_t transposed_idx = i_template * autochisq_len + i_sample;
+                float autocorr_re     = (float)autocorr_res[original_idx];
+                float autocorr_im     = (float)autocorr_ims[original_idx];
 
-        if (tmp_autocorr == NULL) {
-            tmp_autocorr = (COMPLEX_F *)malloc(mem_alloc_size);
-            tmp_norm     = (float *)malloc(sizeof(float) * ntmplt);
-        }
+                ifo_autocorr[transposed_idx].re = autocorr_re;
+                ifo_autocorr[transposed_idx].im = autocorr_im;
 
-        float tmp_re = 0.0, tmp_im = 0.0;
-
-        memset(tmp_norm, 0, sizeof(float) * ntmplt);
-        for (int j = 0; j < ntmplt; j++) {
-            for (int k = 0; k < autochisq_len; k++) {
-                tmp_re =
-                  (float)((double *)(array_autocorr[0].data))[k * ntmplt + j];
-                tmp_im =
-                  (float)((double *)(array_autocorr[1].data))[k * ntmplt + j];
-                tmp_autocorr[j * autochisq_len + k].re = tmp_re;
-                tmp_autocorr[j * autochisq_len + k].im = tmp_im;
+                float autocorr_mag =
+                  (autocorr_re * autocorr_re + autocorr_im * autocorr_im);
                 if (rescale_chisq_dof) {
-                    tmp_norm[j] += 2 - 2 * (tmp_re * tmp_re + tmp_im * tmp_im);
+                    ifo_normalization[i_template] += 2 - 2 * autocorr_mag;
                 } else {
-                    tmp_norm[j] += 2 - (tmp_re * tmp_re + tmp_im * tmp_im);
+                    ifo_normalization[i_template] += 2 - autocorr_mag;
                 }
             }
 #ifdef __DEBUG__
-            printf("ifo ind %d, norm %d: %f\n", ifo_ind, j, tmp_norm[j]);
+            printf("ifo ind %d, norm %d: %f\n", enabled_ifo_id, i_template,
+                   ifo_normalization[i_template]);
 #endif
         }
-        /* copy the autocorr array to GPU device;
+        /* copy the autocorrelation array to GPU device;
          * copy the array address to GPU device */
-        CUDA_CHECK(cudaMemcpyAsync(autocorr[ifo_ind], tmp_autocorr,
-                                   mem_alloc_size, cudaMemcpyHostToDevice,
+        CUDA_CHECK(cudaMalloc((void **)&(bank_autocorr[enabled_ifo_id]),
+                              ifo_autocorr_size));
+        CUDA_CHECK(cudaMemcpyAsync(bank_autocorr[enabled_ifo_id], ifo_autocorr,
+                                   ifo_autocorr_size, cudaMemcpyHostToDevice,
                                    stream));
-        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_autocorr_matrix[ifo_ind]),
-                                   &(autocorr[ifo_ind]), sizeof(COMPLEX_F *),
-                                   cudaMemcpyHostToDevice, stream));
-        CUDA_CHECK(cudaMemcpyAsync(autocorr_norm[ifo_ind], tmp_norm,
-                                   sizeof(float) * ntmplt,
-                                   cudaMemcpyHostToDevice, stream));
-        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_autocorr_norm[ifo_ind]),
-                                   &(autocorr_norm[ifo_ind]), sizeof(float *),
-                                   cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_autocorr_matrix[enabled_ifo_id]),
+                                   &(bank_autocorr[enabled_ifo_id]),
+                                   sizeof(COMPLEX_F *), cudaMemcpyHostToDevice,
+                                   stream));
 
-        freeArraydata(array_autocorr);
-        freeArraydata(array_autocorr + 1);
+        CUDA_CHECK(cudaMalloc((void **)&(bank_normalization[enabled_ifo_id]),
+                              sizeof(float) * num_templates));
+        CUDA_CHECK(cudaMemcpyAsync(
+          bank_normalization[enabled_ifo_id], ifo_normalization,
+          sizeof(float) * num_templates, cudaMemcpyHostToDevice, stream));
+        CUDA_CHECK(cudaMemcpyAsync(&(state->dd_autocorr_norm[enabled_ifo_id]),
+                                   &(bank_normalization[enabled_ifo_id]),
+                                   sizeof(float *), cudaMemcpyHostToDevice,
+                                   stream));
+
+        // Free the CPU memory
+        freeArraydata(parsed_arrays);
+        freeArraydata(parsed_arrays + 1);
         /*
          * Cleanup function for the XML library.
          */
@@ -731,18 +777,15 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
          * this is to debug memory for regression tests
          */
         xmlMemoryDump();
-        g_strfreev(this_ifo_split);
     }
 
-    state->autochisq_len = autochisq_len;
-
     /* free memory */
-    g_strfreev(auto_fnames);
-    free(array_autocorr);
-    free(tmp_autocorr);
-    free(tmp_norm);
-    free(autocorr);
-    free(autocorr_norm);
+    g_strfreev(split_ifo_bankpaths);
+    free(parsed_arrays);
+    free(ifo_autocorr);
+    free(ifo_normalization);
+    free(bank_autocorr);
+    free(bank_normalization);
 }
 
 char *ColNames[] = { "sngl_inspiral:template_duration",
