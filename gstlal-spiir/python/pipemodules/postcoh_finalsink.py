@@ -21,15 +21,12 @@ import sys
 import StringIO
 from shutil import copyfile
 import httplib
-import math
 import subprocess
 import re
 import time
 import numpy as np
 import os
-import fcntl
 import logging
-import pdb
 
 import pygtk
 
@@ -90,7 +87,7 @@ lsctables.use_in(LIGOLWContentHandler)
 #
 class SegmentDocument(object):
 
-    def __init__(self, ifos, verbose=False):
+    def __init__(self, ifos):
 
         self.filename = None
         #
@@ -257,6 +254,8 @@ class FAPUpdater(object):
                  combine_stats_interval,
                  output_list_string=None,
                  collect_walltime_string=None,
+                 should_block=None,
+                 stats_dump_dir_path=None,
                  verbose=None):
         self.path = path
         self.input_prefix_list = input_prefix_list
@@ -272,12 +271,20 @@ class FAPUpdater(object):
         self.last_calfap_time = None
         self.last_combine_stats_time = None
         self.collect_walltimes = []
+        self.should_block = should_block
         self.calcfap_processes = []
+        self.calcfap_timestamps = []
         if collect_walltime_string is not None:
             times = collect_walltime_string.split(",")
             for itime in times:
                 self.collect_walltimes.append(int(itime))
                 self.calcfap_processes.append(None)
+                self.calcfap_timestamps.append(None)
+
+        self.stats_dump_dir_path = stats_dump_dir_path
+        if self.stats_dump_dir_path is not None and not os.path.exists(
+                self.stats_dump_dir_path):
+            os.mkdir(self.stats_dump_dir_path)
 
         self.combine_duration = 86400 * 2
         self.max_nstats_perbank = 3
@@ -319,14 +326,34 @@ class FAPUpdater(object):
     def _is_calcfap_running(self):
         return len(self._get_running_processes(self.calcfap_processes)) > 0
 
+    def _dump_stats(self):
+        if self.stats_dump_dir_path is None:
+            return
+
+        for i, timestamp in enumerate(self.calcfap_timestamps):
+            if timestamp is None:
+                continue
+
+            timestamp_dir_path = os.path.join(self.stats_dump_dir_path,
+                                              str(timestamp))
+
+            if not os.path.exists(timestamp_dir_path):
+                os.mkdir(timestamp_dir_path)
+
+            src_filepath = self.output[i]
+            filename = os.path.basename(src_filepath)
+            dest_filepath = os.path.join(timestamp_dir_path, filename)
+            copyfile(src_filepath, dest_filepath)
+
     def _clear_completed_processes(self):
         self.combine_stats_processes = self._get_running_processes(
             self.combine_stats_processes)
 
         # The calcfap processes list must maintain its size & order.
         for i, process in enumerate(self.calcfap_processes):
-            if process is not None and process.poll() is None:
+            if process is None or process.poll() is None:
                 continue
+
             self.calcfap_processes[i] = None
 
     def await_processes(self):
@@ -452,10 +479,14 @@ class FAPUpdater(object):
 
             bankstats_filenames.append(walltime_filepaths)
 
+        self._dump_stats()
+
         for (i, collect_walltime) in enumerate(self.collect_walltimes):
             # execute the cmd in a different process
             self.calcfap_processes[i] = self._call_calcfap(
                 self.output[i], bankstats_filenames[i], self.ifos)
+            if self.calcfap_processes[i] != None:
+                self.calcfap_timestamps[i] = timestamp
             logging.info("update '%s' fap %d" % (collect_walltime, timestamp))
         return True
 
@@ -478,6 +509,8 @@ class FAPUpdater(object):
                         "Calcfap launched at '%f' after '%f' second delay." %
                         (timestamp, delay))
                 self.last_calfap_time = timestamp
+                if self.should_block:
+                    self.await_processes()
 
     # combine stats every day
     def _try_combine_stats(self):
@@ -575,7 +608,6 @@ class FinalSink(object):
                  snapshot_interval=None,
                  calcfap_interval=None,
                  cohfar_accumbackground_output_prefix=None,
-                 cohfar_accumbackground_output_name=None,
                  fapupdater_output_fname=None,
                  fapupdater_collect_walltime_string=None,
                  singlefar_veto_thresh=0.01,
@@ -596,6 +628,9 @@ class FinalSink(object):
                  feature_best_far_threshold=0,
                  feature_cluster_available_triggers=False,
                  feature_dump_all_zerolags=False,
+                 feature_dump_stats=False,
+                 feature_dump_stats_dir_path='.',
+                 feature_subprocesses_can_block=False,
                  verbose=False):
         # feature flags
         self.enable_feature_best_far = feature_best_far
@@ -685,6 +720,7 @@ class FinalSink(object):
                             level=logging.DEBUG)
 
         # background updater
+        stats_dump_dir_path = feature_dump_stats_dir_path if feature_dump_stats else None
         self.fapupdater = FAPUpdater(
             path=path,
             input_prefix_list=cohfar_accumbackground_output_prefix,
@@ -693,6 +729,8 @@ class FinalSink(object):
             ifos=self.ifos,
             calcfap_interval=calcfap_interval,
             combine_stats_interval=snapshot_interval,
+            should_block=feature_subprocesses_can_block,
+            stats_dump_dir_path=stats_dump_dir_path,
             verbose=verbose)
 
         # online information performer
@@ -745,13 +783,37 @@ class FinalSink(object):
             sum(active_ifos_with_valid_far) >= 2 and \
             all(active_ifo_pairs_within_chisq_ratio)
 
+    def _have_latest_buffers(self):
+        return self.num_current_buffers == self.expected_buffers_per_timestamp
+
+    # Keep track of the latest timestamp seen on any buffer and number
+    # of buffers seen at that timestamp.
+    def _update_current_timestamp(self, buffer):
+        buf_timestamp = LIGOTimeGPS(0, buffer.timestamp)
+        if self.current_timestamp is None \
+                or buf_timestamp > self.current_timestamp:
+            self.current_timestamp = buf_timestamp
+            self.num_current_buffers = 0
+        elif buf_timestamp < self.current_timestamp:
+            logging.error(
+                "Received buffer with old timestamp '%d' after receiving " \
+                "receiving buffers with a later timestamp '%d'. " \
+                "Attempting to recover by continuing with old timestamp." %
+                buf_timestamp, self.current_timestamp)
+            self.current_timestamp = buf_timestamp
+            self.num_current_buffers = 0
+
+        if buf_timestamp == self.current_timestamp:
+            self.num_current_buffers += 1
+
     # TODO: Refactor/rewrite appsink_new_buffer() and cluster(), see #36
     def appsink_new_buffer(self, elem):
         with self.lock:
             buf = elem.emit("pull-buffer")
 
             # Parse buffer
-            buf_timestamp = LIGOTimeGPS(0, buf.timestamp)
+            self._update_current_timestamp(buf)
+
             is_gap = buf.flag_is_set(gst.BUFFER_FLAG_GAP)
 
             newevents = []
@@ -765,23 +827,23 @@ class FinalSink(object):
                 heartbeat = newevents[0]
                 newevents = newevents[1:]
             self.cluster_and_process_significant_triggers(
-                buf_timestamp, buf.duration, newevents)
+                buf.duration, newevents)
 
-            self.fapupdater.run_calcfap(buf_timestamp)
-
-            self.fapupdater.run_combine_stats(buf_timestamp)
+            if self._have_latest_buffers():
+                self.fapupdater.run_calcfap(self.current_timestamp)
+                self.fapupdater.run_combine_stats(self.current_timestamp)
+                self.run_snapshot()
 
             if not is_gap and heartbeat is not None:
-                self.add_segments(heartbeat, buf_timestamp, buf.duration)
-
-            self.run_snapshot(buf_timestamp)
+                self.add_segments(heartbeat, buf.duration)
 
             if is_gap:
-                logging.info("buf gap at timestamp %d" % buf_timestamp)
+                logging.info("buf gap at timestamp %d" %
+                             self.current_timestamp)
             elif heartbeat is None:
                 logging.warning(
                     "Not in gap and no heartbeat at timestamp %d." %
-                    buf_timestamp)
+                    self.current_timestamp)
 
             # Delete finished threads from list
             self.threads_gracedb_upload = [
@@ -813,30 +875,18 @@ class FinalSink(object):
     # This is named verbosely pending a refactor
     # It should return a list of significant triggers to be processed
     # in another function
-    def cluster_and_process_significant_triggers(self, buf_timestamp, duration,
-                                                 newevents):
-        # Keep track of the latest timestamp seen on any buffer and number
-        # of buffers seen at that timestamp. If we have as many buffers as
+    def cluster_and_process_significant_triggers(self, duration, newevents):
+        # If we have as many buffers as
         # we are expecting we can process them now rather than waiting for
         # the next buffer.
         if self.feature_dump_all_zerolags:
             self.all_zerolags_document.table.extend(
                 [event.postcoh_inspiral for event in newevents])
 
-        if self.current_timestamp is None \
-                or buf_timestamp > self.current_timestamp:
-            self.current_timestamp = buf_timestamp
-            self.num_current_buffers = 0
-
-        if buf_timestamp == self.current_timestamp:
-            self.num_current_buffers += 1
-
-        have_latest_buffers = \
-            self.num_current_buffers == self.expected_buffers_per_timestamp
-
-        max_cluster_boundary = buf_timestamp
-        if have_latest_buffers:
-            max_cluster_boundary = buf_timestamp + LIGOTimeGPS(0, duration)
+        max_cluster_boundary = self.current_timestamp
+        if self._have_latest_buffers():
+            max_cluster_boundary = self.current_timestamp + LIGOTimeGPS(
+                0, duration)
             self.cur_event_table.extend(newevents)
 
         # The max (upper) bound of any cluster we are willing to process.
@@ -873,7 +923,7 @@ class FinalSink(object):
         # buffer may contain events with end time before the buffer start
         # Will have been done above if we could process this buffer early,
         # so don't double up events if so.
-        if not have_latest_buffers:
+        if not self._have_latest_buffers():
             self.cur_event_table.extend(newevents)
 
         if self.cluster_window == 0:
@@ -881,10 +931,11 @@ class FinalSink(object):
                 [event.postcoh_inspiral for event in newevents])
             del self.cur_event_table[:]
 
-    def add_segments(self, heartbeat, buf_timestamp, duration):
+    def add_segments(self, heartbeat, duration):
         participating_ifos = re.findall('..', heartbeat.postcoh_inspiral.ifos)
-        buf_seg = segments.segment(buf_timestamp,
-                                   buf_timestamp + LIGOTimeGPS(0, duration))
+        buf_seg = segments.segment(
+            self.current_timestamp,
+            self.current_timestamp + LIGOTimeGPS(0, duration))
         for segtype, one_type_dict in self.seg_document.seglistdict.items():
             for ifo in one_type_dict.keys():
                 if ifo in participating_ifos:
@@ -894,12 +945,12 @@ class FinalSink(object):
                     this_seglist.coalesce()
                     one_type_dict[ifo] = this_seglist
 
-    def run_snapshot(self, timestamp):
+    def run_snapshot(self):
         # Initialization
         if self.t_snapshot_start is None:
-            self.t_snapshot_start = timestamp
+            self.t_snapshot_start = self.current_timestamp
         # Check interval
-        duration = timestamp - self.t_snapshot_start
+        duration = self.current_timestamp - self.t_snapshot_start
         if ((self.snapshot_interval is not None)
                 and (duration >= self.snapshot_interval)):
             self.snapshot_segment_file(self.t_snapshot_start, duration)
@@ -907,10 +958,10 @@ class FinalSink(object):
                 self.output_prefix, self.output_name, self.t_snapshot_start,
                 duration)
             self._snapshot_zerolags(zerolag_snapshot_filestem)
-            self.t_snapshot_start = timestamp
+            self.t_snapshot_start = self.current_timestamp
 
         # Record the last timestamp so remaining stats can be dumped on program end.
-        self.last_buffer_timestamp = timestamp
+        self.last_buffer_timestamp = self.current_timestamp
 
     def try_get_cluster_candidate(self):
         # Select the best trigger with end time up to the cluster boundary

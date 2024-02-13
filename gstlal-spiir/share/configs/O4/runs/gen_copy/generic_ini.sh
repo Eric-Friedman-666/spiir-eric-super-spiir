@@ -516,10 +516,24 @@ if ((${dump_all_zerolags} == 1)); then
     feature_dump_all_zerolags="--feature-dump-all-zerolags"
 fi
 
+dump_stats=${dump_stats:=0}
+
+if ((${dump_stats} == 1)); then
+    dump_stats_dir_path=${dump_stats_dir_path:="."}
+    feature_dump_stats="--feature-dump-stats"
+    feature_dump_stats_dir_path="--feature-dump-stats-dir-path ${dump_stats_dir_path}"
+fi
+
 rescale_chisq_dof=${rescale_chisq_dof:=0}
 
 if ((${rescale_chisq_dof} == 1)); then
     feature_rescale_chisq_dof="--feature-rescale-chisq-dof"
+fi
+
+subprocesses_can_block=${subprocesses_can_block:=0}
+
+if ((${subprocesses_can_block} == 1)); then
+    feature_subprocesses_can_block="--feature-subprocesses-can-block"
 fi
 
 weight_cmbchisq=${weight_cmbchisq:=0}
@@ -570,8 +584,11 @@ Configurable variables:
 Features:
     cluster_available_triggers=${cluster_available_triggers}
     dump_all_zerolags=${dump_all_zerolags}
+    dump_stats=${dump_stats}
+    dump_stats_dir_path=${dump_stats_dir_path}
     rescale_chisq_dof=${rescale_chisq_dof}
     weight_cmbchisq=${weight_cmbchisq}
+    subprocesses_can_block=${subprocesses_can_block}
 
 Computed variables:
     myrundir=${myrundir}
