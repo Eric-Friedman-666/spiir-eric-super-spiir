@@ -113,6 +113,34 @@ different background collection timescales or a different threshold.
 *Other notes*:
 The threshold may be dependent on detector sensitivity.
 
+## dump-stats
+
+*Name*: Dump marginalized stats
+
+*Feature flag*: `--feature-dump-stats`
+
+*Parameters*: (see `--help` for full details)
+ * `--feature-dump-stats-dir-path`
+
+*Short description*: Enable to dump marginalized stats files to uniquely timestamped directories, for use in testing.
+The parameter `--feature-dump-stats-dir-path` sets the base directory to record marginalized stats in timestamped subdirectories.
+This will be used in combination with an upcoming feature to read these files during an injection run, using the most up to date
+stats available.
+
+*Relevant merge requests*: 
+
+*Relevant review slides*: 
+
+*Production plan*: This flag will be used for offline tests, likely in combination with `--feature-subprocesses-can-block`, for
+determinism. It should allow a more accurate recreation of online results in following injection tests, as the stats will, in effect,
+be updated live.
+
+*History*:
+ * (202x-xx-xx) In branch tdv-subprocesses-can-block
+
+*Other notes*:
+
+
 ## cluster-available-triggers
 
 *Name*: Cluster available triggers
@@ -164,6 +192,35 @@ feature will be enabled permanently.
 
 *Other notes*: 
 
+## subprocesses-can-block
+
+*Name*: Subprocesses can block
+
+*Feature flag*: `--feature-subprocesses-can-block`
+
+*Parameters*: (see `--help` for full details)
+ * None
+
+*Short description*: Enable to allowing some subprocesses to block to improve determinism at the cost of performance.
+Without this feature enabled, the pipeline may use outdated marginalized stats (background tables)
+while waiting for updated marginalized stats to be processed. Additionally, without this feature
+enabled, new subprocesses to update marginalized stats will not be launched until the old ones
+are completed, which leads to inconsistent stats timestamps.
+
+*Relevant merge requests*: 
+
+*Relevant review slides*: 
+
+*Production plan*: This flag should be enabled only in offline tests where FAR determinism is required,
+or when marginalized stats should be procduced at fixed times. In online runs, whatever stats are 
+currently available should be used, as performance is a higher concern. If review is required, this flag
+may be replaced with a normal command line option, or a config file for offline tests.
+
+
+*History*:
+ * (202x-xx-xx) In branch tdv-subprocesses-can-block
+
+*Other notes*:
 
 ## weight-cmbchisq
 

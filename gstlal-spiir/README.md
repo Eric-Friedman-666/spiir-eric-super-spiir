@@ -93,9 +93,12 @@ gstlal_postcohspiir_inspiral_online
         --feature-signal-removal-bg-threshold 8.5
         --feature-best-far
         --feature-best-far-threshold 10000000
+        --feature-dump-stats
+        --feature-dump-stats-dir-path
         --feature-cluster-available-triggers
         --feature-dump-all-zerolags
         --feature-rescale-chisq-dof
+        --feature-subprocesses-can-block
         --feature-weight-cmbchisq
         --finalsink-fapupdater-collect-walltime 604800,86400,7200
         --finalsink-fapupdater-update-interval 1800
@@ -145,9 +148,12 @@ gstlal_postcohspiir_inspiral_online
  - `feature-signal-removal-bg-threshold`: The newsnr threshold on single detectors to classify signals for removal from backgroud.
  - `feature-best-far`: Enable the feature 'best-far' to select the best, rather than worst, far from the three timescales.
  - `feature-best-far-threshold`: The minimum number of events for a background timescale to be considered. Enabled with --feature-best-far.
+ - `feature-dump-stats`: Enable to dump marginalized stats files to uniquely timestamped directories, for use in testing.
+ - `feature-dump-stats-dir-path`: The base directory to record marginalized stats in timestamped subdirectories. '.' by default. Enabled with --feature-dump-stats.
  - `feature-cluster-available-triggers`: Enable to cluster upload candidates only in the second they are received.
  - `feature-dump-all-zerolags`: Enable to snapshot all zerolags, instead of only those that pass clustering.
  - `feature-rescale-chisq-dof`: Enable the feature 'rescale-chisq-dof' to rescale the chisq degrees of freedom.
+ - `feature-subprocesses-can-block`: Enable to allowing some subprocesses to block to improve determinism at the cost of performance.
  - `feature-weight-cmbchisq`: Enable to weight cmbchisq by each detector's contribution to coherent snr.
  - `finalsink-output-prefix`: the prefix for the zerolag output files.
  - `finalsink-fapupdater-collect-walltime`: How long we collect backgrounds for FAR estimations. Usually three scales spanning 1week, 1day, or 2hours. 
