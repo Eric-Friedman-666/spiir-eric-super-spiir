@@ -4,7 +4,7 @@
 // Standard includes
 #include <stdbool.h>
 
-const char *get_ifo_string(int ifo_id);
+const char *get_ifo_string(const int ifo_id);
 
 /* try_get_ifo_id
  *

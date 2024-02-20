@@ -15,7 +15,7 @@ static const char *IFOMap[MAX_NIFO] = {
     "K1", // 1 << 3 = 8
 };
 
-const char *get_ifo_string(int ifo_id) { return IFOMap[ifo_id]; }
+const char *get_ifo_string(const int ifo_id) { return IFOMap[ifo_id]; }
 
 bool try_get_ifo_id(const char *ifo_string, int *ifo_id_out) {
     assert(ifo_string[IFO_LEN] == '\0');

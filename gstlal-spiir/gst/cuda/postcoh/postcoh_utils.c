@@ -37,7 +37,7 @@
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
 
-//#define __DEBUG__ 0
+// #define __DEBUG__        0
 #define NSNGL_TMPLT_COLS 15
 
 void cuda_device_print(int deviceCount) {
@@ -613,6 +613,39 @@ void cuda_postcoh_map_from_xml(char *fname,
 }
 
 /**
+ * @brief Try parse ifo bankpaths, recording ifo_id and bank_filepath.
+ *
+ * @param ifo_bankpath A string combining ifo and bank filepath of the form
+ * "<ifo_string>:<bank_filepath>".
+ * @param bank_filepath Set to a pointer to the bank filepath in the original
+ * `ifo_bankpath` memory on success. On failure, goes unchanged.
+ * @param ifo_id Set to the ifo_id on success. On failure, goes unchanged.
+ * @return gboolean Whether the ifo_bankpath was successfully parsed.
+ */
+gboolean try_parse_ifo_bankpaths(gchar *ifo_bankpath,
+                                 gchar **bank_filepath,
+                                 int *ifo_id) {
+    if (strlen(ifo_bankpath) <= IFO_LEN || ifo_bankpath[IFO_LEN] != ':') {
+        return FALSE;
+    }
+
+    // Parse the IFO and bank filepath from "ifo:bankpath"
+    gchar *ifo_string = g_strndup(ifo_bankpath, IFO_LEN);
+
+    if (!try_get_ifo_id(ifo_string, ifo_id)) {
+        g_free(ifo_string);
+        return FALSE;
+    }
+
+    g_free(ifo_string);
+
+    int delimiter_len = 1;
+    *bank_filepath    = ifo_bankpath + IFO_LEN + delimiter_len;
+
+    return TRUE;
+}
+
+/**
  * @brief Write the autocorrelation and normalization to GPU for
  * the provided template banks.
  *
@@ -631,16 +664,11 @@ void cuda_postcoh_load_autocorr_on_gpu(const char *ifo_bankpaths,
                                        PostcohState *state,
                                        bool rescale_chisq_dof,
                                        cudaStream_t stream) {
-#ifdef __DEBUG__
-    printf("read in autocorrelation from xml %s\n", ifo_bankpaths);
-#endif
-
     gchar **split_ifo_bankpaths = g_strsplit(ifo_bankpaths, ",", -1);
     int nifo                    = g_strv_length(split_ifo_bankpaths);
 
-#ifdef __DEBUG__
-    printf("autocorrelation from %d ifos.\n", nifo);
-#endif
+    GST_DEBUG("Reading autocorrelation from xml '%s', %d ifos.", ifo_bankpaths,
+              nifo);
 
     XmlNodeStruct *bank_xml =
       (XmlNodeStruct *)malloc(sizeof(XmlNodeStruct) * 2);
@@ -670,19 +698,14 @@ void cuda_postcoh_load_autocorr_on_gpu(const char *ifo_bankpaths,
     int autochisq_len;
     int ifo_autocorr_size;
     for (int enabled_ifo_id = 0; enabled_ifo_id < nifo; enabled_ifo_id++) {
-        // Parse the IFO and bank filepath from "ifo:bankpath"
-        int ifo_id = -1;
-        char ifo_string[IFO_LEN + 1];
-        strncpy(ifo_string, split_ifo_bankpaths[enabled_ifo_id], IFO_LEN);
-        ifo_string[IFO_LEN] = '\0';
-        if (!try_get_ifo_id(ifo_string, &ifo_id)) {
-            fprintf(stderr, "Could not find an IFO matching %s in bank %s\n",
-                    ifo_string, split_ifo_bankpaths[enabled_ifo_id]);
+        gchar *bank_filepath;
+        int ifo_id;
+        if (!try_parse_ifo_bankpaths(split_ifo_bankpaths[enabled_ifo_id],
+                                     &bank_filepath, &ifo_id)) {
+            fprintf(stderr, "Could not find an IFO matching bank %s\n",
+                    split_ifo_bankpaths[enabled_ifo_id]);
             exit(1);
         }
-        int delimiter_len = 1;
-        gchar *bank_filepath =
-          split_ifo_bankpaths[enabled_ifo_id] + IFO_LEN + delimiter_len;
 
         // Read the IFO's autocorrelation arrays from its bankfile.
         parseFile(bank_filepath, bank_xml, 2);
@@ -706,16 +729,16 @@ void cuda_postcoh_load_autocorr_on_gpu(const char *ifo_bankpaths,
               "The first IFO in %s has '%d' autochiq_len and '%d' templates,\n"
               "but IFO '%s' has '%d' autochiq_len and '%d' templates. "
               "Exiting.\n",
-              ifo_bankpaths, autochisq_len, num_templates, ifo_string,
-              parsed_arrays[0].dim[0], parsed_arrays[0].dim[1]);
+              ifo_bankpaths, autochisq_len, num_templates,
+              get_ifo_string(ifo_id), parsed_arrays[0].dim[0],
+              parsed_arrays[0].dim[1]);
             exit(1);
         }
-#ifdef __DEBUG__
-        printf("this filename %s, this ifo %s, enabled_ifo_id %d, "
-               "num_templates %d, autochisq_len %d \n",
-               matched_ifo_bankname, ifo_string, enabled_ifo_id, num_templates,
-               autochisq_len);
-#endif
+
+        GST_DEBUG("Found bank filename '%s' for ifo '%s', enabled_ifo_id %d, "
+                  "num_templates %d, autochisq_len %d.",
+                  bank_filepath, get_ifo_string(ifo_id), enabled_ifo_id,
+                  num_templates, autochisq_len);
 
         // Record autocorrelation and normalization in CPU memory as floats
         double *autocorr_res = parsed_arrays[0].data;
@@ -739,10 +762,11 @@ void cuda_postcoh_load_autocorr_on_gpu(const char *ifo_bankpaths,
                     ifo_normalization[i_template] += 2 - autocorr_mag;
                 }
             }
-#ifdef __DEBUG__
-            printf("ifo ind %d, norm %d: %f\n", enabled_ifo_id, i_template,
-                   ifo_normalization[i_template]);
-#endif
+
+            GST_DEBUG("Finished parsing autocorrelation. Autocorrelation "
+                      "normalization for ifo %s, i_template %d: '%f'.",
+                      get_ifo_string(ifo_id), i_template,
+                      ifo_normalization[i_template]);
         }
         /* copy the autocorrelation array to GPU device;
          * copy the array address to GPU device */
