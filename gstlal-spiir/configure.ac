@@ -20,7 +20,6 @@ AC_CONFIG_FILES([ \
 	python/Makefile \
 	python/pipemodules/Makefile \
 	python/pipemodules/postcohtable/Makefile \
-	python/spiirbank/Makefile \
 	python/workflow/Makefile \
 	lib/Makefile \
 	bin/Makefile \

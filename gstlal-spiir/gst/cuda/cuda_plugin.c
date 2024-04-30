@@ -42,9 +42,6 @@
  * Our own stuff
  */
 
-#include <spiir/spiir.h>
-//#include <audioresample/cuda_gstaudioresample.h>
-//#include <multidownsample/gstlal_multidownsample.h>
 #include <cohfar/cohfar_accumbackground.h>
 #include <cohfar/cohfar_assignfar.h>
 #include <multiratespiir/multiratespiir.h>
@@ -64,10 +61,6 @@ static gboolean plugin_init(GstPlugin *plugin) {
         const gchar *name;
         GType type;
     } * element, elements[] = {
-        { "cuda_iirbank", CUDA_IIRBANK_TYPE },
-        //		{"cuda_audioresample", CUDA_AUDIO_RESAMPLE_TYPE},
-        //		{"gstlal_multidownsample",
-        // GSTLAL_MULTI_DOWNSAMPLE_TYPE},
         { "cuda_multiratespiir", CUDA_TYPE_MULTIRATESPIIR },
         { "cuda_postcoh", CUDA_TYPE_POSTCOH },
         { "postcoh_filesink", POSTCOH_TYPE_FILESINK },
