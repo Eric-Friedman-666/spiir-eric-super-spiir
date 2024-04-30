@@ -100,7 +100,7 @@ from gstlal import datasource
 from gstlal.pipemodules import pipe_macro
 from gstlal.pipemodules import postcoh_finalsink
 from gstlal.pipemodules import spiirparts
-from gstlal.spiirbank import spiir_utils
+from gstlal.pipemodules import spiir_utils
 
 
 class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):

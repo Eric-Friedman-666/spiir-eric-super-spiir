@@ -5,8 +5,6 @@ plugin_LTLIBRARIES = libcuda_plugin.la
 
 libcuda_plugin_la_SOURCES = \
 	cuda_plugin.c \
-	spiir/spiir_kernel.cu \
-	spiir/spiir.c \
 	multiratespiir/multiratespiir_kernel.cu \
 	multiratespiir/multiratespiir_utils.c \
 	multiratespiir/multiratespiir.c \
@@ -37,8 +35,6 @@ libcuda_plugin_la_LDFLAGS = $(AM_LDFLAGS) $(GSL_LIBS) $(LAL_LIBS) $(GSTLAL_LIBS)
 	$(top_srcdir)/gnuscripts/cudalt.py $@ $(NVCC) $(NVCC_CFLAGS) $(NVCC_ADD_CFLAGS) $(DEFAULT_INCLUDES) $(NVCC_LAL_CFLAGS) $(NVCC_GSTLAL_CFLAGS) $(NVCC_gstreamer_CFLAGS) $(ADD_CFLAGS) --ptxas-options=-v -O0  -maxrregcount=0 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_52,code=sm_52 --compiler-options=\"$(libcuda_plugin_la_CFLAGS)\" -c $<
 
 noinst_HEADERS = \
-	spiir/spiir_kernel.h \
-	spiir/spiir.h \
 	multiratespiir/multiratespiir_kernel.h \
 	multiratespiir/multiratespiir_utils.h \
 	multiratespiir/multiratespiir.h \

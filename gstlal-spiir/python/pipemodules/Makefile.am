@@ -15,4 +15,5 @@ pipemodules_PYTHON = \
 	postcoh_finalsink.py \
 	spiirparts.py \
 	pipe_macro.py \
-	stats.py
+	stats.py \
+	spiir_utils.py

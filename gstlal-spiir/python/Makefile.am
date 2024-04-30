@@ -1,1 +1,1 @@
-SUBDIRS = pipemodules spiirbank workflow
+SUBDIRS = pipemodules workflow
