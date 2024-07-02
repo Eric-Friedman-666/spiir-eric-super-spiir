@@ -1,0 +1,16 @@
+universe = Vanilla
+accounting_group_user  =  manoj.kovalam
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+Requirements  = (Target.Online_CBC_IIR_GPU_X2200 =?= True)
+kill_sig = 15
++Online_CBC_IIR_GPU_X2200 = True
++OpSysAndVer = "SL7"
+transfer_executable = False
+executable = /home/spiir/.conda/envs/spiir-monitor/bin/python
+arguments = "/home/spiir/O4/science/FB/2det_BNS/monitor_pipeline.py --run_dir /home/spiir/O4/science/FB/2det_BNS"
+request_disk = 1GB
+log = /home/spiir/O4/science/FB/2det_BNS/logs/monitor_pipeline_spiir.dag.log
+error = /home/spiir/O4/science/FB/2det_BNS/logs/monitor_pipeline_spiir-$(cluster)-$(process).err
+output = /home/spiir/O4/science/FB/2det_BNS/logs/monitor_pipeline_spiir-$(cluster)-$(process).out
+notification = Always
+queue 1

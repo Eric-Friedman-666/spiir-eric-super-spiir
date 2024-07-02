@@ -1,0 +1,44 @@
+diff --git a/gstlal-spiir/python/pipemodules/postcoh_finalsink.py b/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
+index e037bdb46..50dbd45a0 100644
+--- a/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
++++ b/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
+@@ -592,6 +592,10 @@ class FinalSink(object):
+         self.thread_upload_skymap = None
+ 
+     def __pass_test(self, postcoh_inspiral):
++        # DEBUG PATCH: cohsnr > 12 condition
++        if postcoh_inspiral.cohsnr > 12:
++            return True
++
+         if postcoh_inspiral.far <= 0.0:
+             return False
+ 
+@@ -887,7 +891,7 @@ class FinalSink(object):
+         # if it is not one order of magnitude more significant than the last
+         # trigger or if it not more significant the last submitted trigger
+         # FIXME: what if there are two adjacent significant events
+-        if ((abs(float(trigger.end) - last_time) < 50
++        if ((abs(float(trigger.end) - last_time) < 50 and last_far > 0
+              and abs(trigger.far / last_far) > 0.5)) or (
+                  abs(float(trigger.end) - float(last_submitted_time)) < 100
+                  and trigger.far > last_submitted_far * 0.5):
+@@ -958,8 +962,8 @@ class FinalSink(object):
+         if postcoh_inspiral.far <= 0:
+             # NOTE: p_astro does a division by FAR, hence we need FAR > 0
+             logger.info(f"far is <= 0: {postcoh_inspiral.far}, "
+-                        "skipping p_astro calculation.")
+-            return None
++                        "running debug p_astro calculation.")
++            # return None  # DEBUG PATCH
+ 
+         effective_distances = [
+             d_eff for d_eff in postcoh_inspiral.deff if d_eff > 0
+@@ -973,7 +977,7 @@ class FinalSink(object):
+ 
+         # collect input data and run p_astro
+         p_astro_input = dict(
+-            far=postcoh_inspiral.far,
++            far=postcoh_inspiral.far if postcoh_inspiral.far > 0 else 1e-8,  # DEBUG
+             snr=postcoh_inspiral.cohsnr,
+             mchirp=postcoh_inspiral.mchirp,
+             eff_dist=min(effective_distances),
