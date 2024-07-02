@@ -1,0 +1,18 @@
+universe = Vanilla
+executable = /bin/bash
+arguments = "/home/spiir/O4/science/FB/2det_NSBH/monitor_pipeline.sh /home/spiir/monitoring clean_skymap /home/spiir/spiir-scripts/build/spiir-O4-review-v5.3.1/install/bin/gstlal_periodic_clean_skymap --data-loc /dev/shm/kafka/H1 --clean-days-ago 0.5 --period 1200 --skymap-loc H1L1_skymap"
+request_disk = 1GB
+log = /home/spiir/O4/science/FB/2det_NSBH/logs/clean_skymap_spiir.dag.log
+error = /home/spiir/O4/science/FB/2det_NSBH/logs/clean_skymap_spiir-$(cluster)-$(process).err
+output = /home/spiir/O4/science/FB/2det_NSBH/logs/clean_skymap_spiir-$(cluster)-$(process).out
++SingularityImage = "/home/spiir/singularity/spiir-base-py2"
+accounting_group_user  =  manoj.kovalam
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+Requirements  = (Target.Online_CBC_IIR_GPU_X2200 =?= True)
+kill_sig = 15
++Online_CBC_IIR_GPU_X2200 = True
++OpSysAndVer = "SL7"
+environment = "GST_DEBUG= GST_REGISTRY_UPDATE=no GST_REGISTRY=/home/spiir/O4/science/FB/2det_NSBH/gst-registry.bin X509_USER_PROXY=/home/spiir/.cert/O3_cilogon_cert/x509up_u100019 X509_USER_KEY=/home/spiir/.cert/O3_cilogon_cert/CERT_KEY.pem X509_USER_CERT=/home/spiir/.cert/O3_cilogon_cert/CERT_KEY.pem KRB5_KTNAME=/home/spiir/.cert/O3_cilogon_cert/spiir.keytab SPIIR_PATH=/home/spiir/spiir-scripts/build/spiir-O4-review-v5.3.1"
+transfer_executable = False
+notification = Always
+queue 1

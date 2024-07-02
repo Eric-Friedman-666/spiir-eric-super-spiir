@@ -1,0 +1,64 @@
+universe = vanilla
+executable = /bin/bash
+arguments = "/home/spiir/O4/science/FB/2det_NSBH/monitor_pipeline.sh /home/spiir/monitoring $(macrojobtag) /home/spiir/spiir-scripts/build/spiir-O4-review-v5.3.1/install/bin/gstlal_inspiral_postcohspiir_online \
+--job-tag $(macrojobtag) \
+--tmp-space _CONDOR_SCRATCH_DIR \
+--iir-bank $(macroiirbank) \
+--data-source lvshm \
+--request-data Live_H1_L1_V1 \
+--track-psd \
+--psd-fft-length 4 \
+--channel-name H1=GDS-CALIB_STRAIN_CLEAN --channel-name L1=GDS-CALIB_STRAIN_CLEAN \
+--state-channel-name H1=GDS-CALIB_STATE_VECTOR --state-channel-name L1=GDS-CALIB_STATE_VECTOR  --state-vector-on-bits H1=3 --state-vector-on-bits L1=3  --state-vector-off-bits H1=0 --state-vector-off-bits L1=0 \
+--gpu-acc on \
+--ht-gate-threshold 15 \
+--shared-memory-partition H1=X1LHO_Data --shared-memory-partition=L1=X1LLO_Data --shared-memory-block-size 1000000 --shared-memory-assumed-duration 1 \
+--cuda-postcoh-snglsnr-thresh 4 \
+--cuda-postcoh-hist-trials 100 \
+--cuda-postcoh-detrsp-fname H1L1_detrsp_map.xml \
+--cuda-postcoh-output-skymap 12 \
+--check-time-stamp \
+--finalsink-output-prefix $(macrooutprefix) \
+--finalsink-snapshot-interval 43200 \
+--cohfar-accumbackground-snapshot-interval 3600 \
+--cohfar-accumbackground-output-prefix $(macrostatsprefix) \
+--cohfar-assignfar-input-fname $(macrofarinput) \
+--finalsink-fapupdater-output-fname $(macrolocfapoutput) \
+--cohfar-assignfar-silent-time 7200 \
+--cohfar-assignfar-refresh-interval 1800 \
+--cohfar-assignfar-refresh-offset 180 \
+--finalsink-cluster-window 1 \
+--finalsink-fapupdater-interval 1800 \
+--finalsink-fapupdater-collect-walltime 604800,86400,7200 \
+--finalsink-far-factor 47 \
+--finalsink-gracedb-far-thresh 0.00014 \
+--finalsink-need-online-perform 1 \
+--finalsink-gracedb-group CBC \
+--finalsink-gracedb-search AllSky \
+--finalsink-gracedb-service-url https://gracedb-test.ligo.org/api/ \
+--cuda-postcoh-detrsp-refresh-interval 43200 \
+--cuda-postcoh-detrsp-refresh-offset 600 \
+--code-version f711570ee \
+--finalsink-singlefar-veto-thresh 0.5 \
+--fir-whitener 0"
+want_graceful_removal = True
++General_Use_AMD = True
+request_cpus = Target.Cpus
+request_gpus = 1
+request_memory = 19GB
+request_disk = 20GB
+log = /home/spiir/O4/science/FB/2det_NSBH/logs/$(macronodename)_spiir.dag.log
+error = /home/spiir/O4/science/FB/2det_NSBH/logs/$(macronodename)-$(cluster)-job$(macrojobtag).err
+output = /home/spiir/O4/science/FB/2det_NSBH/logs/$(macronodename)-$(cluster)-job$(macrojobtag).out
+stream_output = True
++SingularityImage = "/home/spiir/singularity/spiir-base-py2"
+accounting_group_user  =  manoj.kovalam
+accounting_group  =  ligo.dev.o4.cbc.em.gstlal_spiir
+Requirements  = (Target.Online_CBC_IIR_GPU_X2200 =?= True)
+kill_sig = 15
++Online_CBC_IIR_GPU_X2200 = True
++OpSysAndVer = "SL7"
+environment = "GST_DEBUG= GST_REGISTRY_UPDATE=no GST_REGISTRY=/home/spiir/O4/science/FB/2det_NSBH/gst-registry.bin X509_USER_PROXY=/home/spiir/.cert/O3_cilogon_cert/x509up_u100019 X509_USER_KEY=/home/spiir/.cert/O3_cilogon_cert/CERT_KEY.pem X509_USER_CERT=/home/spiir/.cert/O3_cilogon_cert/CERT_KEY.pem KRB5_KTNAME=/home/spiir/.cert/O3_cilogon_cert/spiir.keytab SPIIR_PATH=/home/spiir/spiir-scripts/build/spiir-O4-review-v5.3.1"
+transfer_executable = False
+notification = Always
+queue 1
