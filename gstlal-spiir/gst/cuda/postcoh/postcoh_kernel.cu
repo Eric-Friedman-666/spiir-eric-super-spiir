@@ -17,22 +17,15 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-#include "postcoh_utils.h"
-
 #include <assert.h>
 #include <cuda_debug.h>
+#include <cuda_runtime.h>
 #include <pipe_macro.h>
 #include <stdio.h>
 
-#ifdef __cplusplus
+extern "C" {
+#include <postcoh/postcoh_kernel.h>
 }
-#endif
-
-const int GAMMA_ITMAX = 50;
-// const float GAMMA_EPS = 2.22e-16;
 
 #define WARP_SIZE        32
 #define WARP_MASK        31
@@ -42,217 +35,34 @@ const int GAMMA_ITMAX = 50;
 #define MIN_EPSILON       1e-7
 #define NSKY_REDUCE_RATIO 4
 
-__device__ static inline float atomicMax(float *address, float val) {
-    int *address_as_i = (int *)address;
-    int old           = *address_as_i, assumed;
-    do {
-        assumed = old;
-        old     = atomicCAS(address_as_i, assumed,
-                        __float_as_int(fmaxf(val, __int_as_float(assumed))));
-    } while (assumed != old);
-    return __int_as_float(old);
-}
-
 // Returns a wrapped index that can be safely used by the ring buffer.
 __device__ static inline size_t ring_index(ptrdiff_t ind, ptrdiff_t len) {
     assert(len > 0);
     return ((ind % len) + len) % len;
 }
 
-__global__ void ker_max_snglsnr(COMPLEX_F **snr, // INPUT: snr
-                                int iifo,
-                                int start_exe,
-                                int len,
-                                int ntmplt, // INPUT: template number
-                                int timeN, // INPUT: time sample number
-                                float *ressnr, // OUTPUT: maximum snr
-                                int *restemplate // OUTPUT: max snr time
-) {
-    int wIDl = threadIdx.x & (WARP_SIZE - 1);
-    int wIDg = (threadIdx.x + blockIdx.x * blockDim.x) >> LOG_WARP_SIZE;
-    int wNg  = (gridDim.x * blockDim.x) >> LOG_WARP_SIZE;
-
-    float max_snr_sq = -1;
-    int max_template = 0;
-    float temp_snr_sq;
-    int temp_template;
-    int index = 0, start_idx = 0;
-
-    for (int i = wIDg; i < timeN; i += wNg) {
-        start_idx = ring_index(i + start_exe, len);
-        // one warp is used to find the max snr for one time
-        for (int j = wIDl; j < ntmplt; j += WARP_SIZE) {
-            index = start_idx * ntmplt + j;
-
-            temp_snr_sq = snr[iifo][index].re * snr[iifo][index].re
-                          + snr[iifo][index].im * snr[iifo][index].im;
-
-            max_template =
-              (j + max_template)
-              + (j - max_template) * (2 * (temp_snr_sq > max_snr_sq) - 1);
-            max_template = max_template >> 1;
-
-            max_snr_sq = (max_snr_sq + temp_snr_sq) * 0.5f
-                         + (max_snr_sq - temp_snr_sq)
-                             * ((max_snr_sq > temp_snr_sq) - 0.5f);
-        }
-
-        // inter-warp reduction to find the max snr among threads in the warp
-        for (int j = WARP_SIZE / 2; j > 0; j = j >> 1) {
-
-            temp_snr_sq =
-              __shfl_sync(ALL_THREADS_MASK, max_snr_sq, wIDl + j, 2 * j);
-
-            temp_template =
-              __shfl_sync(ALL_THREADS_MASK, max_template, wIDl + j, 2 * j);
-            max_template = (max_template + temp_template)
-                           + (max_template - temp_template)
-                               * (2 * (max_snr_sq > temp_snr_sq) - 1);
-            max_template = max_template >> 1;
-
-            max_snr_sq = (max_snr_sq + temp_snr_sq) * 0.5f
-                         + (max_snr_sq - temp_snr_sq)
-                             * ((max_snr_sq > temp_snr_sq) - 0.5f);
-        }
-
-        if (wIDl == 0) {
-            ressnr[i]      = sqrt(max_snr_sq);
-            restemplate[i] = max_template;
-        }
-    }
-}
-
-__global__ void ker_remove_duplicate_mix(
-  float *ressnr, int *restemplate, int timeN, int ntmplt, float *peak) {
-    // there is only 1 thread block
-
-    float snr;
-    int templ;
-
-    for (int i = threadIdx.x; i < timeN; i += blockDim.x) {
-        snr   = ressnr[i];
-        templ = restemplate[i];
-        atomicMax(peak + templ, snr);
-    }
-    __syncthreads();
-
-    float max_snr;
-    for (int i = threadIdx.x; i < timeN; i += blockDim.x) {
-        snr     = ressnr[i];
-        templ   = restemplate[i];
-        max_snr = peak[templ];
-
-        restemplate[i] =
-          ((-1 + templ) + (-1 - templ) * ((max_snr > snr) * 2 - 1)) >> 1;
-        ressnr[i] =
-          (-1.0f + snr) * 0.5 + (-1.0f - snr) * ((max_snr > snr) - 0.5);
-    }
-}
-
-__global__ void ker_remove_duplicate_find_peak(
-  float *ressnr,
-  int *restemplate,
-  int timeN,
-  int ntmplt,
-  float
-    *peak // peak is used for storing intermediate result, it is of size ntmplt
-) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int tn  = blockDim.x * gridDim.x;
-
-    float snr;
-    int templ;
-    for (int i = tid; i < timeN; i += tn) {
-        snr   = ressnr[i];
-        templ = restemplate[i];
-        atomicMax(peak + templ, snr);
-    }
-}
-
-__global__ void
-  ker_remove_duplicate_scan(int *npeak, // Needs to be initialize to 0
-                            int *peak_pos,
-                            float *ressnr,
-                            int *restemplate,
-                            int timeN,
-                            int ntmplt,
-                            float *peak,
-                            float snglsnr_thresh) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int tn  = blockDim.x * gridDim.x;
-
-    float max_snr;
-    float snr;
-    int templ;
-
-    unsigned int index;
-    /* make sure npeak is 0 at the beginning */
-    if (tid == 0) npeak[0] = 0;
-    __syncthreads();
-
-    for (int i = tid; i < timeN; i += tn) {
-        snr     = ressnr[i];
-        templ   = restemplate[i];
-        max_snr = peak[templ];
-
-        if (abs(max_snr - snr) < MIN_EPSILON && max_snr > snglsnr_thresh) {
-            index           = atomicInc((unsigned *)npeak, timeN);
-            peak_pos[index] = i;
-            /* FIXME: could be many peak positions for one peak */
-            //			peak[templ] = -1;
-            //			printf("peak tmplt %d, time %d, maxsnr %f, snr
-            //%f\n", templ, i, max_snr, snr);
-        }
-        // restemplate[i]  = ((-1 + templ) + (-1 - templ) * ((max_snr > snr) * 2
-        // - 1)) >> 1; ressnr[i]       = (-1.0f + snr) * 0.5 + (-1.0f - snr) *
-        // ((max_snr > snr) - 0.5);
-    }
-}
-
-__device__ float gser(float x, float a) {
-    float ap, del, sum;
-    int i;
-
-    ap  = a;
-    del = 1.0 / a;
-    sum = del;
-
-    for (i = 1; i <= GAMMA_ITMAX; ++i) {
-        ap += 1.0;
-        // NOTE: Bottleneck, previous code, del *= x / ap;, use __fdividef for
-        // fast math
-        del *= __fdividef(x, ap);
-        sum += del;
-        // if (fabs(del) < fabs(sum) * GAMMA_EPS)
-        // {
-        //     return sum * exp(-x + a * log(x) - lgamma(a));
-        // }
-    }
-    return sum * exp(-x + a * log(x) - lgamma(a));
-}
-
 __global__ void ker_coh_skymap(
-  float *restrict
-    cohsnr_skymap, /* OUTPUT, of size (num_triggers * num_sky_directions) */
-  float *restrict
-    nullsnr_skymap, /* OUTPUT, of size (num_triggers * num_sky_directions) */
-  COMPLEX_F *restrict *restrict snr, /* INPUT, (2, 3) * data_points */
+  float *__restrict__ cohsnr_skymap, /* OUTPUT, of size (num_triggers *
+                                        num_sky_directions) */
+  float *__restrict__ nullsnr_skymap, /* OUTPUT, of size (num_triggers *
+                                         num_sky_directions) */
+  COMPLEX_F *__restrict__ *__restrict__ snr, /* INPUT, (2, 3) * data_points */
   int iifo, /* INPUT, detector we are considering */
   int nifo, /* INPUT, all detectors that are in this coherent analysis */
-  int *restrict peak_pos, /* INPUT, place the location of the trigger */
-  float *restrict *restrict snglsnr, /* INPUT, maximum single snr    */
-  float *restrict cohsnr, /* INPUT, coherent snr */
+  int *__restrict__ peak_pos, /* INPUT, place the location of the trigger */
+  float *__restrict__ *__restrict__ snglsnr, /* INPUT, maximum single snr */
+  float *__restrict__ cohsnr, /* INPUT, coherent snr */
   int npeak, /* INPUT, number of triggers */
-  float *restrict u_map, /* INPUT, u matrix map */
-  float *restrict toa_diff_map, /* INPUT, time of arrival difference map */
+  float *__restrict__ u_map, /* INPUT, u matrix map */
+  float *__restrict__ toa_diff_map, /* INPUT, time of arrival difference map */
   int num_sky_directions, /* INPUT, # of sky directions */
   int max_npeak, /* INPUT, max number of peaks */
   int len, /* INPUT, snglsnr length */
   int start_exe, /* INPUT, snglsnr start exe position */
   float dt, /* INPUT, 1/ sampling rate */
   int ntmplt, /* INPUT, number of templates */
-  int *restrict len_idx, /* INPUT, the length of the peaks */
-  int *restrict tmplt_idx /* INPUT, the template used for this peak */
+  int *__restrict__ len_idx, /* INPUT, the length of the peaks */
+  int *__restrict__ tmplt_idx /* INPUT, the template used for this peak */
 ) {
 
     int peak_cur, tmplt_cur, len_cur, ipeak_max;
@@ -369,18 +179,18 @@ static __device__ unsigned int bitset_contains(const unsigned int bitset,
 }
 
 __global__ void ker_coh_max_and_chisq_versatile(
-  COMPLEX_F *restrict *restrict snr, /* INPUT, (2, 3) * data_points */
+  COMPLEX_F *__restrict__ *__restrict__ snr, /* INPUT, (2, 3) * data_points */
   int iifo, /* INPUT, detector we are considering */
   int nifo, /* INPUT, number of enabled detectors */
   int num_coh_ifos, /* INPUT, number of coherent detectors */
   unsigned int coh_ifo_bitset, /* INPUT, coherent detectors */
-  int *restrict write_ifo_mapping, /* INPUT, write-ifo-mapping */
-  int *restrict peak_pos, /* INPUT, place the location of the trigger */
-  float *restrict *restrict snglsnr, /* INPUT, maximum single snr    */
-  float *restrict *restrict snglsnr_bg, /* INPUT, maximum single snr    */
+  int *__restrict__ write_ifo_mapping, /* INPUT, write-ifo-mapping */
+  int *__restrict__ peak_pos, /* INPUT, place the location of the trigger */
+  float *__restrict__ *__restrict__ snglsnr, /* INPUT, maximum single snr */
+  float *__restrict__ *__restrict__ snglsnr_bg, /* INPUT, maximum single snr */
   int npeak, /* INPUT, number of triggers */
-  float *restrict u_map, /* INPUT, u matrix map */
-  float *restrict toa_diff_map, /* INPUT, time of arrival difference map */
+  float *__restrict__ u_map, /* INPUT, u matrix map */
+  float *__restrict__ toa_diff_map, /* INPUT, time of arrival difference map */
   int num_sky_directions, /* INPUT, # of sky directions */
   int len, /* INPUT, snglsnr length */
   int max_npeak, /* INPUT, snglsnr length */
@@ -388,32 +198,35 @@ __global__ void ker_coh_max_and_chisq_versatile(
   float dt, /* INPUT, 1/ sampling rate */
   int ntmplt, /* INPUT, number of templates */
   int autochisq_len, /* INPUT, auto-chisq length */
-  COMPLEX_F *restrict *restrict
-    autocorr_matrix, /* INPUT, autocorrelation matrix for all templates */
-  float *restrict *restrict autocorr_norm, /* INPUT, autocorrelation
-                            normalization matrix for all templates */
+  COMPLEX_F *__restrict__
+    *__restrict__ autocorr_matrix, /* INPUT, autocorrelation matrix for all
+                                      templates */
+  float *__restrict__ *__restrict__ autocorr_norm, /* INPUT, autocorrelation
+                          normalization matrix for all templates */
   int hist_trials, /* INPUT, trial number */
   int trial_sample_inv, /* INPUT, trial interval in samples */
-  int *restrict pix_idx, /* OUTPUT, sky direction index */
-  int *restrict pix_idx_bg, /* OUTPUT, sky direction index for the background */
-  float *restrict
-    cohsnr, /* OUTPUT, the coherent SNR for combination of detectors */
-  float *restrict
-    nullsnr, /* OUTPUT, the nullsnr for the combination of detectors */
-  float *restrict
-    cmbchisq, /* OUTPUT, the chisq for the combination of detectors */
-  float *restrict
-    cohsnr_bg, /* OUTPUT, the coherent SNR for the background noise */
-  float *restrict nullsnr_bg, /* OUTPUT, the nullsnr for the background noise */
-  float *restrict
-    cmbchisq_bg, /* OUTPUT, the combined chisq for the background noise */
-  float *restrict *restrict coaphase,
-  float *restrict *restrict coaphase_bg,
-  int *restrict *restrict ntoff,
-  float *restrict *restrict chisq,
-  float *restrict *restrict chisq_bg,
-  int *restrict len_idx,
-  int *restrict tmplt_idx) {
+  int *__restrict__ pix_idx, /* OUTPUT, sky direction index */
+  int *__restrict__ pix_idx_bg, /* OUTPUT, sky direction index for the
+                                   background */
+  float *__restrict__ cohsnr, /* OUTPUT, the coherent SNR for combination of
+                                 detectors */
+  float *__restrict__ nullsnr, /* OUTPUT, the nullsnr for the combination of
+                                  detectors */
+  float *__restrict__ cmbchisq, /* OUTPUT, the chisq for the combination of
+                                   detectors */
+  float *__restrict__ cohsnr_bg, /* OUTPUT, the coherent SNR for the background
+                                    noise */
+  float
+    *__restrict__ nullsnr_bg, /* OUTPUT, the nullsnr for the background noise */
+  float *__restrict__ cmbchisq_bg, /* OUTPUT, the combined chisq for the
+                                      background noise */
+  float *__restrict__ *__restrict__ coaphase,
+  float *__restrict__ *__restrict__ coaphase_bg,
+  int *__restrict__ *__restrict__ ntoff,
+  float *__restrict__ *__restrict__ chisq,
+  float *__restrict__ *__restrict__ chisq_bg,
+  int *__restrict__ len_idx,
+  int *__restrict__ tmplt_idx) {
     int bid = blockIdx.x;
     int bn  = gridDim.x;
 
@@ -424,10 +237,10 @@ __global__ void ker_coh_max_and_chisq_versatile(
     // store snr_max, nullstream_max and sky_idx, each has (blockDim.x /
     // WARP_SIZE) elements
     extern __shared__ float smem[];
-    volatile float *restrict stat_shared       = &smem[0];
-    volatile float *restrict snr_shared        = &stat_shared[wn];
-    volatile float *restrict nullstream_shared = &snr_shared[wn];
-    volatile int *restrict sky_idx_shared      = (int *)&nullstream_shared[wn];
+    volatile float *__restrict__ stat_shared       = &smem[0];
+    volatile float *__restrict__ snr_shared        = &stat_shared[wn];
+    volatile float *__restrict__ nullstream_shared = &snr_shared[wn];
+    volatile int *__restrict__ sky_idx_shared = (int *)&nullstream_shared[wn];
 
     // float    *mu;    // matrix u for certain sky direction
     int peak_cur, tmplt_cur;
@@ -819,8 +632,8 @@ __global__ void ker_coh_max_and_chisq_versatile(
 #define TRANSPOSE_TILE_DIM   32
 #define TRANSPOSE_BLOCK_ROWS 8
 
-__global__ void transpose_matrix(COMPLEX_F *restrict idata,
-                                 COMPLEX_F *restrict odata,
+__global__ void transpose_matrix(COMPLEX_F *__restrict__ idata,
+                                 COMPLEX_F *__restrict__ odata,
                                  int in_x_offset,
                                  int in_y_offset,
                                  int in_width,
@@ -876,36 +689,6 @@ void transpose_snglsnr(COMPLEX_F *idata,
     transpose_matrix<<<grid, block, 0, stream>>>(
       idata, odata, 0, 0, tmplt_len, copy_snglsnr_len, offset, 0, snglsnr_len,
       tmplt_len, tmplt_len, copy_snglsnr_len);
-}
-
-void peakfinder(PostcohState *state, int iifo, cudaStream_t stream) {
-
-    int THREAD_BLOCK = 256;
-    int GRID         = (state->exe_len * 32 + THREAD_BLOCK - 1) / THREAD_BLOCK;
-    PeakList *pklist = state->peak_list[iifo];
-    //    state_reset_npeak(pklist);
-
-    ker_max_snglsnr<<<GRID, THREAD_BLOCK, 0, stream>>>(
-      state->dd_snglsnr, iifo, state->snglsnr_start_exe, state->snglsnr_len,
-      state->ntmplt, state->exe_len, pklist->d_maxsnglsnr, pklist->d_tmplt_idx);
-    cudaStreamSynchronize(stream);
-    CUDA_CHECK(cudaPeekAtLastError());
-
-    GRID = (state->exe_len + THREAD_BLOCK - 1) / THREAD_BLOCK;
-    ker_remove_duplicate_find_peak<<<GRID, THREAD_BLOCK, 0, stream>>>(
-      pklist->d_maxsnglsnr, pklist->d_tmplt_idx, state->exe_len, state->ntmplt,
-      pklist->d_peak_tmplt);
-
-    cudaStreamSynchronize(stream);
-    CUDA_CHECK(cudaPeekAtLastError());
-
-    ker_remove_duplicate_scan<<<GRID, THREAD_BLOCK, 0, stream>>>(
-      pklist->d_npeak, pklist->d_peak_pos, pklist->d_maxsnglsnr,
-      pklist->d_tmplt_idx, state->exe_len, state->ntmplt, pklist->d_peak_tmplt,
-      state->snglsnr_thresh);
-
-    cudaStreamSynchronize(stream);
-    CUDA_CHECK(cudaPeekAtLastError());
 }
 
 /* calculate cohsnr, null stream, chisq of a peak list and copy it back */
@@ -967,9 +750,3 @@ void cohsnr_and_chisq(PostcohState *state,
     CUDA_CHECK(cudaStreamSynchronize(stream));
     CUDA_CHECK(cudaPeekAtLastError());
 }
-
-/* calculate cohsnr, null stream, chisq of a peak list and copy it back */
-void cohsnr_and_chisq_background(PostcohState *state,
-                                 int iifo,
-                                 int hist_trials,
-                                 int gps_idx) {}

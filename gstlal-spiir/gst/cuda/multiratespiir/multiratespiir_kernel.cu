@@ -25,35 +25,16 @@
  * ============================================================================
  */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <assert.h>
 #include <cuda_debug.h>
-
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
-#include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#include <gst/gst.h>
-#pragma GCC diagnostic pop
-
-#include <multiratespiir/multiratespiir_kernel.h>
+#include <cuda_runtime.h>
+#include <multiratespiir/multiratespiir_state.h>
+#include <pipe_macro.h>
 #include <stdio.h>
-#ifdef __cplusplus
+
+extern "C" {
+#include <multiratespiir/multiratespiir_kernel.h>
 }
-#endif
 
 #define THREADSPERBLOCK 256
 #define NB_MAX           32
@@ -171,20 +152,16 @@ __global__ void
                                 COMPLEX_F *cudaB0,
                                 int *cudaShift,
                                 COMPLEX_F *cudaPrevSnr,
-#if __CUDA_ARCH__ >= 350
                                 const float *__restrict__ cudaData,
-#else
-                                const float *cudaData,
-#endif
                                 float *cudaSnr,
-                                gint mem_len,
-                                gint filt_len,
-                                gint delay_max,
-                                gint len,
-                                gint queue_first_sample,
-                                gint queue_len,
-                                gint numFilters,
-                                gint numTemplates) {
+                                int mem_len,
+                                int filt_len,
+                                int delay_max,
+                                int len,
+                                int queue_first_sample,
+                                int queue_len,
+                                int numFilters,
+                                int numTemplates) {
     // This is a coarse-grained version of the spiir kernel, it's used to
     // calculate SNRs where number of filters of each template (numFilters) is
     // larger than 32. 1 block is assigned to calculate 1 template, 1 template
@@ -311,22 +288,18 @@ __global__ void cuda_iir_filter_kernel_fine(COMPLEX_F *cudaA1,
                                             COMPLEX_F *cudaB0,
                                             int *cudaShift,
                                             COMPLEX_F *cudaPrevSnr,
-#if __CUDA_ARCH__ >= 350
                                             const float *__restrict__ cudaData,
-#else
-                                            const float *cudaData,
-#endif
                                             float *cudaSnr,
-                                            gint mem_len,
-                                            gint filt_len,
-                                            gint delay_max,
-                                            gint len,
-                                            gint queue_first_sample,
-                                            gint queue_len,
-                                            gint numFilters,
-                                            gint numTemplates,
-                                            gint cu,
-                                            gint logcu) {
+                                            int mem_len,
+                                            int filt_len,
+                                            int delay_max,
+                                            int len,
+                                            int queue_first_sample,
+                                            int queue_len,
+                                            int numFilters,
+                                            int numTemplates,
+                                            int cu,
+                                            int logcu) {
     // This is a fine-grained version of the spiir kernel, it's used to
     // calculate SNRs where the number of filters per template is less than or
     // equal to 32. 1 compute unit (CU) is used to calculate 1 template, the
@@ -402,12 +375,12 @@ __global__ void cuda_iir_filter_kernel_fine(COMPLEX_F *cudaA1,
     }
 }
 
-__global__ void outdata_reshape(
-  const gint filt_len,
-  const gint len, /* number of samples need to to be upsampled */
-  float *mem_out,
-  const gint mem_out_len,
-  float *out_data) {
+__global__ void
+  outdata_reshape(const int filt_len,
+                  const int len, /* number of samples need to to be upsampled */
+                  float *mem_out,
+                  const int mem_out_len,
+                  float *out_data) {
     unsigned int tx = threadIdx.x, tdx = blockDim.x;
     unsigned int by = blockIdx.y, channels = gridDim.y;
     int mem_out_start = mem_out_len * by + filt_len - 1;
@@ -427,13 +400,13 @@ __global__ void outdata_reshape(
 
 __global__ void upsample2x_and_add_reshape(
   float *sinc,
-  const gint filt_len,
-  gint last_sample,
-  const gint len, /* number of samples need to to be upsampled */
+  const int filt_len,
+  int last_sample,
+  const int len, /* number of samples need to to be upsampled */
   float *mem_in,
   float *mem_out,
-  const gint mem_in_len,
-  const gint mem_out_len,
+  const int mem_in_len,
+  const int mem_out_len,
   float *out_data) {
     volatile float *tmp_sinc = (float *)sharedMem;
     float tmp0 = 0.0, tmp1 = 0.0, tmp_in;
@@ -471,13 +444,13 @@ __global__ void upsample2x_and_add_reshape(
 }
 
 __global__ void upsample2x_and_add(float *sinc,
-                                   const gint filt_len,
-                                   gint last_sample,
-                                   const gint len,
+                                   const int filt_len,
+                                   int last_sample,
+                                   const int len,
                                    float *mem_in,
                                    float *mem_out,
-                                   const gint mem_in_len,
-                                   const gint mem_out_len) {
+                                   const int mem_in_len,
+                                   const int mem_out_len) {
     volatile float *tmp_sinc = (float *)sharedMem;
     float tmp0 = 0.0, tmp1 = 0.0, tmp_in;
     unsigned int tx = threadIdx.x, tdx = blockDim.x;
@@ -517,20 +490,14 @@ __global__ void upsample2x_and_add(float *sinc,
     }
 }
 
-gint multi_downsample(SpiirState **spstate,
-                      float *in_multidown,
-                      gint num_in_multidown,
-                      guint num_depths,
-                      cudaStream_t stream) {
+int multi_downsample(SpiirState **spstate,
+                     const float *in_multidown,
+                     int num_in_multidown,
+                     uint num_depths,
+                     cudaStream_t stream) {
     float *pos_inqueue, *pos_outqueue;
-    gint num_inchunk = num_in_multidown;
-    gint out_processed = num_inchunk;
-
-    GST_LOG("multidownsample: start. in %d samples\n", num_inchunk);
-    /* make sure that unspiired samples + incoming samples won't exceed the
-     * physical queue length */
-    // g_assert (SPSTATE(0)->queue_last_sample + num_inchunk <=
-    // SPSTATE(0)->queue_len);
+    int num_inchunk   = num_in_multidown;
+    int out_processed = num_inchunk;
 
     /*
      * copy inbuf data to the end of queue
@@ -559,13 +526,13 @@ gint multi_downsample(SpiirState **spstate,
                                    cudaMemcpyHostToDevice, stream));
     }
 
-    cudaStreamSynchronize(stream);
+    CUDA_CHECK(cudaStreamSynchronize(stream));
     /* the following parameters should be updated each time of downsample :
      * queue_last_sample,
      * last_sample.
      */
 
-    for (guint i = 0; i < num_depths - 1; i++) {
+    for (uint i = 0; i < num_depths - 1; i++) {
 
         /* predicted output length of downsample this round,
          * we already ganrantee earlier that the length in samples
@@ -580,8 +547,8 @@ gint multi_downsample(SpiirState **spstate,
         // printf("%d, num_in %d, mem_len %d, filt_len %d\n", i, num_inchunk,
         // SPSTATEDOWN(i)->mem_len, SPSTATEDOWN(i)->filt_len);
 
-        g_assert(num_inchunk
-                 <= SPSTATEDOWN(i)->mem_len - SPSTATEDOWN(i)->filt_len + 1);
+        assert(num_inchunk
+               <= SPSTATEDOWN(i)->mem_len - SPSTATEDOWN(i)->filt_len + 1);
 
         pos_inqueue  = SPSTATE(i)->d_queue;
         pos_outqueue = SPSTATE(i + 1)->d_queue;
@@ -599,10 +566,6 @@ gint multi_downsample(SpiirState **spstate,
 
         uint share_mem_sz =
           (2 * block.x + 4 * SPSTATEDOWN(i)->sinc_len) * sizeof(float);
-        GST_LOG("downsample: depth %d, out_processed %d, threads %d, blocks "
-                "%d, amplifier %f, share_mem_sz %d",
-                i, out_processed, block.x, grid.x, SPSTATEDOWN(i)->amplifier,
-                share_mem_sz);
 
         CUDA_CHECK(
           cudaMemcpyAsync(SPSTATEDOWN(i)->d_mem_copy, SPSTATEDOWN(i)->d_mem,
@@ -616,7 +579,7 @@ gint multi_downsample(SpiirState **spstate,
           pos_outqueue, SPSTATE(i + 1)->queue_last_sample,
           SPSTATE(i + 1)->queue_len);
 
-        cudaStreamSynchronize(stream);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
         CUDA_CHECK(cudaPeekAtLastError());
 
         /*
@@ -645,17 +608,15 @@ gint multi_downsample(SpiirState **spstate,
     SPSTATE(num_depths - 1)->queue_last_sample =
       (SPSTATE(num_depths - 1)->queue_last_sample + out_processed)
       % SPSTATE(num_depths - 1)->queue_len;
-    GST_LOG("multidownsample: finished. out processed %d samples",
-            out_processed);
 
     return out_processed;
 }
 
-void update_nb(SpiirState **spstate, gint new_processed, guint depth) {
+void update_nb(SpiirState **spstate, int new_processed, uint depth) {
 
     if (new_processed != SPSTATE(depth)->pre_out_spiir_len) {
         // set nb
-        guint nb = NB_MAX;
+        uint nb = NB_MAX;
         if (SPSTATE(depth)->num_filters < NB_MAX)
             nb = SPSTATE(depth)->num_filters;
 
@@ -667,22 +628,20 @@ void update_nb(SpiirState **spstate, gint new_processed, guint depth) {
     }
 }
 
-gint spiirup(SpiirState **spstate,
-             gint num_in_multiup,
-             guint num_depths,
-             float *out,
-             cudaStream_t stream) {
-    gint num_inchunk = num_in_multiup;
+int spiirup(SpiirState **spstate,
+            int num_in_multiup,
+            uint num_depths,
+            float *out,
+            cudaStream_t stream) {
+    int num_inchunk = num_in_multiup;
 
-    gint resample_processed = num_inchunk / 2, spiir_processed = num_inchunk;
-    gint i;
+    int resample_processed = num_inchunk / 2, spiir_processed = num_inchunk;
+    int i;
     // FIXME: 0 is used;
 
     /*
      * SPIIR filter for the lowest depth
      */
-
-    GST_LOG("spiirup: start. in %d samples\n", num_inchunk);
 
     i = num_depths - 1;
 
@@ -696,12 +655,6 @@ gint spiirup(SpiirState **spstate,
     uint share_mem_sz;
 
     if (SPSTATE(i)->num_filters > CUT_FILTERS) {
-        GST_LOG(
-          "spiir_kernel: depth %d. processed %d, nb %d, num of (templates: "
-          "%d,filters: %d). block.size (%d, %d, %d), grid.size (%d, %d, %d)",
-          i, num_inchunk, SPSTATE(i)->nb, SPSTATE(i)->num_templates,
-          SPSTATE(i)->num_filters, block.x, block.y, block.z, grid.x, grid.y,
-          grid.z);
         if (SPSTATE(i)->num_filters > 32) {
             // Use Coarse-Grained Kernel
             int numTemplates = SPSTATE(i)->num_templates;
@@ -721,7 +674,7 @@ gint spiirup(SpiirState **spstate,
               SPSTATE(i)->delay_max, num_inchunk,
               SPSTATE(i)->queue_first_sample, SPSTATE(i)->queue_len, numFilters,
               numTemplates);
-            cudaStreamSynchronize(stream);
+            CUDA_CHECK(cudaStreamSynchronize(stream));
         } else {
             // Use Fine-Grained Kernel
             int numTemplates = SPSTATE(i)->num_templates;
@@ -741,7 +694,7 @@ gint spiirup(SpiirState **spstate,
               SPSTATE(i)->delay_max, num_inchunk,
               SPSTATE(i)->queue_first_sample, SPSTATE(i)->queue_len, numFilters,
               numTemplates, cu, logcu);
-            cudaStreamSynchronize(stream);
+            CUDA_CHECK(cudaStreamSynchronize(stream));
         }
     } else {
         CUDA_CHECK(cudaMemsetAsync(SPSTATEUP(i)->d_mem, 0,
@@ -764,12 +717,6 @@ gint spiirup(SpiirState **spstate,
             /*
              *	cuda kernel
              */
-            GST_LOG("spiir_kernel: depth %d. processed %d, nb %d, num of "
-                    "(templates: %d,filters: %d). block.size (%d, %d, %d), "
-                    "grid.size (%d, %d, %d)",
-                    i, num_inchunk, SPSTATE(i)->nb, SPSTATE(i)->num_templates,
-                    SPSTATE(i)->num_filters, block.x, block.y, block.z, grid.x,
-                    grid.y, grid.z);
             if (SPSTATE(i)->num_filters > 32) {
                 // Use Coarse-Grained Kernel
                 int numTemplates = SPSTATE(i)->num_templates;
@@ -789,7 +736,7 @@ gint spiirup(SpiirState **spstate,
                   SPSTATE(i)->delay_max, spiir_processed,
                   SPSTATE(i)->queue_first_sample, SPSTATE(i)->queue_len,
                   numFilters, numTemplates);
-                cudaStreamSynchronize(stream);
+                CUDA_CHECK(cudaStreamSynchronize(stream));
             } else {
                 // Use Fine-Grained Kernel
                 int numTemplates = SPSTATE(i)->num_templates;
@@ -810,17 +757,15 @@ gint spiirup(SpiirState **spstate,
                   SPSTATE(i)->delay_max, spiir_processed,
                   SPSTATE(i)->queue_first_sample, SPSTATE(i)->queue_len,
                   numFilters, numTemplates, cu, logcu);
-                cudaStreamSynchronize(stream);
+                CUDA_CHECK(cudaStreamSynchronize(stream));
             }
         } else {
             CUDA_CHECK(cudaMemsetAsync(SPSTATEUP(i)->d_mem, 0,
                                        sizeof(COMPLEX_F) * SPSTATEUP(i)->mem_len
                                          * SPSTATE(i)->num_templates,
                                        stream));
-            cudaStreamSynchronize(stream);
+            CUDA_CHECK(cudaStreamSynchronize(stream));
         }
-
-        // g_mutex_unlock(element->cuTex_lock);
 
         CUDA_CHECK(cudaPeekAtLastError());
 
@@ -844,7 +789,7 @@ gint spiirup(SpiirState **spstate,
               SPSTATEUP(i + 1)->d_mem, SPSTATEUP(i)->d_mem,
               SPSTATEUP(i + 1)->mem_len, SPSTATEUP(i)->mem_len,
               SPSTATE(i)->d_out);
-            cudaStreamSynchronize(stream);
+            CUDA_CHECK(cudaStreamSynchronize(stream));
         } else {
 
             /*
@@ -857,7 +802,7 @@ gint spiirup(SpiirState **spstate,
               SPSTATEUP(i + 1)->d_mem, SPSTATEUP(i)->d_mem,
               SPSTATEUP(i + 1)->mem_len, SPSTATEUP(i)->mem_len);
 
-            cudaStreamSynchronize(stream);
+            CUDA_CHECK(cudaStreamSynchronize(stream));
         }
         CUDA_CHECK(cudaPeekAtLastError());
         SPSTATEUP(i + 1)->last_sample = 0;
@@ -877,7 +822,7 @@ gint spiirup(SpiirState **spstate,
         outdata_reshape<<<grid, block, share_mem_sz, stream>>>(
           SPSTATEUP(0)->filt_len, resample_processed, SPSTATEUP(0)->d_mem,
           SPSTATEUP(0)->mem_len, SPSTATE(0)->d_out);
-        cudaStreamSynchronize(stream);
+        CUDA_CHECK(cudaStreamSynchronize(stream));
         CUDA_CHECK(cudaPeekAtLastError());
     }
 
@@ -885,7 +830,7 @@ gint spiirup(SpiirState **spstate,
                                SPSTATEUP(0)->channels * (spiir_processed)
                                  * sizeof(float),
                                cudaMemcpyDeviceToHost, stream));
-    cudaStreamSynchronize(stream);
+    CUDA_CHECK(cudaStreamSynchronize(stream));
     CUDA_CHECK(cudaPeekAtLastError());
     return spiir_processed;
 }
