@@ -129,6 +129,8 @@ cmd () {
 		--cuda-postcoh-output-skymap 100 \
 		--cuda-postcoh-detrsp-refresh-interval 86400 \
 		--check-time-stamp \
+		--feature-signal-removal-bg \
+		--feature-signal-removal-bg-threshold 8.5 \
 		--finalsink-output-prefix ${macrooutprefix} \
 		--finalsink-snapshot-interval 1800 \
 		--cohfar-accumbackground-snapshot-interval 3600 \

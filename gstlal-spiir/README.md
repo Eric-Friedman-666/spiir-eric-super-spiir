@@ -88,6 +88,8 @@ gstlal_postcohspiir_inspiral_online
         --cuda-postcoh-detrsp-refresh-interval 86400
         --cuda-postcoh-output-skymap 7
         --check-time-stamp 
+        --feature-signal-removal-bg
+        --feature-signal-removal-bg-threshold 8.5
         --finalsink-fapupdater-collect-walltime 604800,86400,7200
         --finalsink-fapupdater-update-interval 1800
         --finalsink-output-prefix lzerolag 
@@ -131,6 +133,8 @@ gstlal_postcohspiir_inspiral_online
  - `cuda-postcoh-detrsp-refresh-interval`: reread the detrsp-fname specified above at multiples of this interval. This is to capture the change of the location of Earth every single day.
  - `cuda-postcoh-output-skymap`: threshold to output skymap, normally set to 7. If it is set to 0, will not output skymaps at all.
  - `check-time-stamp`: check if the data is continously flowing in the pipeline.
+ - `feature-signal-removal-bg`: Enable the feature 'signal-removal-bg' to remove signals from background collection.
+ - `feature-signal-removal-bg-threshold`: The newsnr threshold on single detectors above which to classify signals for removal from backgroud.
  - `finalsink-output-prefix`: the prefix for the zerolag output files.
  - `finalsink-fapupdater-collect-walltime`: How long we collect backgrounds for FAR estimations. Usually three scales spanning 1week, 1day, or 2hours. 
  - `finalsink-fapupdater-update-interval`: A FAR mapping is derived from the collected background for each of different scales set above.
