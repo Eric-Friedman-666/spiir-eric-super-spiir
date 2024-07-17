@@ -30,13 +30,7 @@
  * Stuff from GStreamer
  */
 
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
 
 /*
  * Our own stuff
@@ -91,7 +85,7 @@ static gboolean plugin_init(GstPlugin *plugin) {
 
 GST_PLUGIN_DEFINE(GST_VERSION_MAJOR,
                   GST_VERSION_MINOR,
-                  "cuda",
+                  cuda,
                   "gpu accelerated elements",
                   plugin_init,
                   PACKAGE_VERSION,
