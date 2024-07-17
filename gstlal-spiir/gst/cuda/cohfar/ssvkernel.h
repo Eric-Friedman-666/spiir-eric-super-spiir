@@ -77,8 +77,8 @@ void pdf2cdf_sharpcut(PdfCdf *pc);
 
 void gsl_matrix_xmul(gsl_vector *x1, gsl_vector *x2, gsl_matrix *result);
 double gsl_matrix_sum(gsl_matrix *x);
-double gsl_vector_sum(gsl_vector *x);
-long gsl_vector_long_sum(gsl_vector_long *x);
+double gsl_vector_sum(const gsl_vector *x);
+long gsl_vector_long_sum(const gsl_vector_long *x);
 void Gauss(gsl_vector *x, double w, gsl_vector *y);
 void Boxcar(gsl_vector *x, gsl_vector *w, gsl_vector *y);
 double CostFunction(gsl_vector *y_hist,

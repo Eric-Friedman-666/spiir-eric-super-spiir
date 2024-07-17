@@ -180,13 +180,13 @@ long gsl_matrix_long_sum(gsl_matrix_long *x) {
     }
     return result;
 }
-double gsl_vector_sum(gsl_vector *x) {
+double gsl_vector_sum(const gsl_vector *x) {
     double result = 0;
     size_t i      = 0;
     for (i = 0; i < x->size; i++) { result += gsl_vector_get(x, i); }
     return result;
 }
-long gsl_vector_long_sum(gsl_vector_long *x) {
+long gsl_vector_long_sum(const gsl_vector_long *x) {
     long result = 0;
     size_t i    = 0;
     for (i = 0; i < x->size; i++) { result += gsl_vector_long_get(x, i); }
