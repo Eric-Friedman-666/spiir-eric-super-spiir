@@ -16,8 +16,6 @@ XmlArray xarray = { 2, { 2, 10, 0 }, NULL };
 XmlParam xparams[4];
 XmlTable xtable;
 
-void xy_table_init(XmlTable *table);
-
 /**
  * testXmlwriterFilename:
  * @uri: the output URI
@@ -308,6 +306,101 @@ xmlChar *ConvertInput(const char *in, const char *encoding) {
     }
 
     return out;
+}
+
+void xy_table_init(XmlTable *table) {
+    table->tableName = g_string_new("sngl_inspiral:table");
+
+    table->delimiter = g_string_new(",");
+
+    table->names = g_array_new(FALSE, FALSE, sizeof(GString));
+    g_array_append_val(table->names, *g_string_new("sngl_inspiral:cont_chisq"));
+    g_array_append_val(table->names, *g_string_new("sngl_inspiral:bank_chisq"));
+    g_array_append_val(table->names, *g_string_new("sngl_inspiral:chisq_dof"));
+    g_array_append_val(table->names,
+                       *g_string_new("sngl_inspiral:end_time_gmst"));
+    g_array_append_val(table->names,
+                       *g_string_new("sngl_inspiral:event_duration"));
+    g_array_append_val(table->names, *g_string_new("sngl_inspiral:event_id"));
+    g_array_append_val(table->names, *g_string_new("sngl_inspiral:channel"));
+
+    table->hashContent =
+      g_hash_table_new((GHashFunc)g_string_hash, (GEqualFunc)g_string_equal);
+
+    XmlHashVal *vals = (XmlHashVal *)malloc(sizeof(XmlHashVal) * 7);
+
+    float cont_chisq[3] = { 0.1f, 0.3f, 0.2f };
+    vals[0].name        = g_string_new("sngl_inspiral:cont_chisq");
+    vals[0].type        = g_string_new("real_4");
+    vals[0].data        = g_array_new(FALSE, FALSE, sizeof(float));
+    g_array_append_val(vals[0].data, cont_chisq[0]);
+    g_array_append_val(vals[0].data, cont_chisq[1]);
+    g_array_append_val(vals[0].data, cont_chisq[2]);
+    g_hash_table_insert(table->hashContent,
+                        g_string_new("sngl_inspiral:cont_chisq"), vals + 0);
+
+    float bank_chisq[3] = { 0.2f, 0.4f, 0.7f };
+    vals[1].name        = g_string_new("sngl_inspiral:bank_chisq");
+    vals[1].type        = g_string_new("real_4");
+    vals[1].data        = g_array_new(FALSE, FALSE, sizeof(float));
+    g_array_append_val(vals[1].data, bank_chisq[0]);
+    g_array_append_val(vals[1].data, bank_chisq[1]);
+    g_array_append_val(vals[1].data, bank_chisq[2]);
+    g_hash_table_insert(table->hashContent,
+                        g_string_new("sngl_inspiral:bank_chisq"), vals + 1);
+
+    int chisq_dof[3] = { 3, 6, 9 };
+    vals[2].name     = g_string_new("sngl_inspiral:chisq_dof");
+    vals[2].type     = g_string_new("int_4s");
+    vals[2].data     = g_array_new(FALSE, FALSE, sizeof(int));
+    g_array_append_val(vals[2].data, chisq_dof[0]);
+    g_array_append_val(vals[2].data, chisq_dof[1]);
+    g_array_append_val(vals[2].data, chisq_dof[2]);
+    g_hash_table_insert(table->hashContent,
+                        g_string_new("sngl_inspiral:chisq_dof"), vals + 2);
+
+    double end_time_gmst[3] = { 0.4, 0.8, 0.5 };
+    vals[3].name            = g_string_new("sngl_inspiral:end_time_gmst");
+    vals[3].type            = g_string_new("real_8");
+    vals[3].data            = g_array_new(FALSE, FALSE, sizeof(double));
+    g_array_append_val(vals[3].data, end_time_gmst[0]);
+    g_array_append_val(vals[3].data, end_time_gmst[1]);
+    g_array_append_val(vals[3].data, end_time_gmst[2]);
+    g_hash_table_insert(table->hashContent,
+                        g_string_new("sngl_inspiral:end_time_gmst"), vals + 3);
+
+    double event_duration[3] = { 0.5, 0.9, 0.6 };
+    vals[4].name             = g_string_new("sngl_inspiral:event_duration");
+    vals[4].type             = g_string_new("real_8");
+    vals[4].data             = g_array_new(FALSE, FALSE, sizeof(double));
+    g_array_append_val(vals[4].data, event_duration[0]);
+    g_array_append_val(vals[4].data, event_duration[1]);
+    g_array_append_val(vals[4].data, event_duration[2]);
+    g_hash_table_insert(table->hashContent,
+                        g_string_new("sngl_inspiral:event_duration"), vals + 4);
+
+    vals[5].name        = g_string_new("sngl_inspiral:event_id");
+    vals[5].type        = g_string_new("int_8s");
+    vals[5].data        = g_array_new(FALSE, FALSE, sizeof(gint64));
+    gint64 event_ids[3] = { 0, 1, 0 };
+    g_array_append_val(vals[5].data, event_ids[0]);
+    g_array_append_val(vals[5].data, event_ids[1]);
+    g_array_append_val(vals[5].data, event_ids[2]);
+    g_hash_table_insert(table->hashContent,
+                        g_string_new("sngl_inspiral:event_id"), vals + 5);
+
+    vals[6].name = g_string_new("sngl_inspiral:channel");
+    vals[6].type = g_string_new("lstring");
+    vals[6].data = g_array_new(FALSE, FALSE, sizeof(GString));
+    g_array_append_val(vals[6].data, *g_string_new("\"FAKE-STRAIN\""));
+    g_array_append_val(vals[6].data, *g_string_new("\"FAKE-STRAIN\""));
+    g_array_append_val(vals[6].data, *g_string_new("\"FAKE-STRAIN\""));
+    g_hash_table_insert(table->hashContent,
+                        g_string_new("sngl_inspiral:channel"), vals + 6);
+
+#ifdef __DEBUG__
+    printf("hash table size: %u\n", g_hash_table_size(table->hashContent));
+#endif
 }
 
 int main(int argc, char *argv[]) {
