@@ -31,28 +31,9 @@
 #include "postcohtable_utils.h"
 
 #include <errno.h>
-
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
 #include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
 #include <glib/gstdio.h>
-
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
-
 #include <math.h>
 #include <string.h>
 
@@ -118,7 +99,7 @@ static void postcoh_filesink_get_property(GObject *object,
 
 static gboolean postcoh_filesink_start(GstBaseSink *sink);
 static gboolean postcoh_filesink_stop(GstBaseSink *sink);
-static gboolean postcoh_filesink_event(GstBaseSink *sink, GstEvent *event);
+static gboolean postcoh_filesink_sink_event(GstBaseSink *sink, GstEvent *event);
 static GstFlowReturn postcoh_filesink_render(GstBaseSink *sink,
                                              GstBuffer *buffer);
 
@@ -133,43 +114,20 @@ static GstFlowReturn postcoh_filesink_render(GstBaseSink *sink,
 static void postcoh_filesink_uri_handler_init(gpointer g_iface,
                                               gpointer iface_data);
 
-//#define postcoh_filesink_parent_class parent_class
-
 #define GST_CAT_DEFAULT postcoh_filesink_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-static void _do_init(GType filesink_type) {
-    static const GInterfaceInfo urihandler_info = {
-        postcoh_filesink_uri_handler_init, NULL, NULL
-    };
-
-    g_type_add_interface_static(filesink_type, GST_TYPE_URI_HANDLER,
-                                &urihandler_info);
-    GST_DEBUG_CATEGORY_INIT(GST_CAT_DEFAULT, "postcoh filesink", 0,
-                            "postcoh filesink element");
-}
-
-GST_BOILERPLATE_FULL(
-  PostcohFilesink, postcoh_filesink, GstBaseSink, GST_TYPE_BASE_SINK, _do_init);
-
-static void postcoh_filesink_base_init(gpointer g_class) {
-
-    GstElementClass *gstelement_class = GST_ELEMENT_CLASS(g_class);
-    gst_element_class_set_details_simple(
-      gstelement_class, "Postcoh File Sink", "Sink/File",
-      "Write postcoh tables to a xml file", "Qi Chu <qi.chu at ligo dot org>");
-
-    gst_element_class_add_pad_template(
-      gstelement_class,
-      gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-                           gst_caps_from_string("application/x-lal-postcoh")));
-}
+G_DEFINE_TYPE_WITH_CODE(
+  PostcohFilesink,
+  postcoh_filesink,
+  GST_TYPE_BASE_SINK,
+  G_IMPLEMENT_INTERFACE(GST_TYPE_URI_HANDLER,
+                        postcoh_filesink_uri_handler_init);
+  GST_DEBUG_CATEGORY_INIT(
+    GST_CAT_DEFAULT, "postcoh filesink", 0, "postcoh filesink element"))
 
 static void postcoh_filesink_class_init(PostcohFilesinkClass *klass) {
-    GObjectClass *gobject_class         = G_OBJECT_CLASS(klass);
-    GstBaseSinkClass *gstbasesink_class = GST_BASE_SINK_CLASS(klass);
-
-    parent_class = g_type_class_ref(GST_TYPE_BASE_SINK);
+    GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
 
     gobject_class->dispose = postcoh_filesink_dispose;
 
@@ -195,15 +153,30 @@ static void postcoh_filesink_class_init(PostcohFilesinkClass *klass) {
         "How often to store postcoh table: (0) At the end, (N) Every N seconds",
         0, G_MAXINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+    GstBaseSinkClass *gstbasesink_class = GST_BASE_SINK_CLASS(klass);
+
     gstbasesink_class->start = GST_DEBUG_FUNCPTR(postcoh_filesink_start);
     gstbasesink_class->stop  = GST_DEBUG_FUNCPTR(postcoh_filesink_stop);
     //  gstbasesink_class->query = GST_DEBUG_FUNCPTR (postcoh_filesink_query);
     gstbasesink_class->render = GST_DEBUG_FUNCPTR(postcoh_filesink_render);
-    gstbasesink_class->event  = GST_DEBUG_FUNCPTR(postcoh_filesink_event);
+    gstbasesink_class->event  = GST_DEBUG_FUNCPTR(postcoh_filesink_sink_event);
+
+    GstElementClass *gst_element_class = GST_ELEMENT_CLASS(klass);
+
+    gst_element_class_set_metadata(
+      gst_element_class, "Postcoh File Sink", "Sink/File",
+      "Write postcoh tables to a xml file", "Qi Chu <qi.chu at ligo dot org>");
+
+    GstCaps *template_caps = gst_caps_from_string("application/x-lal-postcoh");
+
+    gst_element_class_add_pad_template(
+      gst_element_class, gst_pad_template_new("sink", GST_PAD_SINK,
+                                              GST_PAD_ALWAYS, template_caps));
+
+    gst_caps_unref(template_caps);
 }
 
-static void postcoh_filesink_init(PostcohFilesink *sink,
-                                  PostcohFilesinkClass *klass) {
+static void postcoh_filesink_init(PostcohFilesink *sink) {
     sink->filename = NULL;
     sink->file     = NULL;
     sink->uri      = NULL;
@@ -215,7 +188,7 @@ static void postcoh_filesink_init(PostcohFilesink *sink,
 static void postcoh_filesink_dispose(GObject *object) {
     PostcohFilesink *sink = POSTCOH_FILESINK(object);
 
-    G_OBJECT_CLASS(parent_class)->dispose(object);
+    G_OBJECT_CLASS(postcoh_filesink_parent_class)->dispose(object);
 
     if (sink->uri) {
         g_free(sink->uri);
@@ -476,9 +449,12 @@ static gboolean postcoh_filesink_cleanup_xml(PostcohFilesink *sink) {
 
 static GstFlowReturn
   postcoh_filesink_write_table_from_buf(PostcohFilesink *sink, GstBuffer *buf) {
-    PostcohInspiralTable *table = (PostcohInspiralTable *)GST_BUFFER_DATA(buf);
+    GstMapInfo mapInfo;
+    gst_buffer_map(buf, &mapInfo, GST_MAP_READ);
+
+    PostcohInspiralTable *table = (PostcohInspiralTable *)mapInfo.data;
     PostcohInspiralTable *table_end =
-      (PostcohInspiralTable *)(GST_BUFFER_DATA(buf) + GST_BUFFER_SIZE(buf));
+      (PostcohInspiralTable *)(mapInfo.data + mapInfo.size);
 
     XmlTable *xtable = sink->xtable;
 
@@ -488,16 +464,21 @@ static GstFlowReturn
         postcohtable_set_line(line, table, xtable);
         int rc =
           xmlTextWriterWriteString(sink->writer, (const xmlChar *)line->str);
-        if (rc < 0) return GST_FLOW_ERROR;
+        if (rc < 0) {
+            gst_buffer_unmap(buf, &mapInfo);
+            return GST_FLOW_ERROR;
+        }
         g_string_free(line, TRUE);
     }
 
+    gst_buffer_unmap(buf, &mapInfo);
+
     GST_LOG_OBJECT(sink,
-                   "Writen a buffer (%u bytes) with timestamp %" GST_TIME_FORMAT
+                   "Writen a buffer (%" G_GSIZE_FORMAT
+                   " bytes) with timestamp %" GST_TIME_FORMAT
                    ", duration %" GST_TIME_FORMAT ", offset %" G_GUINT64_FORMAT
                    ", offset_end %" G_GUINT64_FORMAT,
-                   GST_BUFFER_SIZE(buf),
-                   GST_TIME_ARGS(GST_BUFFER_TIMESTAMP(buf)),
+                   gst_buffer_get_size(buf), GST_TIME_ARGS(GST_BUFFER_PTS(buf)),
                    GST_TIME_ARGS(GST_BUFFER_DURATION(buf)),
                    GST_BUFFER_OFFSET(buf), GST_BUFFER_OFFSET_END(buf));
 
@@ -505,7 +486,8 @@ static GstFlowReturn
 }
 
 /* handle events (search) */
-static gboolean postcoh_filesink_event(GstBaseSink *basesink, GstEvent *event) {
+static gboolean postcoh_filesink_sink_event(GstBaseSink *basesink,
+                                            GstEvent *event) {
     GstEventType type;
     PostcohFilesink *sink;
 
@@ -515,9 +497,6 @@ static gboolean postcoh_filesink_event(GstBaseSink *basesink, GstEvent *event) {
 
     switch (type) {
     case GST_EVENT_EOS:
-        //	  if (fflush (sink->file))
-        //		goto flush_failed;
-
         GST_LOG_OBJECT(sink, "EVENT EOS. Finish writing document");
 
         gboolean rt = postcoh_filesink_end_xml(sink);
@@ -555,29 +534,18 @@ static gboolean postcoh_filesink_event(GstBaseSink *basesink, GstEvent *event) {
     default: break;
     }
 
-    return TRUE;
-
-    // return GST_BASE_SINK_CLASS (parent_class)->event (sink, event);
-#if 0
-flush_failed:
-  {
-	GST_ELEMENT_ERROR (sink, RESOURCE, WRITE,
-		(_("Error while writing to file \"%s\"."), sink->filename),
-		GST_ERROR_SYSTEM);
-	gst_event_unref (event);
-	return FALSE;
-  }
-#endif
+    return GST_BASE_SINK_CLASS(postcoh_filesink_parent_class)
+      ->event(basesink, event);
 }
 
 static GstFlowReturn postcoh_filesink_render(GstBaseSink *basesink,
                                              GstBuffer *buf) {
     PostcohFilesink *sink;
     sink        = POSTCOH_FILESINK(basesink);
-    sink->t_end = GST_BUFFER_TIMESTAMP(buf) + GST_BUFFER_DURATION(buf);
+    sink->t_end = GST_BUFFER_PTS(buf) + GST_BUFFER_DURATION(buf);
 
     if (!GST_CLOCK_TIME_IS_VALID(sink->t_start)) {
-        sink->t_start = GST_BUFFER_TIMESTAMP(buf);
+        sink->t_start = GST_BUFFER_PTS(buf);
         // This is the filename prefix.
         g_assert(sink->uri);
         sink->cur_filename = g_string_new(sink->uri);
@@ -598,7 +566,7 @@ static GstFlowReturn postcoh_filesink_render(GstBaseSink *basesink,
         return rs;
     }
 
-    GstClockTime t_cur = GST_BUFFER_TIMESTAMP(buf);
+    GstClockTime t_cur = GST_BUFFER_PTS(buf);
     if (sink->snapshot_interval > 0
         && (t_cur - sink->t_start) / GST_SECOND
              > (unsigned)sink->snapshot_interval) {
@@ -643,32 +611,30 @@ static gboolean postcoh_filesink_stop(GstBaseSink *basesink) {
 }
 /*** GSTURIHANDLER INTERFACE *************************************************/
 
-static GstURIType postcoh_filesink_uri_get_type(void) { return GST_URI_SINK; }
+static GstURIType postcoh_filesink_uri_get_type(GType type) {
+    return GST_URI_SINK;
+}
 
-static gchar **postcoh_filesink_uri_get_protocols(void) {
-    static gchar *protocols[] = { (char *)"file", NULL };
+static const gchar *const *postcoh_filesink_uri_get_protocols(GType type) {
+    static const gchar *const protocols[] = { "file", NULL };
 
     return protocols;
 }
 
-static const gchar *postcoh_filesink_uri_get_uri(GstURIHandler *handler) {
+static gchar *postcoh_filesink_uri_get_uri(GstURIHandler *handler) {
     PostcohFilesink *sink = POSTCOH_FILESINK(handler);
 
-    return sink->uri;
+    return g_string_new(sink->uri)->str;
 }
 
 static gboolean postcoh_filesink_uri_set_uri(GstURIHandler *handler,
-                                             const gchar *uri) {
-    gchar *protocol, *location;
+                                             const gchar *uri,
+                                             GError **error) {
+    /* FIXME:  report errors via GError argument */
+
+    gchar *location;
     gboolean ret;
     PostcohFilesink *sink = POSTCOH_FILESINK(handler);
-
-    protocol = gst_uri_get_protocol(uri);
-    if (strcmp(protocol, "file") != 0) {
-        g_free(protocol);
-        return FALSE;
-    }
-    g_free(protocol);
 
     /* allow file://localhost/foo/bar by stripping localhost but fail
      * for every other hostname */
