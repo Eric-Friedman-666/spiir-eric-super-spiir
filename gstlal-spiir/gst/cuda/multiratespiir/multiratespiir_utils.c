@@ -25,32 +25,14 @@
  * ============================================================================
  */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <LIGOLwHeader.h>
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
-
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
 #include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
 #include <math.h>
 #include <multiratespiir/multiratespiir.h>
+#include <multiratespiir/multiratespiir_state.h>
 #include <multiratespiir/multiratespiir_utils.h>
-
-#ifdef __cplusplus
-}
-#endif
 
 #define NTHREAD_LIMIT 1024
 /*
@@ -305,8 +287,8 @@ float resampler_state_amplifier_init(gint quality,
 ResamplerState *resampler_state_create(gint inrate,
                                        gint outrate,
                                        gint channels,
-                                       gint num_exe_samples,
-                                       gint num_cover_samples,
+                                       guint num_exe_samples,
+                                       guint num_cover_samples,
                                        gint depth,
                                        cudaStream_t stream) {
     gint mem_alloc_size, num_alloc_samples;
@@ -576,16 +558,13 @@ void spiir_state_load_bank(SpiirState **spstate,
     free(tmp_a1);
     free(tmp_b0);
     free(tmp_d);
-
-    xmlCleanupParser();
-    xmlMemoryDump();
 }
 
 SpiirState **spiir_state_create(const gchar *bank_fname,
                                 guint ndepth,
                                 guint rate,
                                 guint num_head_cover_samples,
-                                gint num_exe_samples,
+                                guint num_exe_samples,
                                 cudaStream_t stream) {
 
     // printf("init spstate\n");
@@ -631,9 +610,7 @@ SpiirState **spiir_state_create(const gchar *bank_fname,
           cudaMemsetAsync(SPSTATE(i)->d_queue, 0, queue_alloc_size, stream));
     }
     // FIXME: this d_out will cost large GPU memory, find a way to avoid it
-    // NOTE: num_exe_samples will be replaced with an unsigned data type
-    // in the gstreamer upgrade
-    int out_alloc_size = MAX((guint)num_exe_samples, num_head_cover_samples)
+    int out_alloc_size = MAX(num_exe_samples, num_head_cover_samples)
                          * outchannels * sizeof(float);
 
     // printf("out_alloc_size %d\n", out_alloc_size);
@@ -705,8 +682,6 @@ void cuda_multiratespiir_read_bank_id(const char *fname, gint *bank_id) {
     parseFile(fname, &xns, 1);
 
     *bank_id = atoi((const gchar *)xparam.data);
-    xmlCleanupParser();
-    xmlMemoryDump();
 }
 void cuda_multiratespiir_read_ndepth_and_rate(const char *fname,
                                               guint *num_depths,
@@ -738,9 +713,6 @@ void cuda_multiratespiir_read_ndepth_and_rate(const char *fname,
     freeParam(&xparam);
     *num_depths = (guint)(log(maxrate) / log(2) - log(minrate) / log(2)) + 1;
     *rate       = (gint)maxrate;
-
-    xmlCleanupParser();
-    xmlMemoryDump();
 }
 
 void cuda_multiratespiir_init_cover_samples(guint *num_head_cover_samples,
@@ -765,8 +737,8 @@ void cuda_multiratespiir_init_cover_samples(guint *num_head_cover_samples,
     }
 }
 
-void cuda_multiratespiir_update_exe_samples(gint *num_exe_samples,
-                                            gint new_value) {
+void cuda_multiratespiir_update_exe_samples(guint *num_exe_samples,
+                                            guint new_value) {
     *num_exe_samples = new_value;
 }
 
@@ -793,6 +765,6 @@ void cuda_multiratespiir_add_two_data(float *data1, float *data2, gint len) {
     for (i = 0; i < len; i++) data1[i] = data1[i] + data2[i];
 }
 
-guint64 cuda_multiratespiir_get_available_samples(CudaMultirateSPIIR *element) {
+guint cuda_multiratespiir_get_available_samples(CudaMultirateSPIIR *element) {
     return gst_adapter_available(element->adapter) / (element->width / 8);
 }

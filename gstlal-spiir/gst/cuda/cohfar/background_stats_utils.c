@@ -1108,17 +1108,6 @@ gboolean trigger_stats_xml_from_xml(TriggerStatsXML *stats,
     }
     *hist_trials = *((int *)param_hist_trials->data);
 
-    // FIXME: some sanity check for file loading
-    // printf( "load stats file\n");
-    /*
-     * Cleanup function for the XML library.
-     */
-    xmlCleanupParser();
-    /*
-     * this is to debug memory for regression tests
-     */
-    xmlMemoryDump();
-
     /*
      * free the allocated memory for xml reading
      */
