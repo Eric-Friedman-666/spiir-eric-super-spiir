@@ -6,9 +6,6 @@ libgstlalspiir_la_SOURCES = \
 	LIGOLw_xmllib/LIGOLwUtils.c \
 	IFOMap/IFOMap.c
 
-
-libgstlalspiir_la_CFLAGS = $(AM_CFLAGS) $(AM_CPPFLAGS) $(XML_CFLAGS) $(gstreamer_CFLAGS) $(GSTLAL_SPIIR_CFLAGS)
-libgstlalspiir_la_LIBADD = 
-
-libgstlalspiir_la_LDFLAGS = $(AM_LDFLAGS) $(XML_LIBS) $(gstreamer_LIBS)
-
+libgstlalspiir_la_CFLAGS = $(AM_CFLAGS) $(AM_CPPFLAGS) $(LIBXML_CFLAGS) $(GLIB_CFLAGS) $(GSTLAL_SPIIR_CFLAGS)
+libgstlalspiir_la_LIBADD = $(LIBXML_LIBS) $(GLIB_LIBS)
+libgstlalspiir_la_LDFLAGS = $(AM_LDFLAGS)

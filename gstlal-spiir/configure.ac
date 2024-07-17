@@ -3,14 +3,14 @@
 #
 
 
-AC_INIT([gstlal-spiir],[0.9.1],[spiir-discuss@ligo.org],[gstlal-spiir])
+AC_INIT([gstlal-spiir],[0.10.0],[spiir-discuss@ligo.org],[gstlal-spiir])
 AC_COPYRIGHT([Copyright (C) 2017 Qi Chu])
 # a file whose existance can be used to use to check that we are in the
 # top-level directory of the source tree
 AC_CONFIG_SRCDIR([gnuscripts/ltmain.sh])
 AC_CONFIG_AUX_DIR([gnuscripts])
 AC_CONFIG_MACRO_DIR([gnuscripts])
-AM_INIT_AUTOMAKE([1.9 tar-ustar foreign])
+AM_INIT_AUTOMAKE([1.9 tar-ustar foreign subdir-objects])
 AUTOMAKE_OPTIONS="${AUTOMAKE_OPTIONS} --add-missing --copy"
 AC_CONFIG_FILES([ \
 	Makefile \
@@ -61,11 +61,11 @@ AC_SUBST([pkgconfigdir],["\${libdir}/pkgconfig"])
 
 
 #
-# force /usr/share/ package files into same directory as gstlal
+# /usr/share/ package files
 #
 
 
-AC_SUBST([pkgdatadir],["\${datadir}/gstlal"])
+AC_SUBST([pkgdatadir],["\${datadir}/gstlal_spiir"])
 
 
 #
@@ -85,20 +85,12 @@ AC_SUBST([LIBVERSION], [${LIBAPI}:${LIBREL}:${LIBAGE}])
 # Check for programs
 #
 
-# check for c99 compiler
+# check for c99 compiler and C preprocessor
 m4_pattern_allow([AC_PROG_CC_C99])
 m4_ifdef([AC_PROG_CC_C99],[AC_PROG_CC_C99],[LALSUITE_AC_PROG_CC_C99])
 
 AC_PROG_CXX
 AC_PROG_INSTALL
-# libtool incorrectly determines library path on SL6.  FIXME:  remove when
-# no longer needed
-case `cat /etc/redhat-release 2> /dev/null` in
-  "Scientific Linux"*|"CentOS"*)
-    AC_MSG_NOTICE([hacking round broken libtool multilib support on RedHat systems])
-    lt_cv_sys_lib_dlsearch_path_spec="/lib64 /usr/lib64"
-    ;;
-esac
 LT_INIT
 PKG_PROG_PKG_CONFIG()
 
@@ -113,19 +105,12 @@ AC_SUBST([MIN_DOXYGEN_VERSION])
 #
 
 
-MIN_PYTHON_VERSION="2.6"
+MIN_PYTHON_VERSION="3.8"
 AM_PATH_PYTHON(["$MIN_PYTHON_VERSION"],,)
 AX_PYTHON_DEVEL()
-# hack to remove default lib dirs from PYTHON_LDFLAGS.  only tested on
-# Debian and SL6.  FIXME:  find a way to do this properly
-PYTHON_LDFLAGS="`echo $PYTHON_LDFLAGS | sed -e 'sX-L/usr/lib\(64\)\?\(/\)\?[[:space:]]*XXg'`"
-# hack to add missing options to PYTHON_LDFLAGS.  sigh, what's the point of
-# AX_PYTHON_DEVEL!?
-PYTHON_LDFLAGS="-module -avoid-version $PYTHON_LDFLAGS"
 AC_SUBST([MIN_PYTHON_VERSION])
-# force python modules into same directory as gstlal
-AC_SUBST([pkgpythondir], ["\${pythondir}/gstlal"])
-AC_SUBST([pkgpyexecdir], ["\${pyexecdir}/gstlal"])
+AC_SUBST([pkgpythondir], ["\${pythondir}/gstlal_spiir"])
+AC_SUBST([pkgpyexecdir], ["\${pyexecdir}/gstlal_spiir"])
 
 
 #
@@ -157,39 +142,25 @@ AC_CHECK_LIB([m], [main], , [AC_MSG_ERROR([Not found!])])
 
 
 #
-# Check for FFTW
-#
-
-
-PKG_CHECK_MODULES([FFTW], [fftw3 fftw3f])
-AC_SUBST([FFTW_CFLAGS])
-AC_SUBST([FFTW_LIBS])
-AC_DEFINE([GSTLAL_FFTW_WISDOM_ENV], ["GSTLAL_FFTW_WISDOM"], [Set to the name of the environment variable to use for overriding the system-wide double-precision FFTW wisdom file])
-AC_DEFINE([GSTLAL_FFTWF_WISDOM_ENV], ["GSTLAL_FFTWF_WISDOM"], [Set to the name of the environment variable to use for overriding the system-wide single-precision FFTW wisdom file])
-
-
-
-#
 # Check for GStreamer
 #
 
 
-AC_SUBST([GSTREAMER_RELEASE], [0.10])
-AC_SUBST([MIN_GSTREAMER_VERSION], [0.10.32])
-PKG_CHECK_MODULES([gstreamer], [gstreamer-${GSTREAMER_RELEASE} >= ${MIN_GSTREAMER_VERSION} gstreamer-base-${GSTREAMER_RELEASE} >= ${MIN_GSTREAMER_VERSION}])
-AC_SUBST([gstreamer_CFLAGS])
-AC_SUBST([gstreamer_LIBS])
+AC_SUBST([GSTREAMER_RELEASE], [1.0])
+AC_SUBST([MIN_GSTREAMER_VERSION], [1.14.1])
+PKG_CHECK_MODULES([GSTREAMER], [gstreamer-${GSTREAMER_RELEASE} >= ${MIN_GSTREAMER_VERSION} gstreamer-allocators-${GSTREAMER_RELEASE} >= ${MIN_GSTREAMER_VERSION} gstreamer-base-${GSTREAMER_RELEASE} >= ${MIN_GSTREAMER_VERSION} gstreamer-controller-${GSTREAMER_RELEASE} >= ${MIN_GSTREAMER_VERSION}])
+AC_SUBST([GSTREAMER_CFLAGS])
+AC_SUBST([GSTREAMER_LIBS])
 AC_SUBST([plugindir], [${libdir}/gstreamer-${GSTREAMER_RELEASE}])
 AC_MSG_NOTICE([If you have chosen to install the software in a location not included in your default gstreamer plugin search path, you might need to add the directory
 
 	$plugindir
 	
 to your GST_PLUGIN_PATH environment variable.])
-AC_SUBST([GSTLAL_PLUGIN_LDFLAGS], ["-module -avoid-version -export-symbols-regex [_]*\(gst_\|Gst\|GST_\|gstlal_\|GstLAL_\|GSTLAL_\).*"])
 
 # Check for availability of GstBaseParse class (starting in 0.10.33)
 CFLAGS_saved="$CFLAGS"
-CFLAGS="$gstreamer_CFLAGS"
+CFLAGS="$GSTREAMER_CFLAGS"
 AC_COMPILE_IFELSE(
 	[AC_LANG_PROGRAM([#include <gst/base/gstbaseparse.h>])],
 	[HAVE_GSTBASEPARSE=yes
@@ -201,34 +172,11 @@ AM_CONDITIONAL([COND_GSTBASEPARSE], [test "x${HAVE_GSTBASEPARSE}" == "xyes"])
 
 
 #
-# Check for GStreamer Video Library
-#
-
-
-AC_SUBST([GSTREAMER_VIDEO_RELEASE], [0.10])
-AC_SUBST([MIN_GSTREAMER_VIDEO_VERSION], [0.10.32])
-PKG_CHECK_MODULES([gstreamer_video], [gstreamer-video-${GSTREAMER_VIDEO_RELEASE} >= ${MIN_GSTREAMER_VIDEO_VERSION}])
-AC_SUBST([gstreamer_video_CFLAGS])
-AC_SUBST([gstreamer_video_LIBS])
-
-
-#
-# Check for GStreamer Audio Library
-#
-
-
-AC_SUBST([GSTREAMER_AUDIO_RELEASE], [0.10])
-AC_SUBST([MIN_GSTREAMER_AUDIO_VERSION], [0.10.32])
-PKG_CHECK_MODULES([gstreamer_audio], [gstreamer-audio-${GSTREAMER_AUDIO_RELEASE} >= ${MIN_GSTREAMER_AUDIO_VERSION}])
-AC_SUBST([gstreamer_audio_CFLAGS])
-AC_SUBST([gstreamer_audio_LIBS])
-
-
-#
 # Check for NumPy
 #
 
 
+AC_SUBST([MIN_NUMPY_VERSION], [1.7.0])
 AX_PYTHON_MODULE(numpy, fatal)
 NUMPY_CFLAGS=-I`$PYTHON -c "import numpy;print (numpy.get_include());"`
 old_CFLAGS="$CFLAGS"
@@ -240,19 +188,31 @@ AC_CHECK_HEADER([numpy/arrayobject.h],
 CFLAGS="$old_CFLAGS"
 
 
-
 #
 # Check for LAL
 #
 
 
-AC_SUBST([MIN_LAL_VERSION], [6.15.0])
-AC_SUBST([MIN_LALMETAIO_VERSION], [1.2.6])
-PKG_CHECK_MODULES([LAL], [lal >= ${MIN_LAL_VERSION} lalmetaio >= ${MIN_LALMETAIO_VERSION} lalsupport])
+AC_SUBST([MIN_LAL_VERSION], [7.1.0])
+AC_SUBST([MIN_LALMETAIO_VERSION], [2.0.0])
+AC_SUBST([MIN_LALSIMULATION_VERSION], [2.5.0])
+AC_SUBST([MIN_LALBURST_VERSION], [1.5.0])
+AC_SUBST([MIN_LALINSPIRAL_VERSION], [2.0.0])
+PKG_CHECK_MODULES([LAL], [lal >= ${MIN_LAL_VERSION} lalmetaio >= ${MIN_LALMETAIO_VERSION} lalsupport lalsimulation >= ${MIN_LALSIMULATION_VERSION} lalburst >= ${MIN_LALBURST_VERSION} lalinspiral >= ${MIN_LALINSPIRAL_VERSION}])
 AC_SUBST([LAL_CFLAGS])
 AC_SUBST([LAL_LIBS])
 
 AX_PYTHON_MODULE([lal], fatal)
+
+#
+# Check for GLIB
+#
+
+
+AC_SUBST([MIN_GLIB_VERSION], [2.0])
+PKG_CHECK_MODULES([GLIB], [glib-2.0 >= ${MIN_GLIB_VERSION}])
+AC_SUBST([GLIB_CFLAGS])
+AC_SUBST([GLIB_LIBS])
 
 
 #
@@ -268,8 +228,7 @@ AX_PYTHON_GLUE()
 # Check for gstlal
 #
 
-
-AC_SUBST([MIN_GSTLAL_VERSION], [0.10.0])
+AC_SUBST([MIN_GSTLAL_VERSION], [1.0.0])
 PKG_CHECK_MODULES([GSTLAL], [gstlal >= ${MIN_GSTLAL_VERSION}])
 AC_SUBST([GSTLAL_VERSION], [`$PKG_CONFIG --modversion gstlal`])
 AX_GSTLAL_SPLIT_VERSION([GSTLAL_VERSION])
@@ -308,12 +267,8 @@ AS_IF([test "x$with_cuda" != "xno"], [
 	])
 	AC_SUBST([NVCC], ["${with_cuda}/bin/nvcc"])
 	AC_SUBST([NVCC_CFLAGS], ["-I${with_cuda}/include"])
-	PKG_CHECK_MODULES([GLIB], [glib-2.0])
-	AC_SUBST([NVCC_GSTLAL_CFLAGS], [$GLIB_CFLAGS])
-	AC_SUBST([NVCC_LAL_CFLAGS], ["$($PKG_CONFIG --cflags-only-I lal)"])
-	AC_SUBST([NVCC_gstreamer_CFLAGS], ["$($PKG_CONFIG --cflags-only-I gstreamer-0.10)"])
-	AC_SUBST([NVCC_ADD_CFLAGS], ["-Xcudafe --display_error_number"])
 	AC_SUBST([NVCC_LIBS], ["-L${with_cuda}/$CLIBS -lcudart"])
+	AC_SUBST([NVCC_ADD_CFLAGS], ["-Xcudafe --display_error_number"])
 	HAVE_CUDA="yes"
 ], [
 	AC_MSG_WARN([check for cuda disabled])
@@ -344,15 +299,6 @@ AC_CHECK_LIB([lapacke], [LAPACKE_dgetrf], [
 
 
 #
-# Check for cython
-#
-AC_CHECK_PROG(have_cython, cython, yes)
-AS_IF([test x"$have_cython" != x"yes"], [
-	    AC_MSG_ERROR([Cython not found.])])
-
-
-
-#
 # Check for Chealpix
 #
 
@@ -365,9 +311,9 @@ AC_SUBST([CHEALPIX_LIBS])
 #
 # Check for libxml2
 #
-PKG_CHECK_MODULES([XML], [libxml-2.0], [true], [false])
-AC_SUBST([XML_CFLAGS])
-AC_SUBST([XML_LIBS])
+PKG_CHECK_MODULES([LIBXML], [libxml-2.0], [true], [false])
+AC_SUBST([LIBXML_CFLAGS])
+AC_SUBST([LIBXML_LIBS])
 
 #
 # custom cflags and libs

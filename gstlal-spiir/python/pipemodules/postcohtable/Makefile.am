@@ -1,5 +1,5 @@
-ADD_CFLAGS = $(GSTLAL_SPIIR_CFLAGS)
-ADD_LIBS = $(GSTLAL_SPIIR_LIBS)
+COMMON_CPP_FLAGS = $(GSTLAL_SPIIR_CFLAGS)
+COMMON_LIBS = $(GSTLAL_SPIIR_LIBS)
 
 
 # This is a trick taken from the gst-python automake setup.
@@ -17,8 +17,8 @@ postcohtable_PYTHON = \
 postcohtable_LTLIBRARIES = _postcohtable.la
 
 _postcohtable_la_SOURCES = _postcohtable.c
-_postcohtable_la_CPPFLAGS = $(AM_CPPFLAGS) $(LAL_CFLAGS) $(GSL_CFLAGS) $(gstreamer_CFLAGS) $(GSTLAL_CFLAGS) $(ADD_CFLAGS) $(PYTHON_CPPFLAGS) -DMODULE_NAME="\"gstlal.pipemodules.postcohtable._postcohtable\"" -fno-strict-aliasing
+_postcohtable_la_CPPFLAGS = $(AM_CPPFLAGS) $(LAL_CFLAGS) $(GSL_CFLAGS) $(GSTLAL_CFLAGS) $(PYTHON_CPPFLAGS) $(COMMON_CPP_FLAGS) -DMODULE_NAME="\"gstlal.pipemodules.postcohtable._postcohtable\"" -fno-strict-aliasing
 _postcohtable_la_CXXFLAGS = -fpermissive
-_postcohtable_la_CFLAGS = $(AM_CFLAGS) $(LAL_CFLAGS) $(GSL_CFLAGS) $(gstreamer_CFLAGS) $(GSTLAL_CFLAGS) $(ADD_CFLAGS) -fno-strict-aliasing -DMODULE_NAME="\"gstlal.pipemodules.postcohtable._postcohtable\""
-_postcohtable_la_LDFLAGS = $(AM_LDFLAGS) $(LAL_LIBS) $(GSL_LIBS) $(GSTLAL_LDFLAGS) $(PYTHON_LIBS) $(ADD_LIBS) -module -avoid-version
-
+_postcohtable_la_CFLAGS = $(AM_CFLAGS) -fno-strict-aliasing
+_postcohtable_la_LIBADD = $(COMMON_LIBS) $(LAL_LIBS) $(GSL_LIBS) $(PYTHON_LIBS)
+_postcohtable_la_LDFLAGS = $(AM_LDFLAGS) -module -avoid-version

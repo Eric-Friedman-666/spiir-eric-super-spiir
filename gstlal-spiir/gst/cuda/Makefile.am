@@ -1,10 +1,10 @@
-ADD_CFLAGS = $(GSTLAL_SPIIR_CFLAGS) $(GST_COMMON_SPIIR_CFLAGS) $(LAPACKE_CFLAGS) $(SPIIR_FIX_COMPLEX_CFLAGS)
-ADD_LIBS = $(GSTLAL_SPIIR_LIBS) $(GST_COMMON_SPIIR_LIBS) -llapack $(LAPACKE_LIBS)
+COMMON_CPP_FLAGS = $(GSTLAL_SPIIR_CFLAGS) $(GST_COMMON_SPIIR_CFLAGS) $(LIBXML_CFLAGS) $(LAPACKE_CFLAGS) $(SPIIR_FIX_COMPLEX_CFLAGS)
+COMMON_LIBS = $(GSTLAL_SPIIR_LIBS) $(GST_COMMON_SPIIR_LIBS) $(LIBXML_LIBS) $(LAPACKE_LIBS)
 
-plugin_LTLIBRARIES = libcuda_plugin.la
+plugin_LTLIBRARIES = libgstcuda.la
 
-libcuda_plugin_la_SOURCES = \
-	cuda_plugin.c \
+libgstcuda_la_SOURCES = \
+	libgstcuda.c \
 	multiratespiir/multiratespiir_kernel.cu \
 	multiratespiir/multiratespiir_utils.c \
 	multiratespiir/multiratespiir.c \
@@ -18,26 +18,23 @@ libcuda_plugin_la_SOURCES = \
 	cohfar/background_stats_utils.c \
 	cohfar/cohfar_accumbackground.c \
 	cohfar/cohfar_assignfar.c
-#	deprecated
-#	audioresample folder not working, seg fault
-#	audioresample/cuda_gstaudioresample.c \
-#	audioresample/speex_resampler_int.c \
-#	audioresample/speex_resampler_float.c \
-#	audioresample/speex_resampler_double.c
-#	multidownsample folder not working, seg fault
-#	multidownsample/gstlal_multidownsample.c
 
-libcuda_plugin_la_CFLAGS = $(AM_CFLAGS) $(GSL_CFLAGS) $(LAL_CFLAGS) $(GSTLAL_CFLAGS) $(gstreamer_CFLAGS) $(AM_CPPFLAGS) $(NVCC_CFLAGS) $(CHEALPIX_CFLAGS) $(ADD_CFLAGS)
-
-libcuda_plugin_la_LDFLAGS = $(AM_LDFLAGS) $(GSL_LIBS) $(LAL_LIBS) $(GSTLAL_LIBS) $(gstreamer_LIBS) $(GSTLAL_PLUGIN_LDFLAGS) $(NVCC_LIBS) $(CHEALPIX_LIBS) $(ADD_LIBS) -lstdc++ 
+libgstcuda_la_CPPFLAGS = $(AM_CPPFLAGS) $(GSL_CFLAGS) $(LAL_CFLAGS) $(GSTLAL_CFLAGS) $(GSTREAMER_CFLAGS) $(GLIB_CFLAGS) $(NVCC_CFLAGS) $(CHEALPIX_CFLAGS) $(COMMON_CPP_FLAGS)
+libgstcuda_la_CFLAGS = $(AM_CFLAGS)
+libgstcuda_la_LIBADD = $(COMMON_LIBS) $(GSL_LIBS) $(LAL_LIBS) $(GSTLAL_LIBS) $(GSTREAMER_LIBS) $(GLIB_LIBS) $(NVCC_LIBS) $(CHEALPIX_LIBS)
+libgstcuda_la_LDFLAGS = $(AM_LDFLAGS) -lstdc++ 
 
 .cu.lo:
-	$(top_srcdir)/gnuscripts/cudalt.py $@ $(NVCC) $(NVCC_CFLAGS) $(NVCC_ADD_CFLAGS) $(DEFAULT_INCLUDES) $(NVCC_LAL_CFLAGS) $(NVCC_GSTLAL_CFLAGS) $(NVCC_gstreamer_CFLAGS) $(ADD_CFLAGS) --ptxas-options=-v -O0  -maxrregcount=0 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_52,code=sm_52 --compiler-options=\"$(libcuda_plugin_la_CFLAGS)\" -c $<
+	$(top_srcdir)/gnuscripts/cudalt.py $@ $(NVCC) $(NVCC_CFLAGS) $(NVCC_ADD_CFLAGS) $(DEFAULT_INCLUDES) --ptxas-options=-v -O0  -maxrregcount=0 -gencode=arch=compute_75,code=sm_75 -gencode=arch=compute_70,code=sm_70 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_52,code=sm_52 --compiler-options=\"$(libgstcuda_la_CPPFLAGS) $(libgstcuda_la_CFLAGS)\" -c $<
 
 noinst_HEADERS = \
+	complex_f.h \
+	multiratespiir/multiratespiir_state.h \
 	multiratespiir/multiratespiir_kernel.h \
 	multiratespiir/multiratespiir_utils.h \
 	multiratespiir/multiratespiir.h \
+	postcoh/postcoh_state.h \
+	postcoh/postcoh_kernel.h \
 	postcoh/postcoh_utils.h \
 	postcoh/postcoh.h \
 	postcoh/postcohtable_utils.h \
@@ -52,18 +49,16 @@ gstlal_cohfar_calc_fap_SOURCES = \
 	cohfar/background_stats_utils.c \
 	cohfar/cohfar_calc_fap.c
 
-gstlal_cohfar_calc_fap_CFLAGS = $(AM_CFLAGS) $(GSL_CFLAGS) $(LAL_CFLAGS) $(GSTLAL_CFLAGS) $(gstreamer_CFLAGS) $(ADD_CFLAGS)
-gstlal_cohfar_calc_fap_LDFLAGS = $(AM_LDFLAGS) $(GSL_LIBS) $(LAL_LIBS) $(GSTLAL_LIBS) $(gstreamer_LIBS) $(GSTLAL_PLUGIN_LDFLAGS) $(ADD_LIBS)
-
+gstlal_cohfar_calc_fap_CFLAGS = $(AM_CFLAGS) $(AM_CPPFLAGS) $(GSL_CFLAGS) $(LAL_CFLAGS) $(GSTLAL_CFLAGS) $(GSTREAMER_CFLAGS) $(GLIB_CFLAGS) $(COMMON_CPP_FLAGS)
+gstlal_cohfar_calc_fap_LDADD = $(COMMON_LIBS) $(GSL_LIBS) $(LAL_LIBS) $(GSTLAL_LIBS) $(GSTREAMER_LIBS) $(GLIB_LIBS)
+gstlal_cohfar_calc_fap_LDFLAGS = $(AM_LDFLAGS)
 gstlal_postcoh_gen_detrsp_map_SOURCES = \
 	postcoh/postcoh_detrsp_map.c
 
-gstlal_postcoh_gen_detrsp_map_CFLAGS = $(AM_CFLAGS) $(GSL_CFLAGS) $(LAL_CFLAGS) $(GSTLAL_CFLAGS) $(gstreamer_CFLAGS) $(AM_CPPFLAGS) $(NVCC_CFLAGS) $(CHEALPIX_CFLAGS) $(ADD_CFLAGS)
-
-gstlal_postcoh_gen_detrsp_map_LDFLAGS = $(AM_LDFLAGS) $(GSL_LIBS) $(LAL_LIBS) $(GSTLAL_LIBS) $(gstreamer_LIBS) $(GSTLAL_PLUGIN_LDFLAGS) $(NVCC_LIBS) $(CHEALPIX_LIBS) $(ADD_LIBS) 
-
+gstlal_postcoh_gen_detrsp_map_CFLAGS = $(AM_CFLAGS) $(AM_CPPFLAGS) $(GSL_CFLAGS) $(LAL_CFLAGS) $(GSTLAL_CFLAGS) $(GSTREAMER_CFLAGS) $(GLIB_CFLAGS) $(NVCC_CFLAGS) $(CHEALPIX_CFLAGS) $(COMMON_CPP_FLAGS)
+gstlal_postcoh_gen_detrsp_map_LDADD = $(COMMON_LIBS) $(GSL_LIBS) $(LAL_LIBS) $(GSTLAL_LIBS) $(GSTREAMER_LIBS) $(GLIB_LIBS) $(NVCC_LIBS) $(CHEALPIX_LIBS)
+gstlal_postcoh_gen_detrsp_map_LDFLAGS = $(AM_LDFLAGS)
 
 bin_PROGRAMS = \
 	gstlal_cohfar_calc_fap \
 	gstlal_postcoh_gen_detrsp_map
-
