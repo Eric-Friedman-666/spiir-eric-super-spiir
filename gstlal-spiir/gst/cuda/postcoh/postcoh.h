@@ -22,38 +22,15 @@
 
 // Standard and 3rd party includes
 #include <cuda_runtime.h>
-
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
 #include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/base/gstadapter.h>
 #include <gst/base/gstcollectpads.h>
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
 
 // Our includes
-#include <ifo_set.h>
-#include <pipe_macro.h>
-
-// FIXME: hack for cuda-6.5 and lal header to work
-#ifndef __STDC_CONSTANT_MACROS
-#define __STDC_CONSTANT_MACROS
-#endif
-
 #include <lal/LIGOMetadataTables.h>
+#include <pipe_macro.h>
+#include <postcoh/postcoh_state.h>
 
 G_BEGIN_DECLS
 
@@ -69,17 +46,6 @@ G_BEGIN_DECLS
 
 typedef struct _CudaPostcoh CudaPostcoh;
 typedef struct _CudaPostcohClass CudaPostcohClass;
-
-#ifndef DEFINED_COMPLEX_F
-#define DEFINED_COMPLEX_F
-
-typedef struct _Complex_F {
-    float re;
-    float im;
-} COMPLEX_F;
-
-#else
-#endif
 
 typedef struct _GstPostcohCollectData GstPostcohCollectData;
 typedef void (*CudaPostcohPeakfinder)(gpointer d_snglsnr, gint size);
@@ -97,142 +63,6 @@ struct _GstPostcohCollectData {
     GArray *flag_segments;
 };
 
-// FIXME: consider more flxible structure for PeakList
-typedef struct _PeakList {
-    int peak_intlen;
-    int peak_floatlen;
-
-    /* data in the same type are allocated together */
-    int *npeak;
-    int *peak_pos;
-    int *len_idx;
-    int *tmplt_idx;
-    int *pix_idx;
-    int *pix_idx_bg; // background Ntoff needs this, do not remove
-    int *ntoff[MAX_NIFO];
-
-    float *snglsnr[MAX_NIFO];
-    float *coaphase[MAX_NIFO];
-    float *chisq[MAX_NIFO];
-
-    float *snglsnr_bg[MAX_NIFO];
-    float *coaphase_bg[MAX_NIFO];
-    float *chisq_bg[MAX_NIFO];
-
-    float *cohsnr;
-    float *nullsnr;
-    float *cmbchisq;
-
-    float *cohsnr_bg;
-    float *nullsnr_bg;
-    float *cmbchisq_bg;
-
-    float *cohsnr_skymap;
-    float *nullsnr_skymap;
-
-    /* structure on GPU device */
-    // It is important to note that pointers on the host device are not
-    // exposed to the GPU device. For this reason, we can't allocate d_ntoff,
-    // d_snglsnr, etc. here on the stack with sized arrays. Instead, we need
-    // to malloc is when PeakList is built.
-    int *d_npeak;
-    int *d_peak_pos;
-    int *d_len_idx;
-    int *d_tmplt_idx;
-    int *d_pix_idx;
-    int *d_pix_idx_bg; // background Ntoff needs this, do not remove
-    int **d_ntoff; // size (MAX_NIFO)
-
-    float **d_snglsnr; // size (MAX_NIFO)
-    float **d_coaphase; // size (MAX_NIFO)
-    float **d_chisq; // size (MAX_NIFO)
-
-    float **d_snglsnr_bg; // size (MAX_NIFO)
-    float **d_coaphase_bg; // size (MAX_NIFO)
-    float **d_chisq_bg; // size (MAX_NIFO)
-
-    float *d_cohsnr;
-    float *d_nullsnr;
-    float *d_cmbchisq;
-
-    float *d_cohsnr_bg;
-    float *d_nullsnr_bg;
-    float *d_cmbchisq_bg;
-
-    float *d_cohsnr_skymap;
-    float *d_nullsnr_skymap;
-
-    float *d_peak_tmplt;
-    float *d_maxsnglsnr; // for cuda peakfinder, not used now
-
-    float *d_snglsnr_buffer; // we need to copy data from CPU memory to this
-                             // buffer; then do transpose for new postcoh kernel
-                             // optimized by Xiaoyang Guo
-    int len_snglsnr_buffer;
-} PeakList;
-
-typedef struct _PostcohState {
-    // Redundant, use postcoh equivalent instead
-    int head_len;
-    int exe_len;
-    // Immutable pointer with immutable data outside of init/setcaps
-    /* parent pointer in host device, each children pointer is in GPU device,
-     * pointing to a detector autocorrelation array in GPU device*/
-    COMPLEX_F **dd_autocorr_matrix;
-    /* parent pointer in host device, each children pointer is in GPU device,
-     * pointing to a detector autocorrealtion norm value in GPU device*/
-    float **dd_autocorr_norm;
-    /* map the position of detector snr series to the position of output snr
-     * instances */
-    gint *write_ifo_mapping;
-    gint *d_write_ifo_mapping;
-    /* sigmasq read from bank to compute effective distance */
-    double **sigmasq;
-    char *all_ifos;
-    // Immutable outside of init/setcaps
-    gint nifo;
-    ifo_set_type enabled_ifos;
-    gint enabled_ifo_ids[MAX_NIFO];
-    int max_npeak;
-    int ntmplt;
-    float dt;
-    float snglsnr_thresh;
-    gint hist_trials;
-    gint trial_sample_inv;
-    float snglsnr_max[MAX_NIFO];
-    gint is_member_init;
-    // Immutable pointer with immutable data outside of init/setcaps and detrsp
-    // refresh
-    /* parent pointer in host device, each children pointer is in host device,
-     * pointing to the coherent U map of a certain time in GPU device*/
-    float **d_U_map;
-    /* parent pointer in host device, each children pointer is in host device,
-     * pointing to the coherent time arrival diff map of a certain time in GPU
-     * device*/
-    float **d_diff_map;
-    // Immutable outside of init/setcaps and detrsp refresh
-    int autochisq_len;
-    int snglsnr_len;
-    int snglsnr_start_load;
-    int snglsnr_start_exe;
-    /* map the input sink to the 'enabled_ifo_id' (its index in all_ifos) */
-    int gps_step;
-    /* be careful that long has different length in different machines */
-    long gps_start;
-    unsigned long nside;
-    int npix;
-    // Immutable pointers with mutable data
-    /* parent pointer in host device, each children pointer is in host device,
-     * pointing to a detector snglsnr array in GPU device */
-    COMPLEX_F **d_snglsnr;
-    /* parent pointer in host device, each children pointer is in GPU device,
-     * pointing to a detector snglsnr array in GPU device*/
-    COMPLEX_F **dd_snglsnr;
-    PeakList **peak_list;
-    // Mutable
-    COMPLEX_F *snr_history_per_template[MAX_NIFO];
-} PostcohState;
-
 /**
  * CudaPostcoh:
  *
@@ -248,16 +78,16 @@ struct _CudaPostcoh {
     gint rate;
     gint channels;
     gint width;
-    gint bps;
+    guint bps;
 
     char *detrsp_fname;
     char *spiir_bank_fname;
     gint exe_len;
-    gint exe_size;
+    gsize exe_size;
     gint one_take_len;
-    gint one_take_size;
+    gsize one_take_size;
     gint snglsnr_cpy_len;
-    gint snglsnr_cpy_size;
+    gsize snglsnr_cpy_size;
     gint preserved_len;
     gint head_len;
     float max_dt;
@@ -287,8 +117,7 @@ struct _CudaPostcoh {
     gboolean enable_signal_removal_bg;
     float signal_removal_bg_threshold;
 
-    /* sink event handling */
-    GstPadEventFunction collect_event;
+    COMPLEX_F *one_take_snr[MAX_NIFO];
 
     gint stream_id;
     gint device_id;
@@ -301,7 +130,7 @@ struct _CudaPostcoh {
 };
 
 struct _CudaPostcohClass {
-    GstElementClass parent_class;
+    GstElementClass cuda_postcoh_parent_class;
 };
 
 GType cuda_postcoh_get_type(void);
