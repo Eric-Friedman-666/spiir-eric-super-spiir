@@ -19,24 +19,16 @@
 
 #include <IFOMap.h>
 #include <LIGOLwHeader.h>
+#include <assert.h>
 #include <chealpix.h>
 #include <cuda_debug.h>
 #include <cuda_runtime.h>
-
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
-
 #include <pipe_macro.h>
 #include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
 
 //#define __DEBUG__ 0
-#define NSNGL_TMPLT_COLS 15
 
 void cuda_device_print(int deviceCount) {
     int dev, driverVersion = 0, runtimeVersion = 0;
@@ -156,7 +148,7 @@ void cuda_device_print(int deviceCount) {
 /* get ifo indices of a given set of ifos
  * e.g. HV: 0, 2
  */
-void get_write_ifo_mapping(char *ifos, int nifo, int *write_ifo_mapping) {
+void get_write_ifo_mapping(const char *ifos, int nifo, int *write_ifo_mapping) {
     int iifo, jifo;
     for (iifo = 0; iifo < nifo; iifo++)
         for (jifo = 0; jifo < MAX_NIFO; jifo++)
@@ -471,14 +463,6 @@ void cuda_postcoh_sigmasq_from_xml(char *fname, PostcohState *state) {
         }
 
         freeArraydata(array_sigmasq);
-        /*
-         * Cleanup function for the XML library.
-         */
-        xmlCleanupParser();
-        /*
-         * this is to debug memory for regression tests
-         */
-        xmlMemoryDump();
         g_strfreev(this_ifo_split);
     }
     /* free memory */
@@ -513,14 +497,6 @@ void cuda_postcoh_map_from_xml(char *fname,
     // printf("read in detrsp map from xml %s\n", fname);
 
     parseFile(fname, xns, 3);
-    /*
-     * Cleanup function for the XML library.
-     */
-    xmlCleanupParser();
-    /*
-     * this is to debug memory for regression tests
-     */
-    xmlMemoryDump();
 
     /* assign basic information to state */
     int gps_step_new = *((int *)param_gps_step.data);
@@ -587,14 +563,6 @@ void cuda_postcoh_map_from_xml(char *fname,
                                    mem_alloc_size, cudaMemcpyHostToDevice,
                                    stream));
     }
-    /*
-     * Cleanup function for the XML library.
-     */
-    xmlCleanupParser();
-    /*
-     * this is to debug memory for regression tests
-     */
-    xmlMemoryDump();
 
     /* label that the map has been initialized, no longer
      * POSTCOH_PARAMS_NOT_INIT */
@@ -716,14 +684,6 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
 
         freeArraydata(array_autocorr);
         freeArraydata(array_autocorr + 1);
-        /*
-         * Cleanup function for the XML library.
-         */
-        xmlCleanupParser();
-        /*
-         * this is to debug memory for regression tests
-         */
-        xmlMemoryDump();
         g_strfreev(this_ifo_split);
     }
 
@@ -738,21 +698,35 @@ void cuda_postcoh_autocorr_from_xml(char *fname,
     free(autocorr_norm);
 }
 
-char *ColNames[] = { "sngl_inspiral:template_duration",
-                     "sngl_inspiral:mass1",
-                     "sngl_inspiral:mass2",
-                     "sngl_inspiral:mchirp",
-                     "sngl_inspiral:mtotal",
-                     "sngl_inspiral:spin1x",
-                     "sngl_inspiral:spin1y",
-                     "sngl_inspiral:spin1z",
-                     "sngl_inspiral:spin2x",
-                     "sngl_inspiral:spin2y",
-                     "sngl_inspiral:spin2z",
-                     "sngl_inspiral:eta",
-                     "sngl_inspiral:end_time",
-                     "sngl_inspiral:end_time_ns",
-                     "sngl_inspiral:f_final" };
+#define NSNGL_TMPLT_COLS 15
+char *ColNames[] = { "template_duration",
+                     "mass1",
+                     "mass2",
+                     "mchirp",
+                     "mtotal",
+                     "spin1x",
+                     "spin1y",
+                     "spin1z",
+                     "spin2x",
+                     "spin2y",
+                     "spin2z",
+                     "eta",
+                     "end_time",
+                     "end_time_ns",
+                     "f_final" };
+
+static XmlHashVal *postcoh_utils_get_column_from_table(GHashTable *hash,
+                                                       GString *column_name) {
+    XmlHashVal *column = g_hash_table_lookup(hash, column_name);
+    if (column == NULL) {
+        fprintf(stderr,
+                "Error: Failed to find column %s in bank file. The column "
+                "names have probably changed. Exiting\n",
+                (char *)column_name);
+        exit(1);
+    }
+    return column;
+}
 
 void cuda_postcoh_sngl_tmplt_from_xml(char *fname,
                                       SnglInspiralTable **psngl_table) {
@@ -772,15 +746,6 @@ void cuda_postcoh_sngl_tmplt_from_xml(char *fname,
 
     parseFile(fname, xns, 1);
 
-    /*
-     * Cleanup function for the XML library.
-     */
-    xmlCleanupParser();
-    /*
-     * this is to debug memory for regression tests
-     */
-    xmlMemoryDump();
-
     GHashTable *hash = xtable->hashContent;
     GString **col_names =
       (GString **)malloc(sizeof(GString *) * NSNGL_TMPLT_COLS);
@@ -788,77 +753,74 @@ void cuda_postcoh_sngl_tmplt_from_xml(char *fname,
     for (icol = 0; icol < NSNGL_TMPLT_COLS; icol++) {
         col_names[icol] = g_string_new(ColNames[icol]);
     }
-    XmlHashVal *val = g_hash_table_lookup(hash, (gpointer)col_names[0]);
-    *psngl_table =
-      (SnglInspiralTable *)malloc(sizeof(SnglInspiralTable) * (val->data->len));
+    XmlHashVal *column =
+      postcoh_utils_get_column_from_table(hash, (gpointer)col_names[0]);
+    *psngl_table = (SnglInspiralTable *)malloc(sizeof(SnglInspiralTable)
+                                               * (column->data->len));
     SnglInspiralTable *sngl_table = *psngl_table;
-    for (jlen = 0; jlen < val->data->len; jlen++)
+    for (jlen = 0; jlen < column->data->len; jlen++)
         sngl_table[jlen].template_duration =
-          g_array_index(val->data, double, jlen);
+          g_array_index(column->data, double, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[1]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].mass1 = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[1]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].mass1 = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[2]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].mass2 = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[2]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].mass2 = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[3]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].mchirp = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[3]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].mchirp = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[4]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].mtotal = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[4]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].mtotal = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[5]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].spin1x = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[5]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].spin1x = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[6]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].spin1y = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[6]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].spin1y = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[7]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].spin1z = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[7]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].spin1z = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[8]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].spin2x = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[8]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].spin2x = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[9]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].spin2y = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[9]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].spin2y = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[10]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].spin2z = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[10]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].spin2z = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[11]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].eta = g_array_index(val->data, float, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[11]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].eta = g_array_index(column->data, float, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[12]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].end.gpsSeconds = g_array_index(val->data, int, jlen);
+    column = postcoh_utils_get_column_from_table(hash, col_names[12]);
+    for (jlen = 0; jlen < column->data->len; jlen++)
+        sngl_table[jlen].end.gpsSeconds =
+          g_array_index(column->data, int, jlen);
 
-    val = g_hash_table_lookup(hash, col_names[13]);
-    for (jlen = 0; jlen < val->data->len; jlen++) {
+    column = postcoh_utils_get_column_from_table(hash, col_names[13]);
+    for (jlen = 0; jlen < column->data->len; jlen++) {
         sngl_table[jlen].end.gpsNanoSeconds =
-          g_array_index(val->data, int, jlen);
-#ifdef __DEBUG__
-        printf("read %d, end gps %d, end nano %d\n", jlen,
-               sngl_table[jlen].end.gpsSeconds,
-               sngl_table[jlen].end.gpsNanoSeconds);
-#endif
+          g_array_index(column->data, int, jlen);
     }
 
-    val = g_hash_table_lookup(hash, col_names[14]);
-    for (jlen = 0; jlen < val->data->len; jlen++)
-        sngl_table[jlen].f_final = g_array_index(val->data, float, jlen);
-
+    column = postcoh_utils_get_column_from_table(hash, col_names[14]);
+    for (jlen = 0; jlen < column->data->len; jlen++) {
+        sngl_table[jlen].f_final = g_array_index(column->data, float, jlen);
+    }
     /* free memory */
     freeTable(xtable);
     free(xtable);
@@ -953,10 +915,4 @@ void state_destroy(PostcohState *state) {
         autocorr_destroy(state);
         map_destroy(state);
     }
-}
-
-void state_reset_npeak(PeakList *pklist) {
-    // printf("d_npeak %p\n", pklist->d_npeak);
-    CUDA_CHECK(cudaMemset(pklist->d_npeak, 0, sizeof(int)));
-    pklist->npeak[0] = 0;
 }
