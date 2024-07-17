@@ -163,7 +163,9 @@ enum {
     PROP_COHSNR_THRESH,
     PROP_SNGLSNR_THRESH,
     PROP_STREAM_ID,
-    PROP_REFRESH_INTERVAL
+    PROP_REFRESH_INTERVAL,
+    PROP_SIGNAL_REMOVAL_BG,
+    PROP_SIGNAL_REMOVAL_BG_THRESHOLD
 };
 
 static void cuda_postcoh_device_set_init(CudaPostcoh *element) {
@@ -274,6 +276,14 @@ static void cuda_postcoh_set_property(GObject *object,
         element->refresh_interval = g_value_get_int(value);
         break;
 
+    case PROP_SIGNAL_REMOVAL_BG:
+        element->enable_signal_removal_bg = g_value_get_boolean(value);
+        break;
+
+    case PROP_SIGNAL_REMOVAL_BG_THRESHOLD:
+        element->signal_removal_bg_threshold = g_value_get_float(value);
+        break;
+
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
     }
     GST_OBJECT_UNLOCK(element);
@@ -321,6 +331,14 @@ static void cuda_postcoh_get_property(GObject *object,
 
     case PROP_REFRESH_INTERVAL:
         g_value_set_int(value, element->refresh_interval);
+        break;
+
+    case PROP_SIGNAL_REMOVAL_BG:
+        g_value_set_boolean(value, element->enable_signal_removal_bg);
+        break;
+
+    case PROP_SIGNAL_REMOVAL_BG_THRESHOLD:
+        g_value_set_float(value, element->signal_removal_bg_threshold);
         break;
 
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
@@ -1059,43 +1077,121 @@ static gboolean cuda_postcoh_align_collected(CudaPostcoh *postcoh,
     return all_aligned;
 }
 
-static int cuda_postcoh_select_background(PeakList *pklist,
-                                          int write_ifo,
-                                          int hist_trials,
-                                          int max_npeak,
-                                          float cohsnr_thresh) {
-    int ipeak, npeak, peak_cur, itrial, background_cur, left_backgrounds = 0;
-    npeak = pklist->npeak[0];
-    for (ipeak = 0; ipeak < npeak; ipeak++) {
-        peak_cur = pklist->peak_pos[ipeak];
-        for (itrial = 1; itrial <= hist_trials; itrial++) {
-            background_cur = (itrial - 1) * max_npeak + peak_cur;
-            // FIXME: consider a different threshold for 3-detector
-            //          if (sqrt(pklist->cohsnr_bg[background_cur]) >
-            // cohsnr_thresh
-            //* pklist->snglsnr_H[iifo*max_npeak + peak_cur])
-            if (sqrt(pklist->cohsnr_bg[background_cur])
-                > 1.414 + pklist->snglsnr[write_ifo][peak_cur]) {
-                left_backgrounds++;
-                GST_LOG("mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
-                        ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
-                        pklist->snglsnr[write_ifo][peak_cur]);
-            } else {
-                GST_LOG(
-                  "no mark back,%d ipeak, %d itrial, cohsnr %f, snglsnr %f",
-                  ipeak, itrial, sqrt(pklist->cohsnr_bg[background_cur]),
-                  pklist->snglsnr[write_ifo][peak_cur]);
-                pklist->cohsnr_bg[background_cur] = -1;
+static float get_new_snr(float snr, float reduced_chisq) {
+    const float tunable_q = 6.0; // Tunable constants, see #128
+    const float tunable_n = 2.0;
+
+    /* Calculate the re-weighted SNR statistic ('newSNR') from given cohsnr and
+    chisq values. See http://arxiv.org/abs/1208.3491 for
+    definition. Previous implementation in glue/ligolw/lsctables.py and
+    pycbc/events/ranking.py */
+
+    float new_snr = 0.0;
+    if (reduced_chisq > 1.0) {
+        new_snr =
+          snr
+          * pow((0.5 * (1.0 + pow(reduced_chisq, (tunable_q / tunable_n)))),
+                (-1.0 / tunable_q));
+    } else {
+        new_snr = snr;
+    }
+    return new_snr;
+}
+
+static int
+  remove_backgrounds_with_single_detector_signal(PeakList *pklist,
+                                                 int hist_trials,
+                                                 int max_npeak,
+                                                 int peak_pos,
+                                                 float new_snr_thresh) {
+    int num_removed_backgrounds = 0;
+    for (int itrial = 0; itrial < hist_trials; itrial++) {
+        int cur_background = itrial * max_npeak + peak_pos;
+
+        for (int ifo_id = 0; ifo_id < MAX_NIFO; ifo_id++) {
+            float new_snr =
+              get_new_snr(pklist->snglsnr_bg[ifo_id][cur_background],
+                          pklist->chisq_bg[ifo_id][cur_background]);
+            if (new_snr > new_snr_thresh) {
+                pklist->cohsnr_bg[cur_background] = -1;
+                num_removed_backgrounds++;
+                break;
             }
         }
     }
-    return left_backgrounds;
+
+    return num_removed_backgrounds;
 }
 
-static int cuda_postcoh_select_foreground(PostcohState *state,
+static void remove_backgrounds_with_dominant_pivotal_snr(PeakList *pklist,
+                                                         int hist_trials,
+                                                         int max_npeak,
+                                                         int peak_pos,
+                                                         int pivotal_ifo_id) {
+    for (int itrial = 0; itrial < hist_trials; itrial++) {
+        int cur_background = itrial * max_npeak + peak_pos;
+
+        if (sqrt(pklist->cohsnr_bg[cur_background])
+            > 1.414 + pklist->snglsnr[pivotal_ifo_id][peak_pos]) {
+            GST_TRACE("mark background, %d itrial, cohsnr %f, snglsnr %f.",
+                      itrial, sqrt(pklist->cohsnr_bg[cur_background]),
+                      pklist->snglsnr[pivotal_ifo_id][peak_pos]);
+        } else {
+            GST_TRACE("no mark background, %d itrial, cohsnr %f, snglsnr %f.",
+                      itrial, sqrt(pklist->cohsnr_bg[cur_background]),
+                      pklist->snglsnr[pivotal_ifo_id][peak_pos]);
+            pklist->cohsnr_bg[cur_background] = -1;
+        }
+    }
+}
+
+static int count_backgrounds(PeakList *pklist,
+                             int hist_trials,
+                             int max_npeak,
+                             int peak_pos) {
+    int num_backgrounds = 0;
+    for (int itrial = 0; itrial < hist_trials; itrial++) {
+        int cur_background = itrial * max_npeak + peak_pos;
+        if (pklist->cohsnr_bg[cur_background] != -1) { num_backgrounds++; }
+    }
+
+    return num_backgrounds;
+}
+
+static int cuda_postcoh_select_background(PeakList *pklist,
+                                          int pivotal_ifo_id,
+                                          int hist_trials,
+                                          int max_npeak,
+                                          bool should_remove_signals,
+                                          float new_snr_threshold) {
+    const int npeak             = pklist->npeak[0];
+    int num_removed_backgrounds = 0, selected_backgrounds = 0;
+
+    for (int ipeak = 0; ipeak < npeak; ipeak++) {
+        int cur_peak_pos = pklist->peak_pos[ipeak];
+
+        if (should_remove_signals) {
+            num_removed_backgrounds +=
+              remove_backgrounds_with_single_detector_signal(
+                pklist, hist_trials, max_npeak, cur_peak_pos,
+                new_snr_threshold);
+        }
+
+        remove_backgrounds_with_dominant_pivotal_snr(
+          pklist, hist_trials, max_npeak, cur_peak_pos, pivotal_ifo_id);
+        selected_backgrounds +=
+          count_backgrounds(pklist, hist_trials, max_npeak, cur_peak_pos);
+    }
+    GST_LOG("Total removed backgrounds due to included signal (contamination "
+            "candidates) %d.",
+            num_removed_backgrounds);
+    return selected_backgrounds;
+}
+
+static int cuda_postcoh_select_foreground(CudaPostcoh *postcoh,
                                           ifo_set_type coh_ifos,
-                                          int *skymap_peakcur,
-                                          float cohsnr_thresh) {
+                                          int *skymap_peakcur) {
+    PostcohState *state = postcoh->state;
     int left_entries = 0;
     for (int enabled_ifo_id = 0; enabled_ifo_id < state->nifo;
          enabled_ifo_id++) {
@@ -1115,9 +1211,10 @@ static int cuda_postcoh_select_foreground(PostcohState *state,
          * coh_thresh
          */
         if (npeak > 0)
-            left_entries +=
-              cuda_postcoh_select_background(pklist, ifo_id, state->hist_trials,
-                                             state->max_npeak, cohsnr_thresh);
+            left_entries += cuda_postcoh_select_background(
+              pklist, ifo_id, state->hist_trials, state->max_npeak,
+              postcoh->enable_signal_removal_bg,
+              postcoh->signal_removal_bg_threshold);
 
         /*
          * mark the rest of peak positions to be -1 to identify invalid
@@ -1454,16 +1551,13 @@ static GstFlowReturn cuda_postcoh_new_buffer_and_push(CudaPostcoh *postcoh,
     GstPad *srcpad    = postcoh->srcpad;
     GstCaps *caps     = GST_PAD_CAPS(srcpad);
     GstFlowReturn ret;
-    PostcohState *state = postcoh->state;
     int left_entries    = 0;
     int skymap_peakcur[MAX_NIFO];
 
     /* NOTE: explicitly add one more entry to indicate the participating IFOs */
     if (ifo_set__count(coh_ifos) >= 2) {
         left_entries =
-          cuda_postcoh_select_foreground(state, coh_ifos, skymap_peakcur,
-                                         postcoh->cohsnr_thresh)
-          + 1;
+          cuda_postcoh_select_foreground(postcoh, coh_ifos, skymap_peakcur) + 1;
     } else if (ifo_set__count(coh_ifos) == 1) {
         left_entries = 1;
     }
@@ -1997,6 +2091,21 @@ static void cuda_postcoh_class_init(CudaPostcohClass *klass) {
         "detrsp-refresh-interval", "detector response refresh interval",
         "(0) never refresh stats; (N) refresh stats every N seconds. ", 0,
         G_MAXINT, 600, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SIGNAL_REMOVAL_BG,
+      g_param_spec_boolean("feature-signal-removal-bg",
+                           "Signal removal from backgrounds",
+                           "Enable signal removal from backgrounds.", FALSE,
+                           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SIGNAL_REMOVAL_BG_THRESHOLD,
+      g_param_spec_float(
+        "feature-signal-removal-bg-threshold",
+        "Signal removal from backgrounds threshold",
+        "Newsnr threshold to remove single IFO signals from backgrounds.", 0.0,
+        G_MAXFLOAT, 8.5, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static void cuda_postcoh_init(CudaPostcoh *postcoh, CudaPostcohClass *klass) {

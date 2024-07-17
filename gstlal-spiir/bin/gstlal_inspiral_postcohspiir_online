@@ -252,6 +252,17 @@ def parse_command_line():
         metavar="seconds",
         default=2147483647,
         help="Do not assign FAP during this silent time. (optional)")
+    parser.add_option("--feature-signal-removal-bg",
+                      action="store_true",
+                      help="Turn on signal removal from backgrounds.")
+    parser.add_option(
+        "--feature-signal-removal-bg-threshold",
+        type="float",
+        metavar="newsnr",
+        default=8.5,
+        help=
+        "Single detector newsnr threshold above which a background event will be removed. Enabled with --feature-signal-removal-bg."
+    )
     parser.add_option(
         "--finalsink-fapupdater-collect-walltime",
         metavar="seconds,seconds,seconds",
@@ -766,7 +777,10 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     cohfar_assignfar_refresh_interval=options.
     cohfar_assignfar_refresh_interval,
     cohfar_assignfar_silent_time=options.cohfar_assignfar_silent_time,
-    cohfar_assignfar_input_fname=options.cohfar_assignfar_input_fname
+    cohfar_assignfar_input_fname=options.cohfar_assignfar_input_fname,
+    feature_signal_removal_bg=options.feature_signal_removal_bg,
+    feature_signal_removal_bg_threshold=options.
+    feature_signal_removal_bg_threshold
     # or "%s-%s_Postcoh-%d-%d.xml.gz" % (lsctables.ifos_from_instrument_set(detectors.channel_dict.keys()).replace(",", ""), options.job_tag, int(detectors.seg[0]), int(abs(detectors.seg))),
 )
 # get the negative_latency value from the first bank of the first detector
