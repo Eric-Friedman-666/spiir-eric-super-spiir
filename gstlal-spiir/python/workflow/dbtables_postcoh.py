@@ -41,15 +41,19 @@ from xml.sax.xmlreader import AttributesImpl
 import warnings
 
 from glue import git_version
-from glue import offsetvector
-from glue import segments
-from glue.ligolw import ilwd
-from glue.ligolw import ligolw
-from glue.ligolw import table
-from glue.ligolw import lsctables
-from glue.ligolw import types as ligolwtypes
+from lalburst import offsetvector
+from ligo import segments
+from ligo.lw import ilwd
+from ligo.lw import ligolw
+from ligo.lw import table
+from ligo.lw import lsctables
+from ligo.lw import types as ligolwtypes
 
-from gstlal import postcoh_table_def
+from gstlal_spiir.pipemodules.postcohtable import postcoh_table_def
+
+import six
+from six.moves import map
+from six.moves import zip
 
 __author__ = "Kipp Cannon <kipp.cannon@ligo.org>"
 __version__ = "git id %s" % git_version.id
@@ -170,7 +174,7 @@ def uninstall_signal_trap(signums=None):
 	"""
     # NOTE:  this must be called with the temporary_files_lock held.
     if signums is None:
-        signums = origactions.keys()
+        signums = list(origactions.keys())
     for signum in signums:
         signal.signal(signum, origactions.pop(signum))
 
@@ -189,6 +193,7 @@ def get_connection_filename(filename,
 	working location for improved performance and reduced fileserver
 	load.
 	"""
+
     def mktmp(path, suffix=".sqlite", verbose=False):
         with temporary_files_lock:
             # make sure the clean-up signal traps are installed
@@ -198,7 +203,8 @@ def get_connection_filename(filename,
             temporary_file = tempfile.NamedTemporaryFile(
                 suffix=suffix,
                 dir=path if path != "_CONDOR_SCRATCH_DIR" else
-                os.getenv("_CONDOR_SCRATCH_DIR"))
+                os.getenv("_CONDOR_SCRATCH_DIR"),
+            )
 
             def new_unlink(self, orig_unlink=temporary_file.unlink):
                 # also remove a -journal partner, ignore all errors
@@ -213,37 +219,42 @@ def get_connection_filename(filename,
             # hang onto reference to prevent its removal
             temporary_files[filename] = temporary_file
         if verbose:
-            print >> sys.stderr, "using '%s' as workspace" % filename
+            print("using '%s' as workspace" % filename, file=sys.stderr)
         # mkstemp() ignores umask, creates all files accessible
         # only by owner;  we should respect umask.  note that
         # os.umask() sets it, too, so we have to set it back after
         # we know what it is
-        umsk = os.umask(0777)
+        umsk = os.umask(0o777)
         os.umask(umsk)
-        os.chmod(filename, 0666 & ~umsk)
+        os.chmod(filename, 0o666 & ~umsk)
         return filename
 
     def truncate(filename, verbose=False):
         if verbose:
-            print >> sys.stderr, "'%s' exists, truncating ..." % filename,
+            print("'%s' exists, truncating ..." % filename,
+                  end=" ",
+                  file=sys.stderr)
         try:
             fd = os.open(filename, os.O_WRONLY | os.O_TRUNC)
         except Exception as e:
             if verbose:
-                print >> sys.stderr, "cannot truncate '%s': %s" % (filename,
-                                                                   str(e))
+                print("cannot truncate '%s': %s" % (filename, str(e)),
+                      file=sys.stderr)
             return
         os.close(fd)
         if verbose:
-            print >> sys.stderr, "done."
+            print("done.", file=sys.stderr)
 
     def cpy(srcname, dstname, verbose=False):
         if verbose:
-            print >> sys.stderr, "copying '%s' to '%s' ..." % (srcname,
-                                                               dstname),
+            print(
+                "copying '%s' to '%s' ..." % (srcname, dstname),
+                end=" ",
+                file=sys.stderr,
+            )
         shutil.copy2(srcname, dstname)
         if verbose:
-            print >> sys.stderr, "done."
+            print("done.", file=sys.stderr)
         try:
             # try to preserve permission bits.  according to
             # the documentation, copy() and copy2() are
@@ -253,18 +264,22 @@ def get_connection_filename(filename,
             shutil.copystat(srcname, dstname)
         except Exception as e:
             if verbose:
-                print >> sys.stderr, "warning: ignoring failure to copy permission bits from '%s' to '%s': %s" % (
-                    filename, target, str(e))
+                print(
+                    "warning: ignoring failure to copy permission bits from '%s' to '%s': %s"
+                    % (filename, target, str(e)),
+                    file=sys.stderr,
+                )
 
     database_exists = os.access(filename, os.F_OK)
 
     if tmp_path is not None:
         # for suffix, can't use splitext() because it only keeps
         # the last bit, e.g. won't give ".xml.gz" but just ".gz"
-        target = mktmp(tmp_path,
-                       suffix=".".join(
-                           os.path.split(filename)[-1].split(".")[1:]),
-                       verbose=verbose)
+        target = mktmp(
+            tmp_path,
+            suffix=".".join(os.path.split(filename)[-1].split(".")[1:]),
+            verbose=verbose,
+        )
         if database_exists:
             if replace_file:
                 # truncate database so that if this job
@@ -281,6 +296,7 @@ def get_connection_filename(filename,
                     except IOError as e:
                         import errno
                         import time
+
                         if e.errno not in (errno.EPERM, errno.ENOSPC):
                             # anything other
                             # than out-of-space
@@ -288,14 +304,20 @@ def get_connection_filename(filename,
                             raise
                         if i < 5:
                             if verbose:
-                                print >> sys.stderr, "warning: attempt %d: %s, sleeping and trying again ..." % (
-                                    i, errno.errorcode[e.errno])
+                                print(
+                                    "warning: attempt %d: %s, sleeping and trying again ..."
+                                    % (i, errno.errorcode[e.errno]),
+                                    file=sys.stderr,
+                                )
                             time.sleep(10)
                             i += 1
                             continue
                         if verbose:
-                            print >> sys.stderr, "warning: attempt %d: %s: working with original file '%s'" % (
-                                i, errno.errorcode[e.errno], filename)
+                            print(
+                                "warning: attempt %d: %s: working with original file '%s'"
+                                % (i, errno.errorcode[e.errno], filename),
+                                file=sys.stderr,
+                            )
                         with temporary_files_lock:
                             del temporary_files[target]
                         target = filename
@@ -324,12 +346,17 @@ def set_temp_store_directory(connection, temp_store_directory, verbose=False):
     if temp_store_directory == "_CONDOR_SCRATCH_DIR":
         temp_store_directory = os.getenv("_CONDOR_SCRATCH_DIR")
     if verbose:
-        print >> sys.stderr, "setting the temp_store_directory to %s ..." % temp_store_directory,
+        print(
+            "setting the temp_store_directory to %s ..." %
+            temp_store_directory,
+            end=" ",
+            file=sys.stderr,
+        )
     cursor = connection.cursor()
     cursor.execute("PRAGMA temp_store_directory = '%s'" % temp_store_directory)
     cursor.close()
     if verbose:
-        print >> sys.stderr, "done"
+        print("done", file=sys.stderr)
 
 
 def put_connection_filename(filename, working_filename, verbose=False):
@@ -365,11 +392,14 @@ def put_connection_filename(filename, working_filename, verbose=False):
 
         # replace document
         if verbose:
-            print >> sys.stderr, "moving '%s' to '%s' ..." % (working_filename,
-                                                              filename),
+            print(
+                "moving '%s' to '%s' ..." % (working_filename, filename),
+                end=" ",
+                file=sys.stderr,
+            )
         shutil.move(working_filename, filename)
         if verbose:
-            print >> sys.stderr, "done."
+            print("done.", file=sys.stderr)
 
         # remove reference to tempfile.TemporaryFile object.
         # because we've just deleted the file above, this would
@@ -387,7 +417,7 @@ def put_connection_filename(filename, working_filename, verbose=False):
 
         # restore original handlers, and send ourselves any trapped signals
         # in order
-        for sig, oldhandler in oldhandlers.iteritems():
+        for sig, oldhandler in six.iteritems(oldhandlers):
             signal.signal(sig, oldhandler)
         while deferred_signals:
             os.kill(os.getpid(), deferred_signals.pop(0))
@@ -416,11 +446,13 @@ def discard_connection_filename(filename, working_filename, verbose=False):
         return
     with temporary_files_lock:
         if verbose:
-            print >> sys.stderr, "removing '%s' ..." % working_filename,
+            print("removing '%s' ..." % working_filename,
+                  end=" ",
+                  file=sys.stderr)
         # remove reference to tempfile.TemporaryFile object
         del temporary_files[working_filename]
         if verbose:
-            print >> sys.stderr, "done."
+            print("done.", file=sys.stderr)
         # if there are no more temporary files in place, remove the
         # temporary-file signal traps
         if not temporary_files:
@@ -487,6 +519,7 @@ def idmap_get_new(connection, old, tbl):
 	This function is for internal use, it forms part of the code used
 	to re-map row IDs when merging multiple documents.
 	"""
+    raise NotImplementedError
     cursor = connection.cursor()
     cursor.execute("SELECT new FROM _idmap_ WHERE old == ?", (old, ))
     new = cursor.fetchone()
@@ -514,6 +547,7 @@ def idmap_get_max_id(connection, id_class):
 	>>> print max_id
 	sngl_inspiral:event_id:1054
 	"""
+    raise NotImplementedError
     cursor = connection.cursor()
     cursor.execute(
         "SELECT MAX(CAST(SUBSTR(%s, %d, 10) AS INTEGER)) FROM %s" %
@@ -563,8 +597,9 @@ def get_column_info(connection, table_name):
     cursor = connection.cursor()
     cursor.execute(
         "SELECT sql FROM sqlite_master WHERE type == 'table' AND name == ?",
-        (table_name, ))
-    statement, = cursor.fetchone()
+        (table_name, ),
+    )
+    (statement, ) = cursor.fetchone()
     coldefs = re.match(_sql_create_table_pattern,
                        statement).groupdict()["coldefs"]
     return [(coldef.groupdict()["name"], coldef.groupdict()["type"])
@@ -609,7 +644,7 @@ def get_xml(connection, table_names=None):
                         u"Name":
                         u"%s:%s" % (table_name, column_name),
                         u"Type":
-                        column_type
+                        column_type,
                     })))
         table_elem._end_of_columns()
         table_elem.appendChild(
@@ -617,7 +652,7 @@ def get_xml(connection, table_names=None):
                 AttributesImpl({
                     u"Name": u"%s:table" % table_name,
                     u"Delimiter": table.TableStream.Delimiter.default,
-                    u"Type": table.TableStream.Type.default
+                    u"Type": table.TableStream.Type.default,
                 })))
         ligo_lw.appendChild(table_elem)
     return ligo_lw
@@ -677,19 +712,20 @@ class DBTable(table.Table):
 	the use_in() function defined in this module for information on how
 	to create such a content handler
 
-	If a custom glue.ligolw.Table subclass is defined in
-	glue.ligolw.lsctables whose name matches the name of the DBTable
+	If a custom ligo.lw.Table subclass is defined in
+	ligo.lw.lsctables whose name matches the name of the DBTable
 	being constructed, the lsctables class is added to the list of
 	parent classes.  This allows the lsctables class' methods to be
 	used with the DBTable instances but not all of the methods will
 	necessarily work with the database-backed version of the class.
 	Your mileage may vary.
 	"""
+
     def __new__(cls, *args, **kwargs):
         # does this class already have table-specific metadata?
         if not hasattr(cls, "tableName"):
             # no, try to retrieve it from lsctables
-            attrs, = args
+            (attrs, ) = args
             name = table.StripTableName(attrs[u"Name"])
             if name in lsctables.TableByName:
                 # found metadata in lsctables, construct
@@ -761,7 +797,7 @@ class DBTable(table.Table):
     def copy(self, *args, **kwargs):
         """
 		This method is not implemented.  See
-		glue.ligolw.table.Table for more information.
+		ligo.lw.table.Table for more information.
 		"""
         raise NotImplemented
 
@@ -784,12 +820,16 @@ class DBTable(table.Table):
         # create the table
         ToSQLType = {
             "sqlite": ligolwtypes.ToSQLiteType,
-            "mysql": ligolwtypes.ToMySQLType
+            "mysql": ligolwtypes.ToMySQLType,
         }[connection_db_type(self.connection)]
         try:
-            statement = "CREATE TABLE IF NOT EXISTS " + self.Name + " (" + ", ".join(
-                map(lambda n, t: "%s %s" %
-                    (n, ToSQLType[t]), self.dbcolumnnames, self.dbcolumntypes))
+            statement = ("CREATE TABLE IF NOT EXISTS " + self.Name + " (" +
+                         ", ".join(
+                             map(
+                                 lambda n, t: "%s %s" % (n, ToSQLType[t]),
+                                 self.dbcolumnnames,
+                                 self.dbcolumntypes,
+                             )))
         except KeyError as e:
             raise ValueError("column type '%s' not supported" % str(e))
         if self.constraints is not None:
@@ -803,10 +843,13 @@ class DBTable(table.Table):
         # construct the SQL to be used to insert new rows
         params = {
             "sqlite": ",".join("?" * len(self.dbcolumnnames)),
-            "mysql": ",".join(["%s"] * len(self.dbcolumnnames))
+            "mysql": ",".join(["%s"] * len(self.dbcolumnnames)),
         }[connection_db_type(self.connection)]
         self.append_statement = "INSERT INTO %s (%s) VALUES (%s)" % (
-            self.Name, ",".join(self.dbcolumnnames), params)
+            self.Name,
+            ",".join(self.dbcolumnnames),
+            params,
+        )
         self.append_attrgetter = operator.attrgetter(*self.dbcolumnnames)
 
     def _end_of_rows(self):
@@ -838,11 +881,11 @@ class DBTable(table.Table):
             yield self.row_from_cols(values)
 
     # FIXME:  is adding this a good idea?
-    #def __delslice__(self, i, j):
-    #	# sqlite numbers rows starting from 1:  [0:10] becomes
-    #	# "rowid between 1 and 10" which means 1 <= rowid <= 10,
-    #	# which is the intended range
-    #	self.cursor.execute("DELETE FROM %s WHERE ROWID BETWEEN %d AND %d" % (self.Name, i + 1, j))
+    # def __delslice__(self, i, j):
+    # 	# sqlite numbers rows starting from 1:  [0:10] becomes
+    # 	# "rowid between 1 and 10" which means 1 <= rowid <= 10,
+    # 	# which is the intended range
+    # 	self.cursor.execute("DELETE FROM %s WHERE ROWID BETWEEN %d AND %d" % (self.Name, i + 1, j))
 
     def _append(self, row):
         """
@@ -864,9 +907,11 @@ class DBTable(table.Table):
             # assign (and record) a new ID before inserting the
             # row to avoid collisions with existing rows
             setattr(
-                row, self.next_id.column_name,
+                row,
+                self.next_id.column_name,
                 idmap_get_new(self.connection,
-                              getattr(row, self.next_id.column_name), self))
+                              getattr(row, self.next_id.column_name), self),
+            )
         self._append(row)
 
     append = _append
@@ -878,6 +923,7 @@ class DBTable(table.Table):
 		convenience function for turning the results of database
 		queries into Python objects.
 		"""
+        raise NotImplementedError
         row = self.RowType()
         for c, t, v in zip(self.dbcolumnnames, self.dbcolumntypes, values):
             if t in ligolwtypes.IDTypes:
@@ -954,14 +1000,17 @@ class TimeSlideTable(DBTable):
 		Return a ditionary mapping time slide IDs to offset
 		dictionaries.
 		"""
+        raise NotImplementedError
         return dict((
             ilwd.ilwdchar(id),
             offsetvector.offsetvector((instrument, offset)
-                                      for id, instrument, offset in values)
+                                      for id, instrument, offset in values),
         ) for id, values in itertools.groupby(
             self.cursor.execute(
                 "SELECT time_slide_id, instrument, offset FROM time_slide ORDER BY time_slide_id"
-            ), lambda (id, instrument, offset): id))
+            ),
+            lambda id_instrument_offset: id_instrument_offset[0],
+        ))
 
     def get_time_slide_id(self,
                           offsetdict,
@@ -1071,8 +1120,8 @@ def build_indexes(connection, verbose=False):
             continue
         if how_to_index is not None:
             if verbose:
-                print >> sys.stderr, "indexing %s table ..." % table_name
-            for index_name, cols in how_to_index.iteritems():
+                print("indexing %s table ..." % table_name, file=sys.stderr)
+            for index_name, cols in six.iteritems(how_to_index):
                 cursor.execute("CREATE INDEX IF NOT EXISTS %s ON %s (%s)" %
                                (index_name, table_name, ",".join(cols)))
     connection.commit()
@@ -1092,7 +1141,7 @@ def build_indexes(connection, verbose=False):
 
 TableByName = {
     table.StripTableName(ProcessParamsTable.tableName): ProcessParamsTable,
-    table.StripTableName(TimeSlideTable.tableName): TimeSlideTable
+    table.StripTableName(TimeSlideTable.tableName): TimeSlideTable,
 }
 
 #
@@ -1111,7 +1160,7 @@ TableByName = {
 def use_in(ContentHandler):
     """
 	Modify ContentHandler, a sub-class of
-	glue.ligolw.LIGOLWContentHandler, to cause it to use the DBTable
+	ligo.lw.LIGOLWContentHandler, to cause it to use the DBTable
 	class defined in this module when parsing XML documents.  Instances
 	of the class must provide a connection attribute.  When a document
 	is parsed, the value of this attribute will be passed to the
@@ -1122,7 +1171,7 @@ def use_in(ContentHandler):
 	Example:
 
 	>>> import sqlite3
-	>>> from glue.ligolw import ligolw
+	>>> from ligo.lw import ligolw
 	>>> class MyContentHandler(ligolw.LIGOLWContentHandler):
 	...	def __init__(self, *args):
 	...		super(MyContentHandler, self).__init__(*args)

@@ -123,8 +123,10 @@ if 0:
     p2, = pyplot.plot(tick_lgcdf, back_lgfar, label='background')
     #	p3, = pyplot.plot(tick_lgcdf[nonzero_tick:], zerolag_lgcevent[nonzero_tick:], label = '8' r'$\pi$' 'shifted')
     pyplot.gca().invert_xaxis()
-    pyplot.xlabel('lg' r'$d_0$')
-    pyplot.ylabel('lg FAR' r'($s^{-1}$)')
+    pyplot.xlabel('lg'
+                  r'$d_0$')
+    pyplot.ylabel('lg FAR'
+                  r'($s^{-1}$)')
     pyplot.legend()
     pyplot.savefig("P0_vs_far.png")
 

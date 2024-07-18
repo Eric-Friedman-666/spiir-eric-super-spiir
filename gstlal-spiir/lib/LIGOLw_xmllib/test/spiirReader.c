@@ -1,4 +1,5 @@
 #include "../../multiratespiir/multiratespiir.h"
+#include "../../multiratespiir/multiratespiir_state.h"
 #include "../LIGOLwHeader.h"
 
 #include <stdio.h>
@@ -111,9 +112,6 @@ void spiir_state_load_bank(SpiirState **spstate,
     }
 
     free(inxns);
-
-    xmlCleanupParser();
-    xmlMemoryDump();
 }
 
 int main(int argc, char **argv) {
@@ -137,6 +135,9 @@ int main(int argc, char **argv) {
     for (i = 0; i < 7; ++i)
         spstates[i] = (SpiirState *)malloc(sizeof(SpiirState));
     spiir_state_load_bank(spstates, argv[1], NULL);
+
+    xmlCleanupParser();
+    xmlMemoryDump();
 
     /*
         float *data = (float*)xarray.data;

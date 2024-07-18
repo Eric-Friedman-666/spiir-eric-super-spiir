@@ -132,6 +132,7 @@ class lvalert_listen_job(inspiral_pipe.generic_job):
     """
 	A lvalert_listen_job
 	"""
+
     def __init__(self,
                  program,
                  gracedb_service_url="https://gracedb.ligo.org/api/",
@@ -195,6 +196,7 @@ class lvalert_listen_node(pipeline.CondorDAGNode):
     """
 	lvalert_listen node
 	"""
+
     def __init__(self, job, dag):
         pipeline.CondorDAGNode.__init__(self, job)
         self.add_var_opt("username", raw_input("lvalert username: "))

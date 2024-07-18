@@ -39,6 +39,7 @@ import pdb
 
 
 class FilteringFlopulator(object):
+
     def __init__(self, iir_bank_cache, N_d, N_dd, fft_latency, verbose=False):
         """
 		N_td: template duration

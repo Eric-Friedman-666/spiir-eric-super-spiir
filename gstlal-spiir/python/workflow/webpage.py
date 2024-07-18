@@ -9,6 +9,7 @@ else:
 
 
 class elem(object):
+
     def __init__(self, tag, content, attributes=""):
         self.tag = tag
         self.content = content
@@ -30,13 +31,14 @@ class elem(object):
 
 
 class tabs(elem):
+
     def __init__(self, content=[]):
         elem.__init__(self,
                       tag="ul",
                       content=[] + content,
                       attributes='class="tab"')
         # self.content += [elem("li", [elem("img", [], """ style="width: 100px; margin: 5px 5px 5px 5px;" src="http://www.lsc-group.phys.uwm.edu/cgit/gstlal/plain/gstlal/doc/gstlal.png" """)])]
-        #self.content += [elem("li", [elem("div", [time.strftime("%Y-%m-%d %H:%M")])])]
+        # self.content += [elem("li", [elem("div", [time.strftime("%Y-%m-%d %H:%M")])])]
 
     def __iadd__(self, content):
         try:
@@ -47,6 +49,7 @@ class tabs(elem):
 
 
 class tab(elem):
+
     def __init__(self, href, div, text, charts=[], active=False):
         self.href = href
         self.div = div
@@ -57,22 +60,28 @@ class tab(elem):
                 tag="li",
                 content=[
                     elem(
-                        "a", [text],
+                        "a",
+                        [text],
                         """ href=#%s class="tablinks" onclick="openGstlalTab(event, '%s',%s)" """
-                        % (href, div, ",".join(charts)))
+                        % (href, div, ",".join(charts)),
+                    )
                 ],
-                attributes="")
+                attributes="",
+            )
         else:
             elem.__init__(
                 self,
                 tag="li",
                 content=[
                     elem(
-                        "a", [text],
+                        "a",
+                        [text],
                         """ href=#%s class="tablinks" onclick="openGstlalTab(event, '%s')" """
-                        % (href, div))
+                        % (href, div),
+                    )
                 ],
-                attributes="")
+                attributes="",
+            )
 
     def __call__(self, content=[]):
         return elem("div", content,
@@ -80,41 +89,48 @@ class tab(elem):
 
 
 class image_glob(elem):
+
     def __init__(self, globpat, caption):
         self.globpat = globpat
         self.caption = caption
         elem.__init__(self, "table", [],
                       """ style="width: 100%; table-layout: auto" """)
         cap = elem(
-            "caption", ["Table: " + caption],
-            """ style="caption-side: bottom; text-align: left; font-size: 12px; font-style: italic; padding: 15px;" """
+            "caption",
+            ["Table: " + caption],
+            """ style="caption-side: bottom; text-align: left; font-size: 12px; font-style: italic; padding: 15px;" """,
         )
         td = elem("td", [])
         tr = elem("tr", [td])
         for img in sorted(glob.glob(globpat)):
             td += [
-                elem("a", [elem("img", [], """ src="%s" width=500 """ % img)],
-                     """ class="fancybox" href="%s" rel="group" """ % img)
+                elem(
+                    "a",
+                    [elem("img", [], """ src="%s" width=500 """ % img)],
+                    """ class="fancybox" href="%s" rel="group" """ % img,
+                )
             ]
         self.content = [cap, tr]
 
 
 class page(object):
+
     def __init__(
-            self,
-            title="cbc web page",
-            path='./',
-            css=[
-                "https://cdnjs.cloudflare.com/ajax/libs/fancybox/2.1.5/jquery.fancybox.css"
-            ],
-            script=[
-                "https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js",
-                "https://cdnjs.cloudflare.com/ajax/libs/fancybox/2.1.5/jquery.fancybox.js",
-                "https://www.gstatic.com/charts/loader.js"
-            ],
-            content=None,
-            header_content=None,
-            verbose=False):
+        self,
+        title="cbc web page",
+        path="./",
+        css=[
+            "https://cdnjs.cloudflare.com/ajax/libs/fancybox/2.1.5/jquery.fancybox.css"
+        ],
+        script=[
+            "https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js",
+            "https://cdnjs.cloudflare.com/ajax/libs/fancybox/2.1.5/jquery.fancybox.js",
+            "https://www.gstatic.com/charts/loader.js",
+        ],
+        content=None,
+        header_content=None,
+        verbose=False,
+    ):
         if content is None:
             content = []
         if header_content is None:
@@ -147,8 +163,8 @@ class page(object):
             for s in self.script
         ]
         if write_gstlal_css:
-            gstlal_css_file = open(webvis_dir + 'gstlal.css')
-            gstlal_js_file = open(webvis_dir + 'gstlal.js')
+            gstlal_css_file = open(webvis_dir + "gstlal.css")
+            gstlal_js_file = open(webvis_dir + "gstlal.js")
             gstlal_css = """<style>""" + gstlal_css_file.read(
             ) + """</style>"""
             gstlal_js = """<script>""" + gstlal_js_file.read(
@@ -161,11 +177,12 @@ class page(object):
                 "html",
                 gstlal_list + css_list + script_list + self.header_content +
                 [elem("title", [self.title]),
-                 elem("body", self.content, "")])
+                 elem("body", self.content, "")],
+            )
         ]
 
         for c in self.full_content:
-            print >> f, c
+            print(c, file=f)
 
 
 def section(text):
@@ -173,25 +190,25 @@ def section(text):
 
 
 def googleTableFromJson(fname,
-                        div_id='table_div',
+                        div_id="table_div",
                         gpscolumns=[],
                         scinotationcolumns=[]):
     f = open(fname)
     gpsformatstr = [
         """
 		var gpsformatter = new google.visualization.NumberFormat(
-			{groupingSymbol: ''});\n""" + '\n'.join([
+			{groupingSymbol: ''});\n""" + "\n".join([
             """		gpsformatter.format(data, %d);""" % (gpscolumn, )
             for gpscolumn in gpscolumns
-        ]) if gpscolumns else ''
+        ]) if gpscolumns else ""
     ][0]
     scinotationformatstr = [
         """
 		var formatter = new google.visualization.NumberFormat(
-			{pattern: '0.###E0'});\n""" + '\n'.join([
+			{pattern: '0.###E0'});\n""" + "\n".join([
             """		formatter.format(data, %d);""" % (scinotationcolumn, )
             for scinotationcolumn in scinotationcolumns
-        ]) if scinotationcolumns else ''
+        ]) if scinotationcolumns else ""
     ][0]
     out = """
 		<script type="text/javascript">
@@ -203,12 +220,19 @@ def googleTableFromJson(fname,
 		}
 		google.charts.setOnLoadCallback(draw_%s);
 		</script>
-	""" % (div_id, f.read(), div_id, gpsformatstr, scinotationformatstr, div_id)
+	""" % (
+        div_id,
+        f.read(),
+        div_id,
+        gpsformatstr,
+        scinotationformatstr,
+        div_id,
+    )
     f.close()
     return out
 
 
-def googleTimelineFromJson(fname, div_id='timeline_div'):
+def googleTimelineFromJson(fname, div_id="timeline_div"):
     f = open(fname)
     out = """
 		<script type="text/javascript">
@@ -237,6 +261,14 @@ def googleTimelineFromJson(fname, div_id='timeline_div'):
 		google.charts.setOnLoadCallback(draw_%s);
 
 		</script>
-	""" % (div_id, div_id, f.read(), div_id, div_id, div_id, div_id)
+	""" % (
+        div_id,
+        div_id,
+        f.read(),
+        div_id,
+        div_id,
+        div_id,
+        div_id,
+    )
     f.close()
     return out

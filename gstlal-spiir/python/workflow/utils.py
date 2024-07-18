@@ -2,6 +2,7 @@ import os
 import math
 import subprocess
 from glue import pipeline
+import six
 
 
 # copied from inspiral_pipe.T050017_filename
@@ -9,17 +10,23 @@ def T050017_filename(instruments, description, seg, extension, path=None):
     """!
 	A function to generate a T050017 filename.
 	"""
-    if not isinstance(instruments, basestring):
+    if not isinstance(instruments, six.string_types):
         instruments = "".join(sorted(instruments))
     start, end = seg
     start = int(math.floor(start))
     duration = int(math.ceil(end)) - start
-    extension = extension.strip('.')
+    extension = extension.strip(".")
     if path is not None:
-        return '%s/%s-%s-%d-%d.%s' % (path, instruments, description, start,
-                                      duration, extension)
+        return "%s/%s-%s-%d-%d.%s" % (
+            path,
+            instruments,
+            description,
+            start,
+            duration,
+            extension,
+        )
     else:
-        return '%s-%s-%d-%d.%s' % (instruments, description, start, duration,
+        return "%s-%s-%d-%d.%s" % (instruments, description, start, duration,
                                    extension)
 
 
@@ -28,18 +35,19 @@ class InspiralJob(pipeline.CondorDAGJob):
 	A job class that subclasses pipeline.CondorDAGJob and adds some extra
 	boiler plate items for gstlal inspiral jobs
 	"""
+
     def __init__(self, executable, tag_base, universe="vanilla"):
         self.__prog__ = tag_base
         self.__executable = executable
         self.__universe = universe
         pipeline.CondorDAGJob.__init__(self, self.__universe,
                                        self.__executable)
-        self.add_condor_cmd('getenv', 'True')
-        self.add_condor_cmd('environment', "GST_REGISTRY_UPDATE=no;")
+        self.add_condor_cmd("getenv", "True")
+        self.add_condor_cmd("environment", "GST_REGISTRY_UPDATE=no;")
         self.tag_base = tag_base
-        self.set_sub_file(tag_base + '.sub')
-        self.set_stdout_file('logs/$(macronodename)-$(cluster)-$(process).out')
-        self.set_stderr_file('logs/$(macronodename)-$(cluster)-$(process).err')
+        self.set_sub_file(tag_base + ".sub")
+        self.set_stdout_file("logs/$(macronodename)-$(cluster)-$(process).out")
+        self.set_stderr_file("logs/$(macronodename)-$(cluster)-$(process).err")
         self.number = 1
         # make an output directory for files
         self.output_path = tag_base
@@ -55,6 +63,7 @@ class InspiralNode(pipeline.CondorDAGNode):
 	adding the node to the dag, makes sensible names and allows a list of parent
 	nodes to be provided.
 	"""
+
     def __init__(self, job, dag, p_node=[]):
         pipeline.CondorDAGNode.__init__(self, job)
         for p in p_node:
@@ -70,6 +79,7 @@ class generic_job(InspiralJob):
 	an executable name but otherwise is a subclass of InspiralJob and thus
 	pipeline.CondorDAGJob
 	"""
+
     def __init__(self, program, tag_base=None, condor_commands={}, **kwargs):
         executable = which(program)
         InspiralJob.__init__(self, executable, tag_base
@@ -90,15 +100,18 @@ class generic_node(InspiralNode):
 	an empty argument by setting it to "".  However options set to None are simply
 	ignored.
 	"""
-    def __init__(self,
-                 job,
-                 dag,
-                 parent_nodes,
-                 opts={},
-                 input_files={},
-                 output_files={},
-                 input_cache_files={},
-                 output_cache_files={}):
+
+    def __init__(
+        self,
+        job,
+        dag,
+        parent_nodes,
+        opts={},
+        input_files={},
+        output_files={},
+        input_cache_files={},
+        output_cache_files={},
+    ):
         InspiralNode.__init__(self, job, dag, parent_nodes)
 
         self.input_files = input_files.copy()
@@ -109,8 +122,8 @@ class generic_node(InspiralNode):
         self.cache_inputs = {}
         self.cache_outputs = {}
 
-        for opt, val in opts.items() + output_files.items(
-        ) + input_files.items():
+        for opt, val in (list(opts.items()) + list(output_files.items()) +
+                         list(input_files.items())):
             if val is None:
                 continue  # not the same as val = '' which is allowed
             if not hasattr(
@@ -135,7 +148,9 @@ class generic_node(InspiralNode):
             cache_entries = [lal.CacheEntry.from_T050017(url) for url in val]
             cache_file_name = "{0}/{1}_{2}.cache".format(
                 job.tag_base,
-                opt.replace("-cache", "").replace("-", "_"), job.number - 1)
+                opt.replace("-cache", "").replace("-", "_"),
+                job.number - 1,
+            )
             with open(cache_file_name, "w") as cache_file:
                 lal.Cache(cache_entries).tofile(cache_file)
             self.add_var_opt(opt, cache_file_name)
@@ -146,7 +161,9 @@ class generic_node(InspiralNode):
             cache_entries = [lal.CacheEntry.from_T050017(url) for url in val]
             cache_file_name = "{0}/{1}_{2}.cache".format(
                 job.tag_base,
-                opt.replace("-cache", "").replace("-", "_"), job.number - 1)
+                opt.replace("-cache", "").replace("-", "_"),
+                job.number - 1,
+            )
             with open(cache_file_name, "w") as cache_file:
                 lal.Cache(cache_entries).tofile(cache_file)
             self.add_var_opt(opt, cache_file_name)
@@ -161,7 +178,7 @@ def get_output(outdir, keyword):
 
 
 def get_start_end_time(fname):
-    start_time = fname.split('_')[-2]
-    duration = fname.split('_')[-1].split('.')[0]
+    start_time = fname.split("_")[-2]
+    duration = fname.split("_")[-1].split(".")[0]
     end_time = int(start_time) + int(duration)
     return (int(start_time), end_time)

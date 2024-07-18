@@ -72,13 +72,12 @@ import time
 import pygtk
 
 pygtk.require("2.0")
-import gobject
+import gi
 
-gobject.threads_init()
-import pygst
+gi.require_version('Gst', '1.0')
+from gi.repository import GObject, Gst
 
-pygst.require("0.10")
-import gst
+Gst.init(None)
 from gstlal import bottle
 
 from glue import segments
@@ -94,8 +93,7 @@ from gstlal import pipeparts
 from gstlal import simplehandler
 from gstlal import httpinterface
 from gstlal import datasource
-from gstlal.pipemodules import spiirparts
-from gstlal.pipemodules import spiir_utils
+from gstlal.pipemodules import spiirparts, spiir_utils
 #from gstlal import postcoh_output
 
 
@@ -341,7 +339,7 @@ def parse_command_line():
             sorted(missing_options))
 
     # parse the datasource specific information and do option checking
-    detectors = datasource.GWDataSourceInfo(options)
+    detectors = datasource.DataSourceInfo.from_optparse(options)
     if len(detectors.channel_dict) < 2:
         raise ValueError(
             "only coincident searches are supported:  must process data from at least two antennae"
@@ -425,6 +423,7 @@ def parse_command_line():
 
 
 class OneTimeSignalHandler(object):
+
     def __init__(self, pipeline):
         self.pipeline = pipeline
         self.count = 0
@@ -434,7 +433,7 @@ class OneTimeSignalHandler(object):
         if self.count == 1:
             print >> sys.stderr, "*** SIG %d attempting graceful shutdown (this might take several minutes) ... ***" % signum
             try:
-                if not self.pipeline.send_event(gst.event_new_eos()):
+                if not self.pipeline.send_event(Gst.event_new_eos()):
                     raise Exception(
                         "pipeline.send_event(EOS) returned failure")
             except Exception, e:
@@ -563,8 +562,8 @@ if 1 == 1:
     if options.verbose:
         print >> sys.stderr, "assembling pipeline ...",
 
-    pipeline = gst.Pipeline("gstlal_inspiral_postcohspiir_offline")
-    mainloop = gobject.MainLoop()
+    pipeline = Gst.Pipeline(name="gstlal_inspiral_postcohspiir_offline")
+    mainloop = GObject.MainLoop()
 
     postcohsrcs = spiirparts.mkPostcohSPIIROffline(
         pipeline,
@@ -624,7 +623,7 @@ if 1 == 1:
 
     if options.verbose:
         print >> sys.stderr, "setting pipeline state to playing ..."
-    if pipeline.set_state(gst.STATE_PLAYING) != gst.STATE_CHANGE_SUCCESS:
+    if pipeline.set_state(Gst.State.PLAYING) != Gst.GST_STATE_SUCCESS:
         raise RuntimeError, "pipeline did not enter playing state"
 
     if options.write_pipeline is not None:

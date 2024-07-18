@@ -78,6 +78,7 @@ def to_google_json(fname, description, data):
 
 
 class SimInspiral(lsctables.SimInspiral):
+
     @property
     def mtotal(self):
         return self.mass1 + self.mass2
@@ -98,6 +99,7 @@ class SimInspiral(lsctables.SimInspiral):
 
 
 class PostcohInspiral(postcoh_table_def.PostcohInspiral):
+
     @property
     def chi(self):
         return (self.mass1 * self.spin1z +
@@ -273,6 +275,7 @@ def parse_command_line():
 
 
 class SegmentsTable(object):
+
     def __init__(self, base):
         self.all_segs_dict = {}
         self.data = []
@@ -339,6 +342,7 @@ class SegmentsTable(object):
 
 
 class CoincDatabase(object):
+
     def __init__(self,
                  connection,
                  data_segments_name,
@@ -595,6 +599,7 @@ split the Summary Table for 2 purposes:
 
 
 class SummaryTable(object):
+
     def __init__(self, tag):
         self.candidates = []
         self.bgcandidates = []
@@ -706,6 +711,7 @@ LIMIT 100
 
 
 class InjectionParameterDistributionPlots(object):
+
     def __init__(self):
         self.injections = {}
 
@@ -773,7 +779,9 @@ FROM
 
 
 class ROCPlots(object):
+
     class ROC(object):
+
         def __init__(self, on_instruments):
             self.on_instruments = on_instruments
             self.ln_far_thresh = numpy.linspace(-9., -3., 100)
@@ -882,7 +890,9 @@ WHERE
 
 
 class MissedFoundPlots(object):
+
     class MissedFound(object):
+
         def __init__(self, on_instruments, far_thresh, missed_found_plots):
             self.on_instruments = on_instruments
             self.far_thresh = far_thresh
@@ -1210,6 +1220,7 @@ FROM
 
 
 class ParameterAccuracyPlots(object):
+
     def __init__(self, far_thresh=1e-4):
         self.sim_postcoh_pairs = {}
         self.far_thresh = far_thresh
@@ -1245,6 +1256,7 @@ FROM
                                                       (sim, postcoh, far))
 
     def finish(self):
+
         def hist(arr, axes):
             start = scipy_stats.mstats.mquantiles(arr, 0.01)
             end = scipy_stats.mstats.mquantiles(arr, 0.99)
@@ -1529,6 +1541,7 @@ FROM
 
 
 class BackgroundPlots(object):
+
     def __init__(self, ifos, bgname, njob):
         self.proc = []
         self.bgname = bgname
@@ -1582,7 +1595,9 @@ class BackgroundPlots(object):
 
 
 class BackgroundVsInjectionPlots(object):
+
     class Points(object):
+
         def __init__(self):
             self.snr = []
             self.chi2 = []
@@ -1755,7 +1770,9 @@ FROM
 
 
 class BackgroundVsInjectionPlotsMulti(object):
+
     class Points(object):
+
         def __init__(self):
             self.background_snreff = []
             self.injections_snreff = []
@@ -2026,6 +2043,7 @@ def create_farplot(axes,
 
 
 class RateVsThreshold(object):
+
     def __init__(self, tag):
         self.tag = tag
         self.zerolag_snr = []

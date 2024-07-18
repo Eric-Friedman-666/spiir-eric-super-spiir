@@ -15,7 +15,7 @@ export GST_DEBUG=5
 
 #GST_DEBUG_DUMP_DOT_DIR=. 
 gst-launch --gst-debug-no-color filesrc location=$inputfile ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   cuda_multiratespiir num_depths=7 matrix=1 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   filesink location=$outputfile

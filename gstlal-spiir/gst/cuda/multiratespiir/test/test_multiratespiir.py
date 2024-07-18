@@ -1,15 +1,11 @@
 #!/usr/bin/env python
 
-import pygtk
+import gi
 
-pygtk.require("2.0")
-import gobject
+gi.require_version("Gst", "1.0")
+from gi.repository import GObject, Gst
 
-gobject.threads_init()
-import pygst
-
-pygst.require("0.10")
-import gst
+Gst.init(None)
 
 # This is for parsing the ligolw file
 from glue.ligolw import ligolw, lsctables, array, param, utils, types
@@ -51,8 +47,8 @@ def get_maxrate_from_xml(filename,
     return max(sample_rates)
 
 
-pipeline = gst.Pipeline("test_multiratespiir")
-mainloop = gobject.MainLoop()
+pipeline = Gst.Pipeline("test_multiratespiir")
+mainloop = GObject.MainLoop()
 
 # set the snr dump time range in GPS format
 nxydump_segment = "0:1"
@@ -66,11 +62,10 @@ src = pipeparts.mkaudiotestsrc(pipeline, volume=1, wave="sine", freq=10)
 bank_fname = "H1bank.xml"
 maxrate = get_maxrate_from_xml(bank_fname)
 src = pipeparts.mkcapsfilter(
-    pipeline, src,
-    "audio/x-raw-float, width=32, channels=1, rate=%d" % maxrate)
+    pipeline, src, "audio/x-raw, width=32, channels=1, rate=%d" % maxrate)
 
 src = pipeparts.mkcudamultiratespiir(pipeline, src, bank_fname)
-#sink = gst.element_factory_make("fakesink")
+#sink = Gst.ElementFactory.make("fakesink", None)
 #pipeline.add(sink)
 #src.link(sink)
 
@@ -80,7 +75,7 @@ pipeparts.mknxydumpsink(pipeline,
                         (nxydump_segment[0], bank_fname[1:5]),
                         segment=nxydump_segment)
 
-if pipeline.set_state(gst.STATE_PLAYING) != gst.STATE_CHANGE_SUCCESS:
+if pipeline.set_state(Gst.State.PLAYING) != Gst.GST_STATE_SUCCESS:
     raise RuntimeError, "pipeline did not enter playing state"
 
 mainloop.run()
