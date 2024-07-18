@@ -14,17 +14,17 @@ pipeline = Gst.Pipeline("test_postcoh")
 mainloop = GObject.MainLoop()
 
 src1 = pipeparts.mkaudiotestsrc(pipeline, wave=9)
-src1 = pipeparts.mkcapsfilter(
-    pipeline, src1, "audio/x-raw, width=32, channels=2, rate=4096")
+src1 = pipeparts.mkcapsfilter(pipeline, src1,
+                              "audio/x-raw, width=32, channels=2, rate=4096")
 src2 = pipeparts.mkaudiotestsrc(pipeline, wave=9)
-src2 = pipeparts.mkcapsfilter(
-    pipeline, src2, "audio/x-raw, width=32, channels=2, rate=4096")
+src2 = pipeparts.mkcapsfilter(pipeline, src2,
+                              "audio/x-raw, width=32, channels=2, rate=4096")
 src3 = pipeparts.mkaudiotestsrc(pipeline, wave=9)
-src3 = pipeparts.mkcapsfilter(
-    pipeline, src3, "audio/x-raw, width=32, channels=2, rate=4096")
+src3 = pipeparts.mkcapsfilter(pipeline, src3,
+                              "audio/x-raw, width=32, channels=2, rate=4096")
 src4 = pipeparts.mkaudiotestsrc(pipeline, wave=9)
-src4 = pipeparts.mkcapsfilter(
-    pipeline, src4, "audio/x-raw, width=32, channels=2, rate=4096")
+src4 = pipeparts.mkcapsfilter(pipeline, src4,
+                              "audio/x-raw, width=32, channels=2, rate=4096")
 
 postcoh = Gst.ElementFactory.make("cuda_postcoh", None)
 postcoh.set_property("detrsp-fname", "H1L1V1K1_skymap.xml")

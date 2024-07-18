@@ -1063,7 +1063,7 @@ static gboolean cuda_postcoh_align_collected(CudaPostcoh *postcoh,
             g_assert(subbuf);
 
             GST_LOG_OBJECT(
-              data,
+              pads,
               "Drop the start of a buffer to align pads at t0. Start time of "
               "buffer '%" GST_TIME_FORMAT "', t0 '%" GST_TIME_FORMAT "'.",
               GST_TIME_ARGS(t_start_cur), GST_TIME_ARGS(postcoh->t0));
@@ -1080,7 +1080,7 @@ static gboolean cuda_postcoh_align_collected(CudaPostcoh *postcoh,
             }
 
             GST_LOG_OBJECT(
-              data,
+              pads,
               "Creating sub buffer (EXPECTED, ACTUAL):\n"
               "size (%" G_GSIZE_FORMAT ", %" G_GSIZE_FORMAT "),\n"
               "timestamp (%" GST_TIME_FORMAT ", %" GST_TIME_FORMAT "),\n"
@@ -2112,7 +2112,6 @@ static void cuda_postcoh_class_init(CudaPostcohClass *klass) {
         "detrsp-refresh-interval", "detector response refresh interval",
         "(0) never refresh stats; (N) refresh stats every N seconds. ", 0,
         G_MAXINT, 600, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
     g_object_class_install_property(
       gobject_class, PROP_SIGNAL_REMOVAL_BG,
       g_param_spec_boolean("feature-signal-removal-bg",

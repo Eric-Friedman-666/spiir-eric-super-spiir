@@ -23,8 +23,8 @@ src3 = pipeparts.mkaudiotestsrc(pipeline, wave=9)
 src3 = pipeparts.mkcapsfilter(pipeline, src3,
                               "audio/x-raw, width=32, channels=1, rate=4096")
 src4 = pipeparts.mkaudiotestsrc(pipeline, wave=9)
-src4 = pipeparts.mkcapsfilter(
-    pipeline, src4, "audio/x-raw, width=32, channels=1, rate=4096")
+src4 = pipeparts.mkcapsfilter(pipeline, src4,
+                              "audio/x-raw, width=32, channels=1, rate=4096")
 
 src1 = pipeparts.mkcudamultiratespiir(pipeline,
                                       src1,

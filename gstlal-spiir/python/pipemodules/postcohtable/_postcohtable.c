@@ -388,7 +388,7 @@ static PostcohInspiralWrapper *
     self->chisq =
       PyArray_SimpleNewFromData(1, dims, NPY_FLOAT, self->postcohtable.chisq);
     self->far_sngl    = PyArray_SimpleNewFromData(1, dims, NPY_FLOAT,
-                                                  self->postcohtable.far_sngl);
+                                               self->postcohtable.far_sngl);
     self->far_1w_sngl = PyArray_SimpleNewFromData(
       1, dims, NPY_FLOAT, self->postcohtable.far_1w_sngl);
     self->far_1d_sngl = PyArray_SimpleNewFromData(

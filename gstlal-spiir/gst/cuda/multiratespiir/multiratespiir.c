@@ -659,7 +659,7 @@ static GstFlowReturn cuda_multiratespiir_push_drain(CudaMultirateSPIIR *element,
         /* move along */
         gst_adapter_unmap(element->adapter);
         gst_adapter_flush(element->adapter, adapter_size);
-        in_len -= total_num_out_spiirup;
+        in_len -= num_in_multidown;
         /* after the first filtering, update the exe_samples to the rate */
         cuda_multiratespiir_update_exe_samples(&element->num_exe_samples,
                                                element->rate);
