@@ -29,26 +29,9 @@
  *  stuff from gobject/gstreamer
  */
 
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
 #include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
-
 #include <gstlal/gstlal.h>
 
 /*
@@ -88,16 +71,13 @@
 #define GST_CAT_DEFAULT cohfar_assignfar_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-static void additional_initializations(GType type) {
-    GST_DEBUG_CATEGORY_INIT(GST_CAT_DEFAULT, "cohfar_assignfar", 0,
-                            "cohfar_assignfar element");
-}
-
-GST_BOILERPLATE_FULL(CohfarAssignfar,
-                     cohfar_assignfar,
-                     GstBaseTransform,
-                     GST_TYPE_BASE_TRANSFORM,
-                     additional_initializations);
+G_DEFINE_TYPE_WITH_CODE(CohfarAssignfar,
+                        cohfar_assignfar,
+                        GST_TYPE_BASE_TRANSFORM,
+                        GST_DEBUG_CATEGORY_INIT(GST_CAT_DEFAULT,
+                                                "cohfar_assignfar",
+                                                0,
+                                                "cohfar_assignfar element"))
 
 enum property {
     PROP_0,
@@ -196,7 +176,7 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
     CohfarAssignfar *element = COHFAR_ASSIGNFAR(trans);
     GstFlowReturn result     = GST_FLOW_OK;
 
-    GstClockTime t_cur = GST_BUFFER_TIMESTAMP(buf);
+    GstClockTime t_cur = GST_BUFFER_PTS(buf);
     if (!GST_CLOCK_TIME_IS_VALID(element->t_start)) element->t_start = t_cur;
 
     /* Check that we have collected enough backgrounds */
@@ -258,10 +238,11 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
     TriggerStats *cur_stats;
     if (element->pass_silent_time) {
         ifo_set_type enabled_ifos;
-        PostcohInspiralTable *table =
-          (PostcohInspiralTable *)GST_BUFFER_DATA(buf);
+        GstMapInfo mapInfo;
+        gst_buffer_map(buf, &mapInfo, GST_MAP_WRITE);
+        PostcohInspiralTable *table = (PostcohInspiralTable *)mapInfo.data;
         PostcohInspiralTable *table_end =
-          (PostcohInspiralTable *)(GST_BUFFER_DATA(buf) + GST_BUFFER_SIZE(buf));
+          (PostcohInspiralTable *)(mapInfo.data + mapInfo.size);
         for (; table < table_end; table++) {
             if (table->is_background == FLAG_EMPTY) continue;
             if (!ifo_set__try_parse(table->ifos, &enabled_ifos)) {
@@ -284,6 +265,7 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
                 _update_fars(table, element);
             }
         }
+        gst_buffer_unmap(buf, &mapInfo);
     }
 
     return result;
@@ -298,8 +280,8 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
  */
 
 /* handle events (search) */
-static gboolean cohfar_assignfar_event(GstBaseTransform *base,
-                                       GstEvent *event) {
+static gboolean cohfar_assignfar_sink_event(GstBaseTransform *base,
+                                            GstEvent *event) {
     CohfarAssignfar *element = COHFAR_ASSIGNFAR(base);
 
     switch (GST_EVENT_TYPE(event)) {
@@ -312,7 +294,8 @@ static gboolean cohfar_assignfar_event(GstBaseTransform *base,
     default: break;
     }
 
-    return TRUE;
+    return GST_BASE_TRANSFORM_CLASS(cohfar_assignfar_parent_class)
+      ->sink_event(base, event);
 }
 
 /*
@@ -419,39 +402,8 @@ static void cohfar_assignfar_dispose(GObject *object) {
         trigger_stats_xml_destroy(element->bgstats_1d);
         trigger_stats_xml_destroy(element->bgstats_2h);
     }
-    G_OBJECT_CLASS(parent_class)->dispose(object);
+    G_OBJECT_CLASS(cohfar_assignfar_parent_class)->dispose(object);
     g_strfreev(element->input_fnames);
-}
-
-/*
- * base_init()
- */
-
-static void cohfar_assignfar_base_init(gpointer gclass) {
-    GstElementClass *element_class         = GST_ELEMENT_CLASS(gclass);
-    GstBaseTransformClass *transform_class = GST_BASE_TRANSFORM_CLASS(gclass);
-
-    gst_element_class_set_details_simple(
-      element_class, "assign FAR to postcoh triggers", "assign FAR",
-      "assign FAR to postcoh triggers according to a given stats file.\n",
-      "Qi Chu <qi.chu at ligo dot org>");
-    gst_element_class_add_pad_template(
-      element_class,
-      //		gst_static_pad_template_get(&cohfar_background_src_template)
-      gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-                           gst_caps_from_string("application/x-lal-postcoh"))
-
-    );
-
-    gst_element_class_add_pad_template(
-      element_class,
-      //		gst_static_pad_template_get(&cohfar_background_src_template)
-      gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-                           gst_caps_from_string("application/x-lal-postcoh")));
-
-    transform_class->transform_ip =
-      GST_DEBUG_FUNCPTR(cohfar_assignfar_transform_ip);
-    transform_class->event = GST_DEBUG_FUNCPTR(cohfar_assignfar_event);
 }
 
 /*
@@ -460,7 +412,6 @@ static void cohfar_assignfar_base_init(gpointer gclass) {
 
 static void cohfar_assignfar_class_init(CohfarAssignfarClass *klass) {
     GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
-    ;
     gobject_class->set_property =
       GST_DEBUG_FUNCPTR(cohfar_assignfar_set_property);
     gobject_class->get_property =
@@ -493,13 +444,42 @@ static void cohfar_assignfar_class_init(CohfarAssignfarClass *klass) {
                        "seconds to accumulate background.",
                        0, G_MAXINT, G_MAXINT,
                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    GstElementClass *gst_element_class = GST_ELEMENT_CLASS(klass);
+
+    gst_element_class_set_metadata(
+      gst_element_class, "assign FAR to postcoh triggers", "assign FAR",
+      "assign FAR to postcoh triggers according to a given stats file.\n",
+      "Qi Chu <qi.chu at ligo dot org>");
+
+    GstCaps *template_caps = gst_caps_from_string("application/x-lal-postcoh");
+
+    gst_element_class_add_pad_template(
+      gst_element_class,
+      //		gst_static_pad_template_get(&cohfar_background_src_template)
+      gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, template_caps)
+
+    );
+
+    gst_element_class_add_pad_template(
+      gst_element_class,
+      //		gst_static_pad_template_get(&cohfar_background_src_template)
+      gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, template_caps));
+
+    gst_caps_unref(template_caps);
+
+    GstBaseTransformClass *transform_class = GST_BASE_TRANSFORM_CLASS(klass);
+
+    transform_class->transform_ip =
+      GST_DEBUG_FUNCPTR(cohfar_assignfar_transform_ip);
+    transform_class->sink_event =
+      GST_DEBUG_FUNCPTR(cohfar_assignfar_sink_event);
 }
 /*
  * init()
  */
 
-static void cohfar_assignfar_init(CohfarAssignfar *element,
-                                  CohfarAssignfarClass *kclass) {
+static void cohfar_assignfar_init(CohfarAssignfar *element) {
     element->ifos             = NULL;
     element->bgstats_2h       = NULL;
     element->bgstats_1d       = NULL;
