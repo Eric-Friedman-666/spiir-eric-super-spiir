@@ -1,16 +1,11 @@
-from glue.ligolw import ligolw
-from glue.ligolw import table
-from glue.ligolw import ilwd
-from glue.ligolw import dbtables
+from ligo.lw import ligolw
+from ligo.lw import table
+from ligo.lw import dbtables
 from lal import LIGOTimeGPS
 from xml.sax.xmlreader import AttributesImpl
 from itertools import chain
-# so they can be inserted into a database
-dbtables.ligolwtypes.ToPyType["ilwd:char"] = unicode
 
-PostcohInspiralID = ilwd.get_ilwdchar_class(u"postcoh", u"event_id")
-
-from gstlal.pipemodules import pipe_macro
+from gstlal_spiir.pipemodules import pipe_macro
 
 
 # need to be consistent with the table defined in postcohinspiral_table.h
@@ -19,8 +14,8 @@ class PostcohInspiralTable(table.Table):
     validcolumns = dict(
         chain(
             [
-                ("process_id", "ilwd:char"),
-                ("event_id", "ilwd:char"),
+                ("process_id", "int_8s"),
+                ("event_id", "int_8s"),
                 ("end_time", "int_4s"),
                 ("end_time_ns", "int_4s"),
                 ("is_background", "int_4s"),
@@ -76,11 +71,11 @@ class PostcohInspiralTable(table.Table):
                  for name in pipe_macro.IFO_MAP),
         ))
     constraints = "PRIMARY KEY (event_id)"
-    next_id = PostcohInspiralID(0)
+    next_id = 0
 
 
 class PostcohInspiral(table.Table.RowType):
-    __slots__ = PostcohInspiralTable.validcolumns.keys()
+    __slots__ = list(PostcohInspiralTable.validcolumns.keys())
 
     #
     # Properties
@@ -102,7 +97,7 @@ class PostcohInspiral(table.Table.RowType):
 
 PostcohInspiralTable.RowType = PostcohInspiral
 
-# ref: glue.ligolw.lsctables
+# ref: ligo.lw.lsctables
 # Override portions of a lsctables.LIGOLWContentHandler class
 #
 
@@ -112,22 +107,23 @@ TableByName = {PostcohInspiralTable.tableName: PostcohInspiralTable}
 def use_in(ContentHandler):
     """
 	Modify ContentHandler, a sub-class of
-	glue.ligolw.LIGOLWContentHandler, to cause it to use the Table
+	ligo.lw.LIGOLWContentHandler, to cause it to use the Table
 	classes defined in this module when parsing XML documents.
 
 	Example:
 
-	>>> from glue.ligolw import ligolw
+	>>> from ligo.lw import ligolw
 	>>> class MyContentHandler(ligolw.LIGOLWContentHandler):
 	...	pass
 	...
 	>>> use_in(MyContentHandler)
-	<class 'glue.ligolw.lsctables.MyContentHandler'>
+	<class 'ligo.lw.lsctables.MyContentHandler'>
 	"""
 
     # need to comment out the next clause in case there are other use_in performed
     # e.g. lsctables.use_in before this use_in
-    #ContentHandler = table.use_in(ContentHandler)
+    # ContentHandler = table.use_in(ContentHandler)
+    raise NotImplementedError
 
     def startTable(self,
                    parent,
@@ -157,7 +153,7 @@ DBTableByName = {PostcohInspiralDBTable.tableName: PostcohInspiralDBTable}
 def DB_use_in(ContentHandler):
     """
 	Modify ContentHandler, a sub-class of
-	glue.ligolw.LIGOLWContentHandler, to cause it to use the DBTable
+	ligo.lw.LIGOLWContentHandler, to cause it to use the DBTable
 	class defined in this module when parsing XML documents.  Instances
 	of the class must provide a connection attribute.  When a document
 	is parsed, the value of this attribute will be passed to the
@@ -168,7 +164,7 @@ def DB_use_in(ContentHandler):
 	Example:
 
 	>>> import sqlite3
-	>>> from glue.ligolw import ligolw
+	>>> from ligo.lw import ligolw
 	>>> class MyContentHandler(ligolw.LIGOLWContentHandler):
 	...	def __init__(self, *args):
 	...		super(MyContentHandler, self).__init__(*args)
@@ -179,6 +175,9 @@ def DB_use_in(ContentHandler):
 	Multiple database files can be in use at once by creating a content
 	handler class for each one.
 	"""
+
+    raise NotImplementedError
+
     def startTable(self,
                    parent,
                    attrs,
@@ -208,6 +207,7 @@ def get_xml(connection, table_names=None):
 	to a database, and an optional list of table names to dump.  If
 	table_names is not provided the set is obtained from get_table_names()
 	"""
+    raise NotImplementedError
     ligo_lw = ligolw.LIGO_LW()
 
     if table_names is None:
@@ -236,7 +236,7 @@ def get_xml(connection, table_names=None):
                         u"Name":
                         u"%s:%s" % (table_name, column_name),
                         u"Type":
-                        column_type
+                        column_type,
                     })))
         table_elem._end_of_columns()
         table_elem.appendChild(
@@ -244,7 +244,7 @@ def get_xml(connection, table_names=None):
                 AttributesImpl({
                     u"Name": u"%s:table" % table_name,
                     u"Delimiter": table.TableStream.Delimiter.default,
-                    u"Type": table.TableStream.Type.default
+                    u"Type": table.TableStream.Type.default,
                 })))
         ligo_lw.appendChild(table_elem)
     return ligo_lw

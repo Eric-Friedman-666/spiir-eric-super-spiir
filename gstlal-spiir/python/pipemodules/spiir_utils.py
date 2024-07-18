@@ -17,7 +17,7 @@
 
 import os
 import re
-from glue.ligolw import ligolw, lsctables, array, param, utils
+from ligo.lw import ligolw, lsctables, array, param, utils
 
 
 # FIXME:  require calling code to provide the content handler

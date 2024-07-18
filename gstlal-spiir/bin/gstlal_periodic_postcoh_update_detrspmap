@@ -44,7 +44,7 @@ def call_update_map(output_coh,
     cmd += ["--chealpix-order", chealpix_order]
     if verbose:
         cmd += ["--verbose"]
-        print cmd
+        print(cmd)
     proc = subprocess.Popen(cmd)
     proc.wait()
 
@@ -98,8 +98,8 @@ def parse_command_line():
         if getattr(options, option) is None
     ]
     if missing_options:
-        raise ValueError, "missing required option(s) %s" % ", ".join(
-            sorted(missing_options))
+        raise ValueError("missing required option(s) %s" %
+                         ", ".join(sorted(missing_options)))
 
     return options
 
@@ -111,7 +111,7 @@ while True:
     ls_out = os.listdir(options.data_loc)
     grep_out = [fname for fname in ls_out if options.data_keyword in fname]
     if len(grep_out) == 0:
-        print "no data file yet"
+        print("no data file yet")
         time.sleep(int(options.period))
         continue
 
@@ -125,7 +125,7 @@ while True:
             % data_name)
 
     if options.verbose:
-        print "generating detrsp map at %s gps time" % str(gps_time)
+        print("generating detrsp map at %s gps time" % str(gps_time))
 
     call_update_map(options.output_coh_coeff,
                     options.output_prob_coeff,
@@ -135,6 +135,6 @@ while True:
                     verbose=False)
 
     if options.verbose:
-        print "finished detrsp map at %s gps time" % str(gps_time)
+        print("finished detrsp map at %s gps time" % str(gps_time))
 
     time.sleep(int(options.period))

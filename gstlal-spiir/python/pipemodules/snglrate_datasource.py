@@ -22,27 +22,18 @@
 # =============================================================================
 #
 
-import sys
-import optparse
-import math
-import numpy
-from scipy import fftpack
+### The following snippet is a modified version of examples in GstLAL: A software framework for gravitational wave discovery
+import gi
 
-# The following snippet is taken from http://gstreamer.freedesktop.org/wiki/FAQ#Mypygstprogramismysteriouslycoredumping.2Chowtofixthis.3F
-import pygtk
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
 
-pygtk.require("2.0")
-import gobject
-
-gobject.threads_init()
-import pygst
-
-pygst.require('0.10')
-import gst
+Gst.init(None)
 
 from gstlal import bottle
 from gstlal import pipeparts
-from gstlal import reference_psd
+from gstlal.pipeio import format_property
+from gstlal.psd import interpolate_psd
 from gstlal import datasource
 
 import lal
@@ -63,90 +54,91 @@ import lal
 #
 # @dot
 # digraph mkbasicsrc {
-#	rankdir = LR;
-#	compound=true;
-#	node [shape=record fontsize=10 fontname="Verdana"];
-#	edge [fontsize=8 fontname="Verdana"];
+# 	rankdir = LR;
+# 	compound=true;
+# 	node [shape=record fontsize=10 fontname="Verdana"];
+# 	edge [fontsize=8 fontname="Verdana"];
 #
-#	capsfilter1 [URL="\ref pipeparts.mkcapsfilter()"];
-#	audioresample [URL="\ref pipeparts.mkresample()"];
-#	capsfilter2 [URL="\ref pipeparts.mkcapsfilter()"];
+# 	capsfilter1 [URL="\ref pipeparts.mkcapsfilter()"];
+# 	audioresample [URL="\ref pipeparts.mkresample()"];
+# 	capsfilter2 [URL="\ref pipeparts.mkcapsfilter()"];
 
-#	reblock [URL="\ref pipeparts.mkreblock()"];
-#	whiten [URL="\ref pipeparts.mkwhiten()"];
-#	audioconvert [URL="\ref pipeparts.mkaudioconvert()"];
-#	capsfilter3 [URL="\ref pipeparts.mkcapsfilter()"];
-#	"segmentsrcgate()" [URL="\ref datasource.mksegmentsrcgate()", label="segmentsrcgate() \n [iff veto segment list provided]", style=filled, color=lightgrey];
-#	tee [URL="\ref pipeparts.mktee()"];
-#	audioamplifyr1 [URL="\ref pipeparts.mkaudioamplify()"];
-#	capsfilterr1 [URL="\ref pipeparts.mkcapsfilter()"];
+# 	reblock [URL="\ref pipeparts.mkreblock()"];
+# 	whiten [URL="\ref pipeparts.mkwhiten()"];
+# 	audioconvert [URL="\ref pipeparts.mkaudioconvert()"];
+# 	capsfilter3 [URL="\ref pipeparts.mkcapsfilter()"];
+# 	"segmentsrcgate()" [URL="\ref datasource.mksegmentsrcgate()", label="segmentsrcgate() \n [iff veto segment list provided]", style=filled, color=lightgrey];
+# 	tee [URL="\ref pipeparts.mktee()"];
+# 	audioamplifyr1 [URL="\ref pipeparts.mkaudioamplify()"];
+# 	capsfilterr1 [URL="\ref pipeparts.mkcapsfilter()"];
 
-#	htgater1 [URL="\ref datasource.mkhtgate()", label="htgate() \n [iff ht gate specified]", style=filled, color=lightgrey];
-#	tee1 [URL="\ref pipeparts.mktee()"];
-#	audioamplifyr2 [URL="\ref pipeparts.mkaudioamplify()"];
-#	capsfilterr2 [URL="\ref pipeparts.mkcapsfilter()"];
+# 	htgater1 [URL="\ref datasource.mkhtgate()", label="htgate() \n [iff ht gate specified]", style=filled, color=lightgrey];
+# 	tee1 [URL="\ref pipeparts.mktee()"];
+# 	audioamplifyr2 [URL="\ref pipeparts.mkaudioamplify()"];
+# 	capsfilterr2 [URL="\ref pipeparts.mkcapsfilter()"];
 
-#	htgater2 [URL="\ref datasource.mkhtgate()", label="htgate() \n [iff ht gate specified]", style=filled, color=lightgrey];
-#	tee2 [URL="\ref pipeparts.mktee()"];
-#	audioamplify_rn [URL="\ref pipeparts.mkaudioamplify()"];
-#	capsfilter_rn [URL="\ref pipeparts.mkcapsfilter()"];
+# 	htgater2 [URL="\ref datasource.mkhtgate()", label="htgate() \n [iff ht gate specified]", style=filled, color=lightgrey];
+# 	tee2 [URL="\ref pipeparts.mktee()"];
+# 	audioamplify_rn [URL="\ref pipeparts.mkaudioamplify()"];
+# 	capsfilter_rn [URL="\ref pipeparts.mkcapsfilter()"];
 
 
-#	htgate_rn [URL="\ref datasource.mkhtgate()", style=filled, color=lightgrey, label="htgate() \n [iff ht gate specified]"];
-#	tee [URL="\ref pipeparts.mktee()"];
+# 	htgate_rn [URL="\ref datasource.mkhtgate()", style=filled, color=lightgrey, label="htgate() \n [iff ht gate specified]"];
+# 	tee [URL="\ref pipeparts.mktee()"];
 #
-#	// nodes
+# 	// nodes
 #
-#	"?" -> capsfilter1 -> audioresample;
-#	audioresample -> capsfilter2;
-#	capsfilter2 -> reblock;
+# 	"?" -> capsfilter1 -> audioresample;
+# 	audioresample -> capsfilter2;
+# 	capsfilter2 -> reblock;
 #
-#	reblock -> whiten;
-#	whiten -> audioconvert;
-#	audioconvert -> capsfilter3;
-#	capsfilter3 -> "segmentsrcgate()";
-#	"segmentsrcgate()" -> tee;
+# 	reblock -> whiten;
+# 	whiten -> audioconvert;
+# 	audioconvert -> capsfilter3;
+# 	capsfilter3 -> "segmentsrcgate()";
+# 	"segmentsrcgate()" -> tee;
 #
-#	tee -> audioamplifyr1 [label="Rate 1"];
-#	audioamplifyr1 -> capsfilterr1;
-#	capsfilterr1 -> htgater1;
+# 	tee -> audioamplifyr1 [label="Rate 1"];
+# 	audioamplifyr1 -> capsfilterr1;
+# 	capsfilterr1 -> htgater1;
 #
-#	htgater1 -> tee1 -> "? 1";
+# 	htgater1 -> tee1 -> "? 1";
 #
-#	tee -> audioamplifyr2 [label="Rate 2"];
-#	audioamplifyr2 -> capsfilterr2;
-#	capsfilterr2 -> htgater2;
+# 	tee -> audioamplifyr2 [label="Rate 2"];
+# 	audioamplifyr2 -> capsfilterr2;
+# 	capsfilterr2 -> htgater2;
 #
-#	htgater2 -> tee2 -> "? 2";
+# 	htgater2 -> tee2 -> "? 2";
 #
-#	tee ->  audioamplify_rn [label="Rate N"];
-#	audioamplify_rn -> capsfilter_rn;
-#	capsfilter_rn -> htgate_rn;
+# 	tee ->  audioamplify_rn [label="Rate N"];
+# 	audioamplify_rn -> capsfilter_rn;
+# 	capsfilter_rn -> htgate_rn;
 #
-#	htgate_rn -> tee_n -> "? 3";
+# 	htgate_rn -> tee_n -> "? 3";
 #
 # }
 # @enddot
-def mkwhitened_src(pipeline,
-                   src,
-                   max_rate,
-                   instrument,
-                   psd=None,
-                   psd_fft_length=8,
-                   ht_gate_threshold=float("inf"),
-                   veto_segments=None,
-                   seekevent=None,
-                   nxydump_segment=None,
-                   nxydump_directory='.',
-                   track_psd=False,
-                   block_duration=1 * gst.SECOND,
-                   zero_pad=0,
-                   width=64,
-                   fir_whitener=0,
-                   statevector=None,
-                   dqvector=None,
-                   fir_whiten_reference_psd=None,
-                   whiten_expand_gaps=False):
+def mkwhitened_src(
+    pipeline,
+    src,
+    max_rate,
+    instrument,
+    psd=None,
+    psd_fft_length=8,
+    ht_gate_threshold=float("inf"),
+    veto_segments=None,
+    nxydump_segment=None,
+    nxydump_directory=".",
+    track_psd=False,
+    block_duration=1 * Gst.SECOND,
+    zero_pad=0,
+    width=64,
+    fir_whitener=0,
+    statevector=None,
+    dqvector=None,
+    fir_whiten_reference_psd=None,
+    whiten_expand_gaps=False,
+):
     """!
 	Build pipeline stage to whiten and downsample h(t).
 
@@ -164,7 +156,8 @@ def mkwhitened_src(pipeline,
     #
     # input sanity checks
     #
-
+    if fir_whitener != 0 or fir_whiten_reference_psd is not None:
+        raise ValueError("As of the Py3 upgrade, the fir_whitener is no longer supported.")
     if psd is None and not track_psd:
         raise ValueError("must enable track_psd when psd is None")
     if int(psd_fft_length) != psd_fft_length:
@@ -176,14 +169,7 @@ def mkwhitened_src(pipeline,
     #
 
     if zero_pad is None:
-        if fir_whitener:
-            # in this configuration we are not asking the
-            # whitener to reassemble an output time series
-            # (that we care about) so we disable zero-padding
-            # to get the most information from the whitener's
-            # FFT blocks.
-            zero_pad = 0
-        elif psd_fft_length % 4:
+        if psd_fft_length % 4:
             raise ValueError(
                 "default whitener zero-padding requires psd_fft_length to be multiple of 4"
             )
@@ -205,15 +191,40 @@ def mkwhitened_src(pipeline,
     #
 
     quality = 9
+
+    # These parameters control how the resampling is done:
+    #   https://gstreamer.freedesktop.org/documentation/audioresample/index.html
+    # ... which are new since Gstreamer 0.10. There doesn't seem to be an exact
+    # copy of what Gstreamer 0.10 did, but for now we pick the parameters that
+    # produce the closest result (measured by mean unsigned error and maximum
+    # unsigned error).
+    # We've found that linear resampling (resample_method = 1) fixes a PSD issue:
+    # https://git.ligo.org/lscsoft/spiir/-/issues/126
+    # This is the method we will use going forward, though the other parameters may
+    # require further investigation.
+    resample_method = 1
+    sinc_filter_mode = 0
+    sinc_filter_interpolation = 1
+
+    head = pipeparts.mkcapsfilter(pipeline, src,
+                                  "audio/x-raw, rate=[%d,MAX]" % max_rate)
+
+    head = pipeparts.mkresample(
+        pipeline,
+        head,
+        quality=quality,
+        resample_method=resample_method,
+        sinc_filter_mode=sinc_filter_mode,
+        sinc_filter_interpolation=sinc_filter_interpolation,
+    )
+
     head = pipeparts.mkcapsfilter(
-        pipeline, src, "audio/x-raw-float, rate=[%d,MAX]" % max_rate)
-    head = pipeparts.mkcapsfilter(
-        pipeline, pipeparts.mkresample(pipeline, head, quality=quality),
-        "audio/x-raw-float, rate=%d" % max_rate)
+        pipeline,
+        head,
+        "audio/x-raw, rate=%d" % max_rate,
+    )
     head = pipeparts.mknofakedisconts(
         pipeline, head)  # FIXME:  remove when resampler is patched
-    head = pipeparts.mkchecktimestamps(
-        pipeline, head, "%s_timestamps_%d_hoft" % (instrument, max_rate))
 
     #
     # construct whitener.
@@ -225,229 +236,83 @@ def mkwhitened_src(pipeline,
             pipeparts.mkqueue(pipeline, head),
             "%s/before_highpass_data_%s_%d.dump" %
             (nxydump_directory, instrument, nxydump_segment[0]),
-            segment=nxydump_segment)
+            segment=nxydump_segment,
+        )
 
-    if fir_whitener:
+    # FIXME:
+    # add a reblock element.  the whitener's gap support isn't
+    # 100% yet and giving it smaller input buffers works around
+    # the remaining weaknesses (namely that when it sees a gap
+    # buffer large enough to drain its internal history, it
+    # doesn't know enough to produce a short non-gap buffer to
+    # drain its history followed by a gap buffer, it just
+    # produces one huge non-gap buffer that's mostly zeros).
+    # this is not required in the FIR-whitener case because
+    # there we don't use the whitener's output time series for
+    # anything.
+
+    head = pipeparts.mkreblock(pipeline, head, block_duration=block_duration)
+
+    head = whiten = pipeparts.mkwhiten(
+        pipeline,
+        head,
+        fft_length=psd_fft_length,
+        zero_pad=zero_pad,
+        average_samples=64,
+        median_samples=7,
+        expand_gaps=whiten_expand_gaps,
+        name="lal_whiten_%s" % instrument,
+    )
+    # make the buffers going downstream smaller, this can
+    # really help with RAM
+    head = pipeparts.mkreblock(pipeline, head, block_duration=block_duration)
+
+    if nxydump_segment is not None:
         head = pipeparts.mktee(pipeline, head)
-        whiten = pipeparts.mkwhiten(
+        pipeparts.mknxydumpsink(
             pipeline,
-            pipeparts.mkqueue(pipeline,
-                              head,
-                              max_size_time=2 * psd_fft_length * gst.SECOND),
-            fft_length=psd_fft_length - 2 * zero_pad,
-            zero_pad=0,
-            average_samples=64,
-            median_samples=7,
-            expand_gaps=whiten_expand_gaps,
-            name="lal_whiten_%s" % instrument)
-        pipeparts.mkfakesink(pipeline, whiten)
+            pipeparts.mkqueue(pipeline, head),
+            "%s/after_fdwhiten_data_%s_%d.dump" %
+            (nxydump_directory, instrument, nxydump_segment[0]),
+            segment=nxydump_segment,
+        )
 
-        # high pass filter
-        kernel = reference_psd.one_second_highpass_kernel(max_rate, cutoff=12)
-        block_stride = block_duration * max_rate // gst.SECOND
-        assert len(kernel) % 2 == 1, "high-pass filter length is not odd"
-        head = pipeparts.mkfirbank(pipeline,
-                                   pipeparts.mkqueue(pipeline,
-                                                     head,
-                                                     max_size_buffers=1),
-                                   fir_matrix=numpy.array(kernel, ndmin=2),
-                                   block_stride=block_stride,
-                                   time_domain=False,
-                                   latency=(len(kernel) - 1) // 2)
-
-        if nxydump_segment is not None:
-            head = pipeparts.mktee(pipeline, head)
-            pipeparts.mknxydumpsink(
+    if statevector is not None or dqvector is not None:
+        head = pipeparts.mkqueue(
+            pipeline,
+            head,
+            max_size_buffers=0,
+            max_size_bytes=0,
+            max_size_time=Gst.SECOND * (psd_fft_length + 2),
+        )
+    if statevector is not None:
+        head = pipeparts.mkgate(
+            pipeline,
+            head,
+            control=pipeparts.mkqueue(
                 pipeline,
-                pipeparts.mkqueue(pipeline, head),
-                "%s/after_highpass_data_%s_%d.dump" %
-                (nxydump_directory, instrument, nxydump_segment[0]),
-                segment=nxydump_segment)
-
-        # FIR filter for whitening kernel
-        head = pipeparts.mktdwhiten(pipeline,
-                                    head,
-                                    kernel=numpy.zeros(
-                                        1 + max_rate * psd_fft_length,
-                                        dtype=numpy.float64),
-                                    latency=0)
-
-        # compute whitening kernel from PSD
-        def set_fir_psd(whiten, pspec, firelem, psd_fir_kernel):
-            psd_data = numpy.array(whiten.get_property("mean-psd"))
-            psd = lal.CreateREAL8FrequencySeries(
-                name="psd",
-                epoch=lal.LIGOTimeGPS(0),
-                f0=0.0,
-                deltaF=whiten.get_property("delta-f"),
-                sampleUnits=lal.Unit(whiten.get_property("psd-units")),
-                length=len(psd_data))
-            psd.data.data = psd_data
-            kernel, latency, sample_rate = psd_fir_kernel.psd_to_linear_phase_whitening_fir_kernel(
-                psd)
-            kernel, phase = psd_fir_kernel.linear_phase_fir_kernel_to_minimum_phase_whitening_fir_kernel(
-                kernel, sample_rate)
-            firelem.set_property("kernel", kernel)
-
-            #kernel = psd_fir_kernel.min_phase(kernel)
-            #kernel = psd_fir_kernel.homomorphic(kernel, sample_rate)
-
-        firkernel = reference_psd.PSDFirKernel()
-        if fir_whiten_reference_psd is not None:
-            assert fir_whiten_reference_psd.f0 == 0.
-            # interpolate the reference phase PSD if its
-            # resolution doesn't match what we'll eventually
-            # require it to be.
-            if psd_fft_length != round(1. / fir_whiten_reference_psd.deltaF):
-                fir_whiten_reference_psd = reference_psd.interpolate_psd(
-                    fir_whiten_reference_psd, 1. / psd_fft_length)
-            # confirm that the reference phase PSD's Nyquist is
-            # sufficiently high, then reduce it to the required
-            # Nyquist if needed.
-            assert (psd_fft_length * max(rates)) // 2 + 1 <= len(
-                fir_whiten_reference_psd.data.data
-            ), "fir_whiten_reference_psd Nyquist too low"
-            if (psd_fft_length * max(rates)) // 2 + 1 < len(
-                    fir_whiten_reference_psd.data.data):
-                fir_whiten_reference_psd = lal.CutREAL8FrequencySeries(
-                    fir_whiten_reference_psd, 0,
-                    (psd_fft_length * max(rates)) // 2 + 1)
-            # set the reference phase PSD
-            firkernel.set_phase(fir_whiten_reference_psd)
-
-        whiten.connect_after("notify::mean-psd", set_fir_psd, head, firkernel)
-
-        if nxydump_segment is not None:
-            head = pipeparts.mktee(pipeline, head)
-            pipeparts.mknxydumpsink(
+                statevector,
+                max_size_buffers=0,
+                max_size_bytes=0,
+                max_size_time=0,
+            ),
+            default_state=False,
+            threshold=1,
+        )
+    if dqvector is not None:
+        head = pipeparts.mkgate(
+            pipeline,
+            head,
+            control=pipeparts.mkqueue(
                 pipeline,
-                pipeparts.mkqueue(pipeline, head),
-                "%s/after_tdwhiten_data_%s_%d.dump" %
-                (nxydump_directory, instrument, nxydump_segment[0]),
-                segment=nxydump_segment)
-
-        # Gate after gaps.  the queue sizes on the control inputs
-        # need only be large enough to hold the state vector
-        # streams until they are required.  the streams will be
-        # consumed immediately when needed, so there is no risk
-        # that these queues add to the latency, so make them
-        # generously large.
-        # FIXME the -max(rates) extra padding is for the high pass
-        # filter: NOTE it also needs to be big enough for the
-        # downsampling filter, but that is typically smaller than the
-        # HP filter (192 samples at Qual 9)
-        # FIXME: this first queue should not be needed.  what is
-        # going on!?
-        if statevector is not None or dqvector is not None:
-            head = pipeparts.mkqueue(pipeline,
-                                     head,
-                                     max_size_buffers=0,
-                                     max_size_bytes=0,
-                                     max_size_time=gst.SECOND *
-                                     (psd_fft_length + 2))
-        if statevector is not None:
-            head = pipeparts.mkgate(pipeline,
-                                    head,
-                                    control=pipeparts.mkqueue(
-                                        pipeline,
-                                        statevector,
-                                        max_size_buffers=0,
-                                        max_size_bytes=0,
-                                        max_size_time=0),
-                                    default_state=False,
-                                    threshold=1)
-        if dqvector is not None:
-            head = pipeparts.mkgate(pipeline,
-                                    head,
-                                    control=pipeparts.mkqueue(
-                                        pipeline,
-                                        dqvector,
-                                        max_size_buffers=0,
-                                        max_size_bytes=0,
-                                        max_size_time=0),
-                                    default_state=False,
-                                    threshold=1)
-        head = pipeparts.mkchecktimestamps(pipeline, head,
-                                           "%s_timestamps_fir" % instrument)
-    else:
-        # FIXME:  we should require fir_whiten_reference_psd to be
-        # None in this code path for safety, but that's hard to do
-        # since the calling code would need to know what
-        # environment variable is being used to select the mode,
-        # and we don't want to be duplicating that code all over
-        # the place
-
-        #
-        # add a reblock element.  the whitener's gap support isn't
-        # 100% yet and giving it smaller input buffers works around
-        # the remaining weaknesses (namely that when it sees a gap
-        # buffer large enough to drain its internal history, it
-        # doesn't know enough to produce a short non-gap buffer to
-        # drain its history followed by a gap buffer, it just
-        # produces one huge non-gap buffer that's mostly zeros).
-        # this is not required in the FIR-whitener case because
-        # there we don't use the whitener's output time series for
-        # anything.
-        #
-
-        head = pipeparts.mkreblock(pipeline,
-                                   head,
-                                   block_duration=block_duration)
-
-        head = whiten = pipeparts.mkwhiten(pipeline,
-                                           head,
-                                           fft_length=psd_fft_length,
-                                           zero_pad=zero_pad,
-                                           average_samples=64,
-                                           median_samples=7,
-                                           expand_gaps=whiten_expand_gaps,
-                                           name="lal_whiten_%s" % instrument)
-        # make the buffers going downstream smaller, this can
-        # really help with RAM
-        head = pipeparts.mkreblock(pipeline,
-                                   head,
-                                   block_duration=block_duration)
-
-        if nxydump_segment is not None:
-            head = pipeparts.mktee(pipeline, head)
-            pipeparts.mknxydumpsink(
-                pipeline,
-                pipeparts.mkqueue(pipeline, head),
-                "%s/after_fdwhiten_data_%s_%d.dump" %
-                (nxydump_directory, instrument, nxydump_segment[0]),
-                segment=nxydump_segment)
-
-        if statevector is not None or dqvector is not None:
-            head = pipeparts.mkqueue(pipeline,
-                                     head,
-                                     max_size_buffers=0,
-                                     max_size_bytes=0,
-                                     max_size_time=gst.SECOND *
-                                     (psd_fft_length + 2))
-        if statevector is not None:
-            head = pipeparts.mkgate(pipeline,
-                                    head,
-                                    control=pipeparts.mkqueue(
-                                        pipeline,
-                                        statevector,
-                                        max_size_buffers=0,
-                                        max_size_bytes=0,
-                                        max_size_time=0),
-                                    default_state=False,
-                                    threshold=1)
-        if dqvector is not None:
-            head = pipeparts.mkgate(pipeline,
-                                    head,
-                                    control=pipeparts.mkqueue(
-                                        pipeline,
-                                        dqvector,
-                                        max_size_buffers=0,
-                                        max_size_bytes=0,
-                                        max_size_time=0),
-                                    default_state=False,
-                                    threshold=1)
-        head = pipeparts.mkchecktimestamps(pipeline, head,
-                                           "%s_timestamps_fir" % instrument)
+                dqvector,
+                max_size_buffers=0,
+                max_size_bytes=0,
+                max_size_time=0,
+            ),
+            default_state=False,
+            threshold=1,
+        )
 
     #
     # enable/disable PSD tracking
@@ -488,8 +353,9 @@ def mkwhitened_src(pipeline,
             delta_f = elem.get_property("delta-f")
             n = int(round(elem.get_property("f-nyquist") / delta_f) + 1)
             # interpolate, rescale, and install PSD
-            psd = reference_psd.interpolate_psd(psd, delta_f)
-            elem.set_property("mean-psd", psd.data.data[:n] * scale)
+            psd = interpolate_psd(psd, delta_f)
+            scaled_psd = psd.data.data[:n] * scale
+            elem.set_property("mean-psd", format_property(scaled_psd))
 
         whiten.connect_after("notify::f-nyquist",
                              psd_units_or_resolution_changed, psd)
@@ -504,10 +370,11 @@ def mkwhitened_src(pipeline,
 
     head = pipeparts.mkaudioconvert(pipeline, head)
     head = pipeparts.mkcapsfilter(
-        pipeline, head, "audio/x-raw-float,\
-			width=%d, rate=%d, channels=1" % (width, max_rate))
-    head = pipeparts.mkchecktimestamps(
-        pipeline, head, "%s_timestamps_%d_whitehoft" % (instrument, max_rate))
+        pipeline,
+        head,
+        "audio/x-raw, width=%d, rate=%d, channels=1" \
+            % (width, max_rate),
+    )
 
     #
     # optionally add vetoes
@@ -517,7 +384,6 @@ def mkwhitened_src(pipeline,
         head = datasource.mksegmentsrcgate(pipeline,
                                            head,
                                            veto_segments,
-                                           seekevent=seekevent,
                                            invert_output=True)
 
     # h(t) gate plugin (mkhtgate) was first not used in this file. It caused that
@@ -540,13 +406,15 @@ def mkwhitened_src(pipeline,
     # to finish processing causing 4s latency.
 
     ht_gate_window = max(max_rate // 4, 1)
-    head = datasource.mkhtgate(pipeline,
-                               head,
-                               threshold=ht_gate_threshold if ht_gate_threshold
-                               is not None else float("+inf"),
-                               hold_length=ht_gate_window,
-                               attack_length=ht_gate_window,
-                               name="%s_ht_gate" % instrument)
+    head = datasource.mkhtgate(
+        pipeline,
+        head,
+        threshold=ht_gate_threshold
+        if ht_gate_threshold is not None else float("+inf"),
+        hold_length=ht_gate_window,
+        attack_length=ht_gate_window,
+        name="%s_ht_gate" % instrument,
+    )
     # emit signals so that a user can latch on to them
     head.set_property("emit-signals", True)
 
@@ -565,6 +433,7 @@ def mkwhitened_src(pipeline,
             pipeparts.mkqueue(pipeline, head),
             "%s/after_htgate_data_%s_%d.dump" %
             (nxydump_directory, instrument, nxydump_segment[0]),
-            segment=nxydump_segment)
+            segment=nxydump_segment,
+        )
 
     return head

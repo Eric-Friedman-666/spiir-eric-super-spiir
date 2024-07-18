@@ -58,49 +58,42 @@
 # =============================================================================
 #
 
-import errno
+import logging
 import os
 import resource
 import sys
 from optparse import OptionParser
+from pathlib import Path
 import signal
 import socket
-import itertools
 import time
-import pdb
 
-# The following snippet is taken from http://gstreamer.freedesktop.org/wiki/FAQ#Mypygstprogramismysteriouslycoredumping.2Chowtofixthis.3F
-import pygtk
+import gi
 
-pygtk.require("2.0")
-import gobject
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst, GLib
 
-gobject.threads_init()
-import pygst
+Gst.init(None)
 
-pygst.require("0.10")
-import gst
 from gstlal import bottle
 
-from glue import segments
-from glue import segmentsUtils
-from glue.ligolw import ligolw
-from glue.ligolw import array as ligolw_array
-from glue.ligolw import param as ligolw_param
-from glue.ligolw import lsctables
-from glue.ligolw import utils as ligolw_utils
-from glue.ligolw.utils import segments as ligolw_segments
+from ligo import segments
+from ligo.segments import utils as segmentsUtils
+from ligo.lw import ligolw
+from ligo.lw import array as ligolw_array
+from ligo.lw import param as ligolw_param
+from ligo.lw import lsctables
+from ligo.lw import utils as ligolw_utils
+from ligo.lw.utils import segments as ligolw_segments
 import lal
 from lal import LIGOTimeGPS
 from gstlal import pipeparts
-from gstlal import pipemodules
 from gstlal import simplehandler
 from gstlal import httpinterface
 from gstlal import datasource
-from gstlal.pipemodules import pipe_macro
-from gstlal.pipemodules import postcoh_finalsink
-from gstlal.pipemodules import spiirparts
-from gstlal.pipemodules import spiir_utils
+from gstlal_spiir.pipemodules import pipe_macro, postcoh_finalsink, spiirparts, spiir_utils
+
+from spiir.logging import setup_logger
 
 
 class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
@@ -130,14 +123,14 @@ sys.excepthook = excepthook
 
 
 def print_resource():
-    print "RLIMIT_STACK {0}".format(resource.getrlimit(resource.RLIMIT_STACK))
-    print "FSIZE {0}".format(resource.getrlimit(resource.RLIMIT_FSIZE))
-    print "MEMLOCK {0}".format(resource.getrlimit(resource.RLIMIT_MEMLOCK))
-    print "RSS {0}".format(resource.getrlimit(resource.RLIMIT_RSS))
-    print "DATA {0}".format(resource.getrlimit(resource.RLIMIT_DATA))
-    print "NOFILE {0}".format(resource.getrlimit(resource.RLIMIT_NOFILE))
-    print "AS {0}".format(resource.getrlimit(resource.RLIMIT_AS))
-    print "CORE {0}".format(resource.getrlimit(resource.RLIMIT_CORE))
+    print("RLIMIT_STACK {0}".format(resource.getrlimit(resource.RLIMIT_STACK)))
+    print("FSIZE {0}".format(resource.getrlimit(resource.RLIMIT_FSIZE)))
+    print("MEMLOCK {0}".format(resource.getrlimit(resource.RLIMIT_MEMLOCK)))
+    print("RSS {0}".format(resource.getrlimit(resource.RLIMIT_RSS)))
+    print("DATA {0}".format(resource.getrlimit(resource.RLIMIT_DATA)))
+    print("NOFILE {0}".format(resource.getrlimit(resource.RLIMIT_NOFILE)))
+    print("AS {0}".format(resource.getrlimit(resource.RLIMIT_AS)))
+    print("CORE {0}".format(resource.getrlimit(resource.RLIMIT_CORE)))
 
 
 def set_rlimit():
@@ -531,15 +524,28 @@ def parse_command_line():
         if getattr(options, option) is None
     ]
     if missing_options:
-        raise ValueError, "missing required option(s) %s" % ", ".join(
-            sorted(missing_options))
+        raise ValueError("missing required option(s) %s" %
+                         ", ".join(sorted(missing_options)))
 
     # parse the datasource specific information and do option checking
-    detectors = datasource.GWDataSourceInfo(options)
+    detectors = datasource.DataSourceInfo.from_optparse(options)
+
     if len(detectors.channel_dict) < 2:
         raise ValueError(
             "only coherent searches are supported:    must process data from at least two antennae"
         )
+
+    # Remove DQ and State defaults, see https://git.ligo.org/lscsoft/spiir/-/merge_requests/197
+    if options.state_channel_name is None:
+        detectors.state_channel_name = {
+            key: ""
+            for key in detectors.state_channel_name
+        }
+    if options.dq_channel_name is None:
+        detectors.dq_channel_name = {
+            key: ""
+            for key in detectors.dq_channel_name
+        }
 
     # Get the banks and make the detectors
 
@@ -569,16 +575,19 @@ def parse_command_line():
     ]
 
     if missing_files:
-        raise ValueError, "files %s do not exist" % ", ".join(
-            "'%s'" % filename for filename in sorted(missing_files))
+        raise ValueError("files %s do not exist" %
+                         ", ".join("'%s'" % filename
+                                   for filename in sorted(missing_files)))
 
     # make a folder to store all outputs for each node separately
     if not os.path.exists(options.job_tag):
         os.mkdir(options.job_tag)
+
     # do not support chisq method selection yet
     if options.chisq_type not in ["autochisq", "timeslicechisq"]:
-        raise ValueError, "--chisq-type must be one of (autochisq|timeslicechisq), given %s" % (
-            options.chisq_type)
+        raise ValueError(
+            "--chisq-type must be one of (autochisq|timeslicechisq), given %s"
+            % (options.chisq_type))
 
     # do this before converting option types
     process_params = options.__dict__.copy()
@@ -588,7 +597,7 @@ def parse_command_line():
             [options.nxydump_segment], boundtype=LIGOTimeGPS)
 
     # Online specific initialization
-    if options.data_source in ("lvshm", "framexmit"):
+    if options.data_source in ("lvshm", "framexmit", "devshm"):
         # make an "infinite" extent segment
         detectors.seg = segments.segment(LIGOTimeGPS(0),
                                          LIGOTimeGPS(2000000000))
@@ -602,28 +611,14 @@ def parse_command_line():
 
     #pdb.set_trace()
     # create skymap dump directory if not exists
-    ifo_list = detectors.channel_dict.keys()
+    ifo_list = list(detectors.channel_dict.keys())
     if options.cuda_postcoh_output_skymap > 0:
         ifo_combos = pipe_macro.get_ifo_combos(ifo_list)
         for i_ifo_combo in ifo_combos:
-            skymap_path = "%s_skymap" % i_ifo_combo
-            # NOTE: Every node shares the same skymap path, so we must handle
-            #   race conditions. In Py3 we can just use os.mkdir(exist_ok=True)
-            if not os.path.isdir(skymap_path):
-                try:
-                    os.mkdir(skymap_path)
-                except OSError as e:
-                    if e.errno == errno.EEXIST and os.path.isdir(skymap_path):
-                        dir_msg = "skymap dir %s already exists." % skymap_path
-                        print >> sys.stderr, dir_msg
-                    else:
-                        raise e
-                else:
-                    dir_msg = "creating skymap dir at %s" % skymap_path
-                    print >> sys.stderr, dir_msg
+            os.makedirs(f"{i_ifo_combo}_skymap", exist_ok=True)
 
-        if options.finalsink_fapupdater_output_fname is None:
-            options.finalsink_fapupdater_output_fname = options.cohfar_assignfar_input_fname
+    if options.finalsink_fapupdater_output_fname is None:
+        options.finalsink_fapupdater_output_fname = options.cohfar_assignfar_input_fname
 
     return options, filenames, process_params, iir_banks, detectors
 
@@ -653,6 +648,27 @@ options, filenames, process_params, iir_banks, detectors = parse_command_line()
 
 if not options.check_time_stamps:
     pipeparts.mkchecktimestamps = lambda pipeline, src, *args: src
+
+#
+# setup application logging given command line arguments
+# TODO: Enable logging configuration setup by config file, See GitLab Issue #99
+#
+
+# specify logging level for console output
+log_level = logging.DEBUG if options.verbose else logging.WARNING
+
+# configure all loggers to route to the same output log file for the script
+# NOTE: all logs including debug are routed to files
+script_name = Path(__file__).stem  # i.e. "gstlal_inspiral_postcohspiir_online"
+path = Path(options.job_tag) if options.job_tag is not None else Path.cwd()
+log_path = path / f"{script_name}.log"
+logger = setup_logger(script_name, level=log_level, file=log_path)
+
+# configure external module loggers
+setup_logger("spiir", level=log_level, file=log_path)
+setup_logger("gstlal_spiir", level=log_level, file=log_path)
+setup_logger("urllib3", file=log_path)
+setup_logger("matplotlib", level=logging.WARNING)  # suppresses excessive logs
 
 #
 # Parse the vetos segments file(s) if provided
@@ -692,7 +708,8 @@ else:
 
 # need to print out host name
 import socket
-print("pipeline executing on node" + socket.gethostname())
+
+logger.info(f"pipeline executing on node {socket.gethostname()}")
 if int(options.finalsink_need_online_perform) > 0:
     # create a new, empty, Bottle application
     bottle.default_app.push()
@@ -707,6 +724,7 @@ if int(options.finalsink_need_online_perform) > 0:
         service_properties={
             "job_tag": options.job_tag if options.job_tag is not None else ""
         },
+        service_discovery=False,
         verbose=options.verbose)
 
     # Set up a registry of the resources that this job provides
@@ -738,11 +756,11 @@ if int(options.finalsink_need_online_perform) > 0:
     # Build pipeline
     #
 
-if options.verbose:
-    print >> sys.stderr, "assembling pipeline ...",
+logger.info("assembling pipeline ...")
 
-pipeline = gst.Pipeline("gstlal_inspiral_postcoh_online")
-mainloop = gobject.MainLoop()
+pipeline = Gst.Pipeline("gstlal_inspiral_postcoh_online")
+
+mainloop = GLib.MainLoop()
 
 postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     pipeline,
@@ -783,10 +801,11 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     feature_signal_removal_bg_threshold
     # or "%s-%s_Postcoh-%d-%d.xml.gz" % (lsctables.ifos_from_instrument_set(detectors.channel_dict.keys()).replace(",", ""), options.job_tag, int(detectors.seg[0]), int(abs(detectors.seg))),
 )
+
 # get the negative_latency value from the first bank of the first detector
 # the iir_banks structure has been checked in the mkPostcohSPIIROnline function
 bank_dict0 = iir_banks[0]
-this_bankname = bank_dict0.get(bank_dict0.keys()[0])[0]
+this_bankname = bank_dict0.get(list(bank_dict0.keys())[0])[0]
 neg_lat = spiir_utils.get_negative_from_xml(this_bankname)
 
 finalsink = postcoh_finalsink.FinalSink(
@@ -825,30 +844,44 @@ finalsink = postcoh_finalsink.FinalSink(
     expected_buffers_per_timestamp=len(postcohsrcs),
     verbose=options.verbose)
 
-if options.verbose:
-    print >> sys.stderr, " output document initialized"
+logger.info(" output document initialized")
 
 handler = simplehandler.Handler(mainloop, pipeline)
 
-if options.verbose:
-    print >> sys.stderr, " attaching appsinks to pipeline ..."
+logger.info(" attaching appsinks to pipeline ...")
 
 appsync = pipeparts.AppSync(appsink_new_buffer=finalsink.appsink_new_buffer)
 appsinks = set(
     appsync.add_sink(pipeline,
                      pipeparts.mkqueue(pipeline, src),
-                     caps=gst.Caps("application/x-lal-postcoh"),
+                     caps=Gst.Caps("application/x-lal-postcoh"),
                      name="sink_%d" % n)
     for (n, src) in enumerate(postcohsrcs))
+
+
+def write_dump_dot_file(pipeline, filepath, verbose=False):
+    logger.info(f"Writing gstreamer graph dot file to '{filepath}'.")
+    pipeparts.write_dump_dot(pipeline, filepath, verbose)
+
+
+def set_state_or_raise(pipeline, state, state_string):
+    logger.info(f"Setting pipeline to '{state_string}' ...")
+    if pipeline.set_state(state) != Gst.StateChangeReturn.SUCCESS:
+        msg = pipeline.get_bus().poll(Gst.MessageType.ERROR, 0)
+        if msg is not None:
+            logger.error(msg.parse_error())
+        raise RuntimeError(f"Pipeline failed to enter '{state_string}' state")
+    logger.info(f"Pipeline entered '{state_string}' state")
+
 
 if options.write_pipeline is not None:
     pipeparts.connect_appsink_dump_dot(pipeline, appsinks,
                                        options.write_pipeline, options.verbose)
-    pipeparts.write_dump_dot(pipeline,
-                             "%s.%s" % (options.write_pipeline, "NULL"),
-                             verbose=options.verbose)
+    write_dump_dot_file(pipeline,
+                        f"{options.write_pipeline}.NULL",
+                        verbose=options.verbose)
 
-if options.data_source in ("lvshm", "framexmit"):
+if options.data_source in ("lvshm", "framexmit", "devshm"):
 
     # setup sigint handler to shutdown pipeline. This is
     # how the program stops gracefully.
@@ -856,26 +889,33 @@ if options.data_source in ("lvshm", "framexmit"):
     signal.signal(signal.SIGINT, simplehandler.OneTimeSignalHandler(pipeline))
     signal.signal(signal.SIGTERM, simplehandler.OneTimeSignalHandler(pipeline))
 
-if options.verbose:
-    print >> sys.stderr, "setting pipeline state to playing ..."
-if pipeline.set_state(gst.STATE_PLAYING) != gst.STATE_CHANGE_SUCCESS:
-    msg = pipeline.get_bus().poll(gst.MESSAGE_ERROR, 0)
-    if msg is not None:
-        print msg.parse_error()
-    raise RuntimeError, "pipeline did not enter playing state"
+set_state_or_raise(pipeline, Gst.State.READY, "Gst.State.READY")
+
+logger.info(
+    f"seeking pipeline to: {options.gps_start_time}, {options.gps_end_time} ..."
+)
+datasource.pipeline_seek_for_gps(pipeline, options.gps_start_time,
+                                 options.gps_end_time)
+
+set_state_or_raise(pipeline, Gst.State.PLAYING, "Gst.State.PLAYING")
 
 if options.write_pipeline is not None:
-    pipeparts.write_dump_dot(pipeline,
-                             "%s.%s" % (options.write_pipeline, "PLAYING"),
-                             verbose=options.verbose)
+    # Hack to give the async threads time to catch up before writing the
+    # pipeline, see #108
+    time.sleep(2)
+    write_dump_dot_file(pipeline,
+                        f"{options.write_pipeline}.PLAYING",
+                        verbose=options.verbose)
 
-if options.verbose:
-    print >> sys.stderr, "running pipeline ..."
+logger.info("Running pipeline ...")
+
 mainloop.run()
 
 #
 # write output file
 #
+logger.info(f"Pipeline completed. Dumping remaining zerolags.")
+
 finalsink.write_output_file(filename=finalsink.get_output_filename(
     options.finalsink_output_prefix, options.finalsink_output_name,
     finalsink.t_snapshot_start,
@@ -885,12 +925,11 @@ finalsink.write_output_file(filename=finalsink.get_output_filename(
 # Shutdown the web interface servers
 bottle.default_app.pop()
 
-if pipeline.set_state(gst.STATE_NULL) != gst.STATE_CHANGE_SUCCESS:
-    raise RuntimeError("pipeline could not be set to NULL")
+set_state_or_raise(pipeline, Gst.State.NULL, "Gst.State.NULL")
 
 #
 # done
 #
 
-if options.data_source in ("lvshm", "framexmit"):
+if options.data_source in ("lvshm", "framexmit", "devshm"):
     sys.exit(1)  # online pipeline always ends with an error code

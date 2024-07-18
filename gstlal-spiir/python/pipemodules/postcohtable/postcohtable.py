@@ -16,10 +16,9 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-from glue.ligolw import ilwd
-from glue.ligolw import lsctables
-from gstlal.pipemodules import pipe_macro
-from . import _postcohtable
+from ligo.lw import lsctables
+from gstlal_spiir.pipemodules import pipe_macro
+from gstlal_spiir.pipemodules.postcohtable import _postcohtable
 
 __all__ = ["PostcohInspiral", "SNRSeries", "PostcohTrigger", "from_buffer"]
 
@@ -31,32 +30,29 @@ PostcohTrigger = _postcohtable.PostcohTrigger
 class PostcohInspiral(_postcohtable.PostcohInspiral):
     __slots__ = ()
 
-    process_id_type = ilwd.get_ilwdchar_class("process", "process_id")
-    event_id_type = ilwd.get_ilwdchar_class("postcoh", "event_id")
-
     end = lsctables.gpsproperty("end_time", "end_time_ns")
 
     def __eq__(self, other):
-        return not cmp((self.ifo, self.end, self.mass1, self.mass2, self.spin1,
-                        self.spin2, self.search),
-                       (other.ifo, other.end, other.mass1, other.mass2,
-                        other.spin1, other.spin2, other.search))
-
-    @property
-    def process_id(self):
-        return self.process_id_type(self._process_id)
-
-    @process_id.setter
-    def process_id(self, val):
-        self._process_id = int(val)
-
-    @property
-    def event_id(self):
-        return self.event_id_type(self._event_id)
-
-    @event_id.setter
-    def event_id(self, val):
-        self._event_id = int(val)
+        return not cmp(
+            (
+                self.ifo,
+                self.end,
+                self.mass1,
+                self.mass2,
+                self.spin1,
+                self.spin2,
+                self.search,
+            ),
+            (
+                other.ifo,
+                other.end,
+                other.mass1,
+                other.mass2,
+                other.spin1,
+                other.spin2,
+                other.search,
+            ),
+        )
 
     @property
     def end_time_sngl(self):

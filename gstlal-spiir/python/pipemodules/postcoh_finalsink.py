@@ -18,68 +18,58 @@
 from collections import deque
 import threading
 import sys
-import StringIO
+from io import BytesIO
 from shutil import copyfile
-import httplib
-import math
+import six.moves.http_client
 import subprocess
 import re
 import time
 import numpy as np
 import os
-import fcntl
 import logging
-import pdb
 
-import pygtk
+import gi
 
-pygtk.require("2.0")
-import gobject
+gi.require_version('Gst', '1.0')
+from gi.repository import Gst
 
-gobject.threads_init()
-import pygst
+Gst.init(None)
 
-pygst.require('0.10')
-import gst
+from six.moves import zip
 
 try:
     from ligo.gracedb.rest import GraceDb
 except ImportError:
-    print >> sys.stderr, "warning: gracedb import failed"
+    print("warning: gracedb import failed", file=sys.stderr)
     GraceDb = None
 
 from glue import iterutils
-from glue import segments
-from glue.ligolw import ligolw
-from glue.ligolw import dbtables
-from glue.ligolw import ilwd
-from glue.ligolw import table
-from glue.ligolw import lsctables
-from glue.ligolw import array as ligolw_array
-from glue.ligolw import param as ligolw_param
-from glue.ligolw import utils as ligolw_utils
+from ligo import segments
+from ligo.lw import ligolw
+from ligo.lw import lsctables
+from ligo.lw import array as ligolw_array
+from ligo.lw import param as ligolw_param
+from ligo.lw import utils as ligolw_utils
 
-from glue.ligolw.utils import ligolw_sqlite
-from glue.ligolw.utils import ligolw_add
-from glue.ligolw.utils import process as ligolw_process
-from glue.ligolw.utils import search_summary as ligolw_search_summary
-from glue.ligolw.utils import segments as ligolw_segments
+from ligo.lw.utils import process as ligolw_process
+from ligo.lw.utils import segments as ligolw_segments
 
 import lal
 from lal import LIGOTimeGPS
 
 from gstlal import bottle
-from gstlal import reference_psd
-from gstlal.pipemodules.postcohtable import postcoh_table_def
-from gstlal.pipemodules.postcohtable import postcohtable
-from gstlal.pipemodules import pipe_macro
+from gstlal_spiir.pipemodules.postcohtable import postcoh_table_def
+from gstlal_spiir.pipemodules.postcohtable import postcohtable
+from gstlal_spiir.pipemodules import pipe_macro
 
 lsctables.LIGOTimeGPS = LIGOTimeGPS
+
+logger = logging.getLogger(__name__)
 
 #
 # =============================================================================
 #
-#						 glue.ligolw Content Handlers
+#						 ligo.lw Content Handlers
 #
 # =============================================================================
 #
@@ -96,6 +86,7 @@ lsctables.use_in(LIGOLWContentHandler)
 
 #
 class SegmentDocument(object):
+
     def __init__(self, ifos, verbose=False):
 
         self.filename = None
@@ -127,11 +118,9 @@ class SegmentDocument(object):
                     one_type_dict,
                     name=segtype,
                     comment="SPIIR postcoh snapshot")
-        ligolw_process.set_process_end_time(self.process)
+        self.process.set_end_time_now()
         ligolw_utils.write_filename(self.xmldoc,
                                     self.filename,
-                                    gz=(self.filename
-                                        or "stdout").endswith(".gz"),
                                     verbose=verbose,
                                     trap_signals=None)
         if cleanup:
@@ -140,6 +129,7 @@ class SegmentDocument(object):
 
 #
 class PostcohDocument(object):
+
     def __init__(self, verbose=False):
 
         self.filename = None
@@ -163,8 +153,6 @@ class PostcohDocument(object):
         assert self.filename is not None
         ligolw_utils.write_filename(self.xmldoc,
                                     self.filename,
-                                    gz=(self.filename
-                                        or "stdout").endswith(".gz"),
                                     verbose=verbose,
                                     trap_signals=None)
         if cleanup:
@@ -172,6 +160,7 @@ class PostcohDocument(object):
 
 
 class OnlinePerformer(object):
+
     def __init__(self, parent_lock):
         # setup bottle routes
         bottle.route("/latency_history.txt")(self.web_get_latency_history)
@@ -193,7 +182,14 @@ class OnlinePerformer(object):
         self.latency_history.append(latency_val)
 
 
+def gst_buffer_flag_is_set(buf, flags):
+    # FIXME: Copied directly from GSTLAL, this should not be needed.
+    # figure out how GST_BUFFER_FLAG_IS_SET() is exported via gir
+    return buf.mini_object.flags & flags == flags
+
+
 class FAPUpdater(object):
+
     def __init__(self,
                  path,
                  input_prefix_list,
@@ -238,9 +234,9 @@ class FAPUpdater(object):
 
         if self.output and len(self.output) != len(self.collect_walltimes):
             raise ValueError(
-                "number of input walltimes does match the number of input \
-                    filenames: %s does not match %s" \
-                    % (collect_walltime_string, output_list_string))
+                f"number of input walltimes does match the number of " \
+                f"input filenames: {collect_walltime_string} does not "\
+                f"match {output_list_string}")
 
         self.verbose = verbose
 
@@ -248,8 +244,9 @@ class FAPUpdater(object):
         if process is not None and process.poll() is None:
             (stdoutdata, stderrdata) = process.communicate()
             if process.returncode != 0:
-                print >> sys.stderr, "last process return code", \
-                    process.returncode, stderrdata
+                logger.warning(
+                    f"last process return code {process.returncode}")
+                logger.warning(stderrdata)
 
     def await_and_clear_processes(self, processes):
         if len(processes) > 0:
@@ -273,13 +270,14 @@ class FAPUpdater(object):
             return None
 
         # remove files that have been combined from last process
-        try:
-            map(lambda x: os.remove(x), self.rm_fnames)
-            self.rm_fnames = []
-        except:
-            print >> sys.stderr, "remove files failed, rm_fnames %s" \
-                % ', '.join(self.rm_fnames)
-            return None
+        # TODO: Implement more robust file removal system for stat files
+        while self.rm_fnames:
+            cur_file = self.rm_fnames.pop(0)
+            try:
+                os.remove(cur_file)
+            except Exception as exc:
+                logger.warning(f"remove file failed: {cur_file}; exc: {exc}")
+                return None
 
         ls_fnames = sorted(os.listdir(str(self.path)))
         grep_fnames = [fname for fname in ls_fnames if keyword in fname]
@@ -315,9 +313,9 @@ class FAPUpdater(object):
         # when the number of banks reaches 140,
         # it will give you a signal 7 error in OPA2
         if len(bankstats_filenames) > self.max_nstats_for_marignalization:
-            logging.info("update fap: %d stats files for marignalization, \
-                over the input string length limit, combining." \
-                % len(bankstats_filenames))
+            logger.info(f"update fap: {len(bankstats_filenames)} stats files "
+                        "for marginalization, over the input string length "
+                        "limit, combining...")
             self.try_combine_stats()
             return None
         return bankstats_filenames
@@ -339,7 +337,7 @@ class FAPUpdater(object):
         cmd += ["--ifos", ifos]
         if update_pdf:
             cmd += ["--update-pdf"]
-        logging.info("%s" % cmd)
+        logger.debug(cmd)
         proc = subprocess.Popen(cmd,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT)
@@ -350,7 +348,7 @@ class FAPUpdater(object):
             return False
 
         bankstats_filenames = []
-        for (i, collect_walltime) in enumerate(self.collect_walltimes):
+        for i, collect_walltime in enumerate(self.collect_walltimes):
             bankstats_filenames.append(
                 self.get_available_bankstats_filenames(timestamp -
                                                        collect_walltime))
@@ -363,7 +361,7 @@ class FAPUpdater(object):
             # execute the cmd in a different process
             self.calcfap_processes[i] = self.call_calcfap(
                 self.output[i], bankstats_filenames[i], self.ifos)
-            logging.info("update '%s' fap %d" % (collect_walltime, timestamp))
+            logging.info(f"update '{collect_walltime}' fap '{timestamp}'")
         return True
 
     def run_calcfap(self, timestamp):
@@ -398,29 +396,32 @@ class FAPUpdater(object):
             this_bankid = ifname.split('_')[0][4:]
             stats_dict.setdefault(this_bankid, []).append(ifname)
 
-        if '' in stats_dict.keys():
+        if '' in stats_dict:
             del stats_dict['']
 
         for bankid, bank_fnames in stats_dict.items():
             collected_fnames = []
             for one_bank_fname in bank_fnames:
-                this_walltime = int(
-                    one_bank_fname.split('.')[-3].split('_')[-1])
-                collected_walltimes = list(
-                    map(
-                        lambda x: int(
-                            os.path.split(x)[-1].split('_')[-1].split('.')[0]),
-                        collected_fnames))
-                total_collected_walltime = sum(collected_walltimes)
+                # TODO: Implement more robust file removal system for stat files
+                try:
+                    this_walltime = int(
+                        one_bank_fname.split('.')[-3].split('_')[-1])
+                except ValueError as exc:
+                    raise ValueError(
+                        f"we've broken the {one_bank_fname} file, " \
+                            f"stats_dict: {stats_dict}: {exc}")
+                total_collected_walltime = sum([
+                    int(os.path.split(x)[-1].split('_')[-1].split('.')[0])
+                    for x in collected_fnames
+                ])
                 if this_walltime >= self.combine_duration:
                     continue
-                elif (len(collected_fnames) >= self.max_nstats_perbank
-                      or total_collected_walltime >= self.combine_duration):
+                elif ((len(collected_fnames) >= self.max_nstats_perbank)
+                      or (total_collected_walltime >= self.combine_duration)):
                     start_banktime = int(
                         os.path.split(collected_fnames[0])[-1].split('_')[-2])
-                    fout = "%s/bank%s_stats_%d_%d.xml.gz" % (
-                        self.path, bankid, start_banktime,
-                        total_collected_walltime)
+                    fout = f"{self.path}/bank{bankid}_stats_" \
+                        f"{start_banktime}_{total_collected_walltime}.xml.gz"
 
                     proc = self.call_calcfap(fout,
                                              collected_fnames,
@@ -431,11 +432,7 @@ class FAPUpdater(object):
                     for frm in collected_fnames:
                         self.rm_fnames.append(frm)
                     collected_fnames = []
-                    collected_fnames.append("%s/%s" %
-                                            (self.path, one_bank_fname))
-                else:
-                    collected_fnames.append("%s/%s" %
-                                            (self.path, one_bank_fname))
+                collected_fnames.append(f"{self.path}/{one_bank_fname}")
         return True
 
     def run_combine_stats(self, timestamp):
@@ -455,6 +452,7 @@ class FAPUpdater(object):
 
 
 class FinalSink(object):
+
     def __init__(self,
                  channel_dict,
                  process_params,
@@ -478,8 +476,8 @@ class FinalSink(object):
                  gracedb_search="LowMass",
                  gracedb_pipeline="spiir",
                  gracedb_service_url="https://gracedb.ligo.org/api/",
-                 gracedb_upload_attempts=3,
-                 is_offline_analysis=False,
+                 gracedb_upload_attempts: int = 3,
+                 is_offline_analysis: bool = False,
                  output_skymap=0,
                  superevent_thresh=3.8e-7,
                  opa_cohsnr_thresh=8,
@@ -564,11 +562,6 @@ class FinalSink(object):
         self.thread_snapshot_segment = None
         self.t_snapshot_start = None
         self.last_buffer_timestamp = None
-        # set logging to report status
-        self.log_fname = "%s/finalsink_debug_log" % (path)
-        logging.basicConfig(filename=self.log_fname,
-                            format='%(asctime)s %(message)s',
-                            level=logging.DEBUG)
 
         # background updater
         self.fapupdater = FAPUpdater(
@@ -588,7 +581,7 @@ class FinalSink(object):
         # trigger control
         self.trigger_control_doc = "trigger_control.txt"
         if not os.path.exists(self.trigger_control_doc):
-            file(self.trigger_control_doc, 'w').close()
+            open(self.trigger_control_doc, 'w').close()
         self.last_trigger = []
         self.last_submitted_trigger = []
         self.last_trigger.append((0, 1))
@@ -609,7 +602,6 @@ class FinalSink(object):
 
         if ((postcoh_inspiral.far < self.opa_thresh)
                 and (postcoh_inspiral.cohsnr < self.opa_cohsnr_thresh)):
-            # print "suppressed", postcoh_inspiral.cohsnr, postcoh_inspiral.far
             return False
 
         # FIXME: any two of the sngl fars need to be < singlefar_veto_thresh
@@ -636,15 +628,22 @@ class FinalSink(object):
     # TODO: Refactor/rewrite appsink_new_buffer() and cluster(), see #36
     def appsink_new_buffer(self, elem):
         with self.lock:
-            buf = elem.emit("pull-buffer")
+            # TODO: Consider a refactor of these GStreamer 1.0 changes
+            #       They were made quickly while debugging.
+            buf = elem.emit("pull-sample").get_buffer()
 
             # Parse buffer
-            buf_timestamp = LIGOTimeGPS(0, buf.timestamp)
-            is_gap = buf.flag_is_set(gst.BUFFER_FLAG_GAP)
+            buf_timestamp = LIGOTimeGPS(0, buf.pts)
+            is_gap = gst_buffer_flag_is_set(buf, Gst.BufferFlags.GAP)
 
             newevents = []
             if not is_gap:
-                newevents = postcohtable.from_buffer(buf)
+                (result, mapinfo) = buf.map(Gst.MapFlags.READ)
+                assert result
+
+                newevents = postcohtable.from_buffer(mapinfo.data.tobytes())
+
+                buf.unmap(mapinfo)
 
             heartbeat = None
             if len(newevents) > 0:
@@ -665,11 +664,11 @@ class FinalSink(object):
             self.run_snapshot(buf_timestamp)
 
             if is_gap:
-                logging.info("buf gap at timestamp %d" % buf_timestamp)
+                logging.info(f"buf gap at timestamp {buf_timestamp}.")
             elif heartbeat is None:
                 logging.warning(
-                    "Not in gap and no heartbeat at timestamp %d." %
-                    buf_timestamp)
+                    f"Not in gap and no heartbeat at timestamp {buf_timestamp}."
+                )
 
             # Delete finished threads from list
             self.threads_gracedb_upload = [
@@ -875,37 +874,32 @@ class FinalSink(object):
         last_submitted_time = last_time
         last_submitted_far = last_far
 
-        trigger_is_submitted = 0
-
         # suppress the trigger
         # if it is not one order of magnitude more significant than the last
         # trigger or if it not more significant the last submitted trigger
         # FIXME: what if there are two adjacent significant events
+        trigger_control_log = f"time {float(trigger.end)}, " \
+            f"FAR {trigger.far}, " \
+            f"last_submitted time {last_submitted_time}, " \
+            f"last_submitted far {last_submitted_far}"
         if ((abs(float(trigger.end) - last_time) < 50
              and abs(trigger.far / last_far) > 0.5)) or (
                  abs(float(trigger.end) - float(last_submitted_time)) < 100
                  and trigger.far > last_submitted_far * 0.5):
-            print >> sys.stderr, "trigger controled, time %f, FAR %f, \
-                last_far %f, last_submitted time %f, last_submitted far %f" \
-                    % (float(trigger.end), trigger.far, last_far,
-                    last_submitted_time, last_submitted_far)
+            trigger_is_submitted = 0
+            logger.info(f"trigger controlled, {trigger_control_log}")
             self.last_trigger.append((trigger.end, trigger.far))
-            line = "%f,%e,%d\n" % (float(
-                trigger.end), trigger.far, trigger_is_submitted)
+            line = f"{float(trigger.end)},{trigger.far},{trigger_is_submitted}\n"
             with open(self.trigger_control_doc, "a") as f:
                 f.write(line)
             return True
 
-        print >> sys.stderr, "trigger passed, time %f, FAR %f, last_far %f, \
-            last_submitted time %f, last_submitted_far %f" \
-                % (float(trigger.end), trigger.far, last_far,
-                last_submitted_time, last_submitted_far)
+        logger.info(f"trigger passed, {trigger_control_log}")
 
         trigger_is_submitted = 1
         #self.last_trigger.append((trigger.end, trigger.far))
         #self.last_submitted_trigger.append((trigger.end, trigger.far))
-        line = "%f,%e,%d\n" % (float(
-            trigger.end), trigger.far, trigger_is_submitted)
+        line = f"{float(trigger.end)},{trigger.far},{trigger_is_submitted}\n"
         with open(self.trigger_control_doc, "a") as f:
             f.write(line)
 
@@ -941,10 +935,11 @@ class FinalSink(object):
 
     def upload_to_gracedb(self, gracedb_upload_attempts, filename,
                           coinc_message, log_message):
-        upload_attempt_limit = gracedb_upload_attempts + 1  # one-indexed
+        # TODO: Review indexing for non-active ifos in snr_series_list
+
         gracedb_id = None
 
-        for i in range(1, upload_attempt_limit):
+        for i in range(gracedb_upload_attempts):
             try:
                 #FIXME: Hardcoded an EARLY_WARNING label for EW runs.
                 #FIXME: In the future, when necessary, use a dedicated label argument. See #120.
@@ -960,43 +955,40 @@ class FinalSink(object):
                     offline=self.is_offline_analysis,
                     labels=label_name)
                 resp_json = resp.json()
-                if resp.status != httplib.CREATED:
-                    gracedb_msg = "[%d/%d] graceid upload '%s' failed" % \
-                        (i, upload_attempt_limit, filename)
-                    print >> sys.stderr, gracedb_msg
-                else:
+                log_prefix = f"[{i+1}/{gracedb_upload_attempts}]"\
+                                f" graceid upload '{filename}'"
+                if resp.status == six.moves.http_client.CREATED:
                     gracedb_id = resp_json["graceid"]
-                    gracedb_msg = "[%d/%d] graceid upload '%s' succeeded with id '%s'" % \
-                        (i, upload_attempt_limit, filename, gracedb_id)
-                    print >> sys.stderr, gracedb_msg
+                    logger.info(
+                        f"{log_prefix} succeeded with id '{gracedb_id}'")
                     break
+                else:
+                    logger.info(f"{log_prefix} failed")
             except Exception as e:
-                print >> sys.stderr, e
+                logger.info(e)
 
         coinc_message.close()
 
         if gracedb_id is not None:
 
-            for i in range(1, upload_attempt_limit):
+            for i in range(gracedb_upload_attempts):
                 try:
                     resp = self.gracedb_client.writeLog(
                         gracedb_id,
                         log_message,
                         filename=None,
                         tagname="analyst_comments")
-                    if resp.status != httplib.CREATED:
-                        gracedb_msg = "[%d/%d] gracedb upload of log failed" % \
-                            (i, upload_attempt_limit)
-                        print >> sys.stderr, gracedb_msg
-                    else:
-                        gracedb_msg = "[%d/%d] gracedb upload of log succeeded" % \
-                            (i, upload_attempt_limit)
-                        print >> sys.stderr, gracedb_msg
+                    log_prefix = f"[{i+1}/{gracedb_upload_attempts}]"\
+                                " gracedb upload of log"
+                    if resp.status == six.moves.http_client.CREATED:
+                        logger.info(f"{log_prefix} succeeded")
                         break
+                    else:
+                        logger.info(f"{log_prefix} failed")
                 except Exception as e:
-                    print >> sys.stderr, e
+                    logger.info(e)
         else:
-            print "gracedb upload of '%s' failed completely" % filename
+            logger.info(f"gracedb upload of '{filename}' failed completely")
 
     def __do_gracedb_alert(self, trigger, gracedb_upload_attempts=3):
 
@@ -1019,10 +1011,9 @@ class FinalSink(object):
             postcoh_inspiral.ifos, postcoh_inspiral.end_time,
             postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx)
 
-        print >> sys.stderr, "writing %s to disk ..." % filename
+        logger.info(f"writing {filename} to disk ...")
         ligolw_utils.write_filename(self.coincs_document.xmldoc,
                                     filename,
-                                    gz=False,
                                     trap_signals=None)
 
         if self.gracedb_client is not None:
@@ -1031,16 +1022,14 @@ class FinalSink(object):
             # into a string buffer incase there is some safety in doing so in
             # the event of a malformed document; instead of writing directly
             # into gracedb's  input pipe and crashing part way through.
-            coinc_message = StringIO.StringIO()
+            coinc_message = BytesIO()
             ligolw_utils.write_fileobj(self.coincs_document.xmldoc,
-                                       coinc_message,
-                                       gz=False)
+                                       coinc_message)
 
-            print >> sys.stderr, "sending %s to gracedb ..." % filename
+            logger.info(f"sending '{filename}' to gracedb ...")
 
-            log_message = "Optimal ra and dec from this coherent pipeline: \
-                (%f, %f) in degrees" \
-                    % (postcoh_inspiral.ra, postcoh_inspiral.dec)
+            log_message = f"Optimal ra and dec from this coherent pipeline: " \
+                f"({postcoh_inspiral.ra}, {postcoh_inspiral.dec}) in degrees"
 
             gracedb_upload_thread = threading.Thread(
                 target=self.upload_to_gracedb,
@@ -1070,10 +1059,10 @@ class FinalSink(object):
     def snapshot_segment_file(self, t_snapshot_start, duration, verbose=False):
         filename = "%s/%s_SEGMENTS_%d_%d.xml.gz" % (self.path, self.ifos,
                                                     t_snapshot_start, duration)
-        logging.info("snapshotting %s" % filename)
+        logger.info(f"snapshotting {filename}")
         # make sure the last round of output dumping is finished
         if ((self.thread_snapshot_segment is not None)
-                and (self.thread_snapshot_segment.isAlive())):
+                and (self.thread_snapshot_segment.is_alive())):
             self.thread_snapshot_segment.join()
 
         # free thread context
@@ -1091,8 +1080,9 @@ class FinalSink(object):
 
     def snapshot_output_file(self, filename, verbose=False):
         # make sure the last round of output dumping is finished
-        logging.info("snapshotting %s" % filename)
-        if self.thread_snapshot is not None and self.thread_snapshot.isAlive():
+        logger.info(f"snapshotting {filename}")
+        if self.thread_snapshot is not None and self.thread_snapshot.is_alive(
+        ):
             self.thread_snapshot.join()
 
         self.postcoh_document.filename = filename
@@ -1111,19 +1101,20 @@ class FinalSink(object):
             self.postcoh_document.xmldoc)
 
     def __wait_internal_process_finish(self):
-        if self.thread_snapshot is not None and self.thread_snapshot.isAlive():
+        if self.thread_snapshot is not None and self.thread_snapshot.is_alive(
+        ):
             self.thread_snapshot.join()
 
         if ((self.thread_snapshot_segment is not None)
-                and (self.thread_snapshot_segment.isAlive())):
+                and (self.thread_snapshot_segment.is_alive())):
             self.thread_snapshot_segment.join()
 
         if ((self.thread_upload_skymap is not None)
-                and (self.thread_upload_skymap.isAlive())):
+                and (self.thread_upload_skymap.is_alive())):
             self.thread_upload_skymap.join()
 
         for thread in self.threads_gracedb_upload:
-            if thread.isAlive():
+            if thread.is_alive():
                 thread.join()
 
         self.fapupdater.await_and_clear_processes(
@@ -1153,12 +1144,12 @@ class FinalSink(object):
 
 
 class CoincsDocFromPostcoh(object):
-    sngl_inspiral_columns = ("process_id", "ifo", "end_time", "end_time_ns",
-                             "eff_distance", "coa_phase", "mass1", "mass2",
-                             "snr", "chisq", "chisq_dof", "bank_chisq",
-                             "bank_chisq_dof", "sigmasq", "spin1x", "spin1y",
-                             "spin1z", "spin2x", "spin2y", "spin2z",
-                             "event_id", "Gamma0", "Gamma1")
+    sngl_inspiral_columns = ("process:process_id", "ifo", "end_time",
+                             "end_time_ns", "eff_distance", "coa_phase",
+                             "mass1", "mass2", "snr", "chisq", "chisq_dof",
+                             "bank_chisq", "bank_chisq_dof", "sigmasq",
+                             "spin1x", "spin1y", "spin1z", "spin2x", "spin2y",
+                             "spin2z", "event_id", "Gamma0", "Gamma1")
 
     def __init__(self,
                  url,
@@ -1179,7 +1170,7 @@ class CoincsDocFromPostcoh(object):
             u"gstlal_inspiral_postcohspiir_online",
             process_params,
             comment=comment,
-            ifos=channel_dict.keys())
+            instruments=channel_dict.keys())
 
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(lsctables.SnglInspiralTable,
@@ -1213,19 +1204,19 @@ class CoincsDocFromPostcoh(object):
         row = coinc_def_table.RowType()
         row.search = "inspiral"
         row.description = "sngl_inspiral<-->sngl_inspiral coincidences"
-        row.coinc_def_id = "coinc_definer:coinc_def_id:3"
+        row.coinc_def_id = 3
         row.search_coinc_type = 0
         coinc_def_table.append(row)
 
         row = coinc_table.RowType()
-        row.coinc_event_id = "coinc_event:coinc_event_id:1"
+        row.coinc_event_id = 1
         row.instruments = ','.join(re.findall(
             '..',
             postcoh_inspiral.ifos))  #FIXME: for more complex detector names
         row.nevents = 2
         row.process_id = self.process.process_id
-        row.coinc_def_id = "coinc_definer:coinc_def_id:3"
-        row.time_slide_id = "time_slide:time_slide_id:6"
+        row.coinc_def_id = 3
+        row.time_slide_id = 6
         row.likelihood = 0
         coinc_table.append(row)
 
@@ -1235,7 +1226,7 @@ class CoincsDocFromPostcoh(object):
         row.minimum_duration = postcoh_inspiral.template_duration
         row.mass = postcoh_inspiral.mtotal
         row.end_time = postcoh_inspiral.end_time
-        row.coinc_event_id = "coinc_event:coinc_event_id:1"
+        row.coinc_event_id = 1
 
         # add to sngl_inspiral table the network SNR = sqrt(H**2 + L**2 + V**2)
         row.snr = np.sqrt(
@@ -1263,9 +1254,9 @@ class CoincsDocFromPostcoh(object):
         coinc_map_table = lsctables.CoincMapTable.get_table(self.xmldoc)
         for trigger_ifo_id, ifo in enumerate(re.findall('..', trigger.ifos)):
             row = coinc_map_table.RowType()
-            row.event_id = "sngl_inspiral:event_id:%d" % trigger_ifo_id
+            row.event_id = trigger_ifo_id
             row.table_name = "sngl_inspiral"
-            row.coinc_event_id = "coinc_event:coinc_event_id:1"
+            row.coinc_event_id = 1
             coinc_map_table.append(row)
 
     def assemble_time_slide_table(self, trigger):
@@ -1275,7 +1266,7 @@ class CoincsDocFromPostcoh(object):
         for ifo in re.findall('..', trigger.ifos):
             row = time_slide_table.RowType()
             row.instrument = ifo
-            row.time_slide_id = "time_slide:time_slide_id:6"
+            row.time_slide_id = 6
             row.process_id = self.process.process_id
             row.offset = 0
             time_slide_table.append(row)
@@ -1284,7 +1275,7 @@ class CoincsDocFromPostcoh(object):
         sngl_inspiral_table = lsctables.SnglInspiralTable.get_table(
             self.xmldoc)
         for standard_column in (
-                "process_id", "ifo", "search", "channel", "end_time",
+                "process:process_id", "ifo", "search", "channel", "end_time",
                 "end_time_ns", "end_time_gmst", "impulse_time",
                 "impulse_time_ns", "template_duration", "event_duration",
                 "amplitude", "eff_distance", "coa_phase", "mass1", "mass2",
@@ -1371,7 +1362,7 @@ class CoincsDocFromPostcoh(object):
             row.spin2x = postcoh_inspiral.spin2x
             row.spin2y = postcoh_inspiral.spin2y
             row.spin2z = postcoh_inspiral.spin2z
-            row.event_id = "sngl_inspiral:event_id:%d" % trigger_ifo_id
+            row.event_id = trigger_ifo_id
             sngl_inspiral_table.append(row)
 
     def assemble_ligolw_psd_arrays(self, psds):
@@ -1458,11 +1449,13 @@ def call_plot_fits_func(pngname,
     cmd += ["--colormap", colormap]
     if contour:
         cmd += ["--contour", str(contour)]
-    print cmd
+    logger.debug(cmd)
     proc = subprocess.Popen(cmd,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE)
     proc_out, proc_err = proc.communicate()
+    logger.debug(f"bayestar_plot_allsky return code: {proc.returncode}")
+
     return proc.returncode
 
 
@@ -1482,14 +1475,14 @@ def call_fits_skymap_func(out_cohsnr_fits,
     cmd += ["--event-id", event_id]
     cmd += ["--event-time", str(event_time)]
     cmd += [input_fname]
-    if verbose:
-        print cmd
+
+    logger.debug(cmd)
     proc = subprocess.Popen(cmd,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE)
     proc_out, proc_err = proc.communicate()
-    if verbose:
-        print >> sys.stderr, "skymap2fits return code", proc.returncode
+    logger.debug(f"skymap2fits return code: {proc.returncode}")
+
     return proc.returncode
 
 
@@ -1513,8 +1506,8 @@ def upload_skymap(gracedb_client, gid, ifos, skymap_fname, end_time,
 
     try:
         copied_name = 'gracedb/%s/%s' % (gid, os.path.split(skymap_fname)[-1])
-        if verbose:
-            print("copy pipeline skymap %s" % skymap_fname)
+
+        logger.debug(f"copy pipeline skymap {skymap_fname}")
         copyfile(skymap_fname, copied_name)
     except:
         msg += "no skymap generated in %s" % copied_name
@@ -1528,8 +1521,7 @@ def upload_skymap(gracedb_client, gid, ifos, skymap_fname, end_time,
                                        verbose=verbose)
 
     if returncode == 0:
-        if verbose:
-            print("Uploading %s for event %s" % (out_prob_fits, gid))
+        logger.debug(f"Uploading {out_prob_fits} for event {gid}")
 
         gracedb_client.writeLog(gid,
                                 "%s prob skymap, with 90 percent contour" %
@@ -1549,9 +1541,8 @@ def upload_skymap(gracedb_client, gid, ifos, skymap_fname, end_time,
         out_prob_png, out_prob_fits, "Prob", contour=90,
         colormap="cylon")  # default colormap
     if returncode == 0:
-        if verbose:
-            print("Uploading %s, %s for %s, %s " %
-                  (out_prob_png, out_cohsnr_png, gid, msg))
+        logger.debug(
+            f"Uploading {out_prob_png}, {out_cohsnr_png} for {gid}, {msg}")
         gracedb_client.writeLog(gid,
                                 "%s prob skymap" % ifos,
                                 filename=out_prob_png,
@@ -1566,8 +1557,8 @@ def upload_skymap(gracedb_client, gid, ifos, skymap_fname, end_time,
         msg += " can not plot fits to pngs"
         gracedb_client.writeLog(
             gid,
-            "%s, check if it is due to that the trigger single SNR is below \
-                %s in the postcoh element for a skymap output" \
+            "%s, check if it is due to that the trigger single SNR is " \
+                "below %s in the postcoh element for a skymap output" \
             % (msg, str(cuda_postcoh_output_skymap)),
             filename=None,
             tag_name="sky_loc")
