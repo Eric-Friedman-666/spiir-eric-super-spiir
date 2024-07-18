@@ -106,7 +106,7 @@ def calc_expected_snr(premerger_cut, verbose, inj):
 
     injtime = inj.time_geocent
     if verbose:
-        print "injection time %d" % injtime
+        print(f"injection time {injtime}")
 
     # Determine which PSD files have GPS times covering the injection time.
     psds = dict((seg, psd) for seg, psd in allPSDs.items())

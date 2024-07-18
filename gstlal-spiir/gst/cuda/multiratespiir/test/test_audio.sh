@@ -15,29 +15,29 @@ nbchannels=1
 
 #GST_DEBUG_DUMP_DOT_DIR=. 
 gst-launch --gst-debug-no-color filesrc location=$inputfile ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$outsamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$outsamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$outsamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$outsamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$outsamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$outsamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$outsamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$outsamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$outsamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$outsamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$outsamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$outsamp,channels=1 !\
   audioresample quality=2 ! \
-  capsfilter caps=audio/x-raw-float,width=32,rate=$insamp,channels=1 !\
+  capsfilter caps=audio/x-raw,width=32,rate=$insamp,channels=1 !\
   filesink location=$outputfile

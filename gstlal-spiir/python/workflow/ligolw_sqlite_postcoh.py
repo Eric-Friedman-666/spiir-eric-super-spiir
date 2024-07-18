@@ -19,7 +19,7 @@
 #
 # =============================================================================
 #
-#								   Preamble
+# 								   Preamble
 #
 # =============================================================================
 #
@@ -29,7 +29,7 @@ Convert tabular data in LIGO LW XML files to and from SQL databases.
 This module provides a library interface to the machinery used by the
 ligolw_sqlite command-line tool, facilitating it's re-use in other
 applications.  The real XML<-->database translation machinery is
-implemented in the glue.ligolw.dbtables module.  The code here wraps the
+implemented in the ligo.lw.dbtables module.  The code here wraps the
 machinery in that mdoule in functions that are closer to the command-line
 level operations provided by the ligolw_sqlite program.
 """
@@ -42,12 +42,12 @@ except ImportError:
 import sys
 
 from glue import git_version
-from glue.ligolw import ligolw
-from glue.ligolw import dbtables
-from glue.ligolw import table as ligolw_table
-from glue.ligolw import utils as ligolw_utils
+from ligo.lw import ligolw
+from ligo.lw import dbtables
+from ligo.lw import table as ligolw_table
+from ligo.lw import utils as ligolw_utils
 
-from gstlal.pipemodules.postcohtable import postcoh_table_def
+from gstlal_spiir.pipemodules.postcohtable import postcoh_table_def
 
 __author__ = "Kipp Cannon <kipp.cannon@ligo.org>"
 __version__ = "git id %s" % git_version.id
@@ -56,7 +56,7 @@ __date__ = git_version.date
 #
 # =============================================================================
 #
-#								 Library Code
+# 								 Library Code
 #
 # =============================================================================
 #
@@ -92,11 +92,14 @@ def update_ids(connection, xmldoc, verbose=False):
     table_elems = xmldoc.getElementsByTagName(ligolw.Table.tagName)
     for i, tbl in enumerate(table_elems):
         if verbose:
-            print >> sys.stderr, "updating IDs: %d%%\r" % (100.0 * i /
-                                                           len(table_elems)),
+            print(
+                "updating IDs: %d%%\r" % (100.0 * i / len(table_elems)),
+                end=" ",
+                file=sys.stderr,
+            )
         tbl.applyKeyMapping()
     if verbose:
-        print >> sys.stderr, "updating IDs: 100%"
+        print("updating IDs: 100%", file=sys.stderr)
 
     # reset ID mapping for next document
     dbtables.idmap_reset(connection)
@@ -116,7 +119,7 @@ def insert_from_url(url,
 	newly-inserted rows collide with row IDs already in the database,
 	and is generally only sensible when inserting a document into an
 	empty database.  If verbose is True then progress reports will be
-	printed to stderr.  See glue.ligolw.dbtables.use_in() for more
+	printed to stderr.  See ligo.lw.dbtables.use_in() for more
 	information about constructing a suitable content handler class.
 	"""
     #
@@ -296,7 +299,7 @@ def insert_from_urls(urls, contenthandler, **kwargs):
 
     for n, url in enumerate(urls, 1):
         if verbose:
-            print >> sys.stderr, "%d/%d:" % (n, len(urls)),
+            print("%d/%d:" % (n, len(urls)), end=" ", file=sys.stderr)
         insert_from_url(url, contenthandler=contenthandler, **kwargs)
 
     #
@@ -327,11 +330,13 @@ def extract(connection,
 	"""
     xmldoc = ligolw.Document()
     xmldoc.appendChild(dbtables_postcoh.get_xml(connection, table_names))
-    ligolw_utils.write_filename(xmldoc,
-                                filename,
-                                gz=(filename or "stdout").endswith(".gz"),
-                                verbose=verbose,
-                                xsl_file=xsl_file)
+    ligolw_utils.write_filename(
+        xmldoc,
+        filename,
+        gz=(filename or "stdout").endswith(".gz"),
+        verbose=verbose,
+        xsl_file=xsl_file,
+    )
 
     # delete cursors
     xmldoc.unlink()

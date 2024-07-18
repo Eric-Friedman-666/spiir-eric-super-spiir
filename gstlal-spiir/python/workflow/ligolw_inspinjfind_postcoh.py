@@ -38,16 +38,16 @@ import sys
 import pdb
 
 from glue import iterutils
-from glue.ligolw import ligolw
-from glue.ligolw import lsctables
+from ligo.lw import ligolw
+from ligo.lw import lsctables
 from glue.text_progress_bar import ProgressBar
 
-from gstlal.pipemodules.postcohtable import postcoh_table_def
-from glue.ligolw import ilwd
+from gstlal_spiir.pipemodules.postcohtable import postcoh_table_def
+from ligo.lw import ilwd
 
 __author__ = "Kipp Cannon <kipp.cannon@ligo.org>"
-#__version__ = "git id %s" % git_version.id
-#__date__ = git_version.date
+# __version__ = "git id %s" % git_version.id
+# __date__ = git_version.date
 
 #
 # =============================================================================
@@ -65,6 +65,7 @@ class PostcohInspiral(postcoh_table_def.PostcohInspiral):
 	list of instances of this class sorted by .end to be bisection
 	searched for a LIGOTimeGPS end time.
 	"""
+
     __slots__ = ()
 
     def __cmp__(self, other):
@@ -90,6 +91,7 @@ class DocContents(object):
     """
 	A wrapper interface to the XML document.
 	"""
+
     def __init__(self, xmldoc, process, end_time_bisect_window):
         #
         # store the process row
@@ -155,9 +157,9 @@ class DocContents(object):
 		"""
         coinc = lsctables.Coinc()
         # FIXME: revert when register_to_xml works in bin/ligolw_inspinjfind_postcoh
-        #coinc.process_id = self.process.process_id
-        ilwd_process_id = ilwd.get_ilwdchar_class("process", "process")
-        coinc.process_id = ilwd_process_id(10)
+        # coinc.process_id = self.process.process_id
+        #FIXME: Should this be 0 instead of 10?
+        coinc.process_id = 10
         coinc.coinc_def_id = coinc_def_id
         coinc.coinc_event_id = self.coinctable.get_next_id()
         coinc.time_slide_id = self.tisi_id
@@ -183,7 +185,8 @@ def add_sim_postcoh_coinc(contents, sim, event_ids):
 	coinc_event_map table linking the sim_inspiral row and the list of
 	postcoh rows to the new coinc_event row.
 	"""
-
+    raise NotImplementedError
+    # NOTE: If this is used, it requires the table name to be passed in as it is not available from event_id
     ilwd_postcoh_id = ilwd.get_ilwdchar_class("postcoh", "event_id")
     for one_event_id in event_ids:
         coincmap = lsctables.CoincMap()
@@ -191,7 +194,7 @@ def add_sim_postcoh_coinc(contents, sim, event_ids):
         # FIXME: this does not work due to load xmldoc problem in
         # bin/ligolw_inspinjfind_postcoh, related to the last FIXME
         # coincmap.table_name = sim.simulation_id.table_name
-        coincmap.table_name = sim.simulation_id.split(':')[0]
+        coincmap.table_name = sim.simulation_id.split(":")[0]
         coincmap.event_id = sim.simulation_id
         contents.coincmaptable.append(coincmap)
 
@@ -232,7 +235,7 @@ def injfind(xmldoc,
     #
 
     if verbose:
-        print >> sys.stderr, "indexing ..."
+        print("indexing ...", file=sys.stderr)
 
     contents = DocContents(xmldoc=xmldoc,
                            process=process,
@@ -241,9 +244,9 @@ def injfind(xmldoc,
     # Find sim_inspiral <--> coinc_event coincidences.
     #
 
-    progressbar = ProgressBar(max=len(contents.siminspiraltable),
-                              textwidth=35,
-                              text="injfind") if verbose else None
+    progressbar = (ProgressBar(max=len(contents.siminspiraltable),
+                               textwidth=35,
+                               text="injfind") if verbose else None)
 
     for sim in contents.siminspiraltable:
         if progressbar is not None:
@@ -259,7 +262,7 @@ def injfind(xmldoc,
     #
 
     if verbose:
-        print >> sys.stderr, "finishing ..."
+        print("finishing ...", file=sys.stderr)
 
     #
     # Done.

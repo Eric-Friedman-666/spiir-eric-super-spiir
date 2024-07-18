@@ -21,9 +21,9 @@
 #
 # ### Command line interface
 #
-#	+ `--no-upload`: Write plots to disk.
-#	+ `--skip-404`: Skip events that give 404 (file not found) errors (default is to abort).
-#	+ `--verbose`: Be verbose.
+# 	+ `--no-upload`: Write plots to disk.
+# 	+ `--skip-404`: Skip events that give 404 (file not found) errors (default is to abort).
+# 	+ `--verbose`: Be verbose.
 #
 # =============================================================================
 #
@@ -32,18 +32,19 @@
 # =============================================================================
 #
 
-import httplib
+import six.moves.http_client
 import logging
 import os.path
-import StringIO
+from io import StringIO
 import time
 import io
 
-from glue.ligolw import ligolw
-from glue.ligolw import array as ligolw_array
-from glue.ligolw import param as ligolw_param
-from glue.ligolw import lsctables
-from glue.ligolw import utils as ligolw_utils
+from ligo.lw import ligolw
+from ligo.lw import array as ligolw_array
+from ligo.lw import param as ligolw_param
+from ligo.lw import lsctables
+from ligo.lw import utils as ligolw_utils
+from six.moves import range
 
 
 class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
@@ -62,45 +63,49 @@ def get_filename(gracedb_client,
                  retry_delay=10.0,
                  ignore_404=False):
     for i in range(retries):
-        logging.info("retrieving \"%s\" for %s" % (filename, graceid))
+        logging.info('retrieving "%s" for %s' % (filename, graceid))
         response = gracedb_client.files(graceid, filename)
-        if response.status == httplib.OK:
+        if response.status == six.moves.http_client.OK:
             return response
-        if response.status == httplib.NOT_FOUND and ignore_404:
+        if response.status == six.moves.http_client.NOT_FOUND and ignore_404:
             logging.warning(
-                "retrieving \"%s\" for %s: (%d) %s.  skipping ..." %
+                'retrieving "%s" for %s: (%d) %s.  skipping ...' %
                 (filename, graceid, response.status, response.reason))
             return None
-        logging.warning("retrieving \"%s\" for %s: (%d) %s.  pausing ..." %
+        logging.warning('retrieving "%s" for %s: (%d) %s.  pausing ...' %
                         (filename, graceid, response.status, response.reason))
         time.sleep(retry_delay)
-    raise Exception("retrieving \"%s\" for %s: (%d) %s" %
+    raise Exception('retrieving "%s" for %s: (%d) %s' %
                     (filename, graceid, response.status, response.reason))
 
 
 def get_coinc_xmldoc(gracedb_client, graceid, filename="coinc.xml"):
-    return ligolw_utils.load_fileobj(get_filename(gracedb_client,
-                                                  graceid,
-                                                  filename=filename),
-                                     contenthandler=LIGOLWContentHandler)[0]
+    return ligolw_utils.load_fileobj(
+        get_filename(gracedb_client, graceid, filename=filename),
+        contenthandler=LIGOLWContentHandler,
+    )[0]
 
 
-def upload_fig(fig,
-               gracedb_client,
-               graceid,
-               filename="psd.png",
-               log_message="strain spectral density plot",
-               tagname="psd"):
-    plotfile = StringIO.StringIO()
+def upload_fig(
+    fig,
+    gracedb_client,
+    graceid,
+    filename="psd.png",
+    log_message="strain spectral density plot",
+    tagname="psd",
+):
+    plotfile = StringIO()
     fig.savefig(plotfile, format=os.path.splitext(filename)[-1][1:])
-    logging.info("uploading \"%s\" for %s" % (filename, graceid))
-    response = gracedb_client.writeLog(graceid,
-                                       log_message,
-                                       filename=filename,
-                                       filecontents=plotfile.getvalue(),
-                                       tagname=tagname)
-    if response.status != httplib.CREATED:
-        raise Exception("upload of \"%s\" for %s failed: %s" %
+    logging.info('uploading "%s" for %s' % (filename, graceid))
+    response = gracedb_client.writeLog(
+        graceid,
+        log_message,
+        filename=filename,
+        filecontents=plotfile.getvalue(),
+        tagname=tagname,
+    )
+    if response.status != six.moves.http_client.CREATED:
+        raise Exception('upload of "%s" for %s failed: %s' %
                         (filename, graceid, response["error"]))
 
 
@@ -109,13 +114,14 @@ def upload_file(gracedb_client,
                 filename,
                 log_message="A file",
                 tagname=None):
-    logging.info("uploading \"%s\" for %s" % (filename, graceid))
+    logging.info('uploading "%s" for %s' % (filename, graceid))
     response = gracedb_client.writeLog(
         graceid,
         log_message,
         filename=filename,
         filecontents=io.FileIO(filename).readall(),
-        tagname=tagname)
-    if response.status != httplib.CREATED:
-        raise Exception("upload of \"%s\" for %s failed: %s" %
+        tagname=tagname,
+    )
+    if response.status != six.moves.http_client.CREATED:
+        raise Exception('upload of "%s" for %s failed: %s' %
                         (filename, graceid, response["error"]))
