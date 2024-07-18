@@ -29,28 +29,10 @@
 #define __COHFAR_ACCUMBACKGROUND_H__
 
 #include <cohfar/background_stats.h>
-#include <ifo_set.h>
-
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
 #include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
-
+#include <ifo_set.h>
 #include <libxml/xmlwriter.h>
 #include <postcohtable.h>
 
@@ -68,7 +50,7 @@ G_BEGIN_DECLS
     (G_type_CHECK_CLASS_TYPE((klass), COHFAR_ACCUMBACKGROUND_TYPE))
 
 typedef struct {
-    GstElementClass parent_class;
+    GstElementClass cohfar_accumbackground_parent_class;
 } CohfarAccumbackgroundClass;
 
 typedef struct {

@@ -30,28 +30,10 @@
  *  stuff from gobject/gstreamer
  */
 
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
 #include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
 #include <glib/gstdio.h>
-
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
-
 #include <gstlal/gstlal.h>
 
 /*
@@ -62,6 +44,7 @@
 #include <cohfar/cohfar_accumbackground.h>
 #include <ifo_set.h>
 #include <pipe_macro.h>
+#include <postcoh/postcoh_utils.h>
 #include <postcohtable.h>
 #include <time.h>
 #define NOT_INIT            -1
@@ -85,16 +68,14 @@
 #define GST_CAT_DEFAULT cohfar_accumbackground_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-static void additional_initializations(GType type) {
-    GST_DEBUG_CATEGORY_INIT(GST_CAT_DEFAULT, "cohfar_accumbackground", 0,
-                            "cohfar_accumbackground element");
-}
-
-GST_BOILERPLATE_FULL(CohfarAccumbackground,
-                     cohfar_accumbackground,
-                     GstElement,
-                     GST_TYPE_ELEMENT,
-                     additional_initializations);
+G_DEFINE_TYPE_WITH_CODE(
+  CohfarAccumbackground,
+  cohfar_accumbackground,
+  GST_TYPE_ELEMENT,
+  GST_DEBUG_CATEGORY_INIT(GST_CAT_DEFAULT,
+                          "cohfar_accumbackground",
+                          0,
+                          "cohfar_accumbackground element"))
 
 enum property {
     PROP_0,
@@ -119,8 +100,11 @@ static void cohfar_accumbackground_get_property(GObject *object,
 /* vmethods */
 
 static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
+                                                  GstObject *parent,
                                                   GstBuffer *inbuf);
-static gboolean cohfar_accumbackground_sink_event(GstPad *pad, GstEvent *event);
+static gboolean cohfar_accumbackground_sink_event(GstPad *pad,
+                                                  GstObject *parent,
+                                                  GstEvent *event);
 static void cohfar_accumbackground_dispose(GObject *object);
 
 static void trigger_stats_update_stats(TriggerStatsXML *stats,
@@ -165,24 +149,24 @@ static void trigger_stats_update_stats(TriggerStatsXML *stats,
  */
 
 static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
+                                                  GstObject *parent,
                                                   GstBuffer *inbuf) {
-    CohfarAccumbackground *element =
-      COHFAR_ACCUMBACKGROUND(GST_OBJECT_PARENT(pad));
-    GstFlowReturn result = GST_FLOW_OK;
+    CohfarAccumbackground *element = COHFAR_ACCUMBACKGROUND(parent);
+    GstFlowReturn result           = GST_FLOW_OK;
 
     GST_LOG_OBJECT(
       element,
       "receiving accum %s+%s buffer of %" G_GSIZE_FORMAT
       " bytes, ts %" GST_TIME_FORMAT ", duration %" GST_TIME_FORMAT
-      ", offset %" G_GINT64_FORMAT ", offset_end %" G_GINT64_FORMAT,
+      ", offset %" G_GUINT64_FORMAT ", offset_end %" G_GUINT64_FORMAT,
       GST_BUFFER_FLAG_IS_SET(inbuf, GST_BUFFER_FLAG_GAP) ? "GAP" : "NONGAP",
-      GST_BUFFER_IS_DISCONT(inbuf) ? "DISCONT" : "CONT", GST_BUFFER_SIZE(inbuf),
-      GST_TIME_ARGS(GST_BUFFER_TIMESTAMP(inbuf)),
+      GST_BUFFER_IS_DISCONT(inbuf) ? "DISCONT" : "CONT",
+      gst_buffer_get_size(inbuf), GST_TIME_ARGS(GST_BUFFER_PTS(inbuf)),
       GST_TIME_ARGS(GST_BUFFER_DURATION(inbuf)), GST_BUFFER_OFFSET(inbuf),
       GST_BUFFER_OFFSET_END(inbuf));
 
     if (!GST_CLOCK_TIME_IS_VALID(element->t_roll_start))
-        element->t_roll_start = GST_BUFFER_TIMESTAMP(inbuf);
+        element->t_roll_start = GST_BUFFER_PTS(inbuf);
 
     /*
      * initialize stats files
@@ -202,16 +186,18 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     // TriggerStats **cur_stats_in_list = stats_list->plist[pos];
     // trigger_stats_reset(cur_stats_in_list, num_stats);
 
+    GstMapInfo inmap;
+    gst_buffer_map(inbuf, &inmap, GST_MAP_READ);
+
     /*
      * calculate number of output postcoh entries
      */
-    int outentries = 0;
+    guint outentries = 0;
 
-    PostcohInspiralTable *intable =
-      (PostcohInspiralTable *)GST_BUFFER_DATA(inbuf);
     PostcohInspiralTable *intable_end =
-      (PostcohInspiralTable *)(GST_BUFFER_DATA(inbuf) + GST_BUFFER_SIZE(inbuf));
-    for (; intable < intable_end; intable++)
+      (PostcohInspiralTable *)(inmap.data + inmap.size);
+    for (PostcohInspiralTable *intable = (PostcohInspiralTable *)inmap.data;
+         intable < intable_end; intable++)
         if (intable->is_background == FLAG_FOREGROUND
             || intable->is_background == FLAG_EMPTY)
             outentries++;
@@ -219,38 +205,35 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     /*
      * allocate output buffer
      */
-    GstBuffer *outbuf = NULL;
-    GstPad *srcpad    = element->srcpad;
-    GstCaps *caps     = GST_PAD_CAPS(srcpad);
+    GstPad *srcpad = element->srcpad;
 
     /* allocate extra space for prompt stats */
-    // int out_size = sizeof(PostcohInspiralTable) * outentries +
-    // sizeof(TriggerStats) * num_stats;
-    int out_size = sizeof(PostcohInspiralTable) * outentries;
-    result       = gst_pad_alloc_buffer(srcpad, 0, out_size, caps, &outbuf);
-    if (result != GST_FLOW_OK) {
-        GST_ERROR_OBJECT(
-          srcpad, "Could not allocate postcoh-inspiral buffer %d", result);
-        return result;
+    gsize out_size    = sizeof(PostcohInspiralTable) * outentries;
+    GstBuffer *outbuf = gst_buffer_new_allocate(NULL, out_size, NULL);
+    if (G_UNLIKELY(!outbuf)) {
+        gst_buffer_unmap(inbuf, &inmap);
+        GST_ERROR_OBJECT(srcpad, "Could not allocate postcoh-inspiral buffer");
+        return GST_FLOW_ERROR;
     }
 
     /*
      * update background rate
      */
 
-    intable = (PostcohInspiralTable *)GST_BUFFER_DATA(inbuf);
-    PostcohInspiralTable *outtable =
-      (PostcohInspiralTable *)GST_BUFFER_DATA(outbuf);
-    for (; intable < intable_end; intable++) {
+    GstMapInfo outmap;
+    gst_buffer_map(outbuf, &outmap, GST_MAP_WRITE);
+    for (PostcohInspiralTable *intable  = (PostcohInspiralTable *)inmap.data,
+                              *outtable = (PostcohInspiralTable *)outmap.data;
+         intable < intable_end; intable++) {
         // TODO: Consider using ifo_set__try_parse to check for errors
         ifo_set_type table_ifos = ifo_set__parse_or_empty(intable->ifos);
         // The combination of IFOs is invalid
         if (ifo_set__is_empty(table_ifos)) {
             LIGOTimeGPS ligo_time;
-            XLALINT8NSToGPS(&ligo_time, GST_BUFFER_TIMESTAMP(inbuf));
+            XLALINT8NSToGPS(&ligo_time, GST_BUFFER_PTS(inbuf));
             fprintf(stderr,
                     "invalid ifo_set in cohfar_accumbackground at GPS %d, "
-                    "outentries %d, table flag %d, cohsnr %f\n",
+                    "outentries %u, table flag %d, cohsnr %f\n",
                     ligo_time.gpsSeconds, outentries, intable->is_background,
                     intable->cohsnr);
         }
@@ -294,6 +277,10 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
             outtable++;
         }
     }
+
+    gst_buffer_unmap(inbuf, &inmap);
+    gst_buffer_unmap(outbuf, &outmap);
+
     /*
      * calculate immediate PDF using stats_prompt from stats_list
      */
@@ -303,7 +290,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
      */
 
     /* snapshot background xml file when reaching the snapshot point*/
-    GstClockTime t_cur = GST_BUFFER_TIMESTAMP(inbuf);
+    GstClockTime t_cur = GST_BUFFER_PTS(inbuf);
     element->t_end     = t_cur;
     gint duration =
       (int)((element->t_end - element->t_roll_start) / GST_SECOND);
@@ -339,25 +326,26 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     /*
      * set the outbuf meta data
      */
-    GST_BUFFER_TIMESTAMP(outbuf)  = GST_BUFFER_TIMESTAMP(inbuf);
+    GST_BUFFER_PTS(outbuf)        = GST_BUFFER_PTS(inbuf);
     GST_BUFFER_DURATION(outbuf)   = GST_BUFFER_DURATION(inbuf);
     GST_BUFFER_OFFSET(outbuf)     = GST_BUFFER_OFFSET(inbuf);
     GST_BUFFER_OFFSET_END(outbuf) = GST_BUFFER_OFFSET_END(inbuf);
-    GST_BUFFER_SIZE(outbuf)       = sizeof(PostcohInspiralTable) * outentries;
-    if (GST_BUFFER_FLAG_IS_SET(inbuf, GST_BUFFER_FLAG_GAP))
+
+    if (GST_BUFFER_FLAG_IS_SET(inbuf, GST_BUFFER_FLAG_GAP)) {
         GST_BUFFER_FLAG_SET(outbuf, GST_BUFFER_FLAG_GAP);
+    }
 
     gst_buffer_unref(inbuf);
     result = gst_pad_push(srcpad, outbuf);
 
     GST_LOG_OBJECT(
       element,
-      "pushed %s+%s buffer of %ld bytes, ts %" GST_TIME_FORMAT
-      ", duration %" GST_TIME_FORMAT ", offset %" G_GINT64_FORMAT
-      ", offset_end %" G_GINT64_FORMAT,
+      "pushed %s+%s buffer of %" G_GSIZE_FORMAT " bytes, ts %" GST_TIME_FORMAT
+      ", duration %" GST_TIME_FORMAT ", offset %" G_GUINT64_FORMAT
+      ", offset_end %" G_GUINT64_FORMAT,
       GST_BUFFER_FLAG_IS_SET(outbuf, GST_BUFFER_FLAG_GAP) ? "GAP" : "NONGAP",
       GST_BUFFER_IS_DISCONT(outbuf) ? "DISCONT" : "CONT",
-      GST_BUFFER_SIZE(outbuf), GST_TIME_ARGS(GST_BUFFER_TIMESTAMP(outbuf)),
+      gst_buffer_get_size(outbuf), GST_TIME_ARGS(GST_BUFFER_PTS(outbuf)),
       GST_TIME_ARGS(GST_BUFFER_DURATION(outbuf)), GST_BUFFER_OFFSET(outbuf),
       GST_BUFFER_OFFSET_END(outbuf));
 
@@ -374,9 +362,9 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
 
 /* handle events (search) */
 static gboolean cohfar_accumbackground_sink_event(GstPad *pad,
+                                                  GstObject *parent,
                                                   GstEvent *event) {
-    CohfarAccumbackground *element =
-      COHFAR_ACCUMBACKGROUND(GST_OBJECT_PARENT(pad));
+    CohfarAccumbackground *element = COHFAR_ACCUMBACKGROUND(parent);
 
     switch (GST_EVENT_TYPE(event)) {
     case GST_EVENT_EOS:
@@ -425,7 +413,7 @@ static gboolean cohfar_accumbackground_sink_event(GstPad *pad,
     default: break;
     }
 
-    return gst_pad_event_default(pad, event);
+    return gst_pad_event_default(pad, parent, event);
 }
 
 /*
@@ -538,35 +526,7 @@ static void cohfar_accumbackground_dispose(GObject *object) {
     if (element->bgstats) {
         // FIXME: free stats
     }
-    G_OBJECT_CLASS(parent_class)->dispose(object);
-}
-
-/*
- * base_init()
- */
-
-static void cohfar_accumbackground_base_init(gpointer gclass) {
-#if 1
-    GstElementClass *element_class = GST_ELEMENT_CLASS(gclass);
-
-    gst_element_class_set_details_simple(
-      element_class, "Update background xml file given background entries",
-      "Background xml updater", "Background xml updater.\n",
-      "Qi Chu <qi.chu at ligo dot org>");
-    gst_element_class_add_pad_template(
-      element_class,
-      //		gst_static_pad_template_get(&cohfar_background_src_template)
-      gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-                           gst_caps_from_string("application/x-lal-postcoh"))
-
-    );
-
-    gst_element_class_add_pad_template(
-      element_class,
-      //		gst_static_pad_template_get(&cohfar_background_src_template)
-      gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-                           gst_caps_from_string("application/x-lal-postcoh")));
-#endif
+    G_OBJECT_CLASS(cohfar_accumbackground_parent_class)->dispose(object);
 }
 
 /*
@@ -576,7 +536,6 @@ static void cohfar_accumbackground_base_init(gpointer gclass) {
 static void
   cohfar_accumbackground_class_init(CohfarAccumbackgroundClass *klass) {
     GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
-    ;
     gobject_class->set_property =
       GST_DEBUG_FUNCPTR(cohfar_accumbackground_set_property);
     gobject_class->get_property =
@@ -624,21 +583,40 @@ static void
 
     g_object_class_install_property(
       gobject_class, PROP_SNAPSHOT_INTERVAL,
-      g_param_spec_int("snapshot-interval", "snapshot interval",
-                       "(-1) never update; (0) snapshot at the end; (N) "
-                       "snapshot background "
-                       "statistics xml file every N seconds.",
-                       -1, G_MAXINT, 86400,
-                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      g_param_spec_int(
+        "snapshot-interval", "snapshot interval",
+        "(-1) never update; (0) snapshot at the end; (N) snapshot background "
+        "statistics xml file every N seconds.",
+        -1, G_MAXINT, 86400, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    GstElementClass *gst_element_class = GST_ELEMENT_CLASS(klass);
+
+    gst_element_class_set_metadata(
+      gst_element_class, "Update background xml file given background entries",
+      "Background xml updater", "Background xml updater.\n",
+      "Qi Chu <qi.chu at ligo dot org>");
+
+    GstCaps *template_caps = gst_caps_from_string("application/x-lal-postcoh");
+
+    gst_element_class_add_pad_template(
+      gst_element_class,
+      //		gst_static_pad_template_get(&cohfar_background_src_template)
+      gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
+                           template_caps));
+
+    gst_element_class_add_pad_template(
+      gst_element_class,
+      //		gst_static_pad_template_get(&cohfar_background_src_template)
+      gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, template_caps));
+
+    gst_caps_unref(template_caps);
 }
 /*
  * init()
  */
 
-static void
-  cohfar_accumbackground_init(CohfarAccumbackground *element,
-                              CohfarAccumbackgroundClass *element_klass) {
-    GstElementClass *klass = GST_ELEMENT_CLASS(element_klass);
+static void cohfar_accumbackground_init(CohfarAccumbackground *element) {
+    GstElementClass *klass = GST_ELEMENT_CLASS(G_OBJECT_GET_CLASS(element));
     element->sinkpad       = gst_pad_new_from_template(
       gst_element_class_get_pad_template(klass, "sink"), "sink");
     gst_element_add_pad(GST_ELEMENT(element), element->sinkpad);
