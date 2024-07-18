@@ -2,13 +2,7 @@
 #define __GST_FLAG_SEGMENT_HEADER__
 
 #include <glib.h>
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
 
 typedef struct flag_segment {
     GstClockTime start, stop;

@@ -1,12 +1,6 @@
 #include <flag_segment.h>
 #include <glib.h>
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
 
 gboolean flag_segments_is_gap(GArray *flag_segments,
                               GstClockTime start,

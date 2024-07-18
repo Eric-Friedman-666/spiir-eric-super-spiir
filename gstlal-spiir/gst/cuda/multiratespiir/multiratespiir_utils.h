@@ -21,14 +21,7 @@
 #define __CUDA_MULTIRATESPIIR_UTILS_H__
 
 #include <multiratespiir/multiratespiir.h>
-#define RESAMPLER_NUM_DEPTHS_MIN     0
-#define RESAMPLER_NUM_DEPTHS_MAX     7
-#define RESAMPLER_NUM_DEPTHS_DEFAULT 7
-#define MATRIX_DEFAULT               1
-
-#define SPSTATE(i)     (*(spstate + i))
-#define SPSTATEDOWN(i) (SPSTATE(i)->downstate)
-#define SPSTATEUP(i)   (SPSTATE(i)->upstate)
+#include <multiratespiir/multiratespiir_state.h>
 
 /* The quality of downsampler should be choosen carefully. Tests show that
  * quality = 6 will produce 1.5 times single events than quality = 9
@@ -44,17 +37,11 @@
 #define UP_FILT_LEN 16
 #define UP_QUALITY  1
 
-typedef enum {
-    SP_OK                   = 0,
-    SP_RESAMPLER_NOT_INITED = -1,
-    SP_BANK_LOAD_ERR        = -2
-} SpInitReturn;
-
 ResamplerState *resampler_state_create(gint inrate,
                                        gint outrate,
                                        gint channels,
-                                       gint num_exe_samples,
-                                       gint num_cover_samples,
+                                       guint num_exe_samples,
+                                       guint num_cover_samples,
                                        gint depth,
                                        cudaStream_t stream);
 
@@ -66,7 +53,7 @@ SpiirState **spiir_state_create(const gchar *bank_fname,
                                 guint ndepth,
                                 guint rate,
                                 guint num_head_cover_samples,
-                                gint num_exe_samples,
+                                guint num_exe_samples,
                                 cudaStream_t stream);
 
 void spiir_state_destroy(SpiirState **spstate, guint num_depths);
@@ -92,8 +79,8 @@ void cuda_multiratespiir_init_cover_samples(guint *num_head_cover_samples,
                                             gint down_filtlen,
                                             gint up_filtlen);
 
-void cuda_multiratespiir_update_exe_samples(gint *num_exe_samples,
-                                            gint new_value);
+void cuda_multiratespiir_update_exe_samples(guint *num_exe_samples,
+                                            guint new_value);
 
 gboolean cuda_multiratespiir_parse_bank(gdouble *bank,
                                         guint *num_depths,
@@ -104,6 +91,6 @@ guint cuda_multiratespiir_get_outchannels(CudaMultirateSPIIR *element);
 guint cuda_multiratespiir_get_num_head_cover_samples(
   CudaMultirateSPIIR *element);
 
-guint64 cuda_multiratespiir_get_available_samples(CudaMultirateSPIIR *element);
+guint cuda_multiratespiir_get_available_samples(CudaMultirateSPIIR *element);
 
 #endif
