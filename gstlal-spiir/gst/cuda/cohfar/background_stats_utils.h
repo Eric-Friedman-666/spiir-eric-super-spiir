@@ -31,18 +31,7 @@
 
 #include <LIGOLwHeader.h>
 #include <cohfar/background_stats.h>
-
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
 #include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
 #include <ifo_set.h>
 #include <postcohtable.h>
 
@@ -66,6 +55,8 @@ TriggerStats **trigger_stats_create(ifo_set_type enabled_ifos);
 
 int bins1D_get_idx(double val, Bins1D *bins);
 
+void signal_stats_init(TriggerStatsXML *sgstats, int source_type);
+
 void trigger_stats_feature_rate_update(double snr,
                                        double chisq,
                                        FeatureStats *feature,
@@ -76,41 +67,28 @@ void trigger_stats_feature_rate_update_all(gsl_vector *snr_vec,
                                            FeatureStats *feature,
                                            TriggerStats *cur_stats);
 
+void trigger_stats_feature_rate_add(FeatureStats *feature1,
+                                    FeatureStats *feature2,
+                                    TriggerStats *cur_stats);
+
 void trigger_stats_feature_rate_to_pdf(FeatureStats *feature);
 
 void trigger_stats_feature_rate_to_pdf_hist(FeatureStats *feature, Bins2D *pdf);
 
-double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
+void trigger_stats_feature_to_rank_lr(FeatureStats *feature,
+                                      RankingStats *rank);
 
-ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos,
-                               PostcohInspiralTable *trigger);
-
-void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
+void trigger_stats_feature_to_rank(FeatureStats *feature, RankingStats *rank);
 
 void trigger_stats_livetime_add(TriggerStats **stats_out,
                                 TriggerStats **stats_in,
                                 const int index);
 
+void trigger_stats_livetime_inc(TriggerStats **stats, const int index);
+
+double trigger_stats_get_val_from_map(double snr, double chisq, Bins2D *bins);
+
 int trigger_stats_num_stats(const ifo_set_type ifos);
-
-void trigger_stats_xml_reset(TriggerStatsXML *stats);
-
-void signal_stats_init(TriggerStatsXML *sgstats, int source_type);
-
-void trigger_stats_feature_rate_add(FeatureStats *feature1,
-                                    FeatureStats *feature2,
-                                    TriggerStats *cur_stats);
-
-void trigger_stats_feature_rates_add(FeatureStats *feature1,
-                                     FeatureStats *feature2,
-                                     TriggerStats *cur_stats);
-
-void trigger_stats_feature_rates_to_pdf(FeatureStats *feature);
-
-void trigger_stats_feature_to_rank(FeatureStats *feature, RankingStats *rank);
-
-void trigger_stats_feature_to_rank_lr(FeatureStats *feature,
-                                      RankingStats *rank);
 
 double bins2D_get_val(double snr, double chisq, Bins2D *bins);
 
@@ -126,7 +104,13 @@ gboolean trigger_stats_xml_dump(TriggerStatsXML *stats,
 
 TriggerStatsXML *trigger_stats_xml_create(char *ifos, int stats_type);
 
+ifo_set_type scan_trigger_ifos(ifo_set_type enabled_ifos,
+                               PostcohInspiralTable *trigger);
+
+void trigger_stats_xml_reset(TriggerStatsXML *stats);
+
 void trigger_stats_xml_destroy(TriggerStatsXML *stats);
 
 float gen_fap_from_feature(double snr, double chisq, TriggerStats *stats);
+
 #endif /* __BACKGROUND_STATS_UTILS_H__ */

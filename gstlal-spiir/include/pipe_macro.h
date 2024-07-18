@@ -3,11 +3,8 @@
 
 #include <stdbool.h>
 
-/* FIXME: upgrade to include more detectors like KAGRA */
-#ifndef IFO_LEN
 #define IFO_LEN     2
 #define MAX_IFO_LEN 4
-#endif
 
 #define MAX_NIFO 4
 
@@ -67,4 +64,14 @@
 #define SOURCE_TYPE_BNS  1
 
 #define DETRSP_XML_ID_NAME "gstlal_postcoh_detrsp_map"
+
+/* utils */
+#ifndef MAX
+#define MAX(a, b) ((a) > (b)) ? (a) : (b)
+#endif
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b)) ? (a) : (b)
+#endif
+
 #endif

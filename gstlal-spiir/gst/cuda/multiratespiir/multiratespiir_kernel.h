@@ -20,17 +20,19 @@
 #ifndef __CUDA_MULTIRATESPIIR_KERNEL_H__
 #define __CUDA_MULTIRATESPIIR_KERNEL_H__
 
-#include <multiratespiir/multiratespiir.h>
-#include <multiratespiir/multiratespiir_utils.h>
-gint multi_downsample(SpiirState **spstate,
-                      float *in_multidown,
-                      gint num_in_multidown,
-                      guint num_depths,
-                      cudaStream_t stream);
+#include <cuda_runtime.h>
+#include <multiratespiir/multiratespiir_state.h>
 
-gint spiirup(SpiirState **spstate,
-             gint num_in_multiup,
-             guint num_depths,
-             float *out,
-             cudaStream_t stream);
+int multi_downsample(SpiirState **spstate,
+                     const float *in_multidown,
+                     int num_in_multidown,
+                     uint num_depths,
+                     cudaStream_t stream);
+
+int spiirup(SpiirState **spstate,
+            int num_in_multiup,
+            uint num_depths,
+            float *out,
+            cudaStream_t stream);
+
 #endif
