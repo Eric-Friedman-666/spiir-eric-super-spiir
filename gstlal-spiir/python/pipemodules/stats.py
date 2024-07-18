@@ -14,6 +14,8 @@
 # See: https://github.com/scipy/scipy/issues/1608
 #
 
+import logging
+from six.moves import range
 try:
     from fpconst import NaN, NegInf, PosInf
 except ImportError:
@@ -26,6 +28,8 @@ except ImportError:
 import numpy
 import math
 from scipy.special import ive
+
+logger = logging.getLogger(__name__)
 
 
 def logiv(v, z):
@@ -71,8 +75,8 @@ def ncx2pdf(x, k, l):
 # ==================================================================
 
 import re
-from glue.ligolw import ligolw, lsctables, array, param, utils, types
-from gstlal.pipemodules import pipe_macro
+from ligo.lw import ligolw, lsctables, array, param, utils, types
+from gstlal_spiir.pipemodules import pipe_macro
 
 Attributes = ligolw.sax.xmlreader.AttributesImpl
 
@@ -131,8 +135,9 @@ def signal_stats_to_xml(filename,
     pdf_mat, rate_mat, snr_rate_arr, chisq_rate_arr = gen_signal_stats(
         ncx2_dof=ncx2_dof, ncx2_mean_factor=ncx2_mean_factor)
     nevent = rate_mat.sum()
-    if verbose:
-        print "nevent %l" % nevent
+
+    logger.debug(f"nevent {nevent}")
+
     all_ifo_combos = pipe_macro.IFO_MAP + ifo_combos
     for this_ifo_combo in all_ifo_combos:
         # feature
@@ -163,8 +168,8 @@ def signal_stats_to_xml(filename,
         root.appendChild(array.Array.build(name, numpy.array(arr_zero_double)))
         name = "%s:%s_nevent" % (pipe_macro.SIGNAL_XML_FEATURE_NAME,
                                  this_ifo_combo)
-        root.appendChild(
-            param.Param.build(name, types.FromPyType[long], nevent))
+        root.appendChild(param.Param.build(name, types.FromPyType[int],
+                                           nevent))
         name = "%s:%s_livetime" % (pipe_macro.SIGNAL_XML_FEATURE_NAME,
                                    this_ifo_combo)
         root.appendChild(param.Param.build(name, types.FromPyType[int], 0))

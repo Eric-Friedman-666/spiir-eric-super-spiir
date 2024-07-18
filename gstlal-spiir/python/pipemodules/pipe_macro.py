@@ -1,5 +1,7 @@
 # need to be consistent with pipe_macro.h
 # cohsnr
+from six.moves import range
+
 xmin = 0.54
 xmax = 3.0
 xstep = 0.0082
@@ -43,10 +45,10 @@ import re
 
 
 def get_sorted_ifo_string(ifos_string):
-    ifos = re.findall('..', ifos_string)
+    ifos = re.findall("..", ifos_string)
     ifo_idx_sorted = sorted([IFO_MAP.index(ifo) for ifo in ifos])
     sorted_ifo_list = [IFO_MAP[ifo_idx] for ifo_idx in ifo_idx_sorted]
-    return ''.join(sorted_ifo_list)
+    return "".join(sorted_ifo_list)
 
 
 def get_ifo_combos(ifos):
