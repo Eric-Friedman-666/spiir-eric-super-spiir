@@ -21,27 +21,11 @@
 #define __CUDA_MULTIRATESPIIR_H__
 
 #include <cuda_runtime.h>
-
-// Suppresses a warning that only occurs on NVCC
-// It should be revisited after the gstreamer upgrade
-// See #15
-#if defined(__CUDACC__)
-#pragma diag_suppress 1217
-#endif
 #include <glib.h>
-#if defined(__CUDACC__)
-#pragma diag_default 1217
-#endif
-
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #include <gst/base/gstadapter.h>
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
+#include <multiratespiir/multiratespiir_state.h>
 
 G_BEGIN_DECLS
 
@@ -59,53 +43,6 @@ G_BEGIN_DECLS
 
 typedef struct _CudaMultirateSPIIR CudaMultirateSPIIR;
 typedef struct _CudaMultirateSPIIRClass CudaMultirateSPIIRClass;
-
-#ifndef DEFINED_COMPLEX_F
-#define DEFINED_COMPLEX_F
-
-typedef struct _Complex_F {
-    float re;
-    float im;
-} COMPLEX_F;
-
-#else
-#endif
-
-typedef struct _ResamplerState {
-    float *d_sinc_table;
-    float *d_mem; /* fixed length to store input */
-    float *d_mem_copy; /* fixed length to store input */
-    gint channels;
-    gint mem_len;
-    gint last_sample;
-    gint filt_len;
-    gint sinc_len;
-    gint inrate;
-    gint outrate;
-    float amplifier; /* correction factor for resampling */
-} ResamplerState;
-
-typedef struct _SpiirState {
-    COMPLEX_F *d_a1;
-    COMPLEX_F *d_b0;
-    int *d_d;
-    gint delay_max;
-    COMPLEX_F *d_y;
-
-    guint nb;
-    gint num_filters;
-    gint num_templates;
-
-    gint depth; /* supposed to be 0-6 */
-    ResamplerState *downstate, *upstate;
-    float
-      *d_queue; /* circular buffer (or ring buffer) for downsampler and spiir */
-    float *d_out; /* only apply to 0 depth */
-    gint queue_len;
-    gint queue_first_sample; /* queue start position */
-    gint queue_last_sample; /* queue end position */
-    gint pre_out_spiir_len; /* previous output length for spiir filtering */
-} SpiirState;
 
 /* single-precision bank */
 typedef struct _SpiirBank_s {
@@ -140,15 +77,15 @@ struct _CudaMultirateSPIIR {
                                      first buffer */
     guint num_tail_cover_samples; /* number of samples needed to produce the
                                      last buffer */
-    gint num_exe_samples; /* number of samples executed every time after first
-                             buffer */
+    guint num_exe_samples; /* number of samples executed every time after first
+                              buffer */
 
     GstClockTime t0;
     guint64 offset0;
     guint64 samples_in;
     guint64 samples_out;
     guint64 next_in_offset;
-    gint bps;
+    guint bps;
 
     guint64 num_gap_samples;
     gboolean need_tail_drain;
@@ -156,9 +93,6 @@ struct _CudaMultirateSPIIR {
     gint outchannels; /* = number of templates */
     gint rate;
     gint width;
-    // SpiirBank_s **bank;
-    // gdouble *bank;
-    // gint bank_len;
     gchar *bank_fname;
     GMutex iir_bank_lock;
     GCond iir_bank_available;
@@ -171,14 +105,13 @@ struct _CudaMultirateSPIIR {
 
     gint gap_handle;
 
-    // for ACCELERATE_MULTIRATESPIIR_MEMORY_COPY
     float *h_snglsnr_buffer;
-    int len_snglsnr_buffer;
+    gsize len_snglsnr_buffer;
     double offset_per_nanosecond;
 };
 
 struct _CudaMultirateSPIIRClass {
-    GstBaseTransformClass parent_class;
+    GstBaseTransformClass cuda_multiratespiir_parent_class;
 };
 
 GType cuda_multiratespiir_get_type(void);
