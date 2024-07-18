@@ -138,6 +138,10 @@ def mkwhitened_src(
     dqvector=None,
     fir_whiten_reference_psd=None,
     whiten_expand_gaps=False,
+    resample_quality=9,
+    resample_method=4,
+    resample_sinc_filter_mode=0,
+    resample_sinc_filter_interpolation=1,
 ):
     """!
 	Build pipeline stage to whiten and downsample h(t).
@@ -157,7 +161,8 @@ def mkwhitened_src(
     # input sanity checks
     #
     if fir_whitener != 0 or fir_whiten_reference_psd is not None:
-        raise ValueError("As of the Py3 upgrade, the fir_whitener is no longer supported.")
+        raise ValueError(
+            "As of the Py3 upgrade, the fir_whitener is no longer supported.")
     if psd is None and not track_psd:
         raise ValueError("must enable track_psd when psd is None")
     if int(psd_fft_length) != psd_fft_length:
@@ -190,7 +195,8 @@ def mkwhitened_src(
     # sample rate of your data source.
     #
 
-    quality = 9
+    head = pipeparts.mkcapsfilter(pipeline, src,
+                                  "audio/x-raw, rate=[%d,MAX]" % max_rate)
 
     # These parameters control how the resampling is done:
     #   https://gstreamer.freedesktop.org/documentation/audioresample/index.html
@@ -198,24 +204,18 @@ def mkwhitened_src(
     # copy of what Gstreamer 0.10 did, but for now we pick the parameters that
     # produce the closest result (measured by mean unsigned error and maximum
     # unsigned error).
-    # We've found that linear resampling (resample_method = 1) fixes a PSD issue:
-    # https://git.ligo.org/lscsoft/spiir/-/issues/126
-    # This is the method we will use going forward, though the other parameters may
-    # require further investigation.
-    resample_method = 1
-    sinc_filter_mode = 0
-    sinc_filter_interpolation = 1
-
-    head = pipeparts.mkcapsfilter(pipeline, src,
-                                  "audio/x-raw, rate=[%d,MAX]" % max_rate)
-
+    # See https://git.ligo.org/lscsoft/spiir/-/issues/69#note_591325 for more.
+    # In the future we should investigate whether we should use different
+    # options, which come with different performance/correctness tradeoffs
+    # (although in practice it doesn't seem like the difference is very
+    # significant)
     head = pipeparts.mkresample(
         pipeline,
         head,
-        quality=quality,
+        quality=resample_quality,
         resample_method=resample_method,
-        sinc_filter_mode=sinc_filter_mode,
-        sinc_filter_interpolation=sinc_filter_interpolation,
+        sinc_filter_mode=resample_sinc_filter_mode,
+        sinc_filter_interpolation=resample_sinc_filter_interpolation,
     )
 
     head = pipeparts.mkcapsfilter(

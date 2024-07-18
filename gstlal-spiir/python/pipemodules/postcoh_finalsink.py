@@ -373,8 +373,8 @@ class FAPUpdater(object):
             self.last_calfap_time = timestamp
         # Check interval
         duration = timestamp - self.last_calfap_time
-        if (self.last_calfap_time
-                is not None) and (duration >= self.calcfap_interval):
+        if (self.last_calfap_time is not None) and (duration
+                                                    >= self.calcfap_interval):
             if self.try_run_calcfap(timestamp):
                 self.last_calfap_time = timestamp
 
@@ -849,25 +849,43 @@ class FinalSink(object):
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
             postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
 
-    def __need_trigger_control(self, trigger):
-        # do trigger control
-        # FIXME: implement a sql solution for node communication ?
-
+    def __read_trigger_control(self):
         with open(self.trigger_control_doc, "r") as f:
             content = f.read().splitlines()
 
-        is_submitted_idx = -1
         if len(content) > 0:
             (last_time, last_far, is_submitted) = content[-1].split(",")
-            last_time = float(last_time)
-            last_far = float(last_far)
-            while is_submitted == "0" and len(content) + is_submitted_idx > 0:
-                is_submitted_idx = is_submitted_idx - 1
+            cur_idx = -1
+            while is_submitted == "0" and len(content) + cur_idx > 0:
+                cur_idx = cur_idx - 1
                 (last_time, last_far,
-                 is_submitted) = content[is_submitted_idx].split(",")
-            last_time = float(last_time)
-            last_far = float(last_far)
-        else:
+                 is_submitted) = content[cur_idx].split(",")
+            if is_submitted == "1":
+                return float(last_time), float(last_far)
+        return self.last_trigger[-1][0], self.last_trigger[-1][1]
+
+    def __need_trigger_control(self, trigger):
+        # Suppress the trigger if a recent, better upload has been completed.
+        # FIXME: implement a sql solution for node communication ?
+        last_time = 0
+        last_far = 0
+        is_read_successful = False
+        gracedb_upload_attempts = self.gracedb_upload_attempts
+
+        for i in range(gracedb_upload_attempts):
+            try:
+                (last_time, last_far) = self.__read_trigger_control()
+                is_read_successful = True
+
+            except Exception as e:
+                # Log a message, but no need to wait before retrying,
+                # the file was most likely in the process of being written to.
+                # It should finish very quickly.
+                msg = f"[{i+1}/{gracedb_upload_attempts}]"\
+                                f"failed with error: '{e}'."
+                logger.info(msg)
+
+        if not is_read_successful:
             last_time = self.last_trigger[-1][0]
             last_far = self.last_trigger[-1][1]
 

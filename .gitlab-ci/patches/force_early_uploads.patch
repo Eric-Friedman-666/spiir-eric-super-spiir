@@ -1,0 +1,23 @@
+diff --git a/gstlal-spiir/python/pipemodules/postcoh_finalsink.py b/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
+index 31a86bd19..f6ce9ac3c 100644
+--- a/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
++++ b/gstlal-spiir/python/pipemodules/postcoh_finalsink.py
+@@ -592,6 +592,9 @@ class FinalSink(object):
+         self.thread_upload_skymap = None
+ 
+     def __pass_test(self, postcoh_inspiral):
++        if postcoh_inspiral.cohsnr > 12:
++            return True
++
+         if postcoh_inspiral.far <= 0.0:
+             return False
+ 
+@@ -882,7 +885,7 @@ class FinalSink(object):
+             f"FAR {trigger.far}, " \
+             f"last_submitted time {last_submitted_time}, " \
+             f"last_submitted far {last_submitted_far}"
+-        if ((abs(float(trigger.end) - last_time) < 50
++        if ((abs(float(trigger.end) - last_time) < 50 and last_far > 0
+              and abs(trigger.far / last_far) > 0.5)) or (
+                  abs(float(trigger.end) - float(last_submitted_time)) < 100
+                  and trigger.far > last_submitted_far * 0.5):

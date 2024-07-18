@@ -1,0 +1,67 @@
+name: lscsoft-spiir-py310
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+
+  # Build tools
+  - automake
+  - nvidia/label/cuda-11.8.0::cuda-cudart-dev
+  - nvidia/label/cuda-11.8.0::cuda-toolkit
+  - Cython
+  - make
+  - meson
+  - ninja
+  - pip
+  - setuptools
+  - wheel
+
+  # Science utils
+  - astropy
+  - matplotlib
+  - numpy
+  - pandas 
+  - scipy
+
+  # Misc
+  - boost-cpp
+  - cairo
+  - cryptography
+  - dbus-python
+  - doxygen
+  - dtt-awggui
+  - extension-helpers
+  - fftw
+  - gds-base
+  - gds-framexmit
+  - glib
+  - gobject-introspection
+  - gstreamer
+  - gstreamer-orc
+  - gwdatafind
+  - h5py
+  - healpy
+  - lalsuite=7.11
+  - ldas-tools-framecpp
+  - libffi
+  - ligo-segments
+  - ligo.skymap
+  - lscsoft-glue
+  - metaio
+  - openblas
+  - py3c
+  - pygobject
+  - pyopenssl
+  - python-avahi
+  - python-ligo-lw
+  - python-gds
+  - python-nds2-client
+  - shapely
+  - swig
+
+  # lint/formatting
+  - clang-format
+  - yapf
+
+  - pip:
+    - spiir

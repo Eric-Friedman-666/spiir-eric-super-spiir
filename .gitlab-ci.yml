@@ -1,5 +1,5 @@
 default:
-  image: docker:20.10.20-git
+  image: docker:24.0.5-git
   interruptible: true
 
 variables:
@@ -302,14 +302,13 @@ test-spiir-UBSAN:
     WRAPPER: "LD_PRELOAD='/usr/lib/llvm-11/lib/clang/11.1.0/lib/linux/libclang_rt.asan-x86_64.so'"
 
 check pep8 standards:
-  stage: build
-  image: python:2.7
+  image: python:3.10
   before_script:
     - /usr/local/bin/python -m pip install --upgrade pip
     - pip install yapf
   script:
     - cd gstlal-spiir
-    - linter_errors=$(git diff -U0 --no-color --relative origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME | yapf-diff --style pep8)
+    - linter_errors=$(git diff -U0 --no-color --relative origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME -- . ':(exclude)share/*' | yapf-diff --style pep8)
     - echo "$linter_errors"
     - if [ ! -z "$linter_errors" ]; then echo "Detected yapf formatting issues; please fix"; exit 1; else echo "Yapf formatting is correct"; exit 0; fi
   rules:

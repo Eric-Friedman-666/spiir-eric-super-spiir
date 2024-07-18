@@ -76,19 +76,19 @@ cmd () {
 
 	for bank in $(seq -f "%04g" $(( ${bank_start}+${bank_count}*${i} )) $(( ${bank_start}+${bank_count}*($i+1)-1 )) ); do
 		if [[ "$RUN_ID" == *"H"* ]]; then
-			macroiirbank="H1:${bankdir}/iir_H1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
+			macroiirbank="H1:${bankdir}/py3_iir_H1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
 		fi
 		if [[ "$RUN_ID" == *"L"* ]]; then
 			if [[ -n $macroiirbank ]]; then macroiirbank="${macroiirbank},"; fi
-			macroiirbank="${macroiirbank}L1:${bankdir}/iir_L1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
+			macroiirbank="${macroiirbank}L1:${bankdir}/py3_iir_L1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
 		fi
 		if [[ "$RUN_ID" == *"V"* ]]; then
 			if [[ -n $macroiirbank ]]; then macroiirbank="${macroiirbank},"; fi
-			macroiirbank="${macroiirbank}V1:${bankdir}/iir_V1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
+			macroiirbank="${macroiirbank}V1:${bankdir}/py3_iir_V1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
 		fi
 		if [[ "$RUN_ID" == *"K"* ]]; then
 			if [[ -n $macroiirbank ]]; then macroiirbank="${macroiirbank},"; fi
-			macroiirbank="${macroiirbank}K1:${bankdir}/iir_K1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
+			macroiirbank="${macroiirbank}K1:${bankdir}/py3_iir_K1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
 		fi
 		macroiirbanks="$macroiirbanks --iir-bank ${macroiirbank}"
 		unset macroiirbank
@@ -115,7 +115,7 @@ cmd () {
 	fi
 
 	# These values were chosen without any scientific basis, and are purely used for functionality testing.
-	CMD="$WRAPPER python $(which gstlal_inspiral_postcohspiir_online) \
+	CMD="$WRAPPER python $(type -p gstlal_inspiral_postcohspiir_online) \
 		--job-tag ${macrojobtag} \
 		--tmp-space _CONDOR_SCRATCH_ARTIFACTS_DIR \
 		${macroiirbanks} \

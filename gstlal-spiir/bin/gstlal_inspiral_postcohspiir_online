@@ -473,6 +473,26 @@ def parse_command_line():
                       type="int",
                       default=800,
                       help="interval to refresh detrsp map.")
+    parser.add_option("--resample-quality",
+                      metavar="resample-quality",
+                      type="int",
+                      default=9,
+                      help="Sets the resampler quality.")
+    parser.add_option("--resample-method",
+                      metavar="resample-method",
+                      type="int",
+                      default=4,
+                      help="Sets the resampler method.")
+    parser.add_option("--resample-sinc-filter-mode",
+                      metavar="resample-sinc-filter-mode",
+                      type="int",
+                      default=0,
+                      help="Sets the resampler sinc filter mode.")
+    parser.add_option("--resample-sinc-filter-interpolation",
+                      metavar="resample-sinc-filter-interpolation",
+                      type="int",
+                      default=1,
+                      help="Sets the resampler sinc filter interpolation.")
 
     # gpu acceleartion support
     parser.add_option("--gpu-acc",
@@ -796,9 +816,14 @@ postcohsrcs = spiirparts.mkPostcohSPIIROnline(
     cohfar_assignfar_refresh_interval,
     cohfar_assignfar_silent_time=options.cohfar_assignfar_silent_time,
     cohfar_assignfar_input_fname=options.cohfar_assignfar_input_fname,
+    resample_quality=options.resample_quality,
+    resample_method=options.resample_method,
+    resample_sinc_filter_mode=options.resample_sinc_filter_mode,
+    resample_sinc_filter_interpolation=options.
+    resample_sinc_filter_interpolation,
     feature_signal_removal_bg=options.feature_signal_removal_bg,
     feature_signal_removal_bg_threshold=options.
-    feature_signal_removal_bg_threshold
+    feature_signal_removal_bg_threshold,
     # or "%s-%s_Postcoh-%d-%d.xml.gz" % (lsctables.ifos_from_instrument_set(detectors.channel_dict.keys()).replace(",", ""), options.job_tag, int(detectors.seg[0]), int(abs(detectors.seg))),
 )
 

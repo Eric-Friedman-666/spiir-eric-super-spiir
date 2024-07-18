@@ -541,6 +541,10 @@ def mkPostcohSPIIROnline(pipeline,
                          cohfar_assignfar_refresh_interval=86400,
                          cohfar_assignfar_silent_time=2147483647,
                          cohfar_assignfar_input_fname=None,
+                         resample_quality=9,
+                         resample_method=4,
+                         resample_sinc_filter_mode=0,
+                         resample_sinc_filter_interpolation=1,
                          feature_signal_removal_bg=False,
                          feature_signal_removal_bg_threshold=8.5):
     #
@@ -617,6 +621,11 @@ def mkPostcohSPIIROnline(pipeline,
                 fir_whitener=fir_whitener,
                 statevector=statevector,
                 dqvector=dqvector,
+                resample_quality=resample_quality,
+                resample_method=resample_method,
+                resample_sinc_filter_mode=resample_sinc_filter_mode,
+                resample_sinc_filter_interpolation=
+                resample_sinc_filter_interpolation,
             )
         else:
             hoftdicts[instrument] = snglrate_datasource.mkwhitened_src(
@@ -636,6 +645,11 @@ def mkPostcohSPIIROnline(pipeline,
                 fir_whitener=fir_whitener,
                 statevector=statevector,
                 dqvector=dqvector,
+                resample_quality=resample_quality,
+                resample_method=resample_method,
+                resample_sinc_filter_mode=resample_sinc_filter_mode,
+                resample_sinc_filter_interpolation=
+                resample_sinc_filter_interpolation,
             )
 
     #

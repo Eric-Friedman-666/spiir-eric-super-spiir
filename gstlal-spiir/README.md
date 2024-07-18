@@ -147,3 +147,12 @@ gstlal_postcohspiir_inspiral_online
  - `finalsink-gracedb-far-threshold`: the threshold below which triggers will be submitted to appointed database.
  - `code-version`: the git commit hash used for this run.
  - `verbose`: printout verbose information
+
+### Resampler properties
+ You may also overwrite the default resampler properties with the following arguments.
+ - `resample-quality`
+ - `resample-method`
+ - `resample-sinc-filter-mode`
+ - `resample-sinc-filter-interpolation`
+
+See https://gstreamer.freedesktop.org/documentation/audioresample/index.html?gi-language=python#properties for more details.

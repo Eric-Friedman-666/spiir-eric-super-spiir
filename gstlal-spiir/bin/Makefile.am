@@ -26,3 +26,4 @@ dist_bin_SCRIPTS = \
 	gstlal_periodic_clean_skymap \
 	gstlal_periodic_postcohspiir_summarypage \
 	bayestar_plot_allsky_postcohspiir
+	
