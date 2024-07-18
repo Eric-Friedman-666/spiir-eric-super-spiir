@@ -24,24 +24,27 @@
  * ============================================================================
  */
 
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+#define NPY_NO_DEPRECATED_API NPY_1_23_API_VERSION
 
-#define PY_SSIZE_T_CLEAN
-#include <IFOMap.h>
-#include <Python.h>
-#include <lal/TimeSeries.h>
-#include <lal/Units.h>
-#include <numpy/ndarrayobject.h>
-#include <pipe_macro.h>
-#include <postcohtable.h>
+// Standard includes
 #include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
+// Python includes
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+#include <numpy/ndarrayobject.h>
+#include <py3c.h>
+#include <py3c/tpflags.h>
 #include <structmember.h>
 
-// NOTE: This must be included after Python.h due to redefinition of
-// _POSIX_C_SOURCE.
-// Revisit after python upgrade
-// See #15
-#include <string.h>
+// Our includes
+#include <IFOMap.h>
+#include <lal/TimeSeries.h>
+#include <lal/Units.h>
+#include <pipe_macro.h>
+#include <postcohtable.h>
 
 /*
  * ============================================================================
@@ -75,7 +78,7 @@ static void __del_snr_series__(PyObject *self) {
         return wrapper(self->complex8_snr_series->member);                     \
     }
 
-GENERIC_SNR_SERIES_GETTER(name, name, PyString_FromString)
+GENERIC_SNR_SERIES_GETTER(name, name, PyStr_FromString)
 GENERIC_SNR_SERIES_GETTER(epoch_gpsSeconds, epoch.gpsSeconds, PyInt_FromLong)
 GENERIC_SNR_SERIES_GETTER(epoch_gpsNanoSeconds,
                           epoch.gpsNanoSeconds,
@@ -87,7 +90,7 @@ GENERIC_SNR_SERIES_GETTER(data_length, data->length, PyInt_FromLong)
 static PyObject *get_sampleUnits(Complex8TimeSeriesWrapper *self,
                                  void *closure) {
     char *s = XLALUnitToString(&self->complex8_snr_series->sampleUnits);
-    PyObject *sampleUnits = PyString_FromString(s);
+    PyObject *sampleUnits = PyStr_FromString(s);
     XLALFree(s);
     return sampleUnits;
 }
@@ -95,7 +98,7 @@ static PyObject *get_sampleUnits(Complex8TimeSeriesWrapper *self,
 static PyObject *get_data(Complex8TimeSeriesWrapper *self, void *closure) {
     npy_intp snr_series_dims[1] = { self->complex8_snr_series->data->length };
     PyObject *data              = PyArray_SimpleNewFromData(
-                   1, snr_series_dims, NPY_CFLOAT, self->complex8_snr_series->data->data);
+      1, snr_series_dims, NPY_CFLOAT, self->complex8_snr_series->data->data);
     return data;
 }
 
@@ -115,7 +118,7 @@ static PyGetSetDef getset_snr_series[] = {
 
 static PyTypeObject snr_series_wrapper_type = {
     // clang-format off
-  PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
+  PyVarObject_HEAD_INIT(NULL, 0) // PyVarObject_HEAD_INIT includes a trailing comma
   .tp_basicsize = sizeof(Complex8TimeSeriesWrapper), // clang-format on
     .tp_doc = "SNR Series structure",
     .tp_flags =
@@ -127,8 +130,8 @@ static PyTypeObject snr_series_wrapper_type = {
 
 static Complex8TimeSeriesWrapper *
   new_wrapped_snr_series(COMPLEX8TimeSeries *complex8_snr_series) {
-    PyObject *pyModule =
-      PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *pyModule = PyImport_ImportModule(
+      "gstlal_spiir.pipemodules.postcohtable.postcohtable");
     PyObject *wrapped_snr_series_class =
       PyObject_GetAttrString(pyModule, "SNRSeries");
 
@@ -312,12 +315,11 @@ static PyMemberDef members_postcohinspiral[] = {
       "dec" },
     { "f_final", T_FLOAT,
       offsetof(PostcohInspiralWrapper, postcohtable.f_final), 0, "f_final" },
-    { "_process_id", T_LONG,
+    { "process_id", T_LONG,
       offsetof(PostcohInspiralWrapper, postcohtable.process_id), 0,
-      "process_id (long)" },
-    { "_event_id", T_LONG,
-      offsetof(PostcohInspiralWrapper, postcohtable.event_id), 0,
-      "event_id (long)" },
+      "process_id" },
+    { "event_id", T_LONG,
+      offsetof(PostcohInspiralWrapper, postcohtable.event_id), 0, "event_id" },
 
     // Things that are done single detector are ndarrays
     { "_end_time_sngl", T_OBJECT_EX,
@@ -344,7 +346,7 @@ static PyMemberDef members_postcohinspiral[] = {
 
 static PyTypeObject postcoh_inspiral_wrapper_type = {
     // clang-format off
-  PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
+  PyVarObject_HEAD_INIT(NULL, 0) // PyVarObject_HEAD_INIT includes a trailing comma
   .tp_basicsize = sizeof(PostcohInspiralWrapper), // clang-format on
     .tp_doc = "LAL's PostcohInspiral structure",
     .tp_flags =
@@ -356,8 +358,8 @@ static PyTypeObject postcoh_inspiral_wrapper_type = {
 
 static PostcohInspiralWrapper *
   new_wrapped_postcohtable(const PostcohInspiralTable *buffer_postcohtable) {
-    PyObject *pyModule =
-      PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *pyModule = PyImport_ImportModule(
+      "gstlal_spiir.pipemodules.postcohtable.postcohtable");
     PyObject *wrapped_postcohtable_class =
       PyObject_GetAttrString(pyModule, "PostcohInspiral");
 
@@ -370,13 +372,13 @@ static PostcohInspiralWrapper *
 
     self->postcohtable = *buffer_postcohtable;
 
-    self->ifos         = PyString_FromString(self->postcohtable.ifos);
-    self->pivotal_ifo  = PyString_FromString(self->postcohtable.pivotal_ifo);
-    self->skymap_fname = PyString_FromString(self->postcohtable.skymap_fname);
+    self->ifos         = PyStr_FromString(self->postcohtable.ifos);
+    self->pivotal_ifo  = PyStr_FromString(self->postcohtable.pivotal_ifo);
+    self->skymap_fname = PyStr_FromString(self->postcohtable.skymap_fname);
 
     npy_intp end_time_dims[2] = { MAX_NIFO, 2 };
     self->end_time_sngl       = PyArray_SimpleNewFromData(
-            2, end_time_dims, NPY_INT, self->postcohtable.end_time_sngl);
+      2, end_time_dims, NPY_INT, self->postcohtable.end_time_sngl);
 
     npy_intp dims[1] = { MAX_NIFO };
     self->snglsnr =
@@ -428,7 +430,7 @@ static PyMemberDef members_postcohtrigger[] = {
 
 static PyTypeObject postcohtrigger_type = {
     // clang-format off
-  PyObject_HEAD_INIT(NULL) // PyObject_HEAD_INIT includes a trailing comma
+  PyVarObject_HEAD_INIT(NULL, 0) // PyVarObject_HEAD_INIT includes a trailing comma
   .tp_basicsize = sizeof(PostcohTrigger), // clang-format on
     .tp_doc = "Postcoh Trigger structure",
     .tp_flags =
@@ -441,8 +443,8 @@ static PyTypeObject postcohtrigger_type = {
 static PyObject *
   new_postcohtrigger(const PostcohInspiralTable *buffer_postcohtable,
                      bool is_heartbeat) {
-    PyObject *pyModule =
-      PyImport_ImportModule("gstlal.pipemodules.postcohtable.postcohtable");
+    PyObject *pyModule = PyImport_ImportModule(
+      "gstlal_spiir.pipemodules.postcohtable.postcohtable");
     PyObject *postcohtrigger_class =
       PyObject_GetAttrString(pyModule, "PostcohTrigger");
 
@@ -487,7 +489,7 @@ static PyObject *from_buffer(PyObject *cls, PyObject *args) {
 
     if (PyErr_Occurred()) { return NULL; }
 
-    if (!PyArg_ParseTuple(args, "s#", &data, &length)) { return NULL; }
+    if (!PyArg_ParseTuple(args, "y#", &data, &length)) { return NULL; }
 
     Py_ssize_t num_triggers = length / sizeof(PostcohInspiralTable);
     if ((Py_ssize_t)(num_triggers * sizeof(PostcohInspiralTable)) != length) {
@@ -536,28 +538,37 @@ static struct PyMethodDef methods[] = {
     }
 };
 
-PyMODINIT_FUNC init_postcohtable(void) {
-    PyObject *module = Py_InitModule3(
-      MODULE_NAME, methods, "Wrapper for LAL's PostcohInspiralTable type.");
+PyMODINIT_FUNC PyInit__postcohtable(void) {
+    static struct PyModuleDef moduledef = {
+        PyModuleDef_HEAD_INIT,
+        .m_name    = MODULE_NAME,
+        .m_doc     = "Wrapper for LAL's PostcohInspiralTable type.",
+        .m_methods = methods,
+    };
 
-    if (module == NULL) return;
+    PyObject *module = PyModule_Create(&moduledef);
+    assert(!PyErr_Occurred());
+
     import_array();
+    if (PyErr_Occurred()) { return NULL; }
 
-    if (PyType_Ready(&postcoh_inspiral_wrapper_type) < 0) return;
+    if (PyType_Ready(&postcoh_inspiral_wrapper_type) < 0) return NULL;
     Py_INCREF(&postcoh_inspiral_wrapper_type);
 
     PyModule_AddObject(module, "PostcohInspiral",
                        (PyObject *)&postcoh_inspiral_wrapper_type);
 
-    if (PyType_Ready(&snr_series_wrapper_type) < 0) return;
+    if (PyType_Ready(&snr_series_wrapper_type) < 0) return NULL;
     Py_INCREF(&snr_series_wrapper_type);
 
     PyModule_AddObject(module, "SNRSeries",
                        (PyObject *)&snr_series_wrapper_type);
 
-    if (PyType_Ready(&postcohtrigger_type) < 0) return;
+    if (PyType_Ready(&postcohtrigger_type) < 0) return NULL;
     Py_INCREF(&postcohtrigger_type);
 
     PyModule_AddObject(module, "PostcohTrigger",
                        (PyObject *)&postcohtrigger_type);
+
+    return module;
 }
