@@ -121,15 +121,15 @@ static void _update_fars(PostcohInspiralTable *table,
     max_rank        = MAX(trigger_stats_get_val_from_map(
                      table->cohsnr, table->cmbchisq,
                      stats_1w->multistats[cmb_stats_idx]->rank->rank_map),
-                   max_rank);
+                          max_rank);
     max_rank        = MAX(trigger_stats_get_val_from_map(
                      table->cohsnr, table->cmbchisq,
                      stats_1d->multistats[cmb_stats_idx]->rank->rank_map),
-                   max_rank);
+                          max_rank);
     max_rank        = MAX(trigger_stats_get_val_from_map(
                      table->cohsnr, table->cmbchisq,
                      stats_2h->multistats[cmb_stats_idx]->rank->rank_map),
-                   max_rank);
+                          max_rank);
     table->rank     = max_rank;
 
     table->far_1w = _calculate_far(stats_1w->multistats[cmb_stats_idx],
@@ -194,7 +194,6 @@ static void _set_background_stats(PostcohInspiralTable *table,
         }
     }
 }
-
 
 /*
  * ============================================================================
@@ -302,7 +301,7 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
                 _update_fars(table, element);
             }
 
-	    _set_background_stats(table, element);
+            _set_background_stats(table, element);
         }
         gst_buffer_unmap(buf, &mapInfo);
     }
