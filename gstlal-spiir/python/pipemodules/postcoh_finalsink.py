@@ -484,8 +484,13 @@ class FinalSink(object):
                  negative_latency=0,
                  append_psd_to_coincs_doc=True,
                  expected_buffers_per_timestamp=None,
+                 feature_best_far=False,
+                 feature_best_far_threshold=0,
                  verbose=False):
-        #
+        # best far
+        self.enable_feature_best_far = feature_best_far
+        self.best_far_threshold = feature_best_far_threshold
+        
         # initialize
         #
         self.lock = threading.Lock()
@@ -837,15 +842,71 @@ class FinalSink(object):
             self.cluster_boundary = self.cluster_boundary + self.cluster_window
             return True
 
-    def __set_far(self, postcoh_inspiral):
-        postcoh_inspiral.far = (max(postcoh_inspiral.far_2h,
-                                    postcoh_inspiral.far_1d,
-                                    postcoh_inspiral.far_1w)) * self.far_factor
-        far_sngl = [
-            (max(fars) * self.far_factor)
-            for fars in zip(postcoh_inspiral.far_2h_sngl, postcoh_inspiral.
-                            far_1d_sngl, postcoh_inspiral.far_1w_sngl)
+    def __filter_zero_fars(self, fars):
+        filtered_fars = []
+        for far in fars:
+            if far > 0:
+                filtered_fars.append(far)
+
+        if len(filtered_fars) == 0:
+            filtered_fars.append(0)
+
+        return filtered_fars
+
+    # Return all non-zero fars where the nevents meet the required threshold
+    # If all are zero, return [0]
+    def __get_valid_fars(self, fars, nevents):
+        gated_fars = [
+            fars[i] if nevents[i] > self.best_far_threshold else 0
+            for i in range(len(fars))
         ]
+        return self.__filter_zero_fars(gated_fars)
+
+    def __get_valid_combined_fars(self, postcoh_inspiral):
+        combined_fars = [
+            postcoh_inspiral.far_1w, postcoh_inspiral.far_1d,
+            postcoh_inspiral.far_2h
+        ]
+        combined_nevents = [
+            postcoh_inspiral.nevent_1w, postcoh_inspiral.nevent_1d,
+            postcoh_inspiral.nevent_2h
+        ]
+
+        return self.__get_valid_fars(combined_fars, combined_nevents)
+
+    def __get_valid_single_fars(self, postcoh_inspiral):
+        
+        ifo_fars = list(zip(postcoh_inspiral.far_1w_sngl,
+                        postcoh_inspiral.far_1d_sngl,
+                        postcoh_inspiral.far_2h_sngl))
+        ifo_nevents = list(zip(postcoh_inspiral.nevent_1w_sngl,
+                           postcoh_inspiral.nevent_1d_sngl,
+                           postcoh_inspiral.nevent_2h_sngl))
+
+        return [ self.__get_valid_fars(ifo_fars[i], ifo_nevents[i])
+                for i in range(len(ifo_fars))
+
+        ]
+
+    def __set_far(self, postcoh_inspiral):
+        if self.enable_feature_best_far:
+            valid_combined_fars = self.__get_valid_combined_fars(
+                postcoh_inspiral)
+            valid_single_fars = self.__get_valid_single_fars(postcoh_inspiral)
+
+            postcoh_inspiral.far = min(valid_combined_fars) * self.far_factor
+            far_sngl = [
+                min(fars) * self.far_factor for fars in valid_single_fars
+            ]
+        else:
+            postcoh_inspiral.far = (max(
+                postcoh_inspiral.far_2h, postcoh_inspiral.far_1d,
+                postcoh_inspiral.far_1w)) * self.far_factor
+            far_sngl = [
+                (max(fars) * self.far_factor)
+                for fars in zip(postcoh_inspiral.far_2h_sngl, postcoh_inspiral.
+                                far_1d_sngl, postcoh_inspiral.far_1w_sngl)
+            ]
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
             postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
 

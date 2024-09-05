@@ -20,6 +20,12 @@ class PostcohInspiralTable(table.Table):
                 ("end_time_ns", "int_4s"),
                 ("is_background", "int_4s"),
                 ("livetime", "int_4s"),
+                ("livetime_1w", "int_4s"),
+                ("livetime_1d", "int_4s"),
+                ("livetime_2h", "int_4s"),
+                ("nevent_1w", "int_4s"),
+                ("nevent_1d", "int_4s"),
+                ("nevent_2h", "int_4s"),
                 ("ifos", "lstring"),
                 ("pivotal_ifo", "lstring"),
                 ("tmplt_idx", "int_4s"),
@@ -60,6 +66,18 @@ class PostcohInspiralTable(table.Table):
             list(("far_1d_sngl_" + name, "real_4")
                  for name in pipe_macro.IFO_MAP),
             list(("far_1w_sngl_" + name, "real_4")
+                 for name in pipe_macro.IFO_MAP),
+            list(("livetime_1w_sngl_" + name, "int_4s")
+                 for name in pipe_macro.IFO_MAP),
+            list(("livetime_1d_sngl_" + name, "int_4s")
+                 for name in pipe_macro.IFO_MAP),
+            list(("livetime_2h_sngl_" + name, "int_4s")
+                 for name in pipe_macro.IFO_MAP),
+            list(("nevent_1w_sngl_" + name, "int_4s")
+                 for name in pipe_macro.IFO_MAP),
+            list(("nevent_1d_sngl_" + name, "int_4s")
+                 for name in pipe_macro.IFO_MAP),
+            list(("nevent_2h_sngl_" + name, "int_4s")
                  for name in pipe_macro.IFO_MAP),
             list(("snglsnr_" + name, "real_4") for name in pipe_macro.IFO_MAP),
             list(
