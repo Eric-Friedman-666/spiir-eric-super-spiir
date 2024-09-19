@@ -239,6 +239,7 @@ def parse_command_line():
         metavar="seconds",
         default=86400,
         help="How often to update the marginalized stats files. (optional)")
+
     parser.add_option(
         "--cohfar-assignfar-silent-time",
         type="int",
@@ -255,6 +256,20 @@ def parse_command_line():
         default=8.5,
         help=
         "Single detector newsnr threshold above which a background event will be removed. Enabled with --feature-signal-removal-bg."
+    )
+    parser.add_option(
+        "--feature-best-far",
+        action="store_true",
+        help=
+        "Enable to select the best (lowest) FAR rather than the worst (highest) FAR from the three timescales."
+    )
+    parser.add_option(
+        "--feature-best-far-threshold",
+        type="int",
+        metavar="nevent",
+        default=10000000,
+        help=
+        "The minimum number of events for a background timescale to be considered. Enabled with --feature-best-far."
     )
     parser.add_option(
         "--finalsink-fapupdater-collect-walltime",
@@ -554,6 +569,14 @@ def parse_command_line():
         raise ValueError(
             "only coherent searches are supported:    must process data from at least two antennae"
         )
+
+    num_far_timescales = len(
+        options.finalsink_fapupdater_collect_walltime.split(','))
+    if num_far_timescales != 3:
+        raise ValueError(
+            "Expected 3 far timescales, but '--finalsink-fapupdater-collect-walltime' is '%s'"
+            % options.finalsink_fapupdater_collect_walltime)
+
 
     # Remove DQ and State defaults, see https://git.ligo.org/lscsoft/spiir/-/merge_requests/197
     if options.state_channel_name is None:
@@ -867,6 +890,8 @@ finalsink = postcoh_finalsink.FinalSink(
     negative_latency=neg_lat,
     append_psd_to_coincs_doc=not options.skip_psd_upload,
     expected_buffers_per_timestamp=len(postcohsrcs),
+    feature_best_far=options.feature_best_far,
+    feature_best_far_threshold=options.feature_best_far_threshold,
     verbose=options.verbose)
 
 logger.info(" output document initialized")

@@ -214,6 +214,12 @@ typedef struct {
     PyObject *far_1w_sngl;
     PyObject *far_1d_sngl;
     PyObject *far_2h_sngl;
+    PyObject *livetime_1w_sngl;
+    PyObject *livetime_1d_sngl;
+    PyObject *livetime_2h_sngl;
+    PyObject *nevent_1w_sngl;
+    PyObject *nevent_1d_sngl;
+    PyObject *nevent_2h_sngl;
     PyObject *deff;
 } PostcohInspiralWrapper;
 
@@ -231,6 +237,12 @@ static void __del_postcohinspiral__(PyObject *self) {
     Py_XDECREF(self_typed->far_1w_sngl);
     Py_XDECREF(self_typed->far_1d_sngl);
     Py_XDECREF(self_typed->far_2h_sngl);
+    Py_XDECREF(self_typed->livetime_1w_sngl);
+    Py_XDECREF(self_typed->livetime_1d_sngl);
+    Py_XDECREF(self_typed->livetime_2h_sngl);
+    Py_XDECREF(self_typed->nevent_1w_sngl);
+    Py_XDECREF(self_typed->nevent_1d_sngl);
+    Py_XDECREF(self_typed->nevent_2h_sngl);
     Py_XDECREF(self_typed->deff);
 
     Py_TYPE(self)->tp_free(self);
@@ -256,6 +268,24 @@ static PyMemberDef members_postcohinspiral[] = {
       "is_background" },
     { "livetime", T_INT,
       offsetof(PostcohInspiralWrapper, postcohtable.livetime), 0, "livetime" },
+    { "livetime_1w", T_INT,
+      offsetof(PostcohInspiralWrapper, postcohtable.livetime_1w), 0,
+      "livetime_1w" },
+    { "livetime_1d", T_INT,
+      offsetof(PostcohInspiralWrapper, postcohtable.livetime_1d), 0,
+      "livetime_1d" },
+    { "livetime_2h", T_INT,
+      offsetof(PostcohInspiralWrapper, postcohtable.livetime_2h), 0,
+      "livetime_2h" },
+    { "nevent_1w", T_INT,
+      offsetof(PostcohInspiralWrapper, postcohtable.nevent_1w), 0,
+      "nevent_1w" },
+    { "nevent_1d", T_INT,
+      offsetof(PostcohInspiralWrapper, postcohtable.nevent_1d), 0,
+      "nevent_1d" },
+    { "nevent_2h", T_INT,
+      offsetof(PostcohInspiralWrapper, postcohtable.nevent_2h), 0,
+      "nevent_2h" },
     { "tmplt_idx", T_INT,
       offsetof(PostcohInspiralWrapper, postcohtable.tmplt_idx), 0,
       "tmplt_idx" },
@@ -339,6 +369,24 @@ static PyMemberDef members_postcohinspiral[] = {
       READONLY, "far_1d_sngl" },
     { "far_2h_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_2h_sngl),
       READONLY, "far_2h_sngl" },
+    { "livetime_1w_sngl", T_OBJECT_EX,
+      offsetof(PostcohInspiralWrapper, livetime_1w_sngl), READONLY,
+      "livetime_1w_sngl" },
+    { "livetime_1d_sngl", T_OBJECT_EX,
+      offsetof(PostcohInspiralWrapper, livetime_1d_sngl), READONLY,
+      "livetime_1d_sngl" },
+    { "livetime_2h_sngl", T_OBJECT_EX,
+      offsetof(PostcohInspiralWrapper, livetime_2h_sngl), READONLY,
+      "livetime_2h_sngl" },
+    { "nevent_1w_sngl", T_OBJECT_EX,
+      offsetof(PostcohInspiralWrapper, nevent_1w_sngl), READONLY,
+      "nevent_1w_sngl" },
+    { "nevent_1d_sngl", T_OBJECT_EX,
+      offsetof(PostcohInspiralWrapper, nevent_1d_sngl), READONLY,
+      "nevent_1d_sngl" },
+    { "nevent_2h_sngl", T_OBJECT_EX,
+      offsetof(PostcohInspiralWrapper, nevent_2h_sngl), READONLY,
+      "nevent_2h_sngl" },
     { "deff", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, deff), READONLY,
       "deff" },
     { NULL },
@@ -395,6 +443,18 @@ static PostcohInspiralWrapper *
       1, dims, NPY_FLOAT, self->postcohtable.far_1d_sngl);
     self->far_2h_sngl = PyArray_SimpleNewFromData(
       1, dims, NPY_FLOAT, self->postcohtable.far_2h_sngl);
+    self->livetime_1w_sngl = PyArray_SimpleNewFromData(
+      1, dims, NPY_INT, self->postcohtable.livetime_1w_sngl);
+    self->livetime_1d_sngl = PyArray_SimpleNewFromData(
+      1, dims, NPY_INT, self->postcohtable.livetime_1d_sngl);
+    self->livetime_2h_sngl = PyArray_SimpleNewFromData(
+      1, dims, NPY_INT, self->postcohtable.livetime_2h_sngl);
+    self->nevent_1w_sngl = PyArray_SimpleNewFromData(
+      1, dims, NPY_INT, self->postcohtable.nevent_1w_sngl);
+    self->nevent_1d_sngl = PyArray_SimpleNewFromData(
+      1, dims, NPY_INT, self->postcohtable.nevent_1d_sngl);
+    self->nevent_2h_sngl = PyArray_SimpleNewFromData(
+      1, dims, NPY_INT, self->postcohtable.nevent_2h_sngl);
     self->deff =
       PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, self->postcohtable.deff);
 
