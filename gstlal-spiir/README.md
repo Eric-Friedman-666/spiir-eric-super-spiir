@@ -51,7 +51,7 @@ gstlal_postcohspiir_inspiral_online
         --job-tag pcdev11 
         --iir-bank  H1:/mnt/qfs3/joel.bosveld/online/banks/gstlal_iir_bank_split/iir_H1-GSTLAL_SPLIT_BANK_0000-a1-0-0.xml.gz,L1:/mnt/qfs3/joel.bosveld/online/banks/gstlal_iir_bank_split/iir_L1-GSTLAL_SPLIT_BANK_0000-a1-0-0.xml.gz,V1:/mnt/qfs3/joel.bosveld/online/banks/gstlal_iir_bank_split/iir_V1-GSTLAL_SPLIT_BANK_0000-a1-0-0.xml.gz
         --iir-bank H1:/mnt/qfs3/joel.bosveld/online/banks/gstlal_iir_bank_split/iir_H1-GSTLAL_SPLIT_BANK_0001-a1-0-0.xml.gz,L1:/mnt/qfs3/joel.bosveld/online/banks/gstlal_iir_bank_split/iir_L1-GSTLAL_SPLIT_BANK_0001-a1-0-0.xml.gz,V1:/mnt/qfs3/joel.bosveld/online/banks/gstlal_iir_bank_split/iir_V1-GSTLAL_SPLIT_BANK_0001-a1-0-0.xml.gz
-        --gpu-acc on
+        --gpu-acc
         --data-source lvshm
         --request-data O2Replay_H1_L1_V1
         --shared-memory-partition V1=K1VIRGO_Data
@@ -90,6 +90,8 @@ gstlal_postcohspiir_inspiral_online
         --check-time-stamp 
         --feature-signal-removal-bg
         --feature-signal-removal-bg-threshold 8.5
+        --feature-best-far
+        --feature-best-far-threshold 10000000
         --finalsink-fapupdater-collect-walltime 604800,86400,7200
         --finalsink-fapupdater-update-interval 1800
         --finalsink-output-prefix lzerolag 
@@ -135,6 +137,8 @@ gstlal_postcohspiir_inspiral_online
  - `check-time-stamp`: check if the data is continously flowing in the pipeline.
  - `feature-signal-removal-bg`: Enable the feature 'signal-removal-bg' to remove signals from background collection.
  - `feature-signal-removal-bg-threshold`: The newsnr threshold on single detectors above which to classify signals for removal from backgroud.
+ - `feature-best-far`: Enable the feature 'best-far' to select the best, rather than worst, far from the three timescales.
+ - `feature-best-far-threshold`: The minimum number of events for a background timescale to be considered. Enabled with --feature-best-far.
  - `finalsink-output-prefix`: the prefix for the zerolag output files.
  - `finalsink-fapupdater-collect-walltime`: How long we collect backgrounds for FAR estimations. Usually three scales spanning 1week, 1day, or 2hours. 
  - `finalsink-fapupdater-update-interval`: A FAR mapping is derived from the collected background for each of different scales set above.
