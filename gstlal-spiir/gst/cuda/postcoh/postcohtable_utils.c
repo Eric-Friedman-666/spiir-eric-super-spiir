@@ -154,36 +154,6 @@ void postcohtable_set_line(GString *line,
                            xtable->delimiter->str);
     g_string_append_printf(line, "%d%s", table->livetime,
                            xtable->delimiter->str);
-    g_string_append_printf(line, "%d%s", table->livetime_1w,
-                           xtable->delimiter->str);
-    g_string_append_printf(line, "%d%s", table->livetime_1d,
-                           xtable->delimiter->str);
-    g_string_append_printf(line, "%d%s", table->livetime_2h,
-                           xtable->delimiter->str);
-    for (int i = 0; i < MAX_NIFO; ++i) {
-        g_string_append_printf(line, "%d%s", table->livetime_1w_sngl[i],
-                               xtable->delimiter->str);
-        g_string_append_printf(line, "%d%s", table->livetime_1d_sngl[i],
-                               xtable->delimiter->str);
-        g_string_append_printf(line, "%d%s", table->livetime_2h_sngl[i],
-                               xtable->delimiter->str);
-    }
-
-    g_string_append_printf(line, "%d%s", table->nevent_1w,
-                           xtable->delimiter->str);
-    g_string_append_printf(line, "%d%s", table->nevent_1d,
-                           xtable->delimiter->str);
-    g_string_append_printf(line, "%d%s", table->nevent_2h,
-                           xtable->delimiter->str);
-    for (int i = 0; i < MAX_NIFO; ++i) {
-        g_string_append_printf(line, "%d%s", table->nevent_1w_sngl[i],
-                               xtable->delimiter->str);
-        g_string_append_printf(line, "%d%s", table->nevent_1d_sngl[i],
-                               xtable->delimiter->str);
-        g_string_append_printf(line, "%d%s", table->nevent_2h_sngl[i],
-                               xtable->delimiter->str);
-    }
-
     g_string_append_printf(line, "%s%s", table->ifos, xtable->delimiter->str);
     g_string_append_printf(line, "%s%s", table->pivotal_ifo,
                            xtable->delimiter->str);
@@ -219,7 +189,6 @@ void postcohtable_set_line(GString *line,
         g_string_append_printf(line, "%g%s", table->far_sngl[i],
                                xtable->delimiter->str);
     }
-    
     g_string_append_printf(line, "%g%s", table->far_2h, xtable->delimiter->str);
     g_string_append_printf(line, "%g%s", table->far_1d, xtable->delimiter->str);
     g_string_append_printf(line, "%g%s", table->far_1w, xtable->delimiter->str);
@@ -239,7 +208,6 @@ void postcohtable_set_line(GString *line,
     g_string_append_printf(line, "%g%s", table->spin2z, xtable->delimiter->str);
     g_string_append_printf(line, "%lg%s", table->ra, xtable->delimiter->str);
     g_string_append_printf(line, "%lg%s", table->dec, xtable->delimiter->str);
-    
     for (int i = 0; i < MAX_NIFO; ++i) {
         g_string_append_printf(line, "%lg%s", table->deff[i],
                                xtable->delimiter->str);
