@@ -255,6 +255,9 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
                     intable->cohsnr);
         }
         if (intable->is_background == FLAG_BACKGROUND) {
+            if (ifo_set__count(table_ifos) == 1)
+                continue;  // Skip updating stats file for single-detector trigger
+
             trigger_stats_update_stats(
               bgstats, intable,
               table_ifos); // update the last combination and single IFO stats
