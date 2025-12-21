@@ -565,11 +565,10 @@ def parse_command_line():
     # parse the datasource specific information and do option checking
     detectors = datasource.DataSourceInfo.from_optparse(options)
 
-    if len(detectors.channel_dict) < 2:
-        raise ValueError(
-            "only coherent searches are supported:    must process data from at least two antennae"
-        )
-
+    # if len(detectors.channel_dict) < 2:
+    #     raise ValueError(
+    #         "only coherent searches are supported:    must process data from at least two antennae"
+    #     )
     num_far_timescales = len(
         options.finalsink_fapupdater_collect_walltime.split(','))
     if num_far_timescales != 3:

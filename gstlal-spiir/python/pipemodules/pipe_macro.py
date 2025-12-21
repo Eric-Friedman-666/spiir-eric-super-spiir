@@ -57,7 +57,7 @@ def get_ifo_combos(ifos):
     ifo_idx_sorted = sorted([IFO_MAP.index(ifo) for ifo in ifos])
     sorted_ifo_list = [IFO_MAP[ifo_idx] for ifo_idx in ifo_idx_sorted]
     ifo_combos = []
-    for combo_len in range(2, len(sorted_ifo_list) + 1):
+    for combo_len in range(1, len(sorted_ifo_list) + 1):
         this_combo_list = list(
             itertools.combinations(sorted_ifo_list, combo_len))
         combo_str_list = [
