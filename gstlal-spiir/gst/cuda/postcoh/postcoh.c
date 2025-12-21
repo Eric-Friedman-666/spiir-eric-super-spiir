@@ -1944,7 +1944,8 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
     g_mutex_unlock(&postcoh->prop_lock);
 
     CUDA_CHECK(cudaSetDevice(postcoh->device_id));
-    // GstElement *element = GST_ELEMENT(postcoh);    GstClockTime t_latest_start;
+    // GstElement *element = GST_ELEMENT(postcoh);    
+    GstClockTime t_latest_start;
     GstFlowReturn res;
     guint64 offset_latest_start = 0;
     gsize common_size           = 0;
