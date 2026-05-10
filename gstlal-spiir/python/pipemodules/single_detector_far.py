@@ -523,11 +523,14 @@ def json_load_float(value):
 class SingleFarLlrBackgroundFile(object):
     """Persistent single-detector FAR-LLR background.
 
-    This is intentionally a one-dimensional rank/livetime file.  It is not the
-    coherent two-dimensional XML statistics file used by cohfar.
+    This is intentionally a one-dimensional LLR-to-FAR calibration file.  It is
+    not the coherent two-dimensional XML statistics file used by cohfar, and it
+    is not the raw trigger-background stream.  Cold-start runs can build the
+    first fit from direct rank-tail FAR points; later runs should assign FAR by
+    evaluating the stored fitted mapping.
     """
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self, ifos=None, model=None, backgrounds=None):
         self.ifos = tuple(ifos or ())
@@ -552,10 +555,12 @@ class SingleFarLlrBackgroundFile(object):
         directory = os.path.dirname(os.path.abspath(filename))
         if directory and not os.path.exists(directory):
             os.makedirs(directory)
+        for background in self.backgrounds.values():
+            background.prepare_for_dump()
         data = {
             "version": self.VERSION,
             "created_utc": datetime.datetime.utcnow().isoformat() + "Z",
-            "description": "single-detector FAR-LLR rank background and livetime",
+            "description": "single-detector FAR-LLR fit background",
             "ifos": list(self.ifos),
             "likelihood_model": (self.model.to_dict()
                                  if self.model is not None else None),
@@ -828,9 +833,15 @@ class SingleDetectorResult(object):
 class RankBackground(object):
     """One-dimensional background accumulator in rank space."""
 
+    FIT_KIND = "log_linear_llr_far"
+
     def __init__(self):
         self._ranks = []
         self.livetime = 0.0
+        self.fit_points = []
+        self.fit_kind = self.FIT_KIND
+        self.fit_created_utc = None
+        self.fit_source = "none"
 
     def add_rank(self, rank):
         bisect.insort(self._ranks, float(rank))
@@ -845,6 +856,11 @@ class RankBackground(object):
     def merge(self, other):
         self.extend_ranks(other._ranks)
         self.add_livetime(other.livetime)
+        if other.fit_points:
+            self.fit_points = list(other.fit_points)
+            self.fit_kind = other.fit_kind
+            self.fit_created_utc = other.fit_created_utc
+            self.fit_source = other.fit_source
 
     def count_ge(self, rank):
         idx = bisect.bisect_left(self._ranks, float(rank))
@@ -855,10 +871,74 @@ class RankBackground(object):
             return 0.0
         return self.count_ge(rank) / float(len(self._ranks))
 
-    def far(self, rank):
+    def direct_far(self, rank):
         if self.livetime <= 0.0:
             return 0.0
         return self.count_ge(rank) / self.livetime
+
+    def has_far_fit(self):
+        return len(self.fit_points) > 0
+
+    def far(self, rank):
+        if self.has_far_fit():
+            return self.fitted_far(rank)
+        return self.direct_far(rank)
+
+    def fitted_far(self, rank):
+        """Evaluate the stored LLR-to-FAR fit.
+
+        The fit is a conservative piecewise log-linear interpolation of
+        calibration points (rank, FAR).  Outside the calibrated rank range it
+        clamps to the nearest calibrated FAR instead of extrapolating beyond
+        the available background support.
+        """
+
+        if not self.fit_points:
+            return self.direct_far(rank)
+
+        rank = float(rank)
+        points = self.fit_points
+        if rank <= points[0][0]:
+            return points[0][1]
+        if rank >= points[-1][0]:
+            return points[-1][1]
+
+        ranks = [point[0] for point in points]
+        idx = bisect.bisect_right(ranks, rank)
+        left_rank, left_far = points[idx - 1]
+        right_rank, right_far = points[idx]
+        if right_rank == left_rank:
+            return min(left_far, right_far)
+
+        log_left = safe_log_far(left_far)
+        log_right = safe_log_far(right_far)
+        frac = (rank - left_rank) / (right_rank - left_rank)
+        return math.exp(log_left + frac * (log_right - log_left))
+
+    def prepare_for_dump(self, max_points=2000):
+        if self.livetime > 0.0 and self._ranks:
+            self.rebuild_far_fit(max_points=max_points)
+
+    def rebuild_far_fit(self, max_points=2000):
+        """Build calibration points for the production LLR-to-FAR lookup."""
+
+        if self.livetime <= 0.0 or not self._ranks:
+            return
+
+        points = []
+        n_ranks = len(self._ranks)
+        idx = 0
+        while idx < n_ranks:
+            rank = self._ranks[idx]
+            next_idx = bisect.bisect_right(self._ranks, rank, idx)
+            count_ge = n_ranks - idx
+            points.append((rank, count_ge / self.livetime))
+            idx = next_idx
+
+        self.fit_points = compact_fit_points(points, max_points=max_points)
+        self.fit_kind = self.FIT_KIND
+        self.fit_created_utc = datetime.datetime.utcnow().isoformat() + "Z"
+        self.fit_source = "direct_rank_tail_bootstrap_or_update"
 
     def __len__(self):
         return len(self._ranks)
@@ -868,6 +948,15 @@ class RankBackground(object):
             "livetime": self.livetime,
             "ranks": list(self._ranks),
             "count": len(self._ranks),
+            "far_fit": {
+                "kind": self.fit_kind,
+                "created_utc": self.fit_created_utc,
+                "source": self.fit_source,
+                "points": [
+                    {"rank": rank, "far": far}
+                    for rank, far in self.fit_points
+                ],
+            },
         }
 
     @classmethod
@@ -875,7 +964,39 @@ class RankBackground(object):
         bg = cls()
         bg.livetime = float(data.get("livetime", 0.0) or 0.0)
         bg._ranks = sorted(float(rank) for rank in data.get("ranks", []))
+        fit_data = data.get("far_fit", {}) or {}
+        bg.fit_kind = fit_data.get("kind", cls.FIT_KIND)
+        bg.fit_created_utc = fit_data.get("created_utc")
+        bg.fit_source = fit_data.get("source", "loaded")
+        bg.fit_points = sorted(
+            (float(point["rank"]), float(point["far"]))
+            for point in fit_data.get("points", [])
+            if point.get("far") is not None and float(point.get("far")) > 0.0)
         return bg
+
+
+def safe_log_far(far):
+    far = float(far)
+    if far <= 0.0:
+        far = 1.0e-300
+    return math.log(far)
+
+
+def compact_fit_points(points, max_points=2000):
+    points = list(points)
+    if not points:
+        return []
+    max_points = max(2, int(max_points))
+    if len(points) <= max_points:
+        return points
+
+    selected = []
+    last_idx = len(points) - 1
+    for out_idx in range(max_points):
+        source_idx = int(round(out_idx * last_idx / float(max_points - 1)))
+        if not selected or selected[-1] != points[source_idx]:
+            selected.append(points[source_idx])
+    return selected
 
 
 def neg_log10_far(far):
