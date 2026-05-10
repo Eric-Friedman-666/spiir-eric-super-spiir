@@ -255,6 +255,9 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
                     intable->cohsnr);
         }
         if (intable->is_background == FLAG_BACKGROUND) {
+            if (ifo_set__count(table_ifos) == 1)
+                continue;  // Skip updating stats file for single-detector trigger
+
             trigger_stats_update_stats(
               bgstats, intable,
               table_ifos); // update the last combination and single IFO stats
@@ -266,30 +269,29 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
             memcpy(outtable, intable, sizeof(PostcohInspiralTable));
             outtable++;
         } else {
-            int nifo = ifo_set__count(table_ifos);
-            if (nifo > 1) {
-                trigger_stats_livetime_inc(
-                  bgstats->multistats,
-                  trigger_stats_num_stats(bgstats->enabled_ifos) - 1);
-                trigger_stats_livetime_inc(
-                  zlstats->multistats,
-                  trigger_stats_num_stats(zlstats->enabled_ifos) - 1);
+            // int nifo = ifo_set__count(table_ifos);
+            // if (nifo > 1) {
+            trigger_stats_livetime_inc(
+              bgstats->multistats,
+              trigger_stats_num_stats(bgstats->enabled_ifos) - 1);
+            trigger_stats_livetime_inc(
+              zlstats->multistats,
+              trigger_stats_num_stats(zlstats->enabled_ifos) - 1);
 
-                // update single-IFO background according the single-IFO
-                // decomposition
-                for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO;
-                     ifo_id++) {
-                    if (ifo_set__contains(bgstats->enabled_ifos, ifo_id)) {
-                        if (ifo_set__contains(table_ifos, ifo_id)) {
-                            trigger_stats_livetime_inc(bgstats->multistats,
-                                                       stats_idx);
-                            trigger_stats_livetime_inc(zlstats->multistats,
-                                                       stats_idx);
-                        }
-                        stats_idx++;
+            // update single-IFO background according the single-IFO
+            // decomposition
+            for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ifo_id++) {
+                if (ifo_set__contains(bgstats->enabled_ifos, ifo_id)) {
+                    if (ifo_set__contains(table_ifos, ifo_id)) {
+                        trigger_stats_livetime_inc(bgstats->multistats,
+                                                   stats_idx);
+                        trigger_stats_livetime_inc(zlstats->multistats,
+                                                   stats_idx);
                     }
+                    stats_idx++;
                 }
             }
+            // }
             memcpy(outtable, intable, sizeof(PostcohInspiralTable));
             outtable++;
         }

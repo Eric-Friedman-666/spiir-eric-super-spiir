@@ -159,9 +159,10 @@ void bins2D_long_destroy(Bins2D *bins) {
 // We only create TriggerStats for each individual IFO and their final
 // total combination (e.g. (H1, L1, H1L1) or (H1, L1, V1, H1L1V1))
 // Thus, the total number of combinations is the number of individual IFOs
-// in the ifo_set + 1
+// in the ifo_set + 1 (unless only one detector is used)
 int trigger_stats_num_stats(const ifo_set_type ifos) {
-    return ifo_set__count(ifos) + 1;
+    int ifos_count = ifo_set__count(ifos);
+    return ifos_count == 1 ? 1 : ifos_count + 1;
 }
 
 void trigger_stats_reset(TriggerStats **multistats, int num_stats) {

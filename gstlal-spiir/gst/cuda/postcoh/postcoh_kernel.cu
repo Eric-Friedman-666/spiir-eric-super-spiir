@@ -479,7 +479,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
                 dk[j] = snr[j][tmplt_cur * len
                                + ring_index(start_exe + len_cur + NtOff, len)];
             }
-            if (num_coh_ifos == 2) {
+            if (num_coh_ifos <= 2) {
                 for (int k = 0; k < nifo; ++k) {
                     snr_tmp += bitset_contains(coh_ifo_bitset, k)
                                * (dk[k].re * dk[k].re + dk[k].im * dk[k].im);
@@ -684,7 +684,7 @@ __global__ void ker_coh_max_and_chisq_versatile(
                       snr[j][len * tmplt_cur
                              + ring_index(start_exe + len_cur + offset, len)];
                 }
-                if (num_coh_ifos == 2) {
+                if (num_coh_ifos <= 2) {
                     for (int k = 0; k < nifo; ++k) {
                         snr_tmp +=
                           bitset_contains(coh_ifo_bitset, k)

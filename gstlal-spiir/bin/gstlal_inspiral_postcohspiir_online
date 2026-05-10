@@ -600,9 +600,9 @@ def parse_command_line():
 
     # parse the datasource specific information and do option checking
     detectors = datasource.GWDataSourceInfo(options)
-    if len(detectors.channel_dict) < 2:
+    if len(detectors.channel_dict) < 1:
         raise ValueError(
-            "only coherent searches are supported: must process data from at least two antennae"
+            "must process data from at least one antenna"
         )
 
     num_far_timescales = len(
