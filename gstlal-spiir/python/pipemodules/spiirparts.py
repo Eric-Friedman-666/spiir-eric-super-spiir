@@ -37,6 +37,7 @@ pygst.require('0.10')
 import gst
 
 import math
+import os
 import sys
 import numpy as np
 import warnings
@@ -51,6 +52,25 @@ from gstlal import pipemodules
 from gstlal import simulation
 from gstlal.pipemodules import snglrate_datasource
 from gstlal.spiirbank import spiir_utils
+
+
+def _postcoh_analysis_mode():
+    mode = os.environ.get("PIPELINE_MODE", "multi").lower()
+    if mode not in ("single", "multi"):
+        raise ValueError("PIPELINE_MODE must be either 'single' or 'multi'")
+    return mode
+
+
+def _single_detector_postcoh_prefix(output_prefix_list, output_name_list, i_dict):
+    if output_prefix_list is not None:
+        dirname = os.path.dirname(output_prefix_list[i_dict])
+        basename = os.path.basename(output_prefix_list[i_dict])
+        basename = basename.replace("bank", "sdpostcoh", 1)
+        basename = basename.replace("_stats", "")
+        return os.path.join(dirname, basename)
+    if output_name_list is not None:
+        return output_name_list[i_dict].replace(".xml.gz", "_single_postcoh")
+    return "sdpostcoh%d" % i_dict
 
 
 def mkSPIIRmulti(pipeline,
@@ -708,6 +728,7 @@ def mkPostcohSPIIROnline(pipeline,
     if chisq_type not in ['autochisq']:
         raise ValueError("chisq_type must be either 'autochisq', given %s" %
                          chisq_type)
+    analysis_mode = _postcoh_analysis_mode()
 
     #
     # extract segments from the injection file for selected reconstruction
@@ -891,6 +912,23 @@ def mkPostcohSPIIROnline(pipeline,
         if verbose:
             postcoh = pipeparts.mkprogressreport(
                 pipeline, postcoh, "progress_xml_dump_bank_stream%d" % i_dict)
+
+        if analysis_mode == "single":
+            single_postcoh_prefix = _single_detector_postcoh_prefix(
+                cohfar_accumbackground_output_prefix,
+                cohfar_accumbackground_output_name,
+                i_dict)
+            # This is a side branch, not a replacement for the coherent path.
+            # One tee pad dumps raw postcoh rows for the offline single-detector
+            # method; the main postcoh stream below still enters cohfar.
+            postcoh = pipeparts.mktee(pipeline, postcoh)
+            pipemodules.mkpostcohfilesink(
+                pipeline,
+                pipeparts.mkqueue(pipeline, postcoh),
+                location=single_postcoh_prefix,
+                compression=1,
+                snapshot_interval=cohfar_accumbackground_snapshot_interval)
+            postcoh = pipeparts.mkqueue(pipeline, postcoh)
 
         if cohfar_accumbackground_output_prefix is None:
             postcoh = pipemodules.mkcohfar_accumbackground(

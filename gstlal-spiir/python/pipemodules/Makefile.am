@@ -12,6 +12,8 @@ pipemodules_PYTHON = \
 	__init__.py \
 	homomorphic.py \
 	snglrate_datasource.py \
+	single_detector_far.py \
+	combine_background_far.py \
 	postcoh_finalsink.py \
 	spiirparts.py \
 	pipe_macro.py \
