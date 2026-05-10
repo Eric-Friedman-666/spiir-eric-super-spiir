@@ -140,14 +140,15 @@ The current code can expose the needed observables, but the single branch still 
 \begin{enumerate}
   \item define \(H_0\) and \(H_1\) likelihoods for \((\rho_m,\chi_r^2)\);
   \item compute a log-likelihood-ratio rank \(r(d)\);
-  \item accumulate a single-detector rank background;
-  \item persist that background in a dedicated single FAR--LLR file;
-  \item assign FAR from the rank-tail count and livetime;
+  \item use direct rank-tail FAR only during the cold-start stage;
+  \item fit the bootstrap \((r,\mathrm{FAR})\) relation after enough data;
+  \item persist that fitted relation in a dedicated single FAR--LLR file;
+  \item assign later FAR from the fitted LLR-to-FAR function;
   \item output \((\rho_m,-\log_{10}\mathrm{FAR}_{\mathrm{sd}})\) rows.
 \end{enumerate}
 
 \proposal{
-The single-detector background file is only a FAR--LLR/rank-livetime file.  It is not the coherent XML statistics file and it is not a persistent two-dimensional \((\rho_m,\chi_r^2)\) map.
+The single-detector background file is only the FAR--LLR calibration file.  It stores the relation between LLR and FAR, for example \((r,\mathrm{FAR})\) points plus a fitted function.  It is not the coherent XML statistics file, not the zero-lag trigger stream, and not a persistent two-dimensional \((\rho_m,\chi_r^2)\) map.
 }
 \end{frame}
 
@@ -217,7 +218,7 @@ fi
 \end{lstlisting}
 
 \proposal{
-Cold start: if no \code{SINGLE_FAR_BACKGROUND_INPUT} is supplied, the run calibrates from the current background rows and writes the first \code{single_far_llr_background.json}.  Later runs load that file and update it.
+Cold start: if no \code{SINGLE_FAR_BACKGROUND_INPUT} is supplied, the run estimates FAR directly from the current bootstrap ranks for about one week, fits the resulting LLR--FAR relation, and writes the first \code{single_far_llr_background.json}.  Later runs load that fitted relation, assign FAR from it, and update it.
 }
 \end{frame}
 
@@ -595,13 +596,13 @@ This turns every single-detector feature \(d=(\rho_m,\chi_r^2)\) into one scalar
 }
 \end{frame}
 
-\begin{frame}{Rank-Space Background}
+\begin{frame}{Cold-Start Rank-Space Background}
 \small
 For every single-detector background trigger, compute
 \[
 r_k^{(\mathrm{bg})}=r(d_k^{(\mathrm{bg})}).
 \]
-For a foreground candidate with rank \(r_*\), count same-category background triggers with rank at least as large:
+This rank list is needed at the beginning because there is not yet a single-detector FAR--LLR file.  During this bootstrap stage, for a foreground candidate with rank \(r_*\), count same-category background triggers with rank at least as large:
 \[
 N_{\mathrm{bg}}^{(j)}(\ge r_*)
 =
@@ -611,26 +612,51 @@ N_{\mathrm{bg}}^{(j)}(\ge r_*)
 The indicator function is one if the condition is true and zero otherwise.
 
 \important{
-This is the single-detector replacement for the old two-dimensional coherent rank-map lookup.  The significance calculation is one-dimensional in \(r\).
+This direct counting is a bootstrap tool, not the final production FAR assignment.  It creates the first data needed to fit the LLR--FAR relation.
 }
 \end{frame}
 
-\begin{frame}{FAR From the Rank Tail}
+\begin{frame}{Bootstrap FAR From the Rank Tail}
 \small
-Let \(T_{\mathrm{bg}}^{(j)}\) be the background livetime for the same detector category.  The final single-detector FAR is
+Let \(T_{\mathrm{bg}}^{(j)}\) be the background livetime for the same detector category.  Before a FAR--LLR file exists, the provisional direct FAR is
 \[
-\mathrm{FAR}^{(j)}_{\mathrm{sd}}(r_*)
+\mathrm{FAR}^{(j)}_{\mathrm{direct}}(r_*)
 =
 \frac{N_{\mathrm{bg}}^{(j)}(\ge r_*)}
 {T_{\mathrm{bg}}^{(j)}}.
 \]
-The final plotted coordinate is
+These direct values provide calibration points
+\[
+\bigl(r_*,\mathrm{FAR}^{(j)}_{\mathrm{direct}}(r_*)\bigr)
+\]
+for fitting the single-detector FAR--LLR file.
+
+\proposal{
+H1 and L1 must keep separate bootstrap rank lists and separate livetimes.  This stage lasts about one week in the intended workflow, only to initialize the background file.
+}
+\end{frame}
+
+\begin{frame}{Production FAR From the LLR--FAR Fit}
+\small
+After the bootstrap stage, the single-detector background file stores a fitted mapping
+\[
+\mathrm{FAR}^{(j)}_{\mathrm{sd}}=F^{(j)}_{\mathrm{fit}}(r).
+\]
+For a new foreground trigger:
+\[
+d_*=(\rho_m,\chi_r^2)
+\quad\Longrightarrow\quad
+r_*=r(d_*)
+\quad\Longrightarrow\quad
+\mathrm{FAR}^{(j)}_{\mathrm{sd}}=F^{(j)}_{\mathrm{fit}}(r_*).
+\]
+The final plotted coordinate is therefore
 \[
 \bigl(\rho_m,-\log_{10}\mathrm{FAR}^{(j)}_{\mathrm{sd}}\bigr).
 \]
 
-\proposal{
-H1 and L1 must keep separate background rank lists and separate livetimes before any final display/alert-level merge.
+\important{
+This is the normal post-bootstrap path.  The final FAR is given by the fitted function, not by re-counting the trigger background from scratch for every event.
 }
 \end{frame}
 
@@ -657,7 +683,7 @@ class RankBackground(object):
         return self.count_ge(rank) / self.livetime
 \end{lstlisting}
 
-This exact sorted-list version is suitable for offline validation.  A production version can replace it with a compact histogram or quantile/rank summary if memory becomes too large.
+This exact sorted-list version is suitable for offline cold-start validation.  A production version should use the sorted ranks to build \((r,\mathrm{FAR})\) calibration points and then persist the fitted LLR--FAR mapping.
 \end{frame}
 
 \begin{frame}{Single FAR--LLR Background File}
@@ -667,22 +693,22 @@ This exact sorted-list version is suitable for offline validation.  A production
 The single background file stores only what FAR assignment needs:
 \begin{itemize}
   \item detector categories, e.g. \(\mathrm{H1\_sd}\), \(\mathrm{L1\_sd}\);
-  \item background LLR/rank values \(r_k^{(\mathrm{bg},j)}\);
-  \item category livetimes \(T_{\mathrm{bg}}^{(j)}\);
+  \item bootstrap calibration points \((r_i,\mathrm{FAR}_i)\);
+  \item the fitted mapping \(F_{\mathrm{fit}}^{(j)}(r)\);
   \item the likelihood/calibration model used to compute those ranks.
 \end{itemize}
 
 \[
-\mathcal B_j=
+\mathcal H_j=
 \left\{
-r_1^{(\mathrm{bg},j)},\ldots,r_N^{(\mathrm{bg},j)};
-T_{\mathrm{bg}}^{(j)};
+\bigl(r_i^{(j)},\mathrm{FAR}_i^{(j)}\bigr);
+F_{\mathrm{fit}}^{(j)};
 \nu_{\mathrm{eff}}(\rho_m)
 \right\}.
 \]
 
 \important{
-This file is the single-detector FAR--LLR file.  It is not a coherent-style \code{cohfar} XML statistics file.
+This file is the single-detector FAR--LLR file.  It is not a coherent-style \code{cohfar} XML statistics file and it is not the trigger-background stream itself.
 }
 \end{frame}
 
@@ -694,15 +720,18 @@ At the beginning, no single FAR--LLR background file exists.  The first stage is
   \item collect background rows and empty-row livetime;
   \item calibrate \(\nu_{\mathrm{eff}}\) from background \(\chi_r^2\);
   \item compute ranks for background and foreground rows;
-  \item assign provisional FAR from the in-run background;
+  \item assign provisional FAR directly from the in-run rank tail;
+  \item collect \((r,\mathrm{FAR}_{\mathrm{direct}})\) points;
+  \item fit a smooth or monotonic \(F_{\mathrm{fit}}(r)\);
   \item write the first single FAR--LLR background file.
 \end{enumerate}
 
 After that:
 \begin{enumerate}
   \item load the existing single FAR--LLR background file;
-  \item assign FAR to new foreground candidates using the accumulated background;
-  \item insert new background ranks and livetime;
+  \item compute \(r_*\) for each new foreground candidate;
+  \item assign \(\mathrm{FAR}=F_{\mathrm{fit}}(r_*)\);
+  \item update the LLR--FAR calibration with new background information;
   \item write an updated background file snapshot.
 \end{enumerate}
 \end{frame}
@@ -715,16 +744,17 @@ After that:
 data = {
     "version": self.VERSION,
     "created_utc": datetime.datetime.utcnow().isoformat() + "Z",
-    "description": "single-detector FAR-LLR rank background and livetime",
+    "description": "single-detector FAR-LLR fit background",
     "ifos": list(self.ifos),
     "likelihood_model": self.model.to_dict(),
-    "backgrounds": dict(
-        (ifo, bg.to_dict()) for ifo, bg in self.backgrounds.items()),
+    "llr_far_points": ...,
+    "far_fit_model": ...,
+    "fit_metadata": ...,
 }
 \end{lstlisting}
 
 \proposal{
-This makes the file self-consistent: the same likelihood calibration used to create the old ranks can be reloaded before assigning FAR in later runs.
+This makes the file self-consistent: the same likelihood calibration used to create the LLR values can be reloaded before evaluating the FAR fit in later runs.
 }
 \end{frame}
 
@@ -743,11 +773,17 @@ This is for likelihood calibration, not direct FAR lookup.
 
 \begin{block}{Rank-space FAR assignment}
 \small
-Map every background trigger to \(r\), then assign FAR from the one-dimensional rank tail:
+During cold start, map every background trigger to \(r\), then assign provisional FAR from the one-dimensional rank tail:
 \[
 (\rho_m,\chi_r^2)\to r
 \to
 \frac{N_{\mathrm{bg}}(\ge r_*)}{T_{\mathrm{bg}}}.
+\]
+These provisional points initialize \(F_{\mathrm{fit}}(r)\).  After that, new triggers use
+\[
+(\rho_m,\chi_r^2)\to r_*
+\to
+\mathrm{FAR}=F_{\mathrm{fit}}(r_*).
 \]
 \end{block}
 \end{frame}
@@ -758,14 +794,14 @@ Map every background trigger to \(r\), then assign FAR from the one-dimensional 
 \toprule
 Row type & Single-branch action \\
 \midrule
-\code{FOREGROUND} & Extract H1/L1 local features, compute \(r_*\), assign FAR after the background state is available, and write output rows. \\
-\code{BACKGROUND} & Extract H1/L1 local features, compute \(r_{\mathrm{bg}}\), and insert into the detector/category rank background. \\
-\code{EMPTY} & Increment category livetime \(T_{\mathrm{bg}}^{(j)}\).  These rows are essential because FAR is a rate, not just a probability. \\
+\code{FOREGROUND} & Extract H1/L1 local features, compute \(r_*\), then assign FAR through \(F_{\mathrm{fit}}(r_*)\) after the FAR--LLR file exists.  During bootstrap only, assign provisional direct FAR. \\
+\code{BACKGROUND} & Extract H1/L1 local features and compute \(r_{\mathrm{bg}}\).  These ranks build the cold-start direct FAR points and later update the LLR--FAR calibration. \\
+\code{EMPTY} & Increment category livetime \(T_{\mathrm{bg}}^{(j)}\).  These rows are essential for direct bootstrap FAR because FAR is a rate, not just a probability. \\
 \bottomrule
 \end{tabularx}
 
 \vspace{0.8em}
-The local code now collects foreground features while accumulating background and livetime, then assigns FAR after the background stage.
+The key distinction is terminology: zero-lag foreground and time-shift background are trigger rows; the single-detector background file is the fitted LLR--FAR calibration product.
 \end{frame}
 
 \begin{frame}{Implementation Files Modified Locally}
@@ -792,8 +828,8 @@ File & Local change \\
 \node[draw, rounded corners, fill=singlebg, below=of a, minimum width=7.8cm] (b) {extract \(d_{j,m}=(\rho_m,\chi_r^2)\) for H1/L1 separately};
 \node[draw, rounded corners, fill=softorange, below=of b, minimum width=7.8cm] (c) {calibrate/load \(\nu_{\mathrm{eff}}\) and beta-grid likelihood model};
 \node[draw, rounded corners, fill=softorange, below=of c, minimum width=7.8cm] (d) {compute LLR rank \(r(d)\)};
-\node[draw, rounded corners, fill=softgreen, below=of d, minimum width=7.8cm] (e) {update/load single FAR--LLR background \(\mathcal B_j,T_{\mathrm{bg},j}\)};
-\node[draw, rounded corners, fill=softgreen, below=of e, minimum width=7.8cm] (f) {assign \(\mathrm{FAR}_{\mathrm{sd}}^{(j)}=N_{\mathrm{bg}}^{(j)}(\ge r_*)/T_{\mathrm{bg},j}\)};
+\node[draw, rounded corners, fill=softgreen, below=of d, minimum width=7.8cm] (e) {load or initialize single FAR--LLR fit \(F_{\mathrm{fit}}^{(j)}(r)\)};
+\node[draw, rounded corners, fill=softgreen, below=of e, minimum width=7.8cm] (f) {assign \(\mathrm{FAR}_{\mathrm{sd}}^{(j)}=F_{\mathrm{fit}}^{(j)}(r_*)\)};
 \node[draw, rounded corners, fill=softblue, below=of f, minimum width=7.8cm] (g) {write \((\rho_m,-\log_{10}\mathrm{FAR}_{\mathrm{sd}}^{(j)})\) CSV rows};
 \foreach \x/\y in {a/b,b/c,c/d,d/e,e/f,f/g}
   \draw[->, thick] (\x) -- (\y);
@@ -809,8 +845,8 @@ The single branch needs validation in increasing order of risk:
   \item \textbf{Unit checks}: central chi-square logpdf, noncentral Poisson-mixture logpdf, beta-mixture normalization, monotonic rank-tail count.
   \item \textbf{Toy rows}: fake postcoh rows with known foreground/background/empty behavior.
   \item \textbf{Small OzSTAR segment}: run \code{bash pipeline.sh --single} on a short known-good frame/cache segment.
-  \item \textbf{Cold-start week}: build the first \code{single_far_llr_background.json}.
-  \item \textbf{History-file run}: rerun with \code{SINGLE_FAR_BACKGROUND_INPUT} and confirm FAR assignment uses loaded background while appending new ranks/livetime.
+  \item \textbf{Cold-start week}: build direct \((r,\mathrm{FAR})\) points, fit \(F_{\mathrm{fit}}\), and write the first \code{single_far_llr_background.json}.
+  \item \textbf{History-file run}: rerun with \code{SINGLE_FAR_BACKGROUND_INPUT} and confirm FAR assignment uses the loaded fit while updating the calibration snapshot.
 \end{enumerate}
 \end{frame}
 
@@ -837,8 +873,8 @@ The local implementation handles this by storing the likelihood model in the FAR
 Recommended production policy:
 \begin{enumerate}
   \item if \code{SINGLE_FAR_BACKGROUND_INPUT} is used, load its likelihood model and do not recalibrate by default;
-  \item if a new calibration is required, rebuild the rank background from raw stored background features or start a new background file version;
-  \item store model version and calibration metadata in every background file.
+  \item if a new calibration is required, rebuild the bootstrap \((r,\mathrm{FAR})\) points from raw stored background features or start a new background file version;
+  \item store model version, fit metadata, and calibration metadata in every background file.
 \end{enumerate}
 \end{frame}
 
@@ -851,7 +887,8 @@ Recommended production policy:
   \item Build/load \code{single_far_llr_background.json}.
   \item Calibrate \(\nu_{\mathrm{eff}}\) from background rows in H1/L1 categories.
   \item Compute LLR rank for all background and foreground single features.
-  \item Assign FAR through the rank-tail formula.
+  \item If no FAR--LLR file exists, bootstrap direct FAR for about one week and fit \(F_{\mathrm{fit}}(r)\).
+  \item After the FAR--LLR file exists, assign FAR through \(\mathrm{FAR}=F_{\mathrm{fit}}(r_*)\).
   \item Write the single CSV with \(\rho=\code{snglsnr[j]}\) and \(y=-\log_{10}\mathrm{FAR}_{\mathrm{sd}}^{(j)}\).
   \item Later merge with coherent products only after each branch has assigned calibrated FAR.
 \end{enumerate}
