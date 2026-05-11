@@ -33,6 +33,7 @@ FLAG_BACKGROUND = 1
 FLAG_EMPTY = 2
 
 LOG_ZERO = -1.0e300
+DIRECT_FAR_LIVETIME_FLOOR = 1.0
 
 
 def build_arg_parser():
@@ -60,6 +61,10 @@ def build_arg_parser():
     single.add_argument(
         "--calibrate-noise-dof", action="store_true",
         help="estimate nu_eff from current background rows before ranking")
+    single.add_argument(
+        "--bootstrap-far", action="store_true",
+        help=("allow direct rank-tail FAR assignment when no FAR-LLR fit is "
+              "available; intended only for cold-start/calibration runs"))
     single.add_argument(
         "--snr-bins", default="",
         help="comma-separated SNR bin edges for nu_eff calibration, e.g. 4,6,8,12,inf")
@@ -97,6 +102,7 @@ def command_single(args):
         likelihood_model=likelihood_model,
         background_input=args.background_input,
         background_output=args.background_output,
+        bootstrap_far=args.bootstrap_far,
         calibrate_noise_dof=args.calibrate_noise_dof,
         calibration_snr_bins=parse_snr_bins(args.snr_bins),
         min_calibration_count=args.min_calibration_count)
@@ -111,16 +117,21 @@ def calculate_single_detector_rows(postcoh_filenames,
                                    likelihood_model=None,
                                    background_input=None,
                                    background_output=None,
+                                   bootstrap_far=False,
                                    calibrate_noise_dof=False,
                                    calibration_snr_bins=None,
                                    min_calibration_count=50):
     ifos = split_ifos(ifos)
+    allow_direct_far = (not background_input) or bool(bootstrap_far)
     branch = SingleDetectorBranch(
         likelihood_model or make_default_likelihood_model(),
         ifos=ifos,
-        min_snr=min_snr)
+        min_snr=min_snr,
+        allow_direct_far=allow_direct_far)
     if background_input:
-        branch.load_background_file(background_input)
+        branch.load_background_file(
+            background_input,
+            require_fits=not bool(bootstrap_far))
 
     background_features = []
     foreground_features = []
@@ -209,20 +220,33 @@ def split_ifos(ifos):
     return tuple(ifos)
 
 
+def is_finite_number(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return not (math.isnan(value) or math.isinf(value))
+
+
 def features_from_postcoh_row(row, ifos=None, min_snr=0.0):
     """Extract all detector-local feature points from one postcoh row."""
 
     features = []
     ifos = tuple(ifos or pipe_macro.IFO_MAP)
     min_snr = float(min_snr)
+    active_ifos = active_ifos_from_row(row, ifos)
 
-    for ifo in ifos:
+    for ifo in active_ifos:
         rho = read_detector_value(row, "snglsnr", ifo, default=0.0)
         chisq = read_detector_value(row, "chisq", ifo, default=0.0)
 
         if rho is None or chisq is None:
             continue
-        if float(rho) < min_snr or float(chisq) <= 0.0:
+        if not is_finite_number(rho) or not is_finite_number(chisq):
+            continue
+        rho = float(rho)
+        chisq = float(chisq)
+        if rho <= 0.0 or rho < min_snr or chisq <= 0.0:
             continue
 
         features.append(
@@ -274,10 +298,15 @@ class SingleDetectorFeature(object):
 class SingleDetectorBranch(object):
     """Prototype branch after cuda_postcoh for one or more detectors."""
 
-    def __init__(self, likelihood_model, ifos=None, min_snr=0.0):
+    def __init__(self,
+                 likelihood_model,
+                 ifos=None,
+                 min_snr=0.0,
+                 allow_direct_far=True):
         self.likelihood_model = likelihood_model
         self.ifos = tuple(ifos or pipe_macro.IFO_MAP)
         self.min_snr = float(min_snr)
+        self.allow_direct_far = bool(allow_direct_far)
         self.background = dict((ifo, RankBackground()) for ifo in self.ifos)
 
     def rank_feature(self, feature, autocorr_power=None):
@@ -289,8 +318,11 @@ class SingleDetectorBranch(object):
             if ifo in self.background:
                 self.background[ifo].add_livetime(seconds)
 
-    def load_background_file(self, filename):
-        state = SingleFarLlrBackgroundFile.load(filename)
+    def load_background_file(self, filename, require_fits=True):
+        state = SingleFarLlrBackgroundFile.load(
+            filename,
+            required_ifos=self.ifos,
+            require_fits=require_fits)
         if state.model is not None:
             self.likelihood_model = state.model
         for ifo, background in state.backgrounds.items():
@@ -328,7 +360,9 @@ class SingleDetectorBranch(object):
 
     def assign_feature(self, feature, autocorr_power=None):
         rank = self.rank_feature(feature, autocorr_power)
-        far = self.background[feature.ifo].far(rank)
+        far = self.background[feature.ifo].far(
+            rank,
+            allow_direct=self.allow_direct_far)
         return SingleDetectorResult(feature, rank, far)
 
     def process_row(self,
@@ -369,8 +403,9 @@ class SingleDetectorBranch(object):
             return results
 
         if is_background == FLAG_EMPTY and livetime_step is not None:
-            self.add_livetime(livetime_step, active_ifos_from_row(row,
-                                                                  self.ifos))
+            self.add_livetime(
+                row_livetime_seconds(row, livetime_step),
+                active_ifos_from_row(row, self.ifos))
             return []
 
         return []
@@ -530,7 +565,8 @@ class SingleFarLlrBackgroundFile(object):
     evaluating the stored fitted mapping.
     """
 
-    VERSION = 2
+    VERSION = 3
+    SCHEMA = "spiir.single_detector_far_llr_background"
 
     def __init__(self, ifos=None, model=None, backgrounds=None):
         self.ifos = tuple(ifos or ())
@@ -538,18 +574,61 @@ class SingleFarLlrBackgroundFile(object):
         self.backgrounds = dict(backgrounds or {})
 
     @classmethod
-    def load(cls, filename):
+    def load(cls, filename, required_ifos=None, require_fits=False):
         with open(filename, "r") as input_file:
             data = json.load(input_file)
+        cls.validate_top_level(data, filename)
+
+        required_ifos = split_ifos(required_ifos or ())
+        file_ifos = split_ifos(data.get("ifos", ()))
+        backgrounds_data = data.get("backgrounds")
+        for ifo in required_ifos:
+            if ifo not in file_ifos:
+                raise ValueError(
+                    "single FAR-LLR background %s ifos list is missing "
+                    "required IFO %s" % (filename, ifo))
+            if ifo not in backgrounds_data:
+                raise ValueError(
+                    "single FAR-LLR background %s is missing required IFO %s"
+                    % (filename, ifo))
+
         model_data = data.get("likelihood_model")
         model = None
         if model_data:
             model = SingleDetectorLikelihoodModel.from_dict(model_data)
         backgrounds = {}
-        for ifo, bg_data in data.get("backgrounds", {}).items():
-            backgrounds[ifo] = RankBackground.from_dict(bg_data)
-        return cls(ifos=data.get("ifos", ()), model=model,
+        for ifo, bg_data in backgrounds_data.items():
+            backgrounds[ifo] = RankBackground.from_dict(
+                bg_data,
+                ifo=ifo,
+                require_fit=(bool(require_fits) and ifo in required_ifos))
+        return cls(ifos=file_ifos, model=model,
                    backgrounds=backgrounds)
+
+    @classmethod
+    def validate_top_level(cls, data, filename="<memory>"):
+        if not isinstance(data, dict):
+            raise ValueError(
+                "single FAR-LLR background %s must be a JSON object" %
+                filename)
+        if data.get("version") != cls.VERSION:
+            raise ValueError(
+                "single FAR-LLR background %s has unsupported version %r; "
+                "expected %r" %
+                (filename, data.get("version"), cls.VERSION))
+        if data.get("schema") != cls.SCHEMA:
+            raise ValueError(
+                "single FAR-LLR background %s has unsupported schema %r; "
+                "expected %r" %
+                (filename, data.get("schema"), cls.SCHEMA))
+        if not isinstance(data.get("backgrounds"), dict):
+            raise ValueError(
+                "single FAR-LLR background %s must contain a backgrounds map"
+                % filename)
+        if "ifos" not in data:
+            raise ValueError(
+                "single FAR-LLR background %s must contain an ifos list"
+                % filename)
 
     def dump(self, filename):
         directory = os.path.dirname(os.path.abspath(filename))
@@ -559,6 +638,7 @@ class SingleFarLlrBackgroundFile(object):
             background.prepare_for_dump()
         data = {
             "version": self.VERSION,
+            "schema": self.SCHEMA,
             "created_utc": datetime.datetime.utcnow().isoformat() + "Z",
             "description": "single-detector FAR-LLR fit background",
             "ifos": list(self.ifos),
@@ -844,6 +924,8 @@ class RankBackground(object):
         self.fit_source = "none"
 
     def add_rank(self, rank):
+        if not is_finite_number(rank):
+            raise ValueError("background rank must be finite")
         bisect.insort(self._ranks, float(rank))
 
     def extend_ranks(self, ranks):
@@ -851,7 +933,12 @@ class RankBackground(object):
             self.add_rank(rank)
 
     def add_livetime(self, seconds):
-        self.livetime += float(seconds)
+        if not is_finite_number(seconds):
+            raise ValueError("background livetime must be finite")
+        seconds = float(seconds)
+        if seconds < 0.0:
+            raise ValueError("background livetime must be non-negative")
+        self.livetime += seconds
 
     def merge(self, other):
         self.extend_ranks(other._ranks)
@@ -863,6 +950,8 @@ class RankBackground(object):
             self.fit_source = other.fit_source
 
     def count_ge(self, rank):
+        if not is_finite_number(rank):
+            raise ValueError("background query rank must be finite")
         idx = bisect.bisect_left(self._ranks, float(rank))
         return len(self._ranks) - idx
 
@@ -872,16 +961,19 @@ class RankBackground(object):
         return self.count_ge(rank) / float(len(self._ranks))
 
     def direct_far(self, rank):
-        if self.livetime <= 0.0:
-            return 0.0
-        return self.count_ge(rank) / self.livetime
+        livetime = max(self.livetime, DIRECT_FAR_LIVETIME_FLOOR)
+        return max(self.count_ge(rank), 1) / livetime
 
     def has_far_fit(self):
         return len(self.fit_points) > 0
 
-    def far(self, rank):
+    def far(self, rank, allow_direct=True):
         if self.has_far_fit():
             return self.fitted_far(rank)
+        if not allow_direct:
+            raise ValueError(
+                "single-detector FAR requested without a FAR-LLR fit; "
+                "direct rank-tail FAR is disabled outside bootstrap mode")
         return self.direct_far(rank)
 
     def fitted_far(self, rank):
@@ -916,23 +1008,24 @@ class RankBackground(object):
         return math.exp(log_left + frac * (log_right - log_left))
 
     def prepare_for_dump(self, max_points=2000):
-        if self.livetime > 0.0 and self._ranks:
+        if self._ranks:
             self.rebuild_far_fit(max_points=max_points)
 
     def rebuild_far_fit(self, max_points=2000):
         """Build calibration points for the production LLR-to-FAR lookup."""
 
-        if self.livetime <= 0.0 or not self._ranks:
+        if not self._ranks:
             return
 
         points = []
+        livetime = max(self.livetime, DIRECT_FAR_LIVETIME_FLOOR)
         n_ranks = len(self._ranks)
         idx = 0
         while idx < n_ranks:
             rank = self._ranks[idx]
             next_idx = bisect.bisect_right(self._ranks, rank, idx)
             count_ge = n_ranks - idx
-            points.append((rank, count_ge / self.livetime))
+            points.append((rank, count_ge / livetime))
             idx = next_idx
 
         self.fit_points = compact_fit_points(points, max_points=max_points)
@@ -960,19 +1053,78 @@ class RankBackground(object):
         }
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data, ifo=None, require_fit=False):
+        if not isinstance(data, dict):
+            raise ValueError("background for %s must be a JSON object" %
+                             (ifo or "<unknown>"))
         bg = cls()
-        bg.livetime = float(data.get("livetime", 0.0) or 0.0)
-        bg._ranks = sorted(float(rank) for rank in data.get("ranks", []))
-        fit_data = data.get("far_fit", {}) or {}
+        livetime = data.get("livetime", 0.0) or 0.0
+        if not is_finite_number(livetime) or float(livetime) < 0.0:
+            raise ValueError("background livetime for %s must be finite and "
+                             "non-negative" % (ifo or "<unknown>"))
+        bg.livetime = float(livetime)
+
+        ranks = data.get("ranks", []) or []
+        if not isinstance(ranks, list):
+            raise ValueError("background ranks for %s must be a list" %
+                             (ifo or "<unknown>"))
+        for rank in ranks:
+            bg.add_rank(rank)
+
+        fit_data = data.get("far_fit")
+        if not isinstance(fit_data, dict):
+            raise ValueError("background far_fit for %s must be an object" %
+                             (ifo or "<unknown>"))
+        if fit_data.get("kind") != cls.FIT_KIND:
+            raise ValueError(
+                "background far_fit kind for %s must be %r, got %r" %
+                (ifo or "<unknown>", cls.FIT_KIND, fit_data.get("kind")))
         bg.fit_kind = fit_data.get("kind", cls.FIT_KIND)
         bg.fit_created_utc = fit_data.get("created_utc")
         bg.fit_source = fit_data.get("source", "loaded")
-        bg.fit_points = sorted(
-            (float(point["rank"]), float(point["far"]))
-            for point in fit_data.get("points", [])
-            if point.get("far") is not None and float(point.get("far")) > 0.0)
+        points = fit_data.get("points", []) or []
+        if not isinstance(points, list):
+            raise ValueError("background far_fit points for %s must be a list"
+                             % (ifo or "<unknown>"))
+        parsed_points = []
+        for point in points:
+            if not isinstance(point, dict):
+                raise ValueError(
+                    "background far_fit point for %s must be an object" %
+                    (ifo or "<unknown>"))
+            rank = point.get("rank")
+            far = point.get("far")
+            if (not is_finite_number(rank) or not is_finite_number(far)
+                    or float(far) <= 0.0):
+                raise ValueError(
+                    "background far_fit points for %s must contain finite "
+                    "rank and positive finite FAR" % (ifo or "<unknown>"))
+            parsed_points.append((float(rank), float(far)))
+        bg.fit_points = sorted(parsed_points)
+        bg.validate_fit(require_fit=require_fit, ifo=ifo)
         return bg
+
+    def validate_fit(self, require_fit=False, ifo=None):
+        label = ifo or "<unknown>"
+        if self.fit_kind != self.FIT_KIND:
+            raise ValueError("background far_fit kind for %s must be %r" %
+                             (label, self.FIT_KIND))
+        if require_fit and not self.fit_points:
+            raise ValueError(
+                "background for %s must contain positive FAR-LLR fit points" %
+                label)
+        previous_rank = None
+        for rank, far in self.fit_points:
+            if (not is_finite_number(rank) or not is_finite_number(far)
+                    or float(far) <= 0.0):
+                raise ValueError(
+                    "background far_fit points for %s must be finite with "
+                    "positive FAR" % label)
+            if previous_rank is not None and rank <= previous_rank:
+                raise ValueError(
+                    "background far_fit ranks for %s must be strictly "
+                    "increasing" % label)
+            previous_rank = rank
 
 
 def safe_log_far(far):
@@ -1011,6 +1163,14 @@ def detector_index(ifo):
 
 
 def active_ifos_from_row(row, candidate_ifos=None):
+    """Return requested IFOs that are active on this row.
+
+    Older postcoh rows may not carry an ``ifos`` field.  For those legacy rows
+    the safest available interpretation is that all requested IFOs were active;
+    rows with an ``ifos`` field are restricted to that row-local active set so
+    stale detector slots from lock loss do not produce features or livetime.
+    """
+
     ifos = tuple(candidate_ifos or pipe_macro.IFO_MAP)
     row_ifos = getattr(row, "ifos", None)
     if row_ifos is None:
@@ -1057,9 +1217,13 @@ def write_single_far_to_row(row, ifo, far):
 
 def row_livetime_seconds(row, default_livetime_step=1.0):
     livetime = getattr(row, "livetime", None)
-    if livetime is None or float(livetime) <= 0.0:
-        return default_livetime_step
-    return float(livetime)
+    if is_finite_number(livetime) and float(livetime) > 0.0:
+        return float(livetime)
+    if is_finite_number(default_livetime_step):
+        default_livetime_step = float(default_livetime_step)
+        if default_livetime_step > 0.0:
+            return default_livetime_step
+    return DIRECT_FAR_LIVETIME_FLOOR
 
 
 PLOT_ROW_FIELDS = [

@@ -6,6 +6,10 @@ usage() {
   echo "Usage: bash pipeline.sh --single | --multi"
   echo "Optional env:"
   echo "  PIPELINE_MODE=single|multi"
+  echo "  PYTHON=/path/to/python"
+  echo "  SPIIR_ALLOW_STALE_OUTPUTS=1 to allow overwriting previous outputs"
+  echo "  SINGLE_FAR_BACKGROUND_INPUT=/path/to/single_far_llr_background.json"
+  echo "  SINGLE_FAR_BOOTSTRAP=1 to allow direct rank-tail FAR with a background input"
 }
 
 PIPELINE_MODE="${PIPELINE_MODE:-}"
@@ -58,6 +62,39 @@ mkdir -p "${jobno}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+require_file() {
+  local filename="$1"
+  [[ -r "${filename}" ]] || die "required input is missing or unreadable: ${filename}"
+}
+
+require_command() {
+  local command_name="$1"
+  command -v "${command_name}" >/dev/null 2>&1 || die "${command_name} not found in PATH"
+}
+
+require_absent() {
+  local filename="$1"
+  if [[ "${SPIIR_ALLOW_STALE_OUTPUTS:-0}" == "1" ]]; then
+    return
+  fi
+  [[ ! -e "${filename}" ]] || die "refusing to overwrite stale output ${filename}; set SPIIR_ALLOW_STALE_OUTPUTS=1 to override"
+}
+
+require_no_matches() {
+  local pattern="$1"
+  if [[ "${SPIIR_ALLOW_STALE_OUTPUTS:-0}" == "1" ]]; then
+    return
+  fi
+  if compgen -G "${pattern}" >/dev/null; then
+    die "refusing to run with stale outputs matching ${pattern}; set SPIIR_ALLOW_STALE_OUTPUTS=1 to override"
+  fi
+}
+
 # bankdir=/fred/oz016/manoj/O4_Banks/O4_New/filt/gstlal_iir_bank_b0optmin97pc_O4a_0
 bankdir=/fred/oz016/sunil/O4b_banks/O4_spacing/filt/O4b_spacing_py2_banks
 #bankdir=/fred/oz016/sunil/s240422ed/py3-bank
@@ -86,9 +123,11 @@ macrojobtag=${jobno}
 
 macroiirbank=()
 macrostatsprefix=()
+required_input_files=("${map}" "${cache}")
 for bank in $(seq -f "%04g" $(( start+bpj*i )) $(( start+bpj*i )) ); do
     H1bank="${bankdir}/iir_H1-PYCBC_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
     L1bank="${bankdir}/iir_L1-PYCBC_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
+    required_input_files+=("${H1bank}" "${L1bank}")
     macroiirbank+=(--iir-bank "H1:${H1bank},L1:${L1bank}")
     macrostatsprefix+=(--cohfar-accumbackground-output-prefix "${jobno}/bank${bank}_stats")
 done
@@ -96,15 +135,80 @@ done
 for bank in $(seq -f "%04g" $(( start+bpj*i+1 )) $(( start+bpj*(i+1)-1 )) ); do
     H1bank="${bankdir}/iir_H1-PYCBC_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
     L1bank="${bankdir}/iir_L1-PYCBC_SPLIT_BANK_${bank}-a1-0-0.xml.gz"
+    required_input_files+=("${H1bank}" "${L1bank}")
     macroiirbank+=(--iir-bank "H1:${H1bank},L1:${L1bank}")
     macrostatsprefix+=(--cohfar-accumbackground-output-prefix "${jobno}/bank${bank}_stats")
 done
 
 macrooutprefix=${jobno}/${jobno}_zerolag
-PIPELINE_BIN="$(command -v gstlal_inspiral_postcohspiir_online || true)"
-if [[ -z "${PIPELINE_BIN}" ]]; then
-    echo "gstlal_inspiral_postcohspiir_online not found in PATH"
-    exit 1
+single_far_csv="${jobno}/${jobno}_single_detector_far.csv"
+single_far_background_input="${SINGLE_FAR_BACKGROUND_INPUT:-}"
+single_far_background_output="${SINGLE_FAR_BACKGROUND_OUTPUT:-${jobno}/${jobno}_single_far_llr_background.json}"
+single_far_calibrate="${SINGLE_FAR_CALIBRATE:-}"
+single_far_bootstrap="${SINGLE_FAR_BOOTSTRAP:-0}"
+coherent_far_csv="${jobno}/${jobno}_coherent_far_plane.csv"
+combined_far_csv="${jobno}/${jobno}_combined_far_plane.csv"
+coherent_postcoh_glob="${macrooutprefix}*.xml.gz"
+single_detector_py="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules/single_detector_far.py"
+combine_background_py="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules/combine_background_far.py"
+pipemodule_pythonpath="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules${PYTHONPATH:+:${PYTHONPATH}}"
+
+PYTHON_BIN="${PYTHON:-python}"
+require_command "${PYTHON_BIN}"
+require_command gstlal_inspiral_postcohspiir_online
+PIPELINE_BIN="$(command -v gstlal_inspiral_postcohspiir_online)"
+
+require_file "${single_detector_py}"
+require_file "${combine_background_py}"
+for input_file in "${required_input_files[@]}"; do
+  require_file "${input_file}"
+done
+IFS=',' read -r -a macrofar_files <<< "${macrofarinput}"
+for input_file in "${macrofar_files[@]}"; do
+  require_file "${input_file}"
+done
+case "${single_far_calibrate}" in
+  ""|0|1) ;;
+  *) die "SINGLE_FAR_CALIBRATE must be 0 or 1 when set" ;;
+esac
+case "${single_far_bootstrap}" in
+  0|1) ;;
+  *) die "SINGLE_FAR_BOOTSTRAP must be 0 or 1" ;;
+esac
+if [[ "${PIPELINE_MODE}" == "single" && -n "${single_far_background_input}" ]]; then
+  require_file "${single_far_background_input}"
+  [[ "${single_far_background_input}" != "${single_far_background_output}" ]] || die "SINGLE_FAR_BACKGROUND_INPUT and SINGLE_FAR_BACKGROUND_OUTPUT must differ"
+  PYTHONPATH="${pipemodule_pythonpath}" "${PYTHON_BIN}" -c '
+import sys
+from single_detector_far import SingleFarLlrBackgroundFile
+SingleFarLlrBackgroundFile.load(
+    sys.argv[1],
+    required_ifos=("H1", "L1"),
+    require_fits=(sys.argv[2] != "1"))
+' "${single_far_background_input}" "${single_far_bootstrap}"
+fi
+
+require_absent "${coherent_far_csv}"
+require_no_matches "${coherent_postcoh_glob}"
+require_no_matches "${jobno}/bank*_stats*.xml.gz"
+if [[ "${PIPELINE_MODE}" == "single" ]]; then
+  require_absent "${single_far_csv}"
+  require_absent "${single_far_background_output}"
+  require_absent "${combined_far_csv}"
+  require_no_matches "${jobno}/sdpostcoh*.xml.gz"
+fi
+
+finalsink_online_args=(--finalsink-need-online-perform 1)
+if [[ "${PIPELINE_MODE}" == "single" ]]; then
+  finalsink_online_args=(--finalsink-need-online-perform 0)
+  echo "single mode: live GraceDB/FinalSink online triggering is disabled; single-detector FAR is produced offline by single_detector_far.py" >&2
+else
+  finalsink_online_args+=(
+    --finalsink-gracedb-far-threshold 0.0001
+    --finalsink-gracedb-group Test
+    --finalsink-gracedb-search MDC
+    --finalsink-gracedb-service-url https://gracedb-playground.ligo.org/api/
+  )
 fi
 
 base_cmd=(
@@ -113,7 +217,7 @@ base_cmd=(
   --tmp-space _CONDOR_SCRATCH_DIR
   "${macroiirbank[@]}"
   --data-source frames
-  --check-time-stamp
+  --check-time-stamps
   --cuda-postcoh-snglsnr-thresh 4
   --cuda-postcoh-hist-trials 100
   --cuda-postcoh-output-skymap 0
@@ -128,17 +232,13 @@ base_cmd=(
   --finalsink-cluster-window 1
   --finalsink-fapupdater-collect-walltime 604800,86400,7200
   --finalsink-far-factor 94
-  --finalsink-gracedb-far-thresh 0.0001
-  --finalsink-need-online-perform 1
-  --finalsink-gracedb-group Test
-  --finalsink-gracedb-search MDC
-  --finalsink-gracedb-service-url https://gracedb-playground.ligo.org/api/
+  "${finalsink_online_args[@]}"
   --code-version spiir-O4-EW-development
   --track-psd
   --psd-fft-length 4
   --finalsink-fapupdater-output-fname "${macrolocfapoutput}"
   --frame-cache "${cache}"
-  --gpu-acc on
+  --gpu-acc
   --ht-gate-threshold 15.0
   --gps-start-time "${macrostart}"
   --gps-end-time "${macroend}"
@@ -158,15 +258,14 @@ base_cmd=(
 export PIPELINE_MODE
 # The GStreamer graph is launched once.  In single mode spiirparts.py adds a
 # postcoh tee, so the raw single-detector dump branch and the coherent cohfar
-# branch run together inside this one graph.
+# branch run together inside this one graph.  Single mode is an offline
+# sidecar path: live GraceDB/FinalSink online triggering is disabled above, and
+# the single-detector FAR CSV is produced after the graph exits by
+# single_detector_far.py.
 "${base_cmd[@]}"
 
 # Everything below runs after the GStreamer graph exits.  These commands only
 # convert already-produced outputs into common (rho, FAR) CSV files.
-single_far_csv="${jobno}/${jobno}_single_detector_far.csv"
-single_far_background_input="${SINGLE_FAR_BACKGROUND_INPUT:-}"
-single_far_background_output="${SINGLE_FAR_BACKGROUND_OUTPUT:-${jobno}/${jobno}_single_far_llr_background.json}"
-single_far_calibrate="${SINGLE_FAR_CALIBRATE:-}"
 if [[ -z "${single_far_calibrate}" ]]; then
   if [[ -z "${single_far_background_input}" ]]; then
     single_far_calibrate=1
@@ -174,19 +273,15 @@ if [[ -z "${single_far_calibrate}" ]]; then
     single_far_calibrate=0
   fi
 fi
-coherent_far_csv="${jobno}/${jobno}_coherent_far_plane.csv"
-combined_far_csv="${jobno}/${jobno}_combined_far_plane.csv"
-coherent_postcoh_glob="${macrooutprefix}*.xml.gz"
-single_detector_py="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules/single_detector_far.py"
-combine_background_py="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules/combine_background_far.py"
 
-python "${combine_background_py}" \
+PYTHONPATH="${pipemodule_pythonpath}" "${PYTHON_BIN}" "${combine_background_py}" \
+  --mode multi \
   --multi-postcoh-glob "${coherent_postcoh_glob}" \
   --output "${coherent_far_csv}"
 
 if [[ "${PIPELINE_MODE}" == "single" ]]; then
   single_detector_cmd=(
-    python "${single_detector_py}" single
+    env PYTHONPATH="${pipemodule_pythonpath}" "${PYTHON_BIN}" "${single_detector_py}" single
     --postcoh-glob "${jobno}/sdpostcoh*.xml.gz" \
     --output "${single_far_csv}" \
     --ifos H1,L1 \
@@ -200,9 +295,13 @@ if [[ "${PIPELINE_MODE}" == "single" ]]; then
   if [[ "${single_far_calibrate}" == "1" ]]; then
     single_detector_cmd+=(--calibrate-noise-dof)
   fi
+  if [[ "${single_far_bootstrap}" == "1" ]]; then
+    single_detector_cmd+=(--bootstrap-far)
+  fi
   "${single_detector_cmd[@]}"
 
-  python "${combine_background_py}" \
+  PYTHONPATH="${pipemodule_pythonpath}" "${PYTHON_BIN}" "${combine_background_py}" \
+    --mode combined \
     --single-csv "${single_far_csv}" \
     --multi-csv "${coherent_far_csv}" \
     --output "${combined_far_csv}"
