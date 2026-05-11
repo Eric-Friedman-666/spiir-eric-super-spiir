@@ -155,12 +155,9 @@ spiir_pythonpath="${SCRIPT_DIR}/gstlal-spiir/python"
 pipemodule_pythonpath="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules:${spiir_pythonpath}${PYTHONPATH:+:${PYTHONPATH}}"
 
 PYTHON_BIN="${PYTHON:-python}"
-require_command "${PYTHON_BIN}"
 require_command gstlal_inspiral_postcohspiir_online
 PIPELINE_BIN="$(command -v gstlal_inspiral_postcohspiir_online)"
 
-require_file "${single_detector_py}"
-require_file "${combine_background_py}"
 for input_file in "${required_input_files[@]}"; do
   require_file "${input_file}"
 done
@@ -168,18 +165,22 @@ IFS=',' read -r -a macrofar_files <<< "${macrofarinput}"
 for input_file in "${macrofar_files[@]}"; do
   require_file "${input_file}"
 done
-case "${single_far_calibrate}" in
-  ""|0|1) ;;
-  *) die "SINGLE_FAR_CALIBRATE must be 0 or 1 when set" ;;
-esac
-case "${single_far_bootstrap}" in
-  0|1) ;;
-  *) die "SINGLE_FAR_BOOTSTRAP must be 0 or 1" ;;
-esac
-if [[ "${PIPELINE_MODE}" == "single" && -n "${single_far_background_input}" ]]; then
-  require_file "${single_far_background_input}"
-  [[ "${single_far_background_input}" != "${single_far_background_output}" ]] || die "SINGLE_FAR_BACKGROUND_INPUT and SINGLE_FAR_BACKGROUND_OUTPUT must differ"
-  PYTHONPATH="${pipemodule_pythonpath}" "${PYTHON_BIN}" -c '
+if [[ "${PIPELINE_MODE}" == "single" ]]; then
+  require_command "${PYTHON_BIN}"
+  require_file "${single_detector_py}"
+  require_file "${combine_background_py}"
+  case "${single_far_calibrate}" in
+    ""|0|1) ;;
+    *) die "SINGLE_FAR_CALIBRATE must be 0 or 1 when set" ;;
+  esac
+  case "${single_far_bootstrap}" in
+    0|1) ;;
+    *) die "SINGLE_FAR_BOOTSTRAP must be 0 or 1" ;;
+  esac
+  if [[ -n "${single_far_background_input}" ]]; then
+    require_file "${single_far_background_input}"
+    [[ "${single_far_background_input}" != "${single_far_background_output}" ]] || die "SINGLE_FAR_BACKGROUND_INPUT and SINGLE_FAR_BACKGROUND_OUTPUT must differ"
+    PYTHONPATH="${pipemodule_pythonpath}" "${PYTHON_BIN}" -c '
 import sys
 from single_detector_far import SingleFarLlrBackgroundFile
 SingleFarLlrBackgroundFile.load(
@@ -188,12 +189,11 @@ SingleFarLlrBackgroundFile.load(
     require_fits=(sys.argv[2] != "1"),
     allow_partial_ifos=True)
 ' "${single_far_background_input}" "${single_far_bootstrap}"
-fi
+  fi
 
-require_absent "${coherent_far_csv}"
-require_no_matches "${coherent_postcoh_glob}"
-require_no_matches "${jobno}/bank*_stats*.xml.gz"
-if [[ "${PIPELINE_MODE}" == "single" ]]; then
+  require_absent "${coherent_far_csv}"
+  require_no_matches "${coherent_postcoh_glob}"
+  require_no_matches "${jobno}/bank*_stats*.xml.gz"
   require_absent "${single_far_csv}"
   require_absent "${single_far_background_output}"
   require_absent "${combined_far_csv}"
@@ -266,8 +266,12 @@ export PIPELINE_MODE
 # single_detector_far.py.
 "${base_cmd[@]}"
 
+if [[ "${PIPELINE_MODE}" != "single" ]]; then
+  exit 0
+fi
+
 # Everything below runs after the GStreamer graph exits.  These commands only
-# convert already-produced outputs into common (rho, FAR) CSV files.
+# convert already-produced single-mode outputs into common (rho, FAR) CSV files.
 if [[ -z "${single_far_calibrate}" ]]; then
   if [[ -z "${single_far_background_input}" ]]; then
     single_far_calibrate=1
