@@ -151,7 +151,8 @@ combined_far_csv="${jobno}/${jobno}_combined_far_plane.csv"
 coherent_postcoh_glob="${macrooutprefix}*.xml.gz"
 single_detector_py="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules/single_detector_far.py"
 combine_background_py="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules/combine_background_far.py"
-pipemodule_pythonpath="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules${PYTHONPATH:+:${PYTHONPATH}}"
+spiir_pythonpath="${SCRIPT_DIR}/gstlal-spiir/python"
+pipemodule_pythonpath="${SCRIPT_DIR}/gstlal-spiir/python/pipemodules:${spiir_pythonpath}${PYTHONPATH:+:${PYTHONPATH}}"
 
 PYTHON_BIN="${PYTHON:-python}"
 require_command "${PYTHON_BIN}"
@@ -184,7 +185,8 @@ from single_detector_far import SingleFarLlrBackgroundFile
 SingleFarLlrBackgroundFile.load(
     sys.argv[1],
     required_ifos=("H1", "L1"),
-    require_fits=(sys.argv[2] != "1"))
+    require_fits=(sys.argv[2] != "1"),
+    allow_partial_ifos=True)
 ' "${single_far_background_input}" "${single_far_bootstrap}"
 fi
 
@@ -288,6 +290,7 @@ if [[ "${PIPELINE_MODE}" == "single" ]]; then
     --min-snr 4 \
     --background-output "${single_far_background_output}" \
     --snr-bins "${SINGLE_FAR_SNR_BINS:-4,6,8,12,inf}"
+    "${macroiirbank[@]}"
   )
   if [[ -n "${single_far_background_input}" ]]; then
     single_detector_cmd+=(--background-input "${single_far_background_input}")

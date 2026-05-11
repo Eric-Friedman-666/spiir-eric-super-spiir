@@ -15,6 +15,7 @@ import glob
 import json
 import math
 import os
+import re
 import sys
 
 try:
@@ -73,7 +74,16 @@ def build_arg_parser():
     single.add_argument("--signal-dof", type=float, default=None)
     single.add_argument("--beta-max", type=float, default=0.03)
     single.add_argument("--beta-grid-size", type=int, default=31)
-    single.add_argument("--default-autocorr-power", type=float, default=1.0)
+    single.add_argument(
+        "--iir-bank", action="append", default=[],
+        help=("IIR bank spec used by the online pipeline, for example "
+              "H1:/path/bank.xml.gz,L1:/path/bank.xml.gz; may be repeated. "
+              "The single-detector likelihood reads these files to load the "
+              "template-dependent sum_delta |C_jm(Delta)|^2."))
+    single.add_argument(
+        "--default-autocorr-power", type=float, default=1.0,
+        help=("fallback sum_delta |C_jm(Delta)|^2 used only when no matching "
+              "template autocorrelation power can be read from --iir-bank"))
     single.add_argument("--snr-log-weight", type=float, default=0.5)
     single.set_defaults(func=command_single)
     return parser
@@ -105,7 +115,8 @@ def command_single(args):
         bootstrap_far=args.bootstrap_far,
         calibrate_noise_dof=args.calibrate_noise_dof,
         calibration_snr_bins=parse_snr_bins(args.snr_bins),
-        min_calibration_count=args.min_calibration_count)
+        min_calibration_count=args.min_calibration_count,
+        iir_banks=args.iir_bank)
     write_plot_rows_csv(rows, args.output)
     print("wrote %d single-detector rows to %s" % (len(rows), args.output))
 
@@ -120,7 +131,8 @@ def calculate_single_detector_rows(postcoh_filenames,
                                    bootstrap_far=False,
                                    calibrate_noise_dof=False,
                                    calibration_snr_bins=None,
-                                   min_calibration_count=50):
+                                   min_calibration_count=50,
+                                   iir_banks=None):
     ifos = split_ifos(ifos)
     allow_direct_far = (not background_input) or bool(bootstrap_far)
     branch = SingleDetectorBranch(
@@ -132,6 +144,8 @@ def calculate_single_detector_rows(postcoh_filenames,
         branch.load_background_file(
             background_input,
             require_fits=not bool(bootstrap_far))
+
+    autocorr_power_map = load_iir_bank_autocorr_powers(iir_banks)
 
     background_features = []
     foreground_features = []
@@ -165,14 +179,21 @@ def calculate_single_detector_rows(postcoh_filenames,
             min_count=min_calibration_count)
 
     for feature in background_features:
-        branch.accumulate_background_feature(feature)
+        branch.accumulate_background_feature(
+            feature,
+            autocorr_power=autocorr_power_for_feature(
+                feature, autocorr_power_map))
 
     for seconds, active_ifos in livetime_updates:
         branch.add_livetime(seconds, active_ifos)
 
-    results = [
-        branch.assign_feature(feature) for feature in foreground_features
-    ]
+    results = []
+    for feature in foreground_features:
+        results.append(
+            branch.assign_feature(
+                feature,
+                autocorr_power=autocorr_power_for_feature(
+                    feature, autocorr_power_map)))
     if background_output:
         branch.write_background_file(background_output)
     return results_to_plot_rows(results)
@@ -218,6 +239,176 @@ def split_ifos(ifos):
     if isinstance(ifos, string_types):
         return tuple(ifo.strip() for ifo in ifos.split(",") if ifo.strip())
     return tuple(ifos)
+
+
+def parse_iir_bank_specs(iir_bank_specs):
+    """Return ``(ifo, filename)`` pairs from repeated pipeline --iir-bank args."""
+
+    pairs = []
+    for spec in iir_bank_specs or ():
+        for piece in str(spec).split(","):
+            piece = piece.strip()
+            if not piece:
+                continue
+            if ":" not in piece:
+                raise ValueError("invalid --iir-bank entry %r" % piece)
+            ifo, filename = piece.split(":", 1)
+            ifo = ifo.strip()
+            filename = filename.strip()
+            if not ifo or not filename:
+                raise ValueError("invalid --iir-bank entry %r" % piece)
+            pairs.append((ifo, filename))
+    return pairs
+
+
+def bankid_from_bank_filename(bank_filename):
+    """Infer the SPIIR bank id using the same filename convention as spiirparts."""
+
+    tmp_name = os.path.split(bank_filename)[-1]
+    tmp_name = re.sub(r"[HLVK]1", "", tmp_name)
+    match = re.search(r"\d{1,4}", tmp_name)
+    if match is None:
+        raise ValueError("cannot infer bank id from IIR bank filename %s" %
+                         bank_filename)
+    stripped = match.group().lstrip("0")
+    if not stripped:
+        return 0
+    return int(stripped)
+
+
+def xml_local_name(tag):
+    if "}" in tag:
+        return tag.rsplit("}", 1)[1]
+    return tag
+
+
+def array_name_matches(xml_name, requested_name):
+    xml_name = str(xml_name or "")
+    return (xml_name == requested_name
+            or xml_name == requested_name + ":array"
+            or xml_name.split(":", 1)[0] == requested_name)
+
+
+def reshape_flat_values(values, dims):
+    if not dims:
+        return [values]
+    total = 1
+    for dim in dims:
+        total *= int(dim)
+    if total != len(values):
+        raise ValueError("array dimension product %d does not match %d values"
+                         % (total, len(values)))
+    if len(dims) == 1:
+        return [values]
+    nrow = int(dims[0])
+    ncol = int(len(values) / nrow)
+    return [values[i * ncol:(i + 1) * ncol] for i in range(nrow)]
+
+
+def read_ligolw_array_rows(filename, requested_name):
+    """Read a numeric LIGO-LW Array as row-major Python lists.
+
+    This intentionally avoids importing spiirbank.cbc_template_iir.  That
+    module is Python-2-style in the current SPIIR tree, while this launcher
+    often runs under Python 3 on OzSTAR.
+    """
+
+    import gzip
+    import xml.etree.ElementTree as ElementTree
+
+    opener = gzip.open if filename.endswith(".gz") else open
+    with opener(filename, "rb") as input_file:
+        tree = ElementTree.parse(input_file)
+
+    for elem in tree.getroot().iter():
+        if xml_local_name(elem.tag) != "Array":
+            continue
+        if not array_name_matches(elem.attrib.get("Name"), requested_name):
+            continue
+
+        dims = []
+        stream_text = []
+        for child in elem:
+            child_name = xml_local_name(child.tag)
+            if child_name == "Dim":
+                dim_text = (child.text or child.attrib.get("Length")
+                            or child.attrib.get("length") or "").strip()
+                if dim_text:
+                    dims.append(int(dim_text))
+            elif child_name == "Stream":
+                stream_text.append(child.text or "")
+
+        text = " ".join(stream_text).replace(",", " ")
+        values = [float(piece) for piece in text.split()]
+        return reshape_flat_values(values, dims)
+
+    raise ValueError("IIR bank %s does not contain array %s" %
+                     (filename, requested_name))
+
+
+def read_iir_bank_autocorr_powers(bank_filename):
+    """Read per-template sum_delta |C_jm(Delta)|^2 from an IIR bank XML."""
+
+    real_rows = read_ligolw_array_rows(
+        bank_filename, "autocorrelation_bank_real")
+    imag_rows = read_ligolw_array_rows(
+        bank_filename, "autocorrelation_bank_imag")
+    if len(real_rows) != len(imag_rows):
+        raise ValueError("IIR bank %s has inconsistent autocorrelation real "
+                         "and imaginary arrays" % bank_filename)
+
+    powers = []
+    for real_row, imag_row in zip(real_rows, imag_rows):
+        if len(real_row) != len(imag_row):
+            raise ValueError(
+                "IIR bank %s has inconsistent autocorrelation row lengths" %
+                bank_filename)
+        powers.append(float(sum(real * real + imag * imag
+                                for real, imag in zip(real_row, imag_row))))
+    return powers
+
+
+def load_iir_bank_autocorr_powers(iir_bank_specs):
+    """Build lookup keys for template-dependent autocorrelation power."""
+
+    autocorr_powers = {}
+    for ifo, bank_filename in parse_iir_bank_specs(iir_bank_specs):
+        bankid = bankid_from_bank_filename(bank_filename)
+        for tmplt_idx, power in enumerate(
+                read_iir_bank_autocorr_powers(bank_filename)):
+            autocorr_powers[(ifo, bankid, tmplt_idx)] = power
+    return autocorr_powers
+
+
+def int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def autocorr_power_for_feature(feature, autocorr_power_map):
+    """Find the best available autocorrelation power for a feature."""
+
+    if not autocorr_power_map:
+        return None
+    tmplt_idx = int_or_none(feature.tmplt_idx)
+    bankid = int_or_none(feature.bankid)
+    if tmplt_idx is None:
+        return None
+
+    keys = (
+        (feature.ifo, bankid, tmplt_idx),
+        (None, bankid, tmplt_idx),
+        (feature.ifo, None, tmplt_idx),
+        (None, None, tmplt_idx),
+        (bankid, tmplt_idx),
+        tmplt_idx,
+    )
+    for key in keys:
+        if key in autocorr_power_map:
+            return autocorr_power_map[key]
+    return None
 
 
 def is_finite_number(value):
@@ -322,7 +513,8 @@ class SingleDetectorBranch(object):
         state = SingleFarLlrBackgroundFile.load(
             filename,
             required_ifos=self.ifos,
-            require_fits=require_fits)
+            require_fits=require_fits,
+            allow_partial_ifos=True)
         if state.model is not None:
             self.likelihood_model = state.model
         for ifo, background in state.backgrounds.items():
@@ -383,19 +575,19 @@ class SingleDetectorBranch(object):
         results = []
         features = features_from_postcoh_row(row, self.ifos, self.min_snr)
         is_background = getattr(row, "is_background", None)
-        autocorr_power = None
-        tmplt_idx = getattr(row, "tmplt_idx", None)
-        if autocorr_power_by_template is not None and tmplt_idx is not None:
-            autocorr_power = autocorr_power_by_template.get(tmplt_idx)
 
         if is_background == FLAG_BACKGROUND:
             for feature in features:
+                autocorr_power = autocorr_power_for_feature(
+                    feature, autocorr_power_by_template)
                 self.accumulate_background_feature(feature,
                                                    autocorr_power=autocorr_power)
             return []
 
         if is_background == FLAG_FOREGROUND:
             for feature in features:
+                autocorr_power = autocorr_power_for_feature(
+                    feature, autocorr_power_by_template)
                 result = self.assign_feature(feature,
                                              autocorr_power=autocorr_power)
                 write_single_far_to_row(row, feature.ifo, result.far)
@@ -574,7 +766,11 @@ class SingleFarLlrBackgroundFile(object):
         self.backgrounds = dict(backgrounds or {})
 
     @classmethod
-    def load(cls, filename, required_ifos=None, require_fits=False):
+    def load(cls,
+             filename,
+             required_ifos=None,
+             require_fits=False,
+             allow_partial_ifos=False):
         with open(filename, "r") as input_file:
             data = json.load(input_file)
         cls.validate_top_level(data, filename)
@@ -582,15 +778,6 @@ class SingleFarLlrBackgroundFile(object):
         required_ifos = split_ifos(required_ifos or ())
         file_ifos = split_ifos(data.get("ifos", ()))
         backgrounds_data = data.get("backgrounds")
-        for ifo in required_ifos:
-            if ifo not in file_ifos:
-                raise ValueError(
-                    "single FAR-LLR background %s ifos list is missing "
-                    "required IFO %s" % (filename, ifo))
-            if ifo not in backgrounds_data:
-                raise ValueError(
-                    "single FAR-LLR background %s is missing required IFO %s"
-                    % (filename, ifo))
 
         model_data = data.get("likelihood_model")
         model = None
@@ -601,7 +788,45 @@ class SingleFarLlrBackgroundFile(object):
             backgrounds[ifo] = RankBackground.from_dict(
                 bg_data,
                 ifo=ifo,
-                require_fit=(bool(require_fits) and ifo in required_ifos))
+                require_fit=False)
+
+        if required_ifos:
+            present_ifos = [
+                ifo for ifo in required_ifos
+                if ifo in file_ifos and ifo in backgrounds
+            ]
+            missing_ifos = [
+                ifo for ifo in required_ifos
+                if ifo not in present_ifos
+            ]
+            if missing_ifos and not allow_partial_ifos:
+                raise ValueError(
+                    "single FAR-LLR background %s is missing required IFO(s) "
+                    "%s" % (filename, ",".join(missing_ifos)))
+            if allow_partial_ifos and not present_ifos:
+                raise ValueError(
+                    "single FAR-LLR background %s contains none of the "
+                    "requested IFOs %s" %
+                    (filename, ",".join(required_ifos)))
+            if require_fits:
+                fitted_ifos = [
+                    ifo for ifo in present_ifos
+                    if backgrounds[ifo].has_far_fit()
+                ]
+                if not allow_partial_ifos:
+                    missing_fit_ifos = [
+                        ifo for ifo in present_ifos
+                        if not backgrounds[ifo].has_far_fit()
+                    ]
+                    if missing_fit_ifos:
+                        raise ValueError(
+                            "single FAR-LLR background %s is missing FAR-LLR "
+                            "fit(s) for required IFO(s) %s" %
+                            (filename, ",".join(missing_fit_ifos)))
+                elif not fitted_ifos:
+                    raise ValueError(
+                        "single FAR-LLR background %s contains no requested "
+                        "IFO with FAR-LLR fit points" % filename)
         return cls(ifos=file_ifos, model=model,
                    backgrounds=backgrounds)
 
