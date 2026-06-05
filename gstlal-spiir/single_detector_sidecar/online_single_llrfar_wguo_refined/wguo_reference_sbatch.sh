@@ -3,7 +3,7 @@
 # This intentionally does not start the Eric single-detector sidecar updater.
 #SBATCH --job-name=wguo_ref_cmp
 #SBATCH --ntasks=1
-#SBATCH --time=24:00:00
+#SBATCH --time=7-00:00:00
 #SBATCH --mem=18g
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
