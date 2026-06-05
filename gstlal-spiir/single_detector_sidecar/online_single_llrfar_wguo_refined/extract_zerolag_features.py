@@ -88,7 +88,7 @@ def open_text(filename: str):
 def clean_column_name(line: str) -> str | None:
     if not line.startswith("<Column"):
         return None
-    match = re.search(r'Name="postcoh:([^"]+)"', line)
+    match = re.search(r'Name="(?:postcoh:)?([^"]+)"', line)
     return match.group(1) if match else None
 
 
@@ -221,18 +221,28 @@ def iter_single_trigger_csv_rows(filename: str):
 
 def iter_postcoh_rows(filename: str):
     columns: list[str] = []
+    in_table = False
     in_stream = False
     source_row = 0
     with open_text(filename) as input_file:
         for raw_line in input_file:
             line = raw_line.strip()
             if not in_stream:
-                column = clean_column_name(line)
-                if column:
-                    columns.append(column)
+                if line.startswith("<Table") and 'Name="postcoh:table"' in line:
+                    in_table = True
+                    columns = []
                     continue
-                if line.startswith("<Stream") and 'Name="postcoh:table"' in line:
-                    in_stream = True
+                if in_table:
+                    column = clean_column_name(line)
+                    if column:
+                        columns.append(column)
+                        continue
+                    if line.startswith("<Stream") and 'Name="postcoh:table"' in line:
+                        in_stream = True
+                        continue
+                    if line.startswith("</Table"):
+                        in_table = False
+                        columns = []
                 continue
             if line.startswith("</Stream"):
                 break
