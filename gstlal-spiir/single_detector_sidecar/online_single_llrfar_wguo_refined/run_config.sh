@@ -8,7 +8,9 @@ export DATA_DIR=${DATA_DIR:-${PACKAGE_ROOT}/data}
 
 export NODES_AMOUNT=${NODES_AMOUNT:-${NODES:-}}
 
-export SPIIR_SOURCE_DIR=${SPIIR_SOURCE_DIR:-/fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/qliang-wguo-single-detector/source}
+export SPIIR_BUILD_NAME=${SPIIR_BUILD_NAME:-wguo-single-det-py3}
+export SPIIR_RUN_FUNCTION=${SPIIR_RUN_FUNCTION:-run_spiir_py3}
+export SPIIR_SOURCE_DIR=${SPIIR_SOURCE_DIR:-/fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/${SPIIR_BUILD_NAME}/source}
 export SPIIR_HELPER_FUNCTIONS=${SPIIR_HELPER_FUNCTIONS:-/fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/bash_helper_functions.sh}
 
 export FRAME_CACHE_FILE=${FRAME_CACHE_FILE:-${DATA_CACHE_FILE:-${FRAME_CACHE:-${DATA_CACHE:-${DATA_DIRECTION:-${DATA_DIR}/frame_cache_hoft_C00_AR_1372808984_1375400984.cache}}}}}
@@ -141,7 +143,6 @@ fi
 export BANKS_PER_GROUP=${BANKS_PER_GROUP:-6}
 export FAR_INITIAL_WINDOW_POLICY=${FAR_INITIAL_WINDOW_POLICY:-skip}
 export START_BANK=${START_BANK:-0}
-export SPIIR_BUILD_NAME=${SPIIR_BUILD_NAME:-qliang-wguo-single-detector}
 export PIPELINE_MODE=${PIPELINE_MODE:-single}
 export SINGLE_INPUT_KIND=${SINGLE_INPUT_KIND:-zerolag}
 

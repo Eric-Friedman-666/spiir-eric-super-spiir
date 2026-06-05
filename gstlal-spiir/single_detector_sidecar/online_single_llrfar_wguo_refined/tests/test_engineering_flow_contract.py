@@ -23,7 +23,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
             tmp_path = Path(tmp)
             helper = tmp_path / "helper.sh"
             helper.write_text(
-                'run_spiir() { printf "task=%s args=%s\\n" "${SLURM_ARRAY_TASK_ID}" "$#"; }\n'
+                'run_spiir_py3() { printf "task=%s args=%s\\n" "${SLURM_ARRAY_TASK_ID}" "$#"; }\n'
             )
             env = dict(os.environ)
             env.update({
@@ -48,7 +48,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             helper = tmp_path / "helper.sh"
-            helper.write_text('run_spiir() { printf "SHOULD_NOT_RUN\\n"; }\n')
+            helper.write_text('run_spiir_py3() { printf "SHOULD_NOT_RUN\\n"; }\n')
             env = dict(os.environ)
             env.update({
                 "RUN_DIR": str(tmp_path),
@@ -67,6 +67,33 @@ class EngineeringFlowContractTests(unittest.TestCase):
             self.assertIn("has no bank group", result.stdout)
             self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
 
+    def test_run_config_defaults_to_wguo_py3_frontend(self) -> None:
+        env = dict(os.environ)
+        env.update({
+            "SPIIR_BUILD_NAME": "",
+            "SPIIR_RUN_FUNCTION": "",
+            "SPIIR_SOURCE_DIR": "",
+        })
+        result = subprocess.run(
+            [
+                "bash",
+                "-lc",
+                (
+                    f"source {shlex.quote(str(SCRIPT_DIR / 'run_config.sh'))}; "
+                    'printf "build=%s\\nrunner=%s\\nsource=%s\\n" '
+                    '"${SPIIR_BUILD_NAME}" "${SPIIR_RUN_FUNCTION}" "${SPIIR_SOURCE_DIR}"'
+                ),
+            ],
+            check=True,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.assertIn("build=wguo-single-det-py3", result.stdout)
+        self.assertIn("runner=run_spiir_py3", result.stdout)
+        self.assertIn("/build/wguo-single-det-py3/source", result.stdout)
+
     def test_submit_fails_when_slurm_allocation_has_too_few_nodes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -81,6 +108,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
                 "SLURM_JOB_NUM_NODES": "1",
                 "SLURM_JOB_ID": "allocation_guard",
                 "SPIIR_HELPER_FUNCTIONS": str(helper),
+                "SPIIR_RUN_FUNCTION": "run_spiir",
                 "AUTO_CLIP_FRAME_CACHE_TO_COMMON_SEGMENT": "0",
             })
             result = subprocess.run(

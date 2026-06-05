@@ -40,12 +40,17 @@ frame cache + GPS + banks
    `run_bank_group_worker.sh` calls `pipeline.sh`.  `pipeline.sh` launches the
    standard SPIIR online command over the selected frame-cache data.  This is
    still the main coherent SPIIR pipeline; the single-detector branch does not
-   replace it.
+   replace it.  The current runtime front-end is the Python-3 WGuo-compatible
+   path, `SPIIR_BUILD_NAME=wguo-single-det-py3` with
+   `SPIIR_RUN_FUNCTION=run_spiir_py3`, so the zerolag handoff is produced by
+   the same front-end family used for WGuo reference comparisons.
 3. **Run the main SPIIR matched-filter and coherent postcoh path.**
    The main pipeline loads the IIR banks, whitens the H1/L1 streams, performs
    matched filtering, forms detector-local quantities such as `snglsnr` and
    `chisq`, and then passes those streams through the normal coherent postcoh
-   and `cohfar` machinery.
+   and `cohfar` machinery.  When this Python-3 front-end is selected, the
+   submitted workflow also creates run-local WGuo-compatible copies of the
+   current split-bank XML files before the workers start.
 4. **Write zerolag XML snapshots from the main pipeline.**
    FinalSink periodically writes zerolag snapshots under numbered bank-group
    directories, such as `000/000_zerolag_<gps_start>_<duration>.xml.gz` and

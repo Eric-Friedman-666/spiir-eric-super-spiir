@@ -40,7 +40,37 @@ apply_frame_cache_common_clip() {
     eval "${clip_env}"
 }
 
+ensure_py3_compatible_bank_dir() {
+    if [ "${SPIIR_RUN_FUNCTION:-run_spiir_py3}" != "run_spiir_py3" ]; then
+        return 0
+    fi
+    if [ "${BANK_DIR_SOURCE:-}" = "explicit" ]; then
+        return 0
+    fi
+    case "${BANK_DIR_SOURCE:-}" in
+        generated-wguo-py3-compat*) return 0 ;;
+    esac
+
+    local source_bank_dir=${PY3_COMPAT_SOURCE_BANK_DIR:-${BANK_DIR}}
+    local target_bank_dir=${PY3_COMPAT_BANK_DIR:-${RUN_DIR}/compat_banks}
+    local end_bank=$((START_BANK + BANKS_PER_GROUP * (MAX_GROUP + 1) - 1))
+
+    export PY3_COMPAT_SOURCE_BANK_DIR="${source_bank_dir}"
+    export PY3_COMPAT_BANK_DIR="${target_bank_dir}"
+    export BANK_DIR="${target_bank_dir}"
+    export BANK_DIR_SOURCE="generated-wguo-py3-compat-from-${BANK_DIR_SOURCE:-unknown}"
+
+    mkdir -p "${target_bank_dir}"
+    python3 "${SCRIPT_DIR}/convert_pycbc_bank_for_wguo_compat.py" \
+        --input-dir "${source_bank_dir}" \
+        --output-dir "${target_bank_dir}" \
+        --start-bank "${START_BANK}" \
+        --end-bank "${end_bank}" \
+        --ifos H1,L1
+}
+
 apply_frame_cache_common_clip
+ensure_py3_compatible_bank_dir
 
 mkdir -p logs single_branch monitor
 source "${SPIIR_HELPER_FUNCTIONS}"
@@ -79,10 +109,11 @@ write_runtime_env() {
         COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS \
         FINALSINK_FAPUPDATER_INTERVAL_SECONDS ZEROLAG_SNAPSHOT_INTERVAL_SECONDS \
         BACKGROUND_UPDATE_TRIGGER_SECONDS FAR_INITIAL_WINDOW_POLICY MAX_GROUP BANKS_PER_GROUP \
-        SPIIR_BUILD_NAME SPIIR_HELPER_FUNCTIONS SPIIR_SOURCE_DIR PIPELINE_MODE SINGLE_INPUT_KIND \
+        SPIIR_BUILD_NAME SPIIR_RUN_FUNCTION SPIIR_HELPER_FUNCTIONS SPIIR_SOURCE_DIR PIPELINE_MODE SINGLE_INPUT_KIND \
         UPDATE_INTERVAL_SECONDS MONITOR_INTERVAL_SECONDS ONLINE_REPLAY_SYNC ONLINE_REPLAY_RATE \
         ONLINE_REPLAY_ALLOWED_LAG_SECONDS ONLINE_REPLAY_START_GPS ONLINE_REPLAY_START_WALL \
-        BANK_DIR BANK_DIR_SOURCE FALLBACK_BANK_DIR NONINJ_STATS_LOC DETRSP_MAP WGUO_BANK_STATS_DIR \
+        BANK_DIR BANK_DIR_SOURCE PY3_COMPAT_SOURCE_BANK_DIR PY3_COMPAT_BANK_DIR \
+        FALLBACK_BANK_DIR NONINJ_STATS_LOC DETRSP_MAP WGUO_BANK_STATS_DIR \
         NOISE_BETA RANK_OFFSET DEFAULT_SHAPE_DOF PLOT_LLR_MIN TAIL_LOG10_FAR FAR_FIT_BOUNDARY \
         ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN MERGE_WORKER_FAR_OUTPUTS SINGLE_UPDATE_LOCK_STALE_SECONDS; do
         write_runtime_env "${name}"
