@@ -73,6 +73,19 @@ def _single_detector_postcoh_prefix(output_prefix_list, output_name_list, i_dict
     return "sdpostcoh%d" % i_dict
 
 
+def _single_detector_trigger_output_fname(output_prefix_list, output_name_list,
+                                          i_dict):
+    if output_prefix_list is not None:
+        dirname = os.path.dirname(output_prefix_list[i_dict])
+        basename = os.path.basename(output_prefix_list[i_dict])
+        basename = basename.replace("_stats", "")
+        return os.path.join(dirname, "%s_single_triggers.csv" % basename)
+    if output_name_list is not None:
+        return output_name_list[i_dict].replace(".xml.gz",
+                                                "_single_triggers.csv")
+    return "single_triggers%d.csv" % i_dict
+
+
 def mkSPIIRmulti(pipeline,
                  detectors,
                  banks,
@@ -883,6 +896,13 @@ def mkPostcohSPIIROnline(pipeline,
                                     max_size_buffers=10,
                                     max_size_bytes=100000000)
 
+            single_trigger_output_fname = None
+            if analysis_mode == "single":
+                single_trigger_output_fname = _single_detector_trigger_output_fname(
+                    cohfar_accumbackground_output_prefix,
+                    cohfar_accumbackground_output_name,
+                    i_dict)
+
             if postcoh is None:
                 # make a queue for postcoh, otherwise it will be in the same thread with the first bank
                 postcoh = pipemodules.mkcudapostcoh(
@@ -904,6 +924,7 @@ def mkPostcohSPIIROnline(pipeline,
                     feature_signal_removal_bg_threshold,
                     feature_rescale_chisq_dof=feature_rescale_chisq_dof,
                     feature_weight_cmbchisq=feature_weight_cmbchisq,
+                    single_trigger_output_fname=single_trigger_output_fname,
                     stream_id=bankid)
             else:
                 snr.link_pads(None, postcoh, instrument)
@@ -913,7 +934,8 @@ def mkPostcohSPIIROnline(pipeline,
             postcoh = pipeparts.mkprogressreport(
                 pipeline, postcoh, "progress_xml_dump_bank_stream%d" % i_dict)
 
-        if analysis_mode == "single":
+        if (analysis_mode == "single"
+                and os.environ.get("SINGLE_DUMP_POSTCOH", "0") == "1"):
             single_postcoh_prefix = _single_detector_postcoh_prefix(
                 cohfar_accumbackground_output_prefix,
                 cohfar_accumbackground_output_name,

@@ -36,6 +36,7 @@
 #include <lal/TimeSeries.h>
 #include <lal/Units.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 // Our includes
@@ -168,7 +169,8 @@ enum {
     PROP_SIGNAL_REMOVAL_BG,
     PROP_SIGNAL_REMOVAL_BG_THRESHOLD,
     PROP_RESCALE_CHISQ_DOF,
-    PROP_WEIGHT_CMBCHISQ
+    PROP_WEIGHT_CMBCHISQ,
+    PROP_SINGLE_TRIGGER_OUTPUT_FNAME
 };
 
 static void cuda_postcoh_device_set_init(CudaPostcoh *element) {
@@ -300,6 +302,11 @@ static void cuda_postcoh_set_property(GObject *object,
         element->enable_weight_cmbchisq = g_value_get_boolean(value);
         break;
 
+    case PROP_SINGLE_TRIGGER_OUTPUT_FNAME:
+        g_free(element->single_trigger_output_fname);
+        element->single_trigger_output_fname = g_value_dup_string(value);
+        break;
+
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
     }
     GST_OBJECT_UNLOCK(element);
@@ -367,6 +374,10 @@ static void cuda_postcoh_get_property(GObject *object,
 
     case PROP_WEIGHT_CMBCHISQ:
         g_value_set_boolean(value, element->enable_weight_cmbchisq);
+        break;
+
+    case PROP_SINGLE_TRIGGER_OUTPUT_FNAME:
+        g_value_set_string(value, element->single_trigger_output_fname);
         break;
 
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, id, pspec); break;
@@ -1571,6 +1582,83 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
     return write_entries;
 }
 
+static void cuda_postcoh_write_single_trigger_csv(CudaPostcoh *postcoh,
+                                                  ifo_set_type coh_ifos,
+                                                  GstClockTime ts,
+                                                  int exe_len) {
+    if (postcoh->single_trigger_output_fname == NULL
+        || postcoh->single_trigger_output_fname[0] == '\0') {
+        return;
+    }
+
+    PostcohState *state = postcoh->state;
+    if (state == NULL || postcoh->sngl_table == NULL) { return; }
+
+    FILE *file = fopen(postcoh->single_trigger_output_fname, "a");
+    if (file == NULL) {
+        GST_WARNING_OBJECT(postcoh, "failed to open single trigger CSV %s",
+                           postcoh->single_trigger_output_fname);
+        return;
+    }
+
+    if (ftell(file) == 0) {
+        fprintf(file,
+                "source_kind,ifos,ifo,is_background,end_time,end_time_ns,"
+                "bankid,tmplt_idx,rho,snglsnr,chisq,peak_index,coh_ifos,"
+                "pivotal_ifo\n");
+    }
+
+    const char *coh_ifos_string = ifo_set__get_string(coh_ifos);
+    int nifo = state->nifo;
+    for (int enabled_ifo_id = 0; enabled_ifo_id < nifo; enabled_ifo_id++) {
+        if (!ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
+                                          enabled_ifo_id)) {
+            continue;
+        }
+
+        char ifo_name[IFO_LEN + 1];
+        strncpy(ifo_name, state->all_ifos + IFO_LEN * enabled_ifo_id, IFO_LEN);
+        ifo_name[IFO_LEN] = '\0';
+
+        LIGOTimeGPS chunk_end_time;
+        XLALINT8NSToGPS(&chunk_end_time, ts);
+        XLALGPSAdd(&chunk_end_time, (double)exe_len / postcoh->rate);
+        fprintf(file,
+                "chunk_boundary,%s,%s,empty,%d,%d,%d,,,,,,%s,%s\n",
+                ifo_name, ifo_name, chunk_end_time.gpsSeconds,
+                chunk_end_time.gpsNanoSeconds, postcoh->stream_id,
+                coh_ifos_string, ifo_name);
+
+        int ifo_id = state->write_ifo_mapping[enabled_ifo_id];
+        PeakList *pklist = state->peak_list[enabled_ifo_id];
+        if (pklist == NULL || pklist->npeak[0] <= 0) { continue; }
+
+        int npeak = pklist->npeak[0];
+        for (int ipeak = 0; ipeak < npeak; ipeak++) {
+            int peak_cur = pklist->peak_pos[ipeak];
+            int tmplt_idx = pklist->tmplt_idx[peak_cur];
+
+            LIGOTimeGPS end_time;
+            XLALINT8NSToGPS(&end_time, ts);
+            XLALGPSAddGPS(&end_time, &(postcoh->sngl_table[tmplt_idx].end));
+            XLALGPSAdd(&end_time, (double)pklist->len_idx[peak_cur] / exe_len);
+            XLALGPSAdd(&end_time,
+                       (double)pklist->ntoff[ifo_id][peak_cur] / exe_len);
+
+            double rho = pklist->snglsnr[ifo_id][peak_cur];
+            double chisq = pklist->chisq[ifo_id][peak_cur];
+            fprintf(file,
+                    "pre_foreground_select,%s,%s,0,%d,%d,%d,%d,%.9g,%.9g,"
+                    "%.9g,%d,%s,%s\n",
+                    ifo_name, ifo_name, end_time.gpsSeconds,
+                    end_time.gpsNanoSeconds, postcoh->stream_id, tmplt_idx, rho,
+                    rho, chisq, peak_cur, coh_ifos_string, ifo_name);
+        }
+    }
+
+    fclose(file);
+}
+
 static GstFlowReturn cuda_postcoh_new_buffer_and_push(CudaPostcoh *postcoh,
                                                       ifo_set_type coh_ifos,
                                                       gint out_len) {
@@ -1899,8 +1987,15 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
             }
         }
 
-        common_size -= exe_size;
         int exe_len = state->exe_len;
+        GstClockTime single_trigger_ts =
+          postcoh->t0
+          + gst_util_uint64_scale_int_round(postcoh->samples_out, GST_SECOND,
+                                            postcoh->rate);
+        cuda_postcoh_write_single_trigger_csv(postcoh, coh_ifos,
+                                              single_trigger_ts, exe_len);
+
+        common_size -= exe_size;
         state->snglsnr_start_load =
           (state->snglsnr_start_load + exe_len) % state->snglsnr_len;
         state->snglsnr_start_exe =
@@ -2007,6 +2102,9 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
 
 static void cuda_postcoh_dispose(GObject *object) {
     CudaPostcoh *element = CUDA_POSTCOH(object);
+    g_free(element->single_trigger_output_fname);
+    element->single_trigger_output_fname = NULL;
+
     if (element->collect) gst_object_unref(GST_OBJECT(element->collect));
     element->collect = NULL;
 
@@ -2155,6 +2253,14 @@ static void cuda_postcoh_class_init(CudaPostcohClass *klass) {
         "feature-weight-cmbchisq", "Weight cmbchisq by snr.",
         "Enable to weight cmbchisq based on single detector snr.", FALSE,
         G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_TRIGGER_OUTPUT_FNAME,
+      g_param_spec_string(
+        "single-trigger-output-fname", "Single detector trigger CSV filename",
+        "Optional CSV side output written after single-detector SNR/chisq are "
+        "available and before coherent foreground selection.", NULL,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static void cuda_postcoh_init(CudaPostcoh *postcoh, CudaPostcohClass *klass) {
@@ -2193,4 +2299,5 @@ static void cuda_postcoh_init(CudaPostcoh *postcoh, CudaPostcohClass *klass) {
     postcoh->t_roll_start     = GST_CLOCK_TIME_NONE;
     postcoh->refresh_interval = 0;
     postcoh->refresh_offset   = 0;
+    postcoh->single_trigger_output_fname = NULL;
 }

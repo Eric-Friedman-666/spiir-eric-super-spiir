@@ -1,6 +1,13 @@
 # SPIIR
 This repository hosts the source code and examples for the SPIIR pipeline. Please contact Qi Chu (qi.chu@ligo.org) if having any questions.
 
+## Eric single-detector sidecar
+The `Eric-super-spiir` branch keeps the standard coherent SPIIR path intact and
+adds an opt-in single-detector sidecar for H/L detector-local trigger capture and
+worker-local FAR assignment.  The design requirements, source-code handoff, and
+optimized OzSTAR control flow are summarized in
+[SINGLE_DETECTOR_ENGINEERING_FLOW.md](SINGLE_DETECTOR_ENGINEERING_FLOW.md).
+
 ## Dependencies:
 General libraries:
 ```

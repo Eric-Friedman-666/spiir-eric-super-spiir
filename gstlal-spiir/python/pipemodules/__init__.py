@@ -134,6 +134,7 @@ def mkcudapostcoh(pipeline,
                   feature_signal_removal_bg_threshold=8.5,
                   feature_rescale_chisq_dof=False,
                   feature_weight_cmbchisq=False,
+                  single_trigger_output_fname=None,
                   stream_id=0):
     properties = dict((name, value) for name, value in zip((
         "feature-rescale-chisq-dof", "detrsp-fname", "autocorrelation-fname",
@@ -141,13 +142,17 @@ def mkcudapostcoh(pipeline,
         "output-skymap", "detrsp-refresh-interval", "detrsp-refresh-offset",
         "trial-interval", "feature-signal-removal-bg",
         "feature-signal-removal-bg-threshold", "feature-weight-cmbchisq",
-        "stream-id"), (feature_rescale_chisq_dof, detrsp_fname,
+        "single-trigger-output-fname", "stream-id"), (
+                       feature_rescale_chisq_dof, detrsp_fname,
                        autocorrelation_fname, sngl_tmplt_fname, hist_trials,
                        snglsnr_thresh, cohsnr_thresh, output_skymap,
                        detrsp_refresh_interval, detrsp_refresh_offset,
                        trial_interval, feature_signal_removal_bg,
                        feature_signal_removal_bg_threshold,
-                       feature_weight_cmbchisq, stream_id)))
+                       feature_weight_cmbchisq, single_trigger_output_fname,
+                       stream_id)))
+    properties = dict((name, value) for name, value in properties.items()
+                      if value is not None)
     if "name" in properties:
         elem = gst.element_factory_make("cuda_postcoh", properties.pop("name"))
     else:

@@ -289,6 +289,7 @@ struct _CudaPostcoh {
 
     gboolean enable_rescale_chisq_dof;
     gboolean enable_weight_cmbchisq;
+    char *single_trigger_output_fname;
 
     /* sink event handling */
     GstPadEventFunction collect_event;
