@@ -1947,9 +1947,11 @@ class RankBackground(object):
     """
 
     DEFAULT_FAR_FIT_BOUNDARY = 1.0e-2
+    DEFAULT_FAR_PRETAIL_BOUNDARY = 1.0e-1
 
     def __init__(self, fit_min_points=20, far_floor_count=1.0,
-                 far_fit_boundary=DEFAULT_FAR_FIT_BOUNDARY):
+                 far_fit_boundary=DEFAULT_FAR_FIT_BOUNDARY,
+                 far_fit_pretail_boundary=DEFAULT_FAR_PRETAIL_BOUNDARY):
         self._ranks = []
         self.livetime = 0.0
         self.livetime_segments = []
@@ -1957,6 +1959,7 @@ class RankBackground(object):
         self.fit_min_points = int(fit_min_points)
         self.far_floor_count = float(far_floor_count)
         self.far_fit_boundary = float(far_fit_boundary)
+        self.far_fit_pretail_boundary = float(far_fit_pretail_boundary)
         self._fit_cache = None
 
     def _invalidate_fit_cache(self):
@@ -2338,57 +2341,49 @@ class RankBackground(object):
             smoothed = list(zip(xs, ys))
         return smoothed
 
-    @classmethod
-    def _clip_tail_fit_outliers(cls,
-                                points,
-                                x0,
-                                y0,
-                                min_points,
-                                sigma=2.6,
-                                min_log10_residual=0.08,
-                                iterations=8):
-        clean = list(points)
-        min_points = max(2, int(min_points))
-        if len(clean) < min_points:
-            return clean
-        ratios = [
-            (y - y0) / (x - x0)
-            for x, y in clean
-            if x > x0 and is_finite_number((y - y0) / (x - x0))
-            and (y - y0) / (x - x0) < 0.0
-        ]
-        if ratios:
-            slope = cls._median(ratios)
-        else:
-            slope, _intercept = cls._fit_line_through_fixed_point(
-                clean, x0, y0)
-        if slope is None:
-            return clean
+    def _wguo_broken_log10_far_curve(self, raw_xs, raw_monotonic,
+                                     pretail_far, tail_far):
+        if not is_finite_positive(tail_far):
+            return None
+        _pretail_log_far = (
+            math.log10(float(pretail_far))
+            if is_finite_positive(pretail_far) else None)
+        tail_log_far = math.log10(float(tail_far))
 
-        for _iteration in range(max(1, int(iterations))):
-            residuals = [y - (y0 + slope * (x - x0)) for x, y in clean]
-            center = cls._median(residuals)
-            mad = cls._median(abs(value - center) for value in residuals)
-            if mad is None:
-                break
-            cutoff = max(float(min_log10_residual),
-                         float(sigma) * 1.4826 * float(mad))
-            filtered = [
-                point for point, residual in zip(clean, residuals)
-                if abs(residual - center) <= cutoff
-            ]
-            if len(filtered) < min_points:
-                break
-            new_slope, _intercept = cls._fit_line_through_fixed_point(
-                filtered, x0, y0)
-            if new_slope is None:
-                break
-            if len(filtered) == len(clean) and abs(new_slope - slope) < 1.0e-8:
-                clean = filtered
-                break
-            clean = filtered
-            slope = new_slope
-        return clean
+        tail_idx = min(
+            range(len(raw_xs)),
+            key=lambda idx: abs(raw_monotonic[idx] - tail_log_far))
+        x_handoff = raw_xs[tail_idx]
+
+        tail_points = [
+            (x, y) for x, y in zip(raw_xs, raw_monotonic)
+            if x >= x_handoff
+        ]
+        min_tail_points = max(2, min(self.fit_min_points, 20,
+                                     len(tail_points)))
+        if len(tail_points) < min_tail_points:
+            return None
+
+        fit_tail_points = list(tail_points)
+        tail_slope, tail_intercept = self._fit_line_through_fixed_point(
+            fit_tail_points, x_handoff, tail_log_far)
+        if (tail_slope is None or not is_finite_number(tail_slope)
+                or tail_slope >= 0.0 or tail_intercept is None):
+            return None
+        tail_intercept = tail_log_far - tail_slope * x_handoff
+
+        x_end = raw_xs[-1]
+        fit_xs = list(raw_xs[:tail_idx + 1])
+        fit_log_fars = list(raw_monotonic[:tail_idx + 1])
+        if fit_xs:
+            fit_log_fars[-1] = tail_log_far
+        if x_end > x_handoff:
+            fit_xs.append(x_end)
+            fit_log_fars.append(tail_slope * x_end + tail_intercept)
+
+        final_xs, final_log_fars = self._finalize_log10_fit_curve(
+            fit_xs, fit_log_fars)
+        return final_xs, final_log_fars, tail_slope, tail_intercept
 
     def _fitted_log10_far_curve(self):
         if self._fit_cache is not None:
@@ -2420,11 +2415,25 @@ class RankBackground(object):
             self._fit_cache = (raw_xs, raw_monotonic, None, None)
             return self._fit_cache
 
-        # Use one smoothed empirical curve before the handoff, then a robust
-        # high-LLR line after the FAR-space handoff.
+        # Wguo-style FAR assignment: use the empirical/interpolated background
+        # curve before the tail, then fit the high-LLR tail as a constrained
+        # line using all available tail points. The old robust tail clipping
+        # path is archived out of the production code.
         boundary_far = self.far_fit_boundary
         if not is_finite_positive(boundary_far):
             boundary_far = self.DEFAULT_FAR_FIT_BOUNDARY
+        pretail_far = self.far_fit_pretail_boundary
+        if not is_finite_positive(pretail_far):
+            pretail_far = 10.0 * boundary_far
+
+        broken_fit = self._wguo_broken_log10_far_curve(
+            raw_xs, raw_monotonic, pretail_far, boundary_far)
+        if broken_fit is not None:
+            self._fit_cache = broken_fit
+            return self._fit_cache
+
+        # Fall back to the smoothed one-boundary fit if the current support does
+        # not contain enough points for the broken-tail path.
         boundary_log_far = math.log10(boundary_far)
         boundary_idx = min(
             range(len(raw_xs)),
@@ -2454,9 +2463,7 @@ class RankBackground(object):
         min_tail_points = max(2, min(self.fit_min_points, 20,
                                      len(fit_tail_points)))
         if len(fit_tail_points) >= min_tail_points:
-            fit_tail_points = self._clip_tail_fit_outliers(
-                fit_tail_points, x_boundary, boundary_log_far,
-                min_tail_points)
+            fit_tail_points = list(fit_tail_points)
             tail_slope, tail_intercept = self._fit_line_through_fixed_point(
                 fit_tail_points, x_boundary, boundary_log_far)
 
@@ -2495,6 +2502,7 @@ class RankBackground(object):
             "fit_min_points": self.fit_min_points,
             "far_floor_count": self.far_floor_count,
             "far_fit_boundary": self.far_fit_boundary,
+            "far_fit_pretail_boundary": self.far_fit_pretail_boundary,
         }
 
     @classmethod
@@ -2502,7 +2510,10 @@ class RankBackground(object):
         bg = cls(fit_min_points=data.get("fit_min_points", 20),
                  far_floor_count=data.get("far_floor_count", 1.0),
                  far_fit_boundary=data.get(
-                     "far_fit_boundary", cls.DEFAULT_FAR_FIT_BOUNDARY))
+                     "far_fit_boundary", cls.DEFAULT_FAR_FIT_BOUNDARY),
+                 far_fit_pretail_boundary=data.get(
+                     "far_fit_pretail_boundary",
+                     cls.DEFAULT_FAR_PRETAIL_BOUNDARY))
         bg.livetime = float(data.get("livetime", 0.0) or 0.0)
         bg.livetime_segments = []
         for segment in data.get("livetime_segments", []):

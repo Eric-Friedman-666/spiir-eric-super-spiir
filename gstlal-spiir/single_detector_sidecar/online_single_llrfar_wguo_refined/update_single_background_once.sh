@@ -98,6 +98,20 @@ DEFAULT_SHAPE_DOF=${DEFAULT_SHAPE_DOF:-74.30962572260326}
 PLOT_LLR_MIN=${PLOT_LLR_MIN:--10}
 TAIL_LOG10_FAR=${TAIL_LOG10_FAR:--2.0}
 FAR_FIT_BOUNDARY=${FAR_FIT_BOUNDARY:-0.01}
+SINGLE_BACKGROUND_MODE=${SINGLE_BACKGROUND_MODE:-rolling}
+SINGLE_FROZEN_BACKGROUND_JSON=${SINGLE_FROZEN_BACKGROUND_JSON:-}
+SINGLE_FROZEN_BACKGROUND_RUN_DIR=${SINGLE_FROZEN_BACKGROUND_RUN_DIR:-}
+SINGLE_FROZEN_BACKGROUND_ID=${SINGLE_FROZEN_BACKGROUND_ID:-BG-FROZEN}
+SINGLE_FROZEN_BACKGROUND_SOURCE=${SINGLE_FROZEN_BACKGROUND_SOURCE:-}
+
+case "${SINGLE_BACKGROUND_MODE}" in
+    rolling|frozen) ;;
+    *)
+        printf 'single-detector updater: invalid SINGLE_BACKGROUND_MODE=%s; expected rolling or frozen\n' \
+            "${SINGLE_BACKGROUND_MODE}" >&2
+        exit 2
+        ;;
+esac
 
 snapshot_globs=()
 if [ -n "${WORKER_ID}" ]; then
@@ -149,6 +163,60 @@ merge_worker_outputs() {
             --summary monitor/latest_single_background_status.json \
             --plot-summary monitor/latest_single_plot_summary.json || true
     fi
+}
+
+resolve_frozen_background_source() {
+    if [ -n "${SINGLE_FROZEN_BACKGROUND_JSON}" ]; then
+        printf '%s\n' "${SINGLE_FROZEN_BACKGROUND_JSON}"
+        return 0
+    fi
+    if [ -n "${SINGLE_FROZEN_BACKGROUND_RUN_DIR}" ]; then
+        if [ -n "${WORKER_TAG}" ]; then
+            printf '%s\n' "${SINGLE_FROZEN_BACKGROUND_RUN_DIR}/single_branch/${WORKER_TAG}/single_far_llr_background.json"
+        else
+            printf '%s\n' "${SINGLE_FROZEN_BACKGROUND_RUN_DIR}/single_branch/single_far_llr_background.json"
+        fi
+        return 0
+    fi
+    return 1
+}
+
+write_frozen_blocked_status() {
+    local reason=$1
+    local source=${2:-}
+    WORKER_ID="${WORKER_ID}" WORKER_GROUP="${WORKER_GROUP}" WORKER_COUNT="${WORKER_COUNT}" STATUS_JSON="${MONITOR_DIR}/latest_single_background_status.json" REASON="${reason}" FROZEN_SOURCE="${source}" python3 - <<'PY'
+import json
+import os
+import pathlib
+import time
+
+status = {
+    "worker_id": os.environ.get("WORKER_ID") or None,
+    "worker_group": os.environ.get("WORKER_GROUP") or None,
+    "worker_count": os.environ.get("WORKER_COUNT") or None,
+    "background_mode": "frozen",
+    "background_accumulation_disabled": True,
+    "background_ready": False,
+    "background_file": None,
+    "assigned_file": None,
+    "support_file": None,
+    "plot_file": None,
+    "support_points": 0,
+    "assigned_points": 0,
+    "formal_assigned_far_rows_H1": 0,
+    "formal_assigned_far_rows_L1": 0,
+    "formal_assigned_far_rows_total": 0,
+    "far_assignment_blocked": True,
+    "calculated_far_blocked": True,
+    "fixed_background_source": os.environ.get("FROZEN_SOURCE") or None,
+    "reason": os.environ["REASON"],
+    "updated_unix": time.time(),
+}
+path = pathlib.Path(os.environ["STATUS_JSON"])
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n")
+print(json.dumps(status, sort_keys=True))
+PY
 }
 
 if [ "${ONLINE_REPLAY_SYNC:-0}" = "1" ] && [ -z "${ONLINE_REPLAY_START_WALL:-}" ]; then
@@ -240,6 +308,140 @@ PY
 if [ -n "${ONLINE_REPLAY_START_WALL:-}" ]; then
     export ONLINE_REPLAY_START_WALL
 fi
+
+if [ "${SINGLE_BACKGROUND_MODE}" = "frozen" ]; then
+    assignment_extract_args=()
+    for pattern in "${snapshot_globs[@]}"; do
+        assignment_extract_args+=(--glob "${pattern}")
+    done
+    assignment_extract_args+=(
+        --output "${ASSIGNMENT_FEATURE_CSV}"
+        --summary "${ASSIGNMENT_SUMMARY_JSON}"
+        --min-snr 4
+        --banks-per-group "${BANKS_PER_GROUP:-6}"
+    )
+    if [ -n "${assignment_max_snapshot_end_gps:-}" ]; then
+        assignment_extract_args+=(--max-snapshot-end-gps "${assignment_max_snapshot_end_gps}")
+    fi
+
+    python3 "${SCRIPT_DIR:-.}/extract_zerolag_features.py" "${assignment_extract_args[@]}"
+
+    frozen_source=$(resolve_frozen_background_source || true)
+    if [ -f "${BACKGROUND_JSON}" ]; then
+        frozen_input="${BACKGROUND_JSON}"
+    elif [ -n "${frozen_source}" ] && [ -f "${frozen_source}" ]; then
+        cp "${frozen_source}" "${BACKGROUND_JSON}"
+        frozen_input="${BACKGROUND_JSON}"
+    else
+        write_frozen_blocked_status \
+            "SINGLE_BACKGROUND_MODE=frozen requires an existing no-injection background; set SINGLE_FROZEN_BACKGROUND_JSON or SINGLE_FROZEN_BACKGROUND_RUN_DIR before assigning injection triggers" \
+            "${frozen_source}"
+        merge_worker_outputs
+        exit 2
+    fi
+
+    ledger_args=(
+        --feature-csv "${ASSIGNMENT_FEATURE_CSV}"
+        --output "${ASSIGNED_CSV}"
+        --candidate-output "${ASSIGNED_CANDIDATES_CSV}"
+        --summary "${ASSIGNMENT_LEDGER_JSON}"
+        --ifos H1,L1
+        --min-snr 4
+        --background-window-seconds "${BACKGROUND_ACCUMULATION_SECONDS:-10800}"
+        --background-required-seconds "${BACKGROUND_ACCUMULATION_SECONDS:-10800}"
+        --background-update-seconds "${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}"
+        --initial-window-policy "${FAR_INITIAL_WINDOW_POLICY:-skip}"
+        --snr-bins 4,5,6,8,inf
+        --min-calibration-count 20
+        --bank-stats-dir "${WGUO_BANK_STATS_DIR}"
+        --signal-dof "${DEFAULT_SHAPE_DOF}"
+        --noise-dof "${DEFAULT_SHAPE_DOF}"
+        --noise-beta "${NOISE_BETA}"
+        --rank-offset "${RANK_OFFSET}"
+        --fit-min-points 20
+        --far-fit-boundary "${FAR_FIT_BOUNDARY}"
+        --fixed-background-input "${frozen_input}"
+        --fixed-background-id "${SINGLE_FROZEN_BACKGROUND_ID}"
+        --fixed-background-source "${SINGLE_FROZEN_BACKGROUND_SOURCE:-${frozen_source}}"
+    )
+
+    python3 "${SCRIPT_DIR:-.}/assign_frozen_far_ledger.py" "${ledger_args[@]}"
+
+    python3 "${SCRIPT_DIR:-.}/plot_single_llr_far.py" \
+        --background "${BACKGROUND_JSON}" \
+        --assigned "${ASSIGNED_CSV}" \
+        --output "${PLOT_PNG}" \
+        --summary "${PLOT_SUMMARY}" \
+        --llr-min "${PLOT_LLR_MIN}" \
+        --tail-log10-far "${TAIL_LOG10_FAR}"
+
+    WORKER_ID="${WORKER_ID}" WORKER_GROUP="${WORKER_GROUP}" WORKER_COUNT="${WORKER_COUNT}" ASSIGNMENT_SUMMARY_JSON="${ASSIGNMENT_SUMMARY_JSON}" ASSIGNMENT_LEDGER_JSON="${ASSIGNMENT_LEDGER_JSON}" PLOT_SUMMARY="${PLOT_SUMMARY}" STATUS_JSON="${MONITOR_DIR}/latest_single_background_status.json" BACKGROUND_JSON="${BACKGROUND_JSON}" ASSIGNED_CSV="${ASSIGNED_CSV}" SUPPORT_CSV="${SUPPORT_CSV}" PLOT_PNG="${PLOT_PNG}" ASSIGNMENT_FEATURE_CSV="${ASSIGNMENT_FEATURE_CSV}" FROZEN_SOURCE="${frozen_source}" python3 - <<'PY'
+import csv
+import json
+import os
+import pathlib
+import time
+
+assignment_summary_path = pathlib.Path(os.environ["ASSIGNMENT_SUMMARY_JSON"])
+assignment_summary = (
+    json.loads(assignment_summary_path.read_text())
+    if assignment_summary_path.exists() else {})
+ledger = json.loads(pathlib.Path(os.environ["ASSIGNMENT_LEDGER_JSON"]).read_text())
+plot = json.loads(pathlib.Path(os.environ["PLOT_SUMMARY"]).read_text())
+counts = {"H1": 0, "L1": 0, "total": 0}
+with pathlib.Path(os.environ["ASSIGNED_CSV"]).open(newline="") as handle:
+    reader = csv.DictReader(handle)
+    for row in reader:
+        ifo = (row.get("ifo") or row.get("ifos") or "").strip()
+        if ifo in ("H1", "L1"):
+            counts[ifo] += 1
+        counts["total"] += 1
+support_path = pathlib.Path(os.environ["SUPPORT_CSV"])
+summary = dict(assignment_summary)
+summary.update({
+    "worker_id": os.environ.get("WORKER_ID") or None,
+    "worker_group": os.environ.get("WORKER_GROUP") or None,
+    "worker_count": os.environ.get("WORKER_COUNT") or None,
+    "background_mode": "frozen",
+    "background_accumulation_disabled": True,
+    "background_ready": True,
+    "background_file": os.environ["BACKGROUND_JSON"],
+    "fixed_background_file": os.environ["BACKGROUND_JSON"],
+    "fixed_background_source": os.environ.get("FROZEN_SOURCE") or None,
+    "assigned_file": os.environ["ASSIGNED_CSV"],
+    "support_file": str(support_path) if support_path.exists() else None,
+    "plot_file": os.environ["PLOT_PNG"],
+    "support_points": plot.get("support_points"),
+    "assigned_points": plot.get("assigned_points"),
+    "assignment_feature_file": os.environ["ASSIGNMENT_FEATURE_CSV"],
+    "assignment_feature_rows_total": assignment_summary.get("feature_rows_total"),
+    "assignment_input_files": assignment_summary.get("input_files"),
+    "assignment_files": assignment_summary.get("files"),
+    "assignment_gps_start_utc": assignment_summary.get("gps_start_utc"),
+    "assignment_gps_end_utc": assignment_summary.get("gps_end_utc"),
+    "assignment_new_rows": ledger.get("newly_assigned_rows"),
+    "assignment_duplicate_candidate_rows": ledger.get("duplicate_candidate_rows"),
+    "assignment_skipped_not_ready_rows": ledger.get("skipped_not_ready_rows"),
+    "assignment_deferred_window_rows": ledger.get("deferred_window_rows"),
+    "assignment_background_windows_used": ledger.get("background_windows_used"),
+    "assignment_background_files": ledger.get("background_files"),
+    "assignment_policy": ledger.get("policy"),
+    "formal_assigned_far_rows_H1": counts["H1"],
+    "formal_assigned_far_rows_L1": counts["L1"],
+    "formal_assigned_far_rows_total": counts["total"],
+    "far_assignment_blocked": False,
+    "calculated_far_blocked": False,
+    "updated_unix": time.time(),
+})
+pathlib.Path(os.environ["STATUS_JSON"]).write_text(
+    json.dumps(summary, indent=2, sort_keys=True) + "\n")
+print(json.dumps(summary, sort_keys=True))
+PY
+
+    merge_worker_outputs
+    exit 0
+fi
+
 if [ -n "${min_snapshot_end_gps:-}" ]; then
     extract_args+=(--min-snapshot-end-gps "${min_snapshot_end_gps}")
 fi

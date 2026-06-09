@@ -177,7 +177,12 @@ def monotonic_log_fars(values):
 
 
 def robust_curve_for_plot(background, points, boundary_log10_far):
-    """Build the same display shape used by RankBackground.fitted_far."""
+    """Build the same display shape used by RankBackground.fitted_far.
+
+    The function name is kept for compatibility with existing plot scripts.
+    Production tail clipping is disabled; ``tail_kept`` now means the all-point
+    tail support used for the displayed fit and ``tail_rejected`` is empty.
+    """
 
     raw = sorted((float(point[0]), float(point[1])) for point in points)
     if len(raw) < 2 or RankBackground is None:
@@ -200,13 +205,69 @@ def robust_curve_for_plot(background, points, boundary_log10_far):
             raw_log_fars.append(log_far)
     raw_monotonic = monotonic_log_fars(raw_log_fars)
 
-    tail_far = math.pow(10.0, float(boundary_log10_far))
+    tail_far = safe_float(background.get("far_fit_boundary")) if background else None
+    if tail_far is None or tail_far <= 0.0:
+        tail_far = math.pow(10.0, float(boundary_log10_far))
     tail_log_far = math.log10(tail_far)
 
     tail_idx = min(
         range(len(raw_xs)),
         key=lambda idx: abs(raw_monotonic[idx] - tail_log_far))
     x_tail = raw_xs[tail_idx]
+
+    if RankBackground is not None:
+        try:
+            bg = RankBackground.from_dict(background)
+            fit = bg._fitted_log10_far_curve()
+        except Exception:
+            fit = None
+        if fit is not None:
+            fit_xs, fit_log_fars, slope, intercept = fit
+            before_tail = [
+                (x, y) for x, y in zip(fit_xs, fit_log_fars)
+                if x <= x_tail
+            ]
+            if not before_tail or before_tail[-1][0] != x_tail:
+                before_tail.append((x_tail, tail_log_far))
+
+            tail_raw = [
+                (x, y) for x, y in zip(raw_xs, raw_monotonic)
+                if x >= x_tail
+            ]
+            min_tail_points = max(2, min(
+                int(background.get("fit_min_points", 20) or 20),
+                20,
+                len(tail_raw)))
+            tail_kept = []
+            if slope is not None and intercept is not None and len(tail_raw) >= min_tail_points:
+                tail_kept = list(tail_raw)
+            tail_rejected = []
+            tail_line = None
+            if slope is not None and intercept is not None:
+                tail_line = (
+                    (x_tail, slope * x_tail + intercept),
+                    (raw_xs[-1], slope * raw_xs[-1] + intercept),
+                )
+            return {
+                "raw": list(zip(raw_xs, raw_monotonic)),
+                "before_tail": before_tail,
+                "tail_kept": tail_kept,
+                "tail_rejected": tail_rejected,
+                "tail_line": tail_line,
+                "metadata": {
+                    "tail_from": x_tail,
+                    "tail_slope": slope,
+                    "tail_intercept": intercept,
+                    "tail_points": len(tail_raw),
+                    "tail_kept": len(tail_kept),
+                    "tail_rejected": len(tail_rejected),
+                    "tail_clipping": "disabled",
+                    "boundary_log10_far": tail_log_far,
+                    "before_tail_from": raw_xs[0],
+                    "x_max": raw_xs[-1],
+                    "fit_source": "RankBackground._fitted_log10_far_curve",
+                },
+            }
 
     before_tail = RankBackground._smooth_before_tail_curve(
         raw_xs, raw_monotonic, raw_xs[0], x_tail)
@@ -230,8 +291,7 @@ def robust_curve_for_plot(background, points, boundary_log10_far):
     kept = []
     slope = intercept = None
     if len(fit_tail_points) >= min_tail_points:
-        kept = RankBackground._clip_tail_fit_outliers(
-            fit_tail_points, x_tail, tail_log_far, min_tail_points)
+        kept = list(fit_tail_points)
         slope, intercept = RankBackground._fit_line_through_fixed_point(
             kept, x_tail, tail_log_far)
 
@@ -265,6 +325,7 @@ def robust_curve_for_plot(background, points, boundary_log10_far):
             "tail_points": len(fit_tail_points),
             "tail_kept": len(tail_kept),
             "tail_rejected": len(tail_rejected),
+            "tail_clipping": "disabled",
             "boundary_log10_far": tail_log_far,
             "before_tail_from": raw_xs[0],
             "x_max": raw_xs[-1],
@@ -414,16 +475,11 @@ def main() -> int:
             if curve["tail_kept"]:
                 ax.scatter([x for x, _y in curve["tail_kept"]],
                            [y for _x, y in curve["tail_kept"]],
-                           s=18, color="#1f78b4", label="tail points kept")
-            if curve["tail_rejected"]:
-                ax.scatter([x for x, _y in curve["tail_rejected"]],
-                           [y for _x, y in curve["tail_rejected"]],
-                           s=25, marker="x", color="#d7301f",
-                           label="tail outliers rejected")
+                           s=18, color="#1f78b4", label="tail fit points")
             if curve["tail_line"] is not None:
                 (x0, y0), (x1, y1) = curve["tail_line"]
                 ax.plot([x0, x1], [y0, y1], color="#f28e2b",
-                        linewidth=2.2, label="robust linear tail")
+                        linewidth=2.2, label="linear tail fit (all points)")
 
             metadata = curve.get("metadata") or {}
             tail_from = metadata.get("tail_from")
@@ -435,7 +491,7 @@ def main() -> int:
                 ax.axhline(boundary_log10_far, color="#f28e2b",
                            linestyle=":", linewidth=0.9)
 
-            ax.set_title(f"{ifo}: before-tail smoothing + robust tail")
+            ax.set_title(f"{ifo}: before-tail smoothing + all-point tail")
             ax.set_xlabel("LLR")
             ax.set_ylabel(r"$\log_{10}(\mathrm{FAR})$")
             ax.set_xlim(left=args.llr_min)
@@ -445,7 +501,7 @@ def main() -> int:
         fig.legend(handles, labels, loc="lower center", ncol=5, frameon=False,
                    bbox_to_anchor=(0.5, 0.02))
         fig.suptitle(
-            "Single-detector FAR-LLR background: smoothed before-tail and robust tail",
+            "Single-detector FAR-LLR background: smoothed before-tail and all-point tail",
             y=0.98)
         fig.subplots_adjust(left=0.06, right=0.99, top=0.88,
                             bottom=0.18, wspace=0.18)

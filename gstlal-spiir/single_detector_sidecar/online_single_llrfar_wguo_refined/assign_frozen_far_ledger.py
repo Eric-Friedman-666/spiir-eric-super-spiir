@@ -85,6 +85,20 @@ def parse_args() -> argparse.Namespace:
         "--background-archive-dir",
         help=("directory where assignment background files are frozen as BG-000.json, "
               "BG-001.json, ... for audit and replay"))
+    parser.add_argument(
+        "--fixed-background-input",
+        help=("pre-frozen no-injection single-detector background JSON. When set, "
+              "candidate triggers are assigned with this background only; no "
+              "background is accumulated from the current feature CSV. Use this "
+              "for runs that contain injections."))
+    parser.add_argument(
+        "--fixed-background-id",
+        default=os.environ.get("SINGLE_FROZEN_BACKGROUND_ID", "BG-FROZEN"),
+        help="background id recorded on rows assigned with --fixed-background-input")
+    parser.add_argument(
+        "--fixed-background-source",
+        default=os.environ.get("SINGLE_FROZEN_BACKGROUND_SOURCE", ""),
+        help="optional provenance string for the no-injection run that produced the fixed background")
     return parser.parse_args()
 
 
@@ -299,6 +313,136 @@ def count_by_ifo(rows: list[dict[str, str]]) -> dict[str, int]:
     return counts
 
 
+def make_fixed_background_branch(args: argparse.Namespace,
+                                 ifos: tuple[str, ...]) -> sdf.SingleDetectorBranch:
+    model = sdf.make_likelihood_model_from_args(args)
+    branch = sdf.SingleDetectorBranch(
+        model,
+        ifos=ifos,
+        min_snr=args.min_snr,
+        fit_min_points=args.fit_min_points,
+        far_floor_count=args.far_floor_count,
+        far_fit_boundary=args.far_fit_boundary)
+    branch.load_background_file(args.fixed_background_input)
+    branch.use_fitted_far = True
+    return branch
+
+
+def branch_livetime_by_ifo(branch: sdf.SingleDetectorBranch) -> dict[str, float]:
+    return {
+        ifo: float(background.livetime)
+        for ifo, background in branch.background.items()
+    }
+
+
+def assign_with_fixed_background(args: argparse.Namespace,
+                                 ifos: tuple[str, ...],
+                                 foreground_features: list[sdf.SingleDetectorFeature],
+                                 ignored_nonforeground_features: int,
+                                 existing_rows: list[dict[str, str]],
+                                 output_rows: list[dict[str, str]],
+                                 seen: set[tuple[str, ...]],
+                                 output_path: Path,
+                                 summary_path: Path,
+                                 candidate_path: Path | None) -> int:
+    fixed_path = Path(args.fixed_background_input)
+    if not fixed_path.exists():
+        sys.stderr.write(
+            "FIXED_BACKGROUND_ERROR: --fixed-background-input does not exist: "
+            f"{fixed_path}\n"
+        )
+        return 2
+
+    branch = make_fixed_background_branch(args, ifos)
+    livetime_by_ifo = branch_livetime_by_ifo(branch)
+    bg_id = args.fixed_background_id or fixed_path.stem
+    bg_source = args.fixed_background_source or str(fixed_path)
+    assignment_utc, assignment_unix = utc_now()
+
+    new_rows: list[dict[str, str]] = []
+    duplicate_candidates = 0
+    for feature in foreground_features:
+        key = trigger_key_from_feature(feature)
+        if key in seen:
+            duplicate_candidates += 1
+            continue
+        rows = sdf.results_to_plot_rows([branch.assign_feature(feature)])
+        for row in rows:
+            row["assign_bg_id"] = bg_id
+            row["assign_bg_file"] = str(fixed_path)
+            row["assign_bg_start"] = ""
+            row["assign_bg_end"] = ""
+            row["assign_bg_livetime_seconds"] = livetime_by_ifo.get(
+                row.get("ifo", ""), "")
+            row["assign_bg_update_utc"] = assignment_utc
+            row["assign_bg_update_unix"] = assignment_unix
+            row["assignment_utc"] = assignment_utc
+            row["assignment_unix"] = assignment_unix
+            new_rows.append(row)
+            output_rows.append(row)
+            seen.add(trigger_key_from_row(row))
+
+    write_rows(output_path, output_rows)
+    if candidate_path:
+        write_rows(candidate_path, new_rows)
+
+    counts = count_by_ifo(output_rows)
+    policy = (
+        "append-only trigger ledger: existing assigned FAR rows are preserved; "
+        "new trigger rows are assigned with a fixed no-injection single-detector "
+        "background. The current run is treated as assignment-only, so no "
+        "candidate trigger from this feature CSV is used to accumulate or "
+        "refit the background."
+    )
+    background_record = {
+        "bg_id": bg_id,
+        "background_file": str(fixed_path),
+        "background_source": bg_source,
+        "background_livetime_by_ifo": livetime_by_ifo,
+        "assigned_rows": len(new_rows),
+        "assignment_update_utc": assignment_utc,
+        "assignment_update_unix": assignment_unix,
+        "fixed_background": True,
+    }
+    summary = {
+        "assigned_file": str(output_path),
+        "candidate_file": str(candidate_path) if candidate_path else None,
+        "feature_file": args.feature_csv,
+        "existing_rows_before_merge": len(existing_rows),
+        "input_feature_rows": len(foreground_features) + ignored_nonforeground_features,
+        "candidate_rows": len(foreground_features),
+        "ignored_nonforeground_rows": ignored_nonforeground_features,
+        "duplicate_candidate_rows": duplicate_candidates,
+        "newly_assigned_rows": len(new_rows),
+        "skipped_no_time_rows": 0,
+        "skipped_not_ready_rows": 0,
+        "deferred_window_rows": 0,
+        "background_windows_used": 1 if foreground_features else 0,
+        "background_files": [background_record],
+        "max_new_windows_per_run": args.max_new_windows_per_run,
+        "background_window_seconds": args.background_window_seconds,
+        "background_required_seconds": args.background_required_seconds,
+        "background_update_seconds": args.background_update_seconds,
+        "initial_window_policy": args.initial_window_policy,
+        "formal_assigned_far_rows_H1": counts["H1"],
+        "formal_assigned_far_rows_L1": counts["L1"],
+        "formal_assigned_far_rows_total": counts["total"],
+        "assignment_utc": assignment_utc,
+        "assignment_unix": assignment_unix,
+        "policy": policy,
+        "fixed_background": True,
+        "background_accumulation_disabled": True,
+        "fixed_background_file": str(fixed_path),
+        "fixed_background_id": bg_id,
+        "fixed_background_source": bg_source,
+        "fixed_background_livetime_by_ifo": livetime_by_ifo,
+    }
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    print(json.dumps(summary, sort_keys=True))
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     if (float(args.background_required_seconds)
@@ -337,6 +481,19 @@ def main() -> int:
             continue
         output_rows.append(normalize_row(row))
         seen.add(key)
+
+    if args.fixed_background_input:
+        return assign_with_fixed_background(
+            args,
+            ifos,
+            foreground_features,
+            ignored_nonforeground_features,
+            existing_rows,
+            output_rows,
+            seen,
+            output_path,
+            summary_path,
+            candidate_path)
 
     groups: dict[float, list[sdf.SingleDetectorFeature]] = {}
     skipped_no_time = 0

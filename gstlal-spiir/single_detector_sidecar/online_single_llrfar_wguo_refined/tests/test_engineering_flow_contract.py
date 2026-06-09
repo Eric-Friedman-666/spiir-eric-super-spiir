@@ -18,6 +18,14 @@ SCRIPT_DIR = Path(__file__).resolve().parents[1]
 
 
 class EngineeringFlowContractTests(unittest.TestCase):
+    def test_tail_clipping_is_archived_not_active(self) -> None:
+        single_source = (SCRIPT_DIR / "single_detector_far.py").read_text()
+        plot_source = (SCRIPT_DIR / "plot_single_llr_far.py").read_text()
+        self.assertNotIn("_clip_tail_fit_outliers", single_source)
+        self.assertNotIn("RankBackground._clip_tail_fit_outliers", plot_source)
+        self.assertIn("all available tail points", single_source)
+        self.assertIn('"tail_clipping": "disabled"', plot_source)
+
     def test_worker_owns_exactly_one_bank_group(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -302,6 +310,174 @@ class EngineeringFlowContractTests(unittest.TestCase):
                 self.assertTrue(row["assigned_far"])
                 self.assertTrue(row["calculated_far"])
                 self.assertTrue(row["assign_bg_file"])
+
+    def test_fixed_background_assignment_does_not_build_bg_from_injections(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fields = [
+                "source_file",
+                "source_row",
+                "ifo",
+                "rho",
+                "chisq",
+                "tmplt_idx",
+                "bankid",
+                "end_time",
+                "end_time_ns",
+                "is_background",
+            ]
+
+            noinj_features = tmp_path / "noinj_features.csv"
+            rows = []
+            for idx in range(80):
+                rows.append({
+                    "source_file": "000/000_zerolag_0_600.xml.gz",
+                    "source_row": idx,
+                    "ifo": "H1",
+                    "rho": 4.5 + (idx % 10) * 0.1,
+                    "chisq": 1.0 + (idx % 7) * 0.05,
+                    "tmplt_idx": idx % 5,
+                    "bankid": 0,
+                    "end_time": 1 + idx * 5,
+                    "end_time_ns": 0,
+                    "is_background": 0,
+                })
+            rows.append({
+                "source_file": "000/000_zerolag_600_100.xml.gz",
+                "source_row": 1000,
+                "ifo": "H1",
+                "rho": 6.2,
+                "chisq": 1.1,
+                "tmplt_idx": 2,
+                "bankid": 0,
+                "end_time": 620,
+                "end_time_ns": 0,
+                "is_background": 0,
+            })
+            with noinj_features.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(rows)
+
+            fixed_bg = tmp_path / "fixed_noinj_background.json"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_DIR / "single_detector_far.py"),
+                    "feature-csv",
+                    "--feature-csv",
+                    str(noinj_features),
+                    "--output",
+                    str(tmp_path / "bootstrap.csv"),
+                    "--background-output",
+                    str(fixed_bg),
+                    "--ifos",
+                    "H1,L1",
+                    "--min-snr",
+                    "4",
+                    "--foreground-count",
+                    "1",
+                    "--bootstrap-background-from-foreground",
+                    "--background-livetime",
+                    "600",
+                    "--fit-min-points",
+                    "2",
+                ],
+                check=True,
+                cwd=str(SCRIPT_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertTrue(fixed_bg.exists())
+
+            inj_features = tmp_path / "inj_features.csv"
+            with inj_features.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows([
+                    {
+                        "source_file": "000/000_zerolag_700_100.xml.gz",
+                        "source_row": 2000,
+                        "ifo": "H1",
+                        "rho": 35.0,
+                        "chisq": 0.8,
+                        "tmplt_idx": 1,
+                        "bankid": 0,
+                        "end_time": 720,
+                        "end_time_ns": 0,
+                        "is_background": 0,
+                    },
+                    {
+                        "source_file": "000/000_zerolag_800_100.xml.gz",
+                        "source_row": 2001,
+                        "ifo": "H1",
+                        "rho": 42.0,
+                        "chisq": 0.7,
+                        "tmplt_idx": 2,
+                        "bankid": 0,
+                        "end_time": 830,
+                        "end_time_ns": 0,
+                        "is_background": 0,
+                    },
+                ])
+
+            output = tmp_path / "single_final_far_all.csv"
+            summary = tmp_path / "fixed_summary.json"
+            archive = tmp_path / "should_not_be_created"
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT_DIR / "assign_frozen_far_ledger.py"),
+                    "--feature-csv",
+                    str(inj_features),
+                    "--output",
+                    str(output),
+                    "--candidate-output",
+                    str(tmp_path / "fixed_candidates.csv"),
+                    "--summary",
+                    str(summary),
+                    "--ifos",
+                    "H1,L1",
+                    "--min-snr",
+                    "4",
+                    "--background-window-seconds",
+                    "300",
+                    "--background-required-seconds",
+                    "300",
+                    "--background-update-seconds",
+                    "100",
+                    "--allow-short-background-debug",
+                    "--fit-min-points",
+                    "2",
+                    "--background-archive-dir",
+                    str(archive),
+                    "--fixed-background-input",
+                    str(fixed_bg),
+                    "--fixed-background-id",
+                    "NOINJ-BG",
+                    "--fixed-background-source",
+                    "unit-test-noinj",
+                ],
+                check=True,
+                cwd=str(SCRIPT_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+
+            fixed_summary = json.loads(summary.read_text())
+            self.assertTrue(fixed_summary["fixed_background"])
+            self.assertTrue(fixed_summary["background_accumulation_disabled"])
+            self.assertEqual(fixed_summary["newly_assigned_rows"], 2)
+            self.assertFalse(archive.exists())
+            with output.open(newline="") as handle:
+                assigned_rows = list(csv.DictReader(handle))
+            self.assertEqual(len(assigned_rows), 2)
+            for row in assigned_rows:
+                self.assertEqual(row["assign_bg_id"], "NOINJ-BG")
+                self.assertEqual(row["assign_bg_file"], str(fixed_bg))
+                self.assertTrue(row["assigned_far"])
 
     def test_manual_update_uses_script_dir_from_frozen_run_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
