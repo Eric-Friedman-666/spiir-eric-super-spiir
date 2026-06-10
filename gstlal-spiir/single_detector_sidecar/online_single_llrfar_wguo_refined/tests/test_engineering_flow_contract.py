@@ -26,6 +26,24 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("all available tail points", single_source)
         self.assertIn('"tail_clipping": "disabled"', plot_source)
 
+    def test_o3a_online_frontier_bg_is_no_injection_chunked(self) -> None:
+        source = (SCRIPT_DIR / "run_o3a_bns_online_frontier_bg.sh").read_text()
+        self.assertIn("Online-frontier controller", source)
+        self.assertIn("WGUO_O3A_INJECTION_MODE=none", source)
+        self.assertIn('WGUO_O3A_INJECTION_FILE=""', source)
+        self.assertIn("CHUNK_SECONDS=${CHUNK_SECONDS:-86400}", source)
+        self.assertIn("NUM_CHUNKS=${NUM_CHUNKS:-7}", source)
+        self.assertIn("stats_loc=\"${dir}\"", source)
+        self.assertIn("Future online injection tests must expose injection rows chunk by chunk", source)
+
+    def test_o3a_py3_wrapper_requires_external_multi_background(self) -> None:
+        source = (SCRIPT_DIR / "wguo_o3a_bns_py3_pipeline.sh").read_text()
+        self.assertIn("O3A_BNS_PIPELINE_ERROR missing external multi background stats", source)
+        self.assertIn("external multi background points inside current run", source)
+        self.assertIn("--cohfar-assignfar-input-fname", source)
+        self.assertIn("--finalsink-fapupdater-output-fname", source)
+        self.assertIn("DO_NOT_USE_AS_BACKGROUND_INJECTION_STATS.txt", source)
+
     def test_worker_owns_exactly_one_bank_group(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
