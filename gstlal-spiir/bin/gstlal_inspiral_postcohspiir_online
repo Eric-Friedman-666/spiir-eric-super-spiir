@@ -342,6 +342,13 @@ def parse_command_line():
                       default=None,
                       help="Set the filename to read the FAP (optional)")
     parser.add_option(
+        "--finalsink-single-trigger-stream",
+        metavar="filename",
+        default=None,
+        help=("Append a near-real-time CSV mirror of clustered zerolag rows for "
+              "the single-detector sidecar.  The final zerolag XML remains the "
+              "audit source of truth."))
+    parser.add_option(
         "--reference-psd",
         metavar="filename",
         help=
@@ -900,6 +907,7 @@ finalsink = postcoh_finalsink.FinalSink(
     feature_cluster_available_triggers=options.
     feature_cluster_available_triggers,
     feature_dump_all_zerolags=options.feature_dump_all_zerolags,
+    single_trigger_stream_fname=options.finalsink_single_trigger_stream,
     feature_dump_stats=options.feature_dump_stats,
     feature_dump_stats_dir_path=options.feature_dump_stats_dir_path,
     feature_subprocesses_can_block=options.feature_subprocesses_can_block,

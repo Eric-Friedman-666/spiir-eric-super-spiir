@@ -12,6 +12,8 @@ export SPIIR_BUILD_NAME=${SPIIR_BUILD_NAME:-wguo-single-det-py3}
 export SPIIR_RUN_FUNCTION=${SPIIR_RUN_FUNCTION:-run_spiir_py3}
 export SPIIR_SOURCE_DIR=${SPIIR_SOURCE_DIR:-/fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/${SPIIR_BUILD_NAME}/source}
 export SPIIR_HELPER_FUNCTIONS=${SPIIR_HELPER_FUNCTIONS:-/fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/bash_helper_functions.sh}
+export SPIIR_ONLINE_BIN=${SPIIR_ONLINE_BIN:-}
+export SPIIR_RUNTIME_PYTHONPATH=${SPIIR_RUNTIME_PYTHONPATH:-}
 
 export FRAME_CACHE_FILE=${FRAME_CACHE_FILE:-${DATA_CACHE_FILE:-${FRAME_CACHE:-${DATA_CACHE:-${DATA_DIRECTION:-${DATA_DIR}/frame_cache_hoft_C00_AR_1372808984_1375400984.cache}}}}}
 export DATA_CACHE_FILE=${DATA_CACHE_FILE:-${FRAME_CACHE_FILE}}
@@ -159,6 +161,8 @@ export FAR_INITIAL_WINDOW_POLICY=${FAR_INITIAL_WINDOW_POLICY:-skip}
 export START_BANK=${START_BANK:-0}
 export PIPELINE_MODE=${PIPELINE_MODE:-single}
 export SINGLE_INPUT_KIND=${SINGLE_INPUT_KIND:-zerolag}
+export SINGLE_TRIGGER_STREAM_ENABLE=${SINGLE_TRIGGER_STREAM_ENABLE:-0}
+export SINGLE_TRIGGER_STREAM_FILE=${SINGLE_TRIGGER_STREAM_FILE:-}
 
 # Optional wall-clock gate for archived-frame replay.  The SPIIR command still
 # reads a frame cache, but the single-detector sidecar and monitor only expose

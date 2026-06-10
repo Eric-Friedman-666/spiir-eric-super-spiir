@@ -75,11 +75,16 @@ printf 'single_llrfar_online: worker %s on %s owns bank group %03d using %s/%s a
     -e ONLINE_REPLAY_RATE="${ONLINE_REPLAY_RATE}" \
     -e ONLINE_REPLAY_ALLOWED_LAG_SECONDS="${ONLINE_REPLAY_ALLOWED_LAG_SECONDS}" \
     -e ONLINE_REPLAY_START_GPS="${ONLINE_REPLAY_START_GPS}" \
-    -e ONLINE_REPLAY_START_WALL="${ONLINE_REPLAY_START_WALL:-}" \
-    -e PIPELINE_MODE="${PIPELINE_MODE:-single}" \
-    -e SPIIR_BUILD_NAME="${SPIIR_BUILD_NAME}" \
-    -e SPIIR_RUN_FUNCTION="${SPIIR_RUN_FUNCTION}" \
-    "${SPIIR_BUILD_NAME}" bash "${SCRIPT_DIR}/pipeline.sh"
+	    -e ONLINE_REPLAY_START_WALL="${ONLINE_REPLAY_START_WALL:-}" \
+	    -e PIPELINE_MODE="${PIPELINE_MODE:-single}" \
+	    -e SINGLE_INPUT_KIND="${SINGLE_INPUT_KIND:-zerolag}" \
+	    -e SINGLE_TRIGGER_STREAM_ENABLE="${SINGLE_TRIGGER_STREAM_ENABLE:-0}" \
+	    -e SINGLE_TRIGGER_STREAM_FILE="${SINGLE_TRIGGER_STREAM_FILE:-}" \
+	    -e SPIIR_ONLINE_BIN="${SPIIR_ONLINE_BIN:-}" \
+	    -e SPIIR_RUNTIME_PYTHONPATH="${SPIIR_RUNTIME_PYTHONPATH:-}" \
+	    -e SPIIR_BUILD_NAME="${SPIIR_BUILD_NAME}" \
+	    -e SPIIR_RUN_FUNCTION="${SPIIR_RUN_FUNCTION}" \
+	    "${SPIIR_BUILD_NAME}" bash "${SCRIPT_DIR}/pipeline.sh"
 printf 'single_llrfar_online: worker %s on %s finished bank group %03d at %s\n' \
     "${worker_id}" "${worker_node}" "${SLURM_ARRAY_TASK_ID}" "$(date -u +%FT%TZ)"
 
