@@ -78,7 +78,7 @@ if command -v module >/dev/null 2>&1; then
     module load gcc/13.3.0 scipy-bundle/2024.05 >/dev/null 2>&1 || true
 fi
 
-SINGLE_INPUT_KIND=${SINGLE_INPUT_KIND:-zerolag}
+SINGLE_INPUT_KIND=${SINGLE_INPUT_KIND:-singlecsv}
 FEATURE_CSV="${BRANCH_DIR}/single_trigger_features.csv"
 SUMMARY_JSON="${MONITOR_DIR}/latest_single_summary.json"
 ASSIGNMENT_FEATURE_CSV="${BRANCH_DIR}/single_trigger_features_assignment_all_visible.csv"

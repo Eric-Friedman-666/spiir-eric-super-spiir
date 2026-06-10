@@ -18,7 +18,7 @@ mkdir -p "${state_dir}"
 
 worker_glob_args() {
     if [ -n "${worker_id}" ]; then
-        python3 - "${worker_group}" "${MAX_GROUP:-0}" "${SINGLE_INPUT_KIND:-zerolag}" <<'PY'
+        python3 - "${worker_group}" "${MAX_GROUP:-0}" "${SINGLE_INPUT_KIND:-singlecsv}" <<'PY'
 import sys
 worker_group = int(sys.argv[1])
 max_group = int(sys.argv[2])
@@ -33,9 +33,9 @@ if 0 <= worker_group <= max_group:
     print(f"{worker_group:03d}/{glob_name}")
 PY
     else
-        if [ "${SINGLE_INPUT_KIND:-zerolag}" = "sdpostcoh" ]; then
+        if [ "${SINGLE_INPUT_KIND:-singlecsv}" = "sdpostcoh" ]; then
             printf '%s\n' "[0-9][0-9][0-9]/sdpostcoh*.xml.gz"
-        elif [ "${SINGLE_INPUT_KIND:-zerolag}" = "singlecsv" ] || [ "${SINGLE_INPUT_KIND:-zerolag}" = "singletriggers" ]; then
+        elif [ "${SINGLE_INPUT_KIND:-singlecsv}" = "singlecsv" ] || [ "${SINGLE_INPUT_KIND:-singlecsv}" = "singletriggers" ]; then
             printf '%s\n' "[0-9][0-9][0-9]/*_single_triggers.csv"
         else
             printf '%s\n' "[0-9][0-9][0-9]/*_zerolag_*.xml.gz"

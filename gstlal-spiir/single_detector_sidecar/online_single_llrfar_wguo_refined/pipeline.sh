@@ -84,7 +84,7 @@ done
 
 macrooutprefix=${jobno}/${jobno}_zerolag
 single_trigger_stream_arg=""
-if [ "${SINGLE_TRIGGER_STREAM_ENABLE:-0}" = "1" ] || [ "${SINGLE_INPUT_KIND:-zerolag}" = "singlecsv" ] || [ "${SINGLE_INPUT_KIND:-zerolag}" = "singletriggers" ]; then
+if [ "${SINGLE_TRIGGER_STREAM_ENABLE:-1}" = "1" ] || [ "${SINGLE_INPUT_KIND:-singlecsv}" = "singlecsv" ] || [ "${SINGLE_INPUT_KIND:-singlecsv}" = "singletriggers" ]; then
 	single_trigger_stream_file=${SINGLE_TRIGGER_STREAM_FILE:-${jobno}/${jobno}_single_triggers.csv}
 	single_trigger_stream_arg=" --finalsink-single-trigger-stream ${single_trigger_stream_file}"
 fi
