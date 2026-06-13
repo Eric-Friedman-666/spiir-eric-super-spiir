@@ -4,6 +4,17 @@ set -eo pipefail
 worker_id=${1:?worker id required}
 worker_count=${2:?worker count required}
 worker_group=${SINGLE_WORKER_GROUP:-${worker_id}}
+printf -v worker_group_padded '%03d' "${worker_group}"
+
+expand_worker_path() {
+    local path=${1:-}
+    [ -z "${path}" ] && return 0
+    path=${path//\{worker03d\}/${worker_group_padded}}
+    path=${path//\{worker\}/${worker_group}}
+    path=${path//%03d/${worker_group_padded}}
+    path=${path//%d/${worker_group}}
+    printf '%s' "${path}"
+}
 
 SCRIPT_DIR=${SCRIPT_DIR:-$(cd "$(dirname "$0")" && pwd)}
 export SCRIPT_DIR
@@ -22,6 +33,9 @@ export PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-}
 export GST_PLUGIN_PATH=${GST_PLUGIN_PATH:-}
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
 env_args=${env_args:-}
+cohfar_assignfar_latency_csv_worker=$(
+    expand_worker_path "${COHFAR_ASSIGNFAR_LATENCY_CSV:-}"
+)
 spiir_run_function=${SPIIR_RUN_FUNCTION:-run_spiir_py3}
 case "${spiir_run_function}" in
     run_spiir|run_spiir_py3) ;;
@@ -67,6 +81,7 @@ printf 'single_llrfar_online: worker %s on %s owns bank group %03d using %s/%s a
     -e BACKGROUND_COLLECT_WALLTIME="${BACKGROUND_COLLECT_WALLTIME}" \
     -e COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS}" \
     -e COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS}" \
+    -e COHFAR_ASSIGNFAR_LATENCY_CSV="${cohfar_assignfar_latency_csv_worker:-}" \
     -e FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS}" \
     -e BANK_DIR="${BANK_DIR}" \
     -e NONINJ_STATS_LOC="${NONINJ_STATS_LOC}" \
@@ -83,8 +98,14 @@ printf 'single_llrfar_online: worker %s on %s owns bank group %03d using %s/%s a
 	    -e SINGLE_INPUT_KIND="${SINGLE_INPUT_KIND:-singlecsv}" \
 	    -e SINGLE_TRIGGER_STREAM_ENABLE="${SINGLE_TRIGGER_STREAM_ENABLE:-1}" \
 	    -e SINGLE_TRIGGER_STREAM_FILE="${SINGLE_TRIGGER_STREAM_FILE:-}" \
-	    -e CRASHCAR_ENABLE="${CRASHCAR_ENABLE:-0}" \
-	    -e CRASHCAR_DETAIL_OUTPUT_FNAME="${CRASHCAR_DETAIL_OUTPUT_FNAME:-}" \
+	    -e SINGLE_WORKER_ID="${worker_id}" \
+	    -e SINGLE_WORKER_GROUP="${worker_group}" \
+	    -e SIDECAR_PRESERVE_TABLE_SINGLE_FAR="${SIDECAR_PRESERVE_TABLE_SINGLE_FAR:-1}" \
+	    -e SIDECAR_SINGLE_FAR_LEDGER="${SIDECAR_SINGLE_FAR_LEDGER:-}" \
+	    -e SIDECAR_SINGLE_FAR_LOOKUP_INTERVAL_SECONDS="${SIDECAR_SINGLE_FAR_LOOKUP_INTERVAL_SECONDS:-1.0}" \
+		    -e CRASHCAR_ENABLE="${CRASHCAR_ENABLE:-0}" \
+		    -e CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-1}" \
+		    -e CRASHCAR_DETAIL_OUTPUT_FNAME="${CRASHCAR_DETAIL_OUTPUT_FNAME:-}" \
 	    -e CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:--4.0}" \
 	    -e CRASHCAR_MIN_SNR="${CRASHCAR_MIN_SNR:-4.0}" \
 	    -e CRASHCAR_FAR_FLOOR_COUNT="${CRASHCAR_FAR_FLOOR_COUNT:-1.0}" \

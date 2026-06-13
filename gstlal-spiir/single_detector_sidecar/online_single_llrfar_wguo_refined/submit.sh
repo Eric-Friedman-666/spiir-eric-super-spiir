@@ -121,13 +121,17 @@ write_runtime_env() {
         SINGLE_FROZEN_BACKGROUND_ID SINGLE_FROZEN_BACKGROUND_SOURCE \
         BACKGROUND_STATS_WINDOWS BACKGROUND_COLLECT_WALLTIME \
         COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS \
+        COHFAR_ASSIGNFAR_LATENCY_CSV \
         FINALSINK_FAPUPDATER_INTERVAL_SECONDS ZEROLAG_SNAPSHOT_INTERVAL_SECONDS \
         BACKGROUND_UPDATE_TRIGGER_SECONDS FAR_INITIAL_WINDOW_POLICY MAX_GROUP BANKS_PER_GROUP \
         SPIIR_BUILD_NAME SPIIR_RUN_FUNCTION SPIIR_HELPER_FUNCTIONS SPIIR_SOURCE_DIR SPIIR_ONLINE_BIN \
         SPIIR_RUNTIME_PYTHONPATH SPIIR_RUNTIME_GST_PLUGIN_PATH SPIIR_RUNTIME_LD_LIBRARY_PATH \
-        PIPELINE_MODE SINGLE_INPUT_KIND \
+        PIPELINE_MODE SINGLE_INPUT_KIND FINAL_SINGLE_INPUT_KIND FINAL_SINGLE_RESET_LEDGER FINAL_SINGLE_IGNORE_ONLINE_REPLAY_GATE \
         SINGLE_TRIGGER_STREAM_ENABLE SINGLE_TRIGGER_STREAM_FILE \
-        CRASHCAR_ENABLE CRASHCAR_DETAIL_OUTPUT_FNAME CRASHCAR_LOG10_FAR_THRESHOLD CRASHCAR_MIN_SNR \
+        SIDECAR_PRESERVE_TABLE_SINGLE_FAR SIDECAR_SINGLE_FAR_LEDGER \
+        SIDECAR_SINGLE_FAR_LOOKUP_INTERVAL_SECONDS SIDECAR_PATCH_ZEROLAG_SINGLE_FAR \
+        PATCH_ZEROLAG_SINGLE_FAR PATCH_ZEROLAG_SINGLE_FAR_LEDGER PATCH_ZEROLAG_SINGLE_FAR_COLUMN PREFER_FEATURE_SINGLE_FAR \
+        CRASHCAR_ENABLE CRASHCAR_PRESERVE_TABLE_SINGLE_FAR CRASHCAR_DETAIL_OUTPUT_FNAME CRASHCAR_LOG10_FAR_THRESHOLD CRASHCAR_MIN_SNR \
         CRASHCAR_FAR_FLOOR_COUNT CRASHCAR_LIVETIME_STEP CRASHCAR_BACKGROUND_REQUIRED_SECONDS \
         CRASHCAR_MULTI_FAR_FACTOR CRASHCAR_MULTI_BEST_FAR_NEVENT_THRESHOLD CRASHCAR_MULTI_FAR_COMBINE_MODE \
         CRASHCAR_EXPECTED_BUFFERS_PER_TIMESTAMP CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME \
@@ -192,16 +196,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
+reset_final_single_ledgers() {
+    [ "${FINAL_SINGLE_RESET_LEDGER:-1}" = "1" ] || return 0
+    printf "single_llrfar_online: resetting generated final single FAR products at %s\n" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+    rm -f \
+        single_branch/single_final_far_all.csv \
+        single_branch/single_final_far_latest_candidates.csv
+    local worker_dir
+    for worker_dir in single_branch/worker_*; do
+        [ -d "${worker_dir}" ] || continue
+        rm -f \
+            "${worker_dir}/single_final_far_all.csv" \
+            "${worker_dir}/single_final_far_latest_candidates.csv" \
+            "${worker_dir}/single_trigger_features.csv" \
+            "${worker_dir}/single_trigger_features_assignment_all_visible.csv" \
+            "${worker_dir}/single_far_llr_background.json" \
+            "${worker_dir}/single_llr_far_support.csv" \
+            "${worker_dir}/single_llr_far_background.png" \
+            "${worker_dir}/bootstrap_latest_holdout.csv"
+        rm -rf "${worker_dir}/backgrounds"
+    done
+}
+
 run_final_single_update() {
-    if [ "${SINGLE_INPUT_KIND:-zerolag}" != "crashcarcsv" ]; then
-        return 0
-    fi
-    printf "single_llrfar_online: running final crashcarcsv single FAR update at %s\n" \
+    local final_input_kind=${FINAL_SINGLE_INPUT_KIND:-${SINGLE_INPUT_KIND:-zerolag}}
+    case "${final_input_kind}" in
+        crashcarcsv|singlecsv|singletriggers|zerolag|sdpostcoh) ;;
+        *) return 0 ;;
+    esac
+    printf "single_llrfar_online: running final %s single FAR update at %s\n" \
+        "${final_input_kind}" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
     local final_status=0
     local worker_id
+    reset_final_single_ledgers
     for worker_id in $(seq 0 $((worker_count - 1))); do
-        SINGLE_INPUT_KIND=crashcarcsv \
+        SINGLE_INPUT_KIND="${final_input_kind}" \
+        SINGLE_IGNORE_ONLINE_REPLAY_GATE="${FINAL_SINGLE_IGNORE_ONLINE_REPLAY_GATE:-1}" \
         SINGLE_WORKER_ID="${worker_id}" \
         SINGLE_WORKER_GROUP="${worker_id}" \
         SINGLE_WORKER_COUNT="${worker_count}" \
@@ -221,6 +253,21 @@ run_final_single_update() {
             --plot-summary monitor/latest_single_plot_summary.json \
             > "logs/final_single_merge_${SLURM_JOB_ID:-manual}.out" \
             2> "logs/final_single_merge_${SLURM_JOB_ID:-manual}.err" \
+            || final_status=$?
+    fi
+    if [ "${PATCH_ZEROLAG_SINGLE_FAR:-${SIDECAR_PATCH_ZEROLAG_SINGLE_FAR:-1}}" = "1" ]; then
+        printf "single_llrfar_online: patching final single FAR into zerolag at %s\n" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+        PYTHONPATH="${SPIIR_RUNTIME_PYTHONPATH:-}${PYTHONPATH:+:${PYTHONPATH}}" \
+            "${SPIIR_RUN_FUNCTION}" "${SPIIR_BUILD_NAME}" python3 \
+            "${SCRIPT_DIR}/patch_zerolag_single_far_from_ledger.py" \
+            --run-dir "${RUN_DIR}" \
+            --ledger "${PATCH_ZEROLAG_SINGLE_FAR_LEDGER:-single_branch/single_final_far_all.csv}" \
+            --far-column "${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-direct_far}" \
+            --summary monitor/patch_zerolag_single_far_summary.json \
+            --clear-existing \
+            > "logs/patch_zerolag_single_far_${SLURM_JOB_ID:-manual}.out" \
+            2> "logs/patch_zerolag_single_far_${SLURM_JOB_ID:-manual}.err" \
             || final_status=$?
     fi
     return "${final_status}"

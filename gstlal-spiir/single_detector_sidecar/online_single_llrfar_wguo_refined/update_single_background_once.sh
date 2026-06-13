@@ -240,7 +240,7 @@ print(json.dumps(status, sort_keys=True))
 PY
 }
 
-if [ "${ONLINE_REPLAY_SYNC:-0}" = "1" ] && [ -z "${ONLINE_REPLAY_START_WALL:-}" ]; then
+if [ "${ONLINE_REPLAY_SYNC:-0}" = "1" ] && [ "${SINGLE_IGNORE_ONLINE_REPLAY_GATE:-0}" != "1" ] && [ -z "${ONLINE_REPLAY_START_WALL:-}" ]; then
     export ONLINE_REPLAY_START_WALL=$(date +%s)
 fi
 
@@ -285,7 +285,8 @@ for filename in sorted(set(filenames)):
         raw_latest_end = end
 
 online_upper = None
-if os.environ.get("ONLINE_REPLAY_SYNC", "0") == "1":
+ignore_online_gate = os.environ.get("SINGLE_IGNORE_ONLINE_REPLAY_GATE", "0") == "1"
+if not ignore_online_gate and os.environ.get("ONLINE_REPLAY_SYNC", "0") == "1":
     start_gps = float(os.environ.get("ONLINE_REPLAY_START_GPS") or os.environ["DATA_START_TIME"])
     start_wall = float(os.environ.get("ONLINE_REPLAY_START_WALL") or time.time())
     rate = float(os.environ.get("ONLINE_REPLAY_RATE", "1.0"))
@@ -465,7 +466,9 @@ PY
     if [ -n "${DATA_START_TIME:-}" ]; then
         ledger_args+=(--data-start-gps "${DATA_START_TIME}")
     fi
-    ledger_args+=(--prefer-feature-single-far)
+    if [ "${PREFER_FEATURE_SINGLE_FAR:-0}" = "1" ]; then
+        ledger_args+=(--prefer-feature-single-far)
+    fi
 
     python3 "${SCRIPT_DIR:-.}/assign_frozen_far_ledger.py" "${ledger_args[@]}"
 

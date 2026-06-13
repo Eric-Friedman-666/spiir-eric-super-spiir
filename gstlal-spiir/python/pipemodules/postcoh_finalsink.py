@@ -16,6 +16,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 from collections import deque
+import csv
 import threading
 import sys
 from io import BytesIO
@@ -65,6 +66,175 @@ from gstlal_spiir.pipemodules import pipe_macro
 lsctables.LIGOTimeGPS = LIGOTimeGPS
 
 logger = logging.getLogger(__name__)
+
+
+def _env_truthy(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip() in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
+
+
+def _normalize_int_text(value):
+    if value in (None, ""):
+        return ""
+    try:
+        return str(int(float(value)))
+    except (TypeError, ValueError):
+        return str(value).strip()
+
+
+def _normalize_sidecar_ifo(value):
+    return str(value or "").strip()
+
+
+class SidecarSingleFarLookup(object):
+    """Cached lookup for single-detector FARs assigned by the sidecar ledger."""
+
+    def __init__(self, paths, check_interval=1.0):
+        self.paths = [path for path in paths if path]
+        self.check_interval = max(0.1, float(check_interval))
+        self.next_check = 0.0
+        self.file_state = {}
+        self.lookup = {}
+        self.rows_loaded = 0
+
+    @classmethod
+    def from_environment(cls):
+        single_kind = os.environ.get("SINGLE_INPUT_KIND", "zerolag")
+        crashcar_enabled = os.environ.get("CRASHCAR_ENABLE", "0") == "1"
+        default_enabled = (
+            (single_kind in ("singlecsv", "singletriggers"))
+            and not crashcar_enabled
+        )
+        if not _env_truthy("SIDECAR_PRESERVE_TABLE_SINGLE_FAR", default_enabled):
+            return None
+
+        run_dir = os.environ.get("RUN_DIR") or os.getcwd()
+        worker = (
+            os.environ.get("SINGLE_WORKER_GROUP")
+            or os.environ.get("SINGLE_WORKER_ID")
+            or os.environ.get("SLURM_ARRAY_TASK_ID")
+            or ""
+        )
+        worker_padded = ""
+        if worker != "":
+            try:
+                worker_padded = "%03d" % int(worker)
+            except ValueError:
+                worker_padded = str(worker)
+
+        def expand(path):
+            if not path:
+                return path
+            return os.path.abspath(os.path.join(
+                run_dir,
+                path.replace("{worker03d}", worker_padded)
+                    .replace("{worker}", str(worker))
+                    .replace("%03d", worker_padded)
+                    .replace("%d", str(worker))))
+
+        paths = []
+        explicit = os.environ.get("SIDECAR_SINGLE_FAR_LEDGER", "")
+        if explicit:
+            paths.extend(expand(path) for path in explicit.split(":") if path)
+        if worker != "":
+            paths.append(expand(
+                "single_branch/worker_{worker}/single_final_far_all.csv"))
+            if worker_padded and worker_padded != str(worker):
+                paths.append(expand(
+                    "single_branch/worker_{worker03d}/single_final_far_all.csv"))
+        paths.append(expand("single_branch/single_final_far_all.csv"))
+
+        interval = float(os.environ.get(
+            "SIDECAR_SINGLE_FAR_LOOKUP_INTERVAL_SECONDS", "1.0") or 1.0)
+        return cls(paths, check_interval=interval)
+
+    @staticmethod
+    def key_from_row(row):
+        return (
+            _normalize_sidecar_ifo(row.get("ifo") or row.get("category")),
+            _normalize_int_text(row.get("end_time")),
+            _normalize_int_text(row.get("end_time_ns")),
+            _normalize_int_text(row.get("bankid")),
+            _normalize_int_text(row.get("tmplt_idx")),
+        )
+
+    @staticmethod
+    def key_from_postcoh(postcoh_inspiral, ifo_id, ifo):
+        try:
+            end_time = postcoh_inspiral.end_time_sngl[ifo_id]
+            end_time_ns = postcoh_inspiral.end_time_ns_sngl[ifo_id]
+        except (AttributeError, TypeError, IndexError):
+            end_time = postcoh_inspiral.end_time
+            end_time_ns = postcoh_inspiral.end_time_ns
+        return (
+            ifo,
+            _normalize_int_text(end_time),
+            _normalize_int_text(end_time_ns),
+            _normalize_int_text(postcoh_inspiral.bankid),
+            _normalize_int_text(postcoh_inspiral.tmplt_idx),
+        )
+
+    @staticmethod
+    def row_far(row):
+        for field in ("assigned_far", "far", "calculated_far", "direct_far"):
+            value = row.get(field)
+            if value in (None, ""):
+                continue
+            try:
+                far = float(value)
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(far) and far > 0.0:
+                return far
+        return None
+
+    def refresh(self, force=False):
+        now = time.time()
+        if not force and now < self.next_check:
+            return
+        self.next_check = now + self.check_interval
+
+        state = {}
+        changed = False
+        for path in self.paths:
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            state[path] = (stat.st_mtime, stat.st_size)
+            if self.file_state.get(path) != state[path]:
+                changed = True
+
+        if not changed and state == self.file_state:
+            return
+
+        lookup = {}
+        rows_loaded = 0
+        for path in self.paths:
+            if path not in state:
+                continue
+            try:
+                with open(path, newline="") as handle:
+                    for row in csv.DictReader(handle):
+                        far = self.row_far(row)
+                        if far is None:
+                            continue
+                        key = self.key_from_row(row)
+                        if all(key):
+                            lookup[key] = far
+                            rows_loaded += 1
+            except OSError:
+                continue
+        self.lookup = lookup
+        self.file_state = state
+        self.rows_loaded = rows_loaded
+
+    def get_far(self, postcoh_inspiral, ifo_id, ifo):
+        self.refresh()
+        return self.lookup.get(self.key_from_postcoh(
+            postcoh_inspiral, ifo_id, ifo))
 
 #
 # =============================================================================
@@ -525,6 +695,7 @@ class FinalSink(object):
 
         # gracedb parameters
         self.far_factor = far_factor
+        self.sidecar_single_far_lookup = SidecarSingleFarLookup.from_environment()
         self.gracedb_far_threshold = gracedb_far_threshold
         self.gracedb_group = gracedb_group
         self.gracedb_search = gracedb_search
@@ -890,6 +1061,13 @@ class FinalSink(object):
         ]
 
     def __set_far(self, postcoh_inspiral):
+        preserve_crashcar_single_far = (
+            os.environ.get("CRASHCAR_ENABLE", "0") == "1"
+            and os.environ.get("CRASHCAR_PRESERVE_TABLE_SINGLE_FAR", "1") != "0")
+        crashcar_single_far = None
+        if preserve_crashcar_single_far:
+            crashcar_single_far = list(postcoh_inspiral.far_sngl)
+
         if self.enable_feature_best_far:
             valid_combined_fars = self.__get_valid_combined_fars(
                 postcoh_inspiral)
@@ -909,7 +1087,41 @@ class FinalSink(object):
                                 far_1d_sngl, postcoh_inspiral.far_1w_sngl)
             ]
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
-            postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
+            if (crashcar_single_far is not None
+                    and crashcar_single_far[ifo_id] > 0.0):
+                postcoh_inspiral.far_sngl[ifo_id] = crashcar_single_far[ifo_id]
+            else:
+                postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
+        self.__apply_sidecar_single_far(postcoh_inspiral)
+
+    def __apply_sidecar_single_far(self, postcoh_inspiral):
+        if self.sidecar_single_far_lookup is None:
+            return 0
+        updated = 0
+        for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
+            far = self.sidecar_single_far_lookup.get_far(
+                postcoh_inspiral, ifo_id, ifo)
+            if far is None:
+                continue
+            postcoh_inspiral.far_sngl[ifo_id] = far
+            postcoh_inspiral.far_1w_sngl[ifo_id] = far
+            postcoh_inspiral.far_1d_sngl[ifo_id] = far
+            postcoh_inspiral.far_2h_sngl[ifo_id] = far
+            updated += 1
+        return updated
+
+    def __apply_sidecar_single_far_to_table(self):
+        if self.sidecar_single_far_lookup is None:
+            return
+        self.sidecar_single_far_lookup.refresh(force=True)
+        updated = 0
+        for postcoh_inspiral in self.postcoh_table:
+            updated += self.__apply_sidecar_single_far(postcoh_inspiral)
+        if updated:
+            logger.info(
+                "sidecar single FAR zerolag fill: updated %d detector rows "
+                "from %d ledger rows",
+                updated, self.sidecar_single_far_lookup.rows_loaded)
 
     def __read_trigger_control(self):
         with open(self.trigger_control_doc, "r") as f:
@@ -1165,6 +1377,7 @@ class FinalSink(object):
         ):
             self.thread_snapshot.join()
 
+        self.__apply_sidecar_single_far_to_table()
         self.postcoh_document.filename = filename
         # free thread context
         del self.thread_snapshot

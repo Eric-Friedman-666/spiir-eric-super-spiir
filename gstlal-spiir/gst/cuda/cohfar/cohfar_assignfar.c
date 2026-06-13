@@ -24,6 +24,7 @@
  * ============================================================================
  */
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 /*
  *  stuff from gobject/gstreamer
@@ -107,6 +108,80 @@ static float
     if (stats->livetime <= 0) return 0;
     return BOUND(FLT_MIN, gen_fap_from_feature(snr, chisq, stats)
                             * stats->nevent / (stats->livetime * hist_trials));
+}
+
+static double _gps_to_seconds(const LIGOTimeGPS *gps) {
+    if (!gps) return NAN;
+    return (double)gps->gpsSeconds + 1.0e-9 * (double)gps->gpsNanoSeconds;
+}
+
+static float _best_positive_multi_far(const PostcohInspiralTable *table) {
+    float best = 0.0f;
+    const float fars[3] = { table->far_2h, table->far_1d, table->far_1w };
+    for (int i = 0; i < 3; ++i) {
+        if (isfinite(fars[i]) && fars[i] > 0.0f &&
+            (best <= 0.0f || fars[i] < best)) {
+            best = fars[i];
+        }
+    }
+    return best;
+}
+
+G_LOCK_DEFINE_STATIC(assignfar_latency_file);
+static FILE *assignfar_latency_file = NULL;
+static gboolean assignfar_latency_checked = FALSE;
+
+static FILE *_open_assignfar_latency_file(void) {
+    if (assignfar_latency_checked) return assignfar_latency_file;
+
+    assignfar_latency_checked = TRUE;
+    const char *path = g_getenv("COHFAR_ASSIGNFAR_LATENCY_CSV");
+    if (!path || !path[0]) return NULL;
+
+    assignfar_latency_file = fopen(path, "a");
+    if (!assignfar_latency_file) {
+        g_warning("cohfar_assignfar: failed to open latency CSV %s", path);
+        return NULL;
+    }
+
+    if (fseek(assignfar_latency_file, 0, SEEK_END) == 0 &&
+        ftell(assignfar_latency_file) == 0) {
+        fprintf(assignfar_latency_file,
+                "event_id,bankid,tmplt_idx,end_time,end_time_ns,"
+                "is_background,cohsnr,cmbchisq,far_2h,far_1d,far_1w,"
+                "far_multi_min_positive,livetime_2h,livetime_1d,livetime_1w,"
+                "nevent_2h,nevent_1d,nevent_1w,buf_pts_gps,feature_gps,"
+                "assignment_unix\n");
+        fflush(assignfar_latency_file);
+    }
+
+    return assignfar_latency_file;
+}
+
+static void _write_assignfar_latency_row(const PostcohInspiralTable *table,
+                                         GstClockTime t_cur) {
+    G_LOCK(assignfar_latency_file);
+    FILE *file = _open_assignfar_latency_file();
+    if (file) {
+        const double assignment_unix = (double)g_get_real_time() / 1000000.0;
+        const double buf_pts_gps =
+          GST_CLOCK_TIME_IS_VALID(t_cur) ? (double)t_cur / (double)GST_SECOND
+                                         : NAN;
+        fprintf(file,
+                "%ld,%d,%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+                "%d,%d,%d,%d,%d,%d,%.9f,%.9f,%.9f\n",
+                table->event_id, table->bankid, table->tmplt_idx,
+                table->end_time.gpsSeconds, table->end_time.gpsNanoSeconds,
+                table->is_background, table->cohsnr, table->cmbchisq,
+                table->far_2h, table->far_1d, table->far_1w,
+                _best_positive_multi_far(table),
+                table->livetime_2h, table->livetime_1d, table->livetime_1w,
+                table->nevent_2h, table->nevent_1d, table->nevent_1w,
+                buf_pts_gps, _gps_to_seconds(&table->end_time),
+                assignment_unix);
+        fflush(file);
+    }
+    G_UNLOCK(assignfar_latency_file);
 }
 
 static void _update_fars(PostcohInspiralTable *table,
@@ -280,6 +355,7 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
         PostcohInspiralTable *table_end =
           (PostcohInspiralTable *)(mapInfo.data + mapInfo.size);
         for (; table < table_end; table++) {
+            gboolean assigned_far = FALSE;
             if (table->is_background == FLAG_EMPTY) continue;
             if (!ifo_set__try_parse(table->ifos, &enabled_ifos)) {
                 fprintf(stderr,
@@ -299,9 +375,11 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
             if (!ifo_set__is_empty(enabled_ifos)
                 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
                 _update_fars(table, element);
+                assigned_far = TRUE;
             }
 
             _set_background_stats(table, element);
+            if (assigned_far) _write_assignfar_latency_row(table, t_cur);
         }
         gst_buffer_unmap(buf, &mapInfo);
     }
