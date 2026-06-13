@@ -131,6 +131,8 @@ write_runtime_env() {
         SIDECAR_PRESERVE_TABLE_SINGLE_FAR SIDECAR_SINGLE_FAR_LEDGER \
         SIDECAR_SINGLE_FAR_LOOKUP_INTERVAL_SECONDS SIDECAR_PATCH_ZEROLAG_SINGLE_FAR \
         PATCH_ZEROLAG_SINGLE_FAR PATCH_ZEROLAG_SINGLE_FAR_LEDGER PATCH_ZEROLAG_SINGLE_FAR_COLUMN PREFER_FEATURE_SINGLE_FAR \
+        SINGLE_OUTPUT_MODE SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE \
+        PATCH_ZEROLAG_SINGLE_OUTPUT_MODE PATCH_ZEROLAG_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE \
         CRASHCAR_ENABLE CRASHCAR_PRESERVE_TABLE_SINGLE_FAR CRASHCAR_DETAIL_OUTPUT_FNAME CRASHCAR_LOG10_FAR_THRESHOLD CRASHCAR_MIN_SNR \
         CRASHCAR_FAR_FLOOR_COUNT CRASHCAR_LIVETIME_STEP CRASHCAR_BACKGROUND_REQUIRED_SECONDS \
         CRASHCAR_MULTI_FAR_FACTOR CRASHCAR_MULTI_BEST_FAR_NEVENT_THRESHOLD CRASHCAR_MULTI_FAR_COMBINE_MODE \
@@ -258,14 +260,23 @@ run_final_single_update() {
     if [ "${PATCH_ZEROLAG_SINGLE_FAR:-${SIDECAR_PATCH_ZEROLAG_SINGLE_FAR:-1}}" = "1" ]; then
         printf "single_llrfar_online: patching final single FAR into zerolag at %s\n" \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+        patch_args=(
+            --run-dir "${RUN_DIR}"
+            --ledger "${PATCH_ZEROLAG_SINGLE_FAR_LEDGER:-single_branch/single_final_far_all.csv}"
+            --far-column "${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-direct_far}"
+            --summary monitor/patch_zerolag_single_far_summary.json
+            --single-output-mode "${PATCH_ZEROLAG_SINGLE_OUTPUT_MODE:-${SINGLE_OUTPUT_MODE:-single-only}}"
+            --clear-existing
+        )
+        if [ -n "${PATCH_ZEROLAG_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE:-${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE:-}}" ]; then
+            patch_args+=(
+                --active-ifo-schedule "${PATCH_ZEROLAG_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE:-${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE:-}}"
+            )
+        fi
         PYTHONPATH="${SPIIR_RUNTIME_PYTHONPATH:-}${PYTHONPATH:+:${PYTHONPATH}}" \
             "${SPIIR_RUN_FUNCTION}" "${SPIIR_BUILD_NAME}" python3 \
             "${SCRIPT_DIR}/patch_zerolag_single_far_from_ledger.py" \
-            --run-dir "${RUN_DIR}" \
-            --ledger "${PATCH_ZEROLAG_SINGLE_FAR_LEDGER:-single_branch/single_final_far_all.csv}" \
-            --far-column "${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-direct_far}" \
-            --summary monitor/patch_zerolag_single_far_summary.json \
-            --clear-existing \
+            "${patch_args[@]}" \
             > "logs/patch_zerolag_single_far_${SLURM_JOB_ID:-manual}.out" \
             2> "logs/patch_zerolag_single_far_${SLURM_JOB_ID:-manual}.err" \
             || final_status=$?
