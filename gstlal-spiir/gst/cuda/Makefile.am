@@ -17,7 +17,8 @@ libgstcuda_la_SOURCES = \
 	cohfar/ssvkernel.c \
 	cohfar/background_stats_utils.c \
 	cohfar/cohfar_accumbackground.c \
-	cohfar/cohfar_assignfar.c
+	cohfar/cohfar_assignfar.c \
+	cohfar/crashcar_singlefar.c
 
 libgstcuda_la_CPPFLAGS = $(AM_CPPFLAGS) $(GSL_CFLAGS) $(LAL_CFLAGS) $(GSTLAL_CFLAGS) $(GSTREAMER_CFLAGS) $(GLIB_CFLAGS) $(NVCC_CFLAGS) $(CHEALPIX_CFLAGS) $(COMMON_CPP_FLAGS)
 libgstcuda_la_CFLAGS = $(AM_CFLAGS)
@@ -41,7 +42,8 @@ noinst_HEADERS = \
 	cohfar/background_stats.h \
 	cohfar/background_stats_utils.h \
 	cohfar/cohfar_accumbackground.h \
-	cohfar/cohfar_assignfar.h
+	cohfar/cohfar_assignfar.h \
+	cohfar/crashcar_singlefar.h
 
 gstlal_cohfar_calc_fap_SOURCES = \
 	cohfar/ssvkernel.c \

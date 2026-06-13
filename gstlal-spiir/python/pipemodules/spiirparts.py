@@ -25,6 +25,7 @@
 #
 
 import logging
+import os
 
 ### The following snippet is a modified version of examples in GstLAL: A software framework for gravitational wave discovery
 import gi
@@ -42,6 +43,13 @@ from gstlal import simulation
 from gstlal_spiir.pipemodules import snglrate_datasource, spiir_utils
 
 logger = logging.getLogger(__name__)
+
+
+def _env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def mkSPIIRmulti(
@@ -801,6 +809,46 @@ def mkPostcohSPIIROnline(pipeline,
             silent_time=cohfar_assignfar_silent_time,
             input_fname=cohfar_assignfar_input_fname,
         )
+        if _env_bool("CRASHCAR_ENABLE", False):
+            crashcar_worker_id = int(os.environ.get(
+                "SINGLE_WORKER_GROUP",
+                os.environ.get("SLURM_ARRAY_TASK_ID", i_dict),
+            ))
+            crashcar_detail_output_fname = (
+                os.environ.get("CRASHCAR_DETAIL_OUTPUT_FNAME")
+                or "crashcar_singlefar_detail_worker%03d.csv" % crashcar_worker_id
+            )
+            crashcar_detail_output_fname = crashcar_detail_output_fname.format(
+                worker=crashcar_worker_id,
+                worker03d="%03d" % crashcar_worker_id,
+                stream=i_dict,
+                stream03d="%03d" % i_dict,
+            )
+            # Run after coherent FAR assignment so crashcar is the final writer
+            # for detector-local FAR columns before the Python finalsink applies
+            # its normal clustering and output snapshots.
+            postcoh = pipemodules.mkcrashcar_singlefar(
+                pipeline,
+                postcoh,
+                ifos=ifos,
+                enabled=True,
+                detail_output_fname=crashcar_detail_output_fname,
+                template_shape_map_fname=(
+                    os.environ.get("CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME") or None
+                ),
+                log10_far_threshold=float(
+                    os.environ.get("CRASHCAR_LOG10_FAR_THRESHOLD", "-4.0"),
+                ),
+                min_snr=float(
+                    os.environ.get("CRASHCAR_MIN_SNR", str(cuda_postcoh_snglsnr_thresh)),
+                ),
+                far_floor_count=float(
+                    os.environ.get("CRASHCAR_FAR_FLOOR_COUNT", "1.0"),
+                ),
+                livetime_step=float(
+                    os.environ.get("CRASHCAR_LIVETIME_STEP", "1.0"),
+                ),
+            )
         # head = mkpostcohfilesink(pipeline, postcoh, location = output_prefix[i_dict], compression = 1, snapshot_interval = snapshot_interval)
         triggersrcs.append(postcoh)
     return triggersrcs

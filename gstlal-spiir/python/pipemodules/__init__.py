@@ -242,6 +242,50 @@ def mkcohfar_assignfar(
     return elem
 
 
+def mkcrashcar_singlefar(
+    pipeline,
+    src,
+    ifos="H1L1",
+    enabled=True,
+    detail_output_fname=None,
+    template_shape_map_fname=None,
+    log10_far_threshold=-4.0,
+    min_snr=4.0,
+    far_floor_count=1.0,
+    livetime_step=1.0,
+):
+    properties = {
+        "ifos": ifos,
+        "enabled": enabled,
+        "log10_far_threshold": log10_far_threshold,
+        "min_snr": min_snr,
+        "far_floor_count": far_floor_count,
+        "livetime_step": livetime_step,
+    }
+    if detail_output_fname is not None:
+        properties["detail_output_fname"] = detail_output_fname
+    if template_shape_map_fname is not None:
+        properties["template_shape_map_fname"] = template_shape_map_fname
+
+    if "name" in properties:
+        elem = Gst.ElementFactory.make("crashcar_singlefar", properties.pop("name"))
+    else:
+        elem = Gst.ElementFactory.make("crashcar_singlefar")
+    for name, value in properties.items():
+        if name == "ifos":
+            elem.set_property(name.replace("_", "-"), value)
+    for name, value in properties.items():
+        if name != "ifos":
+            elem.set_property(name.replace("_", "-"), value)
+
+    pipeline.add(elem)
+    if isinstance(src, Gst.Pad):
+        src.get_parent_element().link_pads(src, elem, None)
+    elif src is not None:
+        src.link(elem)
+    return elem
+
+
 def mkpostcohfilesink(pipeline,
                       postcoh,
                       location=".",

@@ -38,6 +38,7 @@
 
 #include <cohfar/cohfar_accumbackground.h>
 #include <cohfar/cohfar_assignfar.h>
+#include <cohfar/crashcar_singlefar.h>
 #include <multiratespiir/multiratespiir.h>
 #include <postcoh/postcoh.h>
 #include <postcoh/postcoh_filesink.h>
@@ -60,6 +61,7 @@ static gboolean plugin_init(GstPlugin *plugin) {
         { "postcoh_filesink", POSTCOH_TYPE_FILESINK },
         { "cohfar_accumbackground", COHFAR_ACCUMBACKGROUND_TYPE },
         { "cohfar_assignfar", COHFAR_ASSIGNFAR_TYPE },
+        { "crashcar_singlefar", CRASHCAR_SINGLEFAR_TYPE },
         { NULL, 0 },
     };
 
