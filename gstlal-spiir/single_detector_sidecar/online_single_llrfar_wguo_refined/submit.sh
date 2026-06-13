@@ -75,6 +75,18 @@ ensure_py3_compatible_bank_dir
 mkdir -p logs single_branch monitor
 source "${SPIIR_HELPER_FUNCTIONS}"
 
+if [ "${CRASHCAR_ENABLE:-0}" = "1" ] && [ -n "${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME:-}" ] && [ ! -s "${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME}" ]; then
+    mkdir -p "$(dirname "${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME}")"
+    end_bank=$((START_BANK + BANKS_PER_GROUP * (MAX_GROUP + 1) - 1))
+    "${SPIIR_RUN_FUNCTION}" "${SPIIR_BUILD_NAME}" python3 \
+        "${SCRIPT_DIR}/export_template_shape_map.py" \
+        --bank-stats-dir "${WGUO_BANK_STATS_DIR}" \
+        --output "${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME}" \
+        --ifos H1,L1 \
+        --start-bank "${START_BANK}" \
+        --end-bank "${end_bank}"
+fi
+
 export GST_DEBUG=${GST_DEBUG:-}
 export X509_USER_PROXY=${X509_USER_PROXY:-}
 export X509_USER_KEY=${X509_USER_KEY:-}
@@ -109,11 +121,22 @@ write_runtime_env() {
         SINGLE_FROZEN_BACKGROUND_ID SINGLE_FROZEN_BACKGROUND_SOURCE \
         BACKGROUND_STATS_WINDOWS BACKGROUND_COLLECT_WALLTIME \
         COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS \
+        COHFAR_ASSIGNFAR_LATENCY_CSV \
         FINALSINK_FAPUPDATER_INTERVAL_SECONDS ZEROLAG_SNAPSHOT_INTERVAL_SECONDS \
         BACKGROUND_UPDATE_TRIGGER_SECONDS FAR_INITIAL_WINDOW_POLICY MAX_GROUP BANKS_PER_GROUP \
         SPIIR_BUILD_NAME SPIIR_RUN_FUNCTION SPIIR_HELPER_FUNCTIONS SPIIR_SOURCE_DIR SPIIR_ONLINE_BIN \
-        SPIIR_RUNTIME_PYTHONPATH PIPELINE_MODE SINGLE_INPUT_KIND \
+        SPIIR_RUNTIME_PYTHONPATH SPIIR_RUNTIME_GST_PLUGIN_PATH SPIIR_RUNTIME_LD_LIBRARY_PATH \
+        PIPELINE_MODE SINGLE_INPUT_KIND FINAL_SINGLE_INPUT_KIND FINAL_SINGLE_RESET_LEDGER FINAL_SINGLE_IGNORE_ONLINE_REPLAY_GATE \
         SINGLE_TRIGGER_STREAM_ENABLE SINGLE_TRIGGER_STREAM_FILE \
+        SIDECAR_PRESERVE_TABLE_SINGLE_FAR SIDECAR_SINGLE_FAR_LEDGER \
+        SIDECAR_SINGLE_FAR_LOOKUP_INTERVAL_SECONDS SIDECAR_PATCH_ZEROLAG_SINGLE_FAR \
+        PATCH_ZEROLAG_SINGLE_FAR PATCH_ZEROLAG_SINGLE_FAR_LEDGER PATCH_ZEROLAG_SINGLE_FAR_COLUMN PREFER_FEATURE_SINGLE_FAR \
+        CRASHCAR_ENABLE CRASHCAR_PRESERVE_TABLE_SINGLE_FAR CRASHCAR_DETAIL_OUTPUT_FNAME CRASHCAR_LOG10_FAR_THRESHOLD CRASHCAR_MIN_SNR \
+        CRASHCAR_FAR_FLOOR_COUNT CRASHCAR_LIVETIME_STEP CRASHCAR_BACKGROUND_REQUIRED_SECONDS \
+        CRASHCAR_MULTI_FAR_FACTOR CRASHCAR_MULTI_BEST_FAR_NEVENT_THRESHOLD CRASHCAR_MULTI_FAR_COMBINE_MODE \
+        CRASHCAR_EXPECTED_BUFFERS_PER_TIMESTAMP CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME \
+        CRASHCAR_SUPPORT_DEBUG CRASHCAR_SUPPORT_DEBUG_FNAME \
+        CRASHCAR_CLUSTER_DEBUG CRASHCAR_CLUSTER_DEBUG_FNAME \
         UPDATE_INTERVAL_SECONDS MONITOR_INTERVAL_SECONDS ONLINE_REPLAY_SYNC ONLINE_REPLAY_RATE \
         ONLINE_REPLAY_ALLOWED_LAG_SECONDS ONLINE_REPLAY_START_GPS ONLINE_REPLAY_START_WALL \
         BANK_DIR BANK_DIR_SOURCE PY3_COMPAT_SOURCE_BANK_DIR PY3_COMPAT_BANK_DIR \
@@ -173,6 +196,83 @@ cleanup() {
 }
 trap cleanup EXIT
 
+reset_final_single_ledgers() {
+    [ "${FINAL_SINGLE_RESET_LEDGER:-1}" = "1" ] || return 0
+    printf "single_llrfar_online: resetting generated final single FAR products at %s\n" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+    rm -f \
+        single_branch/single_final_far_all.csv \
+        single_branch/single_final_far_latest_candidates.csv
+    local worker_dir
+    for worker_dir in single_branch/worker_*; do
+        [ -d "${worker_dir}" ] || continue
+        rm -f \
+            "${worker_dir}/single_final_far_all.csv" \
+            "${worker_dir}/single_final_far_latest_candidates.csv" \
+            "${worker_dir}/single_trigger_features.csv" \
+            "${worker_dir}/single_trigger_features_assignment_all_visible.csv" \
+            "${worker_dir}/single_far_llr_background.json" \
+            "${worker_dir}/single_llr_far_support.csv" \
+            "${worker_dir}/single_llr_far_background.png" \
+            "${worker_dir}/bootstrap_latest_holdout.csv"
+        rm -rf "${worker_dir}/backgrounds"
+    done
+}
+
+run_final_single_update() {
+    local final_input_kind=${FINAL_SINGLE_INPUT_KIND:-${SINGLE_INPUT_KIND:-zerolag}}
+    case "${final_input_kind}" in
+        crashcarcsv|singlecsv|singletriggers|zerolag|sdpostcoh) ;;
+        *) return 0 ;;
+    esac
+    printf "single_llrfar_online: running final %s single FAR update at %s\n" \
+        "${final_input_kind}" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+    local final_status=0
+    local worker_id
+    reset_final_single_ledgers
+    for worker_id in $(seq 0 $((worker_count - 1))); do
+        SINGLE_INPUT_KIND="${final_input_kind}" \
+        SINGLE_IGNORE_ONLINE_REPLAY_GATE="${FINAL_SINGLE_IGNORE_ONLINE_REPLAY_GATE:-1}" \
+        SINGLE_WORKER_ID="${worker_id}" \
+        SINGLE_WORKER_GROUP="${worker_id}" \
+        SINGLE_WORKER_COUNT="${worker_count}" \
+        ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN="${ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN:-99}" \
+            "${SCRIPT_DIR}/update_single_background_once.sh" "${RUN_DIR}" \
+            > "logs/final_single_update_${SLURM_JOB_ID:-manual}_worker_${worker_id}.out" \
+            2> "logs/final_single_update_${SLURM_JOB_ID:-manual}_worker_${worker_id}.err" \
+            || final_status=$?
+    done
+    if [ "${MERGE_WORKER_FAR_OUTPUTS:-1}" = "1" ]; then
+        python3 "${SCRIPT_DIR}/merge_worker_far_ledgers.py" \
+            --run-dir "${RUN_DIR}" \
+            --worker-count "${worker_count}" \
+            --output single_branch/single_final_far_all.csv \
+            --candidate-output single_branch/single_final_far_latest_candidates.csv \
+            --summary monitor/latest_single_background_status.json \
+            --plot-summary monitor/latest_single_plot_summary.json \
+            > "logs/final_single_merge_${SLURM_JOB_ID:-manual}.out" \
+            2> "logs/final_single_merge_${SLURM_JOB_ID:-manual}.err" \
+            || final_status=$?
+    fi
+    if [ "${PATCH_ZEROLAG_SINGLE_FAR:-${SIDECAR_PATCH_ZEROLAG_SINGLE_FAR:-1}}" = "1" ]; then
+        printf "single_llrfar_online: patching final single FAR into zerolag at %s\n" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
+        PYTHONPATH="${SPIIR_RUNTIME_PYTHONPATH:-}${PYTHONPATH:+:${PYTHONPATH}}" \
+            "${SPIIR_RUN_FUNCTION}" "${SPIIR_BUILD_NAME}" python3 \
+            "${SCRIPT_DIR}/patch_zerolag_single_far_from_ledger.py" \
+            --run-dir "${RUN_DIR}" \
+            --ledger "${PATCH_ZEROLAG_SINGLE_FAR_LEDGER:-single_branch/single_final_far_all.csv}" \
+            --far-column "${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-direct_far}" \
+            --summary monitor/patch_zerolag_single_far_summary.json \
+            --clear-existing \
+            > "logs/patch_zerolag_single_far_${SLURM_JOB_ID:-manual}.out" \
+            2> "logs/patch_zerolag_single_far_${SLURM_JOB_ID:-manual}.err" \
+            || final_status=$?
+    fi
+    return "${final_status}"
+}
+
 worker_pids=()
 for worker_id in $(seq 0 $((worker_count - 1))); do
     if [ "${worker_count}" -eq 1 ]; then
@@ -189,5 +289,11 @@ worker_status=0
 for pid in "${worker_pids[@]}"; do
     wait "${pid}" || worker_status=$?
 done
+
+cleanup
+trap - EXIT
+if [ "${worker_status}" -eq 0 ]; then
+    run_final_single_update || worker_status=$?
+fi
 
 exit "${worker_status}"
