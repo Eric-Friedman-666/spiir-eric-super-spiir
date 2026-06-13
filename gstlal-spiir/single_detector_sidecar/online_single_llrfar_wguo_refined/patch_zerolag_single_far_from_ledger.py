@@ -24,6 +24,7 @@ from typing import Dict, Iterable, Optional, Tuple
 
 
 Key = Tuple[str, str, str, str, str]
+IFO_ORDER = ("H1", "L1", "V1", "K1")
 
 
 def _maybe_add_runtime_paths(script_dir: Path) -> None:
@@ -58,6 +59,134 @@ def _normalize_ifo(value: object) -> str:
 
 def _is_positive(value: float) -> bool:
     return math.isfinite(value) and value > 0.0
+
+
+def _float_or_none(value: object) -> Optional[float]:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _parse_ifo_mask(text: object) -> set[str]:
+    raw = str(text or "").strip().upper()
+    if raw in ("", "NONE", "OFF", "0"):
+        return set()
+    raw = raw.replace("+", ",").replace("|", ",").replace("/", ",")
+    if "," in raw:
+        tokens = [item.strip() for item in raw.split(",") if item.strip()]
+    elif raw in ("HL", "LH"):
+        tokens = list(raw)
+    else:
+        tokens = [raw]
+
+    out: set[str] = set()
+    for token in tokens:
+        if token in ("H", "H1"):
+            out.add("H1")
+        elif token in ("L", "L1"):
+            out.add("L1")
+        elif token in ("V", "V1"):
+            out.add("V1")
+        elif token in ("K", "K1"):
+            out.add("K1")
+    return out
+
+
+class SingleOutputPolicy:
+    """Decides when detector-local single FARs may enter final zerolag output."""
+
+    def __init__(self, mode: str, schedule: str = ""):
+        normalized = (mode or "single-only").strip().lower().replace("_", "-")
+        if normalized in ("singleonly", "single-only"):
+            normalized = "single-only"
+        self.mode = normalized
+        self.schedule_text = schedule or ""
+        self.schedule = self._parse_schedule(self.schedule_text)
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> "SingleOutputPolicy":
+        mode = (
+            args.single_output_mode
+            or os.environ.get("PATCH_ZEROLAG_SINGLE_OUTPUT_MODE")
+            or os.environ.get("SINGLE_OUTPUT_MODE")
+            or "single-only"
+        )
+        schedule = (
+            args.active_ifo_schedule
+            or os.environ.get("PATCH_ZEROLAG_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE")
+            or os.environ.get("SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE")
+            or os.environ.get("SINGLE_OUTPUT_DETECTOR_SCHEDULE")
+            or ""
+        )
+        return cls(mode=mode, schedule=schedule)
+
+    @staticmethod
+    def _parse_schedule(text: str) -> list[tuple[float, float, set[str]]]:
+        windows: list[tuple[float, float, set[str]]] = []
+        for item in str(text or "").replace(";", ",").split(","):
+            item = item.strip()
+            if not item:
+                continue
+            parts = item.split(":")
+            if len(parts) != 3:
+                continue
+            try:
+                start = float(parts[0])
+                end = float(parts[1])
+            except ValueError:
+                continue
+            if end <= start:
+                continue
+            windows.append((start, end, _parse_ifo_mask(parts[2])))
+        return windows
+
+    @staticmethod
+    def _row_gps(row: object, ifo: str) -> Optional[float]:
+        for attr in (f"end_time_sngl_{ifo}", "end_time"):
+            if hasattr(row, attr):
+                gps = _float_or_none(getattr(row, attr, None))
+                if gps is not None:
+                    return gps
+        return None
+
+    @staticmethod
+    def _row_present_ifos(row: object) -> set[str]:
+        present: set[str] = set()
+        for ifo in IFO_ORDER:
+            snr = _float_or_none(getattr(row, f"snglsnr_{ifo}", None))
+            chisq = _float_or_none(getattr(row, f"chisq_{ifo}", None))
+            if (snr is not None and snr > 0.0) or (
+                    chisq is not None and chisq > 0.0):
+                present.add(ifo)
+        return present
+
+    def active_ifos(self, row: object, ifo: str) -> set[str]:
+        gps = self._row_gps(row, ifo)
+        if gps is not None:
+            for start, end, ifos in self.schedule:
+                if start <= gps < end:
+                    return set(ifos)
+        return self._row_present_ifos(row)
+
+    def allows(self, row: object, ifo: str) -> bool:
+        if self.mode in ("all", "always", "legacy"):
+            return True
+        if self.mode in ("none", "never", "off"):
+            return False
+        active = self.active_ifos(row, ifo)
+        return len(active) == 1 and ifo in active
+
+    def summary(self) -> dict:
+        return {
+            "single_output_mode": self.mode,
+            "single_output_active_ifo_schedule": self.schedule_text,
+            "single_output_schedule_windows": [
+                {"start": start, "end": end, "ifos": sorted(ifos)}
+                for start, end, ifos in self.schedule
+            ],
+        }
 
 
 def build_key(ifo: object, end_time: object, end_time_ns: object,
@@ -188,7 +317,8 @@ def clear_single_far(row: object, ifo: str,
 
 def patch_file(path: Path, ledger: Dict[Key, float], *,
                backup_suffix: Optional[str], dry_run: bool,
-               script_dir: Path, clear_existing: bool) -> dict:
+               script_dir: Path, clear_existing: bool,
+               output_policy: SingleOutputPolicy) -> dict:
     ligolw_utils, postcoh_table_def, content_handler = import_ligolw(script_dir)
     xmldoc = ligolw_utils.load_filename(
         str(path), verbose=False, contenthandler=content_handler)
@@ -201,10 +331,12 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
     zero_before = 0
     missing = 0
     cleared = 0
+    allowed = 0
+    suppressed = 0
     changed_keys: set[Key] = set()
 
     for row in table:
-        for ifo in ("H1", "L1", "V1", "K1"):
+        for ifo in IFO_ORDER:
             if not hasattr(row, f"end_time_sngl_{ifo}"):
                 continue
             if clear_existing:
@@ -215,6 +347,10 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
                 missing += 1
                 continue
             matched += 1
+            if not output_policy.allows(row, ifo):
+                suppressed += 1
+                continue
+            allowed += 1
             current = getattr(row, f"far_sngl_{ifo}", 0.0) or 0.0
             try:
                 current = float(current)
@@ -252,6 +388,8 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
         "file": str(path),
         "postcoh_rows": rows,
         "matched_detector_rows": matched,
+        "single_output_allowed_detector_rows": allowed,
+        "single_output_suppressed_detector_rows": suppressed,
         "updated_detector_rows": updated,
         "cleared_single_far_values": cleared,
         "already_equal_detector_rows": already_equal,
@@ -273,6 +411,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-backup", action="store_true")
     parser.add_argument("--clear-existing", action="store_true",
                         help="clear all existing detector-local FAR fields before applying ledger values")
+    parser.add_argument("--single-output-mode",
+                        default=os.environ.get("PATCH_ZEROLAG_SINGLE_OUTPUT_MODE")
+                        or os.environ.get("SINGLE_OUTPUT_MODE")
+                        or "single-only",
+                        help="single FAR output policy: single-only, all, or never")
+    parser.add_argument("--active-ifo-schedule",
+                        default=os.environ.get("PATCH_ZEROLAG_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE")
+                        or os.environ.get("SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE")
+                        or os.environ.get("SINGLE_OUTPUT_DETECTOR_SCHEDULE")
+                        or "",
+                        help="comma-separated START:END:IFOS windows, e.g. GPS:GPS:HL,GPS:GPS:H")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -295,6 +444,7 @@ def main() -> int:
     if not ledger:
         raise SystemExit(f"ledger has no usable positive FAR rows: {ledger_path}")
 
+    output_policy = SingleOutputPolicy.from_args(args)
     files = iter_zerolag_files(run_dir, args.zerolag_glob)
     if not files:
         raise SystemExit(f"no zerolag files matched under {run_dir}")
@@ -303,7 +453,8 @@ def main() -> int:
     file_summaries = [
         patch_file(
             path, ledger, backup_suffix=backup_suffix, dry_run=args.dry_run,
-            script_dir=script_dir, clear_existing=args.clear_existing)
+            script_dir=script_dir, clear_existing=args.clear_existing,
+            output_policy=output_policy)
         for path in files
     ]
 
@@ -313,9 +464,12 @@ def main() -> int:
         "dry_run": bool(args.dry_run),
         "backup_suffix": backup_suffix,
         "zerolag_file_count": len(files),
+        **output_policy.summary(),
         **ledger_summary,
         "postcoh_rows": sum(item["postcoh_rows"] for item in file_summaries),
         "matched_detector_rows": sum(item["matched_detector_rows"] for item in file_summaries),
+        "single_output_allowed_detector_rows": sum(item["single_output_allowed_detector_rows"] for item in file_summaries),
+        "single_output_suppressed_detector_rows": sum(item["single_output_suppressed_detector_rows"] for item in file_summaries),
         "updated_detector_rows": sum(item["updated_detector_rows"] for item in file_summaries),
         "cleared_single_far_values": sum(item["cleared_single_far_values"] for item in file_summaries),
         "already_equal_detector_rows": sum(item["already_equal_detector_rows"] for item in file_summaries),
@@ -337,6 +491,8 @@ def main() -> int:
         "ledger_rows": total["ledger_rows"],
         "unique_keys": total["unique_keys"],
         "matched_detector_rows": total["matched_detector_rows"],
+        "single_output_allowed_detector_rows": total["single_output_allowed_detector_rows"],
+        "single_output_suppressed_detector_rows": total["single_output_suppressed_detector_rows"],
         "updated_detector_rows": total["updated_detector_rows"],
         "cleared_single_far_values": total["cleared_single_far_values"],
         "already_equal_detector_rows": total["already_equal_detector_rows"],

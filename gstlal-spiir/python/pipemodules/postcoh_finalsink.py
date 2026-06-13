@@ -88,16 +88,140 @@ def _normalize_sidecar_ifo(value):
     return str(value or "").strip()
 
 
+def _float_or_none(value):
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if np.isfinite(out) else None
+
+
+def _parse_ifo_mask(text):
+    raw = str(text or "").strip().upper()
+    if raw in ("", "NONE", "OFF", "0"):
+        return set()
+    raw = raw.replace("+", ",").replace("|", ",").replace("/", ",")
+    if "," in raw:
+        tokens = [item.strip() for item in raw.split(",") if item.strip()]
+    elif raw in ("HL", "LH"):
+        tokens = list(raw)
+    else:
+        tokens = [raw]
+
+    out = set()
+    for token in tokens:
+        if token in ("H", "H1"):
+            out.add("H1")
+        elif token in ("L", "L1"):
+            out.add("L1")
+        elif token in ("V", "V1"):
+            out.add("V1")
+        elif token in ("K", "K1"):
+            out.add("K1")
+    return out
+
+
+class SingleOutputPolicy(object):
+    """Controls when detector-local single FARs are allowed into final output."""
+
+    def __init__(self, mode=None, schedule=None):
+        self.mode = (mode or os.environ.get("SINGLE_OUTPUT_MODE")
+                     or "single-only").strip().lower().replace("_", "-")
+        if self.mode in ("singleonly", "single_only"):
+            self.mode = "single-only"
+        self.schedule_text = (
+            schedule
+            if schedule is not None
+            else os.environ.get("SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE")
+            or os.environ.get("SINGLE_OUTPUT_DETECTOR_SCHEDULE")
+            or ""
+        )
+        self.schedule = self._parse_schedule(self.schedule_text)
+
+    @staticmethod
+    def _parse_schedule(text):
+        windows = []
+        for item in str(text or "").replace(";", ",").split(","):
+            item = item.strip()
+            if not item:
+                continue
+            parts = item.split(":")
+            if len(parts) != 3:
+                continue
+            try:
+                start = float(parts[0])
+                end = float(parts[1])
+            except ValueError:
+                continue
+            if end <= start:
+                continue
+            windows.append((start, end, _parse_ifo_mask(parts[2])))
+        return windows
+
+    @staticmethod
+    def _row_gps(postcoh_inspiral, ifo_id):
+        for attr in ("end_time_sngl", "end_time"):
+            try:
+                value = getattr(postcoh_inspiral, attr)
+            except AttributeError:
+                continue
+            if attr == "end_time_sngl":
+                try:
+                    value = value[ifo_id]
+                except (TypeError, IndexError):
+                    continue
+            gps = _float_or_none(value)
+            if gps is not None:
+                return gps
+        return None
+
+    @staticmethod
+    def _present_ifos(postcoh_inspiral):
+        present = set()
+        for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
+            snr = None
+            chisq = None
+            try:
+                snr = _float_or_none(postcoh_inspiral.snglsnr[ifo_id])
+            except (AttributeError, TypeError, IndexError):
+                pass
+            try:
+                chisq = _float_or_none(postcoh_inspiral.chisq[ifo_id])
+            except (AttributeError, TypeError, IndexError):
+                pass
+            if (snr is not None and snr > 0.0) or (
+                    chisq is not None and chisq > 0.0):
+                present.add(ifo)
+        return present
+
+    def active_ifos(self, postcoh_inspiral, ifo_id):
+        gps = self._row_gps(postcoh_inspiral, ifo_id)
+        if gps is not None:
+            for start, end, ifos in self.schedule:
+                if start <= gps < end:
+                    return set(ifos)
+        return self._present_ifos(postcoh_inspiral)
+
+    def allows(self, postcoh_inspiral, ifo_id, ifo):
+        if self.mode in ("all", "always", "legacy"):
+            return True
+        if self.mode in ("none", "never", "off"):
+            return False
+        active = self.active_ifos(postcoh_inspiral, ifo_id)
+        return len(active) == 1 and ifo in active
+
+
 class SidecarSingleFarLookup(object):
     """Cached lookup for single-detector FARs assigned by the sidecar ledger."""
 
-    def __init__(self, paths, check_interval=1.0):
+    def __init__(self, paths, check_interval=1.0, output_policy=None):
         self.paths = [path for path in paths if path]
         self.check_interval = max(0.1, float(check_interval))
         self.next_check = 0.0
         self.file_state = {}
         self.lookup = {}
         self.rows_loaded = 0
+        self.output_policy = output_policy or SingleOutputPolicy()
 
     @classmethod
     def from_environment(cls):
@@ -148,7 +272,8 @@ class SidecarSingleFarLookup(object):
 
         interval = float(os.environ.get(
             "SIDECAR_SINGLE_FAR_LOOKUP_INTERVAL_SECONDS", "1.0") or 1.0)
-        return cls(paths, check_interval=interval)
+        return cls(paths, check_interval=interval,
+                   output_policy=SingleOutputPolicy())
 
     @staticmethod
     def key_from_row(row):
@@ -232,9 +357,14 @@ class SidecarSingleFarLookup(object):
         self.rows_loaded = rows_loaded
 
     def get_far(self, postcoh_inspiral, ifo_id, ifo):
+        if not self.allows_output(postcoh_inspiral, ifo_id, ifo):
+            return None
         self.refresh()
         return self.lookup.get(self.key_from_postcoh(
             postcoh_inspiral, ifo_id, ifo))
+
+    def allows_output(self, postcoh_inspiral, ifo_id, ifo):
+        return self.output_policy.allows(postcoh_inspiral, ifo_id, ifo)
 
 #
 # =============================================================================
@@ -1099,6 +1229,13 @@ class FinalSink(object):
             return 0
         updated = 0
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
+            if not self.sidecar_single_far_lookup.allows_output(
+                    postcoh_inspiral, ifo_id, ifo):
+                postcoh_inspiral.far_sngl[ifo_id] = 0.0
+                postcoh_inspiral.far_1w_sngl[ifo_id] = 0.0
+                postcoh_inspiral.far_1d_sngl[ifo_id] = 0.0
+                postcoh_inspiral.far_2h_sngl[ifo_id] = 0.0
+                continue
             far = self.sidecar_single_far_lookup.get_far(
                 postcoh_inspiral, ifo_id, ifo)
             if far is None:

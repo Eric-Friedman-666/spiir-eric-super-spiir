@@ -77,6 +77,13 @@ typedef struct {
     guint num_current_buffers;
 } CrashcarBufferClusterState;
 
+typedef struct {
+    double start_gps;
+    double end_gps;
+    gboolean active[MAX_NIFO];
+    guint active_count;
+} CrashcarSingleOutputWindow;
+
 static GArray *crashcar_cluster_events;
 static CrashcarClusterEvent crashcar_cluster_candidate;
 static gboolean crashcar_cluster_have_candidate = FALSE;
@@ -89,6 +96,9 @@ static FILE *crashcar_support_debug_file = NULL;
 static gboolean crashcar_support_debug_header_written = FALSE;
 static FILE *crashcar_cluster_debug_file = NULL;
 static gboolean crashcar_cluster_debug_header_written = FALSE;
+static gboolean crashcar_single_output_policy_initialized = FALSE;
+static gchar *crashcar_single_output_mode = NULL;
+static GArray *crashcar_single_output_windows = NULL;
 
 static GArray *crashcar_support_array_locked(int ifo_id) {
     if (ifo_id < 0 || ifo_id >= MAX_NIFO) return NULL;
@@ -1219,6 +1229,151 @@ static gboolean crashcar_row_has_ifo(const CrashcarSinglefar *element,
     return ifo_set__contains(row_ifos, ifo_id);
 }
 
+static void crashcar_single_output_mask_from_text(const char *text,
+                                                  gboolean active[MAX_NIFO],
+                                                  guint *active_count) {
+    for (int i = 0; i < MAX_NIFO; ++i) active[i] = FALSE;
+    *active_count = 0;
+    if (!text || !text[0]) return;
+
+    for (const char *p = text; *p; ++p) {
+        int ifo_id = -1;
+        switch (g_ascii_toupper(*p)) {
+            case 'H': ifo_id = 0; break;
+            case 'L': ifo_id = 1; break;
+            case 'V': ifo_id = 2; break;
+            case 'K': ifo_id = 3; break;
+            default: break;
+        }
+        if (ifo_id >= 0 && ifo_id < MAX_NIFO && !active[ifo_id]) {
+            active[ifo_id] = TRUE;
+            (*active_count)++;
+        }
+    }
+}
+
+static void crashcar_single_output_policy_init(void) {
+    if (crashcar_single_output_policy_initialized) return;
+    crashcar_single_output_policy_initialized = TRUE;
+
+    const char *mode = g_getenv("CRASHCAR_SINGLE_OUTPUT_MODE");
+    if (!mode || !mode[0]) mode = g_getenv("SINGLE_OUTPUT_MODE");
+    if (!mode || !mode[0]) mode = "single-only";
+    crashcar_single_output_mode = g_ascii_strdown(mode, -1);
+    for (gchar *p = crashcar_single_output_mode; p && *p; ++p) {
+        if (*p == '_') *p = '-';
+    }
+
+    const char *schedule = g_getenv("CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE");
+    if (!schedule || !schedule[0]) schedule = g_getenv("SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE");
+    if (!schedule || !schedule[0]) schedule = g_getenv("SINGLE_OUTPUT_DETECTOR_SCHEDULE");
+    if (!schedule || !schedule[0]) return;
+
+    crashcar_single_output_windows =
+      g_array_new(FALSE, FALSE, sizeof(CrashcarSingleOutputWindow));
+    gchar *copy = g_strdup(schedule);
+    for (gchar *p = copy; *p; ++p) {
+        if (*p == ';') *p = ',';
+    }
+    gchar **items = g_strsplit(copy, ",", -1);
+    for (guint i = 0; items && items[i]; ++i) {
+        gchar *item = g_strstrip(items[i]);
+        if (!item[0]) continue;
+        gchar **parts = g_strsplit(item, ":", 3);
+        if (!parts[0] || !parts[1] || !parts[2]) {
+            g_strfreev(parts);
+            continue;
+        }
+        gchar *endptr = NULL;
+        double start = g_ascii_strtod(parts[0], &endptr);
+        if (endptr == parts[0]) {
+            g_strfreev(parts);
+            continue;
+        }
+        endptr = NULL;
+        double end = g_ascii_strtod(parts[1], &endptr);
+        if (endptr == parts[1] || !(end > start)) {
+            g_strfreev(parts);
+            continue;
+        }
+
+        CrashcarSingleOutputWindow window;
+        memset(&window, 0, sizeof(window));
+        window.start_gps = start;
+        window.end_gps = end;
+        crashcar_single_output_mask_from_text(parts[2], window.active,
+                                              &window.active_count);
+        g_array_append_val(crashcar_single_output_windows, window);
+        g_strfreev(parts);
+    }
+    g_strfreev(items);
+    g_free(copy);
+}
+
+static gboolean crashcar_single_output_mode_is(const char *value) {
+    crashcar_single_output_policy_init();
+    return crashcar_single_output_mode &&
+           g_strcmp0(crashcar_single_output_mode, value) == 0;
+}
+
+static guint crashcar_single_output_active_ifos(
+    const CrashcarSinglefar *element,
+    const PostcohInspiralTable *table,
+    double feature_gps,
+    gboolean active[MAX_NIFO]) {
+    crashcar_single_output_policy_init();
+    for (int i = 0; i < MAX_NIFO; ++i) active[i] = FALSE;
+
+    if (isfinite(feature_gps) && crashcar_single_output_windows) {
+        for (guint i = 0; i < crashcar_single_output_windows->len; ++i) {
+            const CrashcarSingleOutputWindow *window =
+              &g_array_index(crashcar_single_output_windows,
+                             CrashcarSingleOutputWindow, i);
+            if (feature_gps >= window->start_gps &&
+                feature_gps < window->end_gps) {
+                for (int j = 0; j < MAX_NIFO; ++j) active[j] = window->active[j];
+                return window->active_count;
+            }
+        }
+    }
+
+    guint count = 0;
+    for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+        if (!crashcar_row_has_ifo(element, table, ifo_id)) continue;
+        if ((table->snglsnr[ifo_id] > 0.0f &&
+             isfinite(table->snglsnr[ifo_id])) ||
+            (table->chisq[ifo_id] > 0.0f &&
+             isfinite(table->chisq[ifo_id]))) {
+            active[ifo_id] = TRUE;
+            count++;
+        }
+    }
+    return count;
+}
+
+static gboolean crashcar_single_output_allows(
+    const CrashcarSinglefar *element,
+    const PostcohInspiralTable *table,
+    int ifo_id,
+    double feature_gps) {
+    if (crashcar_single_output_mode_is("all") ||
+        crashcar_single_output_mode_is("always") ||
+        crashcar_single_output_mode_is("legacy")) {
+        return TRUE;
+    }
+    if (crashcar_single_output_mode_is("none") ||
+        crashcar_single_output_mode_is("never") ||
+        crashcar_single_output_mode_is("off")) {
+        return FALSE;
+    }
+
+    gboolean active[MAX_NIFO];
+    guint active_count = crashcar_single_output_active_ifos(
+      element, table, feature_gps, active);
+    return active_count == 1 && ifo_id >= 0 && ifo_id < MAX_NIFO &&
+           active[ifo_id];
+}
+
 static float crashcar_best_single_far(const PostcohInspiralTable *table,
                                       int ifo_id) {
     float best = 0.0f;
@@ -1447,11 +1602,19 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                     far_sngl = (float)direct_far;
                 }
             }
-            if (crashcar_far_is_valid(far_sngl)) {
+            const gboolean allow_single_output =
+              crashcar_single_output_allows(element, table, ifo_id,
+                                            feature_gps);
+            if (allow_single_output && crashcar_far_is_valid(far_sngl)) {
                 table->far_sngl[ifo_id] = far_sngl;
                 table->far_1w_sngl[ifo_id] = far_sngl;
                 table->far_1d_sngl[ifo_id] = far_sngl;
                 table->far_2h_sngl[ifo_id] = far_sngl;
+            } else if (!allow_single_output) {
+                table->far_sngl[ifo_id] = 0.0f;
+                table->far_1w_sngl[ifo_id] = 0.0f;
+                table->far_1d_sngl[ifo_id] = 0.0f;
+                table->far_2h_sngl[ifo_id] = 0.0f;
             }
 
             gboolean write_all_details =
