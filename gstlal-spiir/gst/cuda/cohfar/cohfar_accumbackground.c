@@ -198,9 +198,11 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
       (PostcohInspiralTable *)(inmap.data + inmap.size);
     for (PostcohInspiralTable *intable = (PostcohInspiralTable *)inmap.data;
          intable < intable_end; intable++)
-        if (intable->is_background == FLAG_FOREGROUND
-            || intable->is_background == FLAG_EMPTY)
+        if ((intable->is_background == FLAG_FOREGROUND
+             || intable->is_background == FLAG_EMPTY)
+            && intable->ifos[0] != '\0')
             outentries++;
+
 
     /*
      * allocate output buffer
@@ -225,6 +227,19 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
     for (PostcohInspiralTable *intable  = (PostcohInspiralTable *)inmap.data,
                               *outtable = (PostcohInspiralTable *)outmap.data;
          intable < intable_end; intable++) {
+        if (intable->ifos[0] == '\0') {
+            if (intable->is_background != FLAG_EMPTY) {
+                LIGOTimeGPS ligo_time;
+                XLALINT8NSToGPS(&ligo_time, GST_BUFFER_PTS(inbuf));
+                fprintf(stderr,
+                        "skipping empty ifo_set in cohfar_accumbackground "
+                        "at GPS %d, table flag %d, cohsnr %f\n",
+                        ligo_time.gpsSeconds, intable->is_background,
+                        intable->cohsnr);
+            }
+            continue;
+        }
+
         // TODO: Consider using ifo_set__try_parse to check for errors
         ifo_set_type table_ifos = ifo_set__parse_or_empty(intable->ifos);
         // The combination of IFOs is invalid
@@ -236,6 +251,7 @@ static GstFlowReturn cohfar_accumbackground_chain(GstPad *pad,
                     "outentries %u, table flag %d, cohsnr %f\n",
                     ligo_time.gpsSeconds, outentries, intable->is_background,
                     intable->cohsnr);
+            continue;
         }
         if (intable->is_background == FLAG_BACKGROUND) {
             if (ifo_set__count(table_ifos) == 1)

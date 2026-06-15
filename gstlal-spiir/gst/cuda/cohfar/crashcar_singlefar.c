@@ -1223,9 +1223,9 @@ static gboolean crashcar_row_has_ifo(const CrashcarSinglefar *element,
                                      const PostcohInspiralTable *table,
                                      int ifo_id) {
     if (!ifo_set__contains(element->enabled_ifos, ifo_id)) return FALSE;
-    if (table->ifos[0] == '\0') return TRUE;
+    if (table->ifos[0] == '\0') return FALSE;
     ifo_set_type row_ifos;
-    if (!ifo_set__try_parse(table->ifos, &row_ifos)) return TRUE;
+    if (!ifo_set__try_parse(table->ifos, &row_ifos)) return FALSE;
     return ifo_set__contains(row_ifos, ifo_id);
 }
 
@@ -1473,52 +1473,57 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
     PostcohInspiralTable *table_begin = (PostcohInspiralTable *)mapInfo.data;
     PostcohInspiralTable *table_end =
       (PostcohInspiralTable *)(mapInfo.data + mapInfo.size);
-    GArray *buffer_events =
-      g_array_new(FALSE, FALSE, sizeof(CrashcarClusterEvent));
-
+    const gboolean preserve_table_single_far =
+      crashcar_env_truthy("CRASHCAR_PRESERVE_TABLE_SINGLE_FAR");
     gboolean is_first_buffer_row = TRUE;
-    for (PostcohInspiralTable *table = table_begin; table < table_end; ++table) {
-        const gboolean is_heartbeat_row = is_first_buffer_row;
-        is_first_buffer_row = FALSE;
-        if (is_heartbeat_row) {
-            continue;
-        }
-        if (table->is_background != FLAG_FOREGROUND) {
-            continue;
-        }
 
-        for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
-            if (!crashcar_row_has_ifo(element, table, ifo_id)) continue;
-            if (table->snglsnr[ifo_id] < element->min_snr) continue;
-            if (!(table->chisq[ifo_id] > 0.0f) ||
-                !isfinite(table->chisq[ifo_id])) {
+    if (!preserve_table_single_far) {
+        GArray *buffer_events =
+          g_array_new(FALSE, FALSE, sizeof(CrashcarClusterEvent));
+
+        for (PostcohInspiralTable *table = table_begin; table < table_end; ++table) {
+            const gboolean is_heartbeat_row = is_first_buffer_row;
+            is_first_buffer_row = FALSE;
+            if (is_heartbeat_row) {
+                continue;
+            }
+            if (table->is_background != FLAG_FOREGROUND) {
                 continue;
             }
 
-            double autocorr_power = 1.0;
-            double dof = 2.0;
-            crashcar_lookup_template_shape(element, ifo_id, table->bankid,
-                                           table->tmplt_idx,
-                                           &autocorr_power, &dof);
-            double llr = crashcar_single_detector_llr(
-              table->snglsnr[ifo_id], table->chisq[ifo_id],
-              autocorr_power, dof);
+            for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+                if (!crashcar_row_has_ifo(element, table, ifo_id)) continue;
+                if (table->snglsnr[ifo_id] < element->min_snr) continue;
+                if (!(table->chisq[ifo_id] > 0.0f) ||
+                    !isfinite(table->chisq[ifo_id])) {
+                    continue;
+                }
 
-            const LIGOTimeGPS *detail_time = crashcar_detail_end_time(table, ifo_id);
-            const double feature_gps = crashcar_gps_to_seconds(detail_time);
-            crashcar_write_detector_support_debug(table, ifo_id, llr,
-                                                  feature_gps);
-            crashcar_add_foreground_support(element, ifo_id, llr,
-                                            feature_gps);
-            crashcar_buffer_events_add_detector(buffer_events, table,
-                                                ifo_id, llr, feature_gps);
+                double autocorr_power = 1.0;
+                double dof = 2.0;
+                crashcar_lookup_template_shape(element, ifo_id, table->bankid,
+                                               table->tmplt_idx,
+                                               &autocorr_power, &dof);
+                double llr = crashcar_single_detector_llr(
+                  table->snglsnr[ifo_id], table->chisq[ifo_id],
+                  autocorr_power, dof);
+
+                const LIGOTimeGPS *detail_time = crashcar_detail_end_time(table, ifo_id);
+                const double feature_gps = crashcar_gps_to_seconds(detail_time);
+                crashcar_write_detector_support_debug(table, ifo_id, llr,
+                                                      feature_gps);
+                crashcar_add_foreground_support(element, ifo_id, llr,
+                                                feature_gps);
+                crashcar_buffer_events_add_detector(buffer_events, table,
+                                                    ifo_id, llr, feature_gps);
+            }
         }
-    }
 
-    CrashcarBufferClusterState cluster_state =
-      crashcar_cluster_begin_buffer(element, buf);
-    crashcar_cluster_finish_buffer(element, &cluster_state, buffer_events);
-    g_array_free(buffer_events, TRUE);
+        CrashcarBufferClusterState cluster_state =
+          crashcar_cluster_begin_buffer(element, buf);
+        crashcar_cluster_finish_buffer(element, &cluster_state, buffer_events);
+        g_array_free(buffer_events, TRUE);
+    }
 
     is_first_buffer_row = TRUE;
     for (PostcohInspiralTable *table = table_begin; table < table_end; ++table) {
@@ -1570,6 +1575,9 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
               bg_livetime >= element->background_window_seconds - 1.0e-6 &&
               required_window_ready;
 
+            const gboolean allow_single_output =
+              crashcar_single_output_allows(element, table, ifo_id,
+                                            feature_gps);
             guint direct_far_count_ge = 0;
             double *window_ranks = NULL;
             guint window_count = 0;
@@ -1577,7 +1585,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             double direct_far = INFINITY;
             double fitted_far = NAN;
             gboolean has_fitted_far = FALSE;
-            if (full_window_ready) {
+            if (full_window_ready && allow_single_output &&
+                !preserve_table_single_far) {
                 window_count = crashcar_collect_window_ranks(
                   element, ifo_id, bg_start, bg_end, &window_ranks,
                   &direct_far_count_ge, llr);
@@ -1595,16 +1604,14 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             }
 
             float far_sngl = crashcar_best_single_far(table, ifo_id);
-            if (full_window_ready) {
+            if (full_window_ready && allow_single_output &&
+                !preserve_table_single_far) {
                 if (has_fitted_far && crashcar_far_double_is_valid(fitted_far)) {
                     far_sngl = (float)fitted_far;
                 } else if (crashcar_far_double_is_valid(direct_far)) {
                     far_sngl = (float)direct_far;
                 }
             }
-            const gboolean allow_single_output =
-              crashcar_single_output_allows(element, table, ifo_id,
-                                            feature_gps);
             if (allow_single_output && crashcar_far_is_valid(far_sngl)) {
                 table->far_sngl[ifo_id] = far_sngl;
                 table->far_1w_sngl[ifo_id] = far_sngl;
@@ -1615,6 +1622,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                 table->far_1w_sngl[ifo_id] = 0.0f;
                 table->far_1d_sngl[ifo_id] = 0.0f;
                 table->far_2h_sngl[ifo_id] = 0.0f;
+                far_sngl = 0.0f;
             }
 
             gboolean write_all_details =

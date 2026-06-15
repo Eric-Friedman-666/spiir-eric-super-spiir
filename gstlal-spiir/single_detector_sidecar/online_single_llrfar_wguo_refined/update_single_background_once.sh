@@ -935,6 +935,9 @@ ledger_args=(
 if [ -n "${DATA_START_TIME:-}" ]; then
     ledger_args+=(--data-start-gps "${DATA_START_TIME}")
 fi
+if [ "${PREFER_FEATURE_SINGLE_FAR:-0}" = "1" ]; then
+    ledger_args+=(--prefer-feature-single-far)
+fi
 
 python3 "${SCRIPT_DIR:-.}/assign_frozen_far_ledger.py" "${ledger_args[@]}"
 
