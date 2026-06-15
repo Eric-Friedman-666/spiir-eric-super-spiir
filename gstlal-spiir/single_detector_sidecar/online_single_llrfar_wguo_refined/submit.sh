@@ -199,7 +199,7 @@ cleanup() {
 trap cleanup EXIT
 
 reset_final_single_ledgers() {
-    [ "${FINAL_SINGLE_RESET_LEDGER:-1}" = "1" ] || return 0
+    [ "${FINAL_SINGLE_RESET_LEDGER:-0}" = "1" ] || return 0
     printf "single_llrfar_online: resetting generated final single FAR products at %s\n" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
     rm -f \

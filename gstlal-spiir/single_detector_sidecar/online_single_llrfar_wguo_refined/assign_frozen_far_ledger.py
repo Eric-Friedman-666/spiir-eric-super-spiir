@@ -119,13 +119,28 @@ def assignment_window_end(feature: sdf.SingleDetectorFeature,
                           args: argparse.Namespace) -> float | None:
     source = feature.source_row if isinstance(feature.source_row, dict) else {}
     snapshot_times = snapshot_times_from_filename(source.get("source_file", ""))
+    gps = feature_time(feature)
     if snapshot_times is not None:
         # A zerolag snapshot is the online batch that exposed this trigger.  Use
         # the immediately preceding background surface, not rows from the same
         # snapshot that are only known at/after the candidate batch is written.
-        end = snapshot_times[0]
+        start = snapshot_times[0]
+        end = start
+        update = float(args.background_update_seconds or 0.0)
+        first_full_end = None
+        if args.data_start_gps is not None:
+            first_full_end = (
+                float(args.data_start_gps) + float(args.background_required_seconds)
+            )
+        if (gps is not None and update > 0.0 and float(gps) < start
+                and (first_full_end is None or start > first_full_end)):
+            # Some final snapshots carry a row whose trigger GPS falls just
+            # before the snapshot start.  Online sidecar assigns those rows
+            # before the next background surface exists, so replay that
+            # assignment frontier instead of looking one cadence ahead.
+            end = start - update
     else:
-        end = feature_time(feature)
+        end = gps
     if end is None:
         return None
     if args.data_start_gps is not None:
