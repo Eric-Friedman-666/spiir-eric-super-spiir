@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <complex.h>
 
 // Suppresses a warning that only occurs on NVCC
 // It should be revisited after the gstreamer upgrade
@@ -22,6 +23,7 @@
 #pragma diag_suppress 1217
 #endif
 #include <glib.h>
+#include <glib/gstdio.h>
 #if defined(__CUDACC__)
 #pragma diag_default 1217
 #endif
@@ -52,6 +54,7 @@ GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
  * same worker-level detail CSV. Guard each complete CSV line so diagnostic
  * output remains parseable without changing stream data. */
 static GMutex crashcar_detail_file_mutex;
+static GMutex crashcar_snr_series_file_mutex;
 static GMutex crashcar_support_mutex;
 static GMutex crashcar_cluster_mutex;
 static GMutex crashcar_support_debug_file_mutex;
@@ -1421,6 +1424,141 @@ static gboolean crashcar_hits_threshold(float far, double log10_far_threshold) {
            log10((double)far) <= log10_far_threshold;
 }
 
+static const char *crashcar_ifo_name(int ifo_id) {
+    switch (ifo_id) {
+        case 0: return "H1";
+        case 1: return "L1";
+        case 2: return "V1";
+        case 3: return "K1";
+        default: return "X1";
+    }
+}
+
+static gboolean crashcar_env_value_is_disabled(const char *value) {
+    return value &&
+           (g_ascii_strcasecmp(value, "0") == 0 ||
+            g_ascii_strcasecmp(value, "false") == 0 ||
+            g_ascii_strcasecmp(value, "off") == 0 ||
+            g_ascii_strcasecmp(value, "none") == 0);
+}
+
+static gchar *crashcar_snr_series_output_dir(
+    const CrashcarSinglefar *element) {
+    const char *configured = g_getenv("CRASHCAR_SNR_SERIES_OUTPUT_DIR");
+    if (crashcar_env_value_is_disabled(configured)) return NULL;
+    if (configured && configured[0]) return g_strdup(configured);
+
+    if (element->detail_output_fname && element->detail_output_fname[0]) {
+        gchar *detail_dir = g_path_get_dirname(element->detail_output_fname);
+        gchar *out_dir = g_build_filename(detail_dir, "crashcar_snr_series",
+                                          NULL);
+        g_free(detail_dir);
+        return out_dir;
+    }
+    return g_strdup("crashcar_snr_series");
+}
+
+static void crashcar_write_snr_series_dump(
+    CrashcarSinglefar *element,
+    const PostcohInspiralTable *table,
+    int ifo_id,
+    double llr,
+    double direct_far,
+    double bg_livetime,
+    double bg_start,
+    double bg_end,
+    double feature_gps,
+    double assignment_gps,
+    float far_sngl,
+    double autocorr_power,
+    double dof,
+    gboolean hit_single,
+    gboolean hit_multi) {
+    COMPLEX8TimeSeries *series = table->snr_series_list[ifo_id];
+    if (!series || !series->data || series->data->length == 0) return;
+
+    gchar *out_dir = crashcar_snr_series_output_dir(element);
+    if (!out_dir) return;
+
+    const char *ifo = crashcar_ifo_name(ifo_id);
+    const LIGOTimeGPS *detail_end_time = crashcar_detail_end_time(table, ifo_id);
+    const float far_multi = crashcar_best_multi_far(table);
+    const double log10_far_sngl =
+      crashcar_far_is_valid(far_sngl) ? log10((double)far_sngl) : NAN;
+    const double log10_far_multi =
+      crashcar_far_is_valid(far_multi) ? log10((double)far_multi) : NAN;
+    gchar *series_basename = g_strdup_printf(
+      "event%ld_%s_%d_%09d_bank%d_tmpl%d_snr.csv",
+      table->event_id, ifo, detail_end_time->gpsSeconds,
+      detail_end_time->gpsNanoSeconds, table->bankid, table->tmplt_idx);
+    gchar *series_path = g_build_filename(out_dir, series_basename, NULL);
+    gchar *manifest_path = g_build_filename(out_dir, "manifest.csv", NULL);
+
+    g_mutex_lock(&crashcar_snr_series_file_mutex);
+    if (g_mkdir_with_parents(out_dir, 0775) != 0) {
+        GST_WARNING_OBJECT(element, "failed to create crashcar SNR output dir %s",
+                           out_dir);
+        goto done_locked;
+    }
+
+    FILE *series_file = fopen(series_path, "w");
+    if (!series_file) {
+        GST_WARNING_OBJECT(element, "failed to write crashcar SNR series %s",
+                           series_path);
+        goto done_locked;
+    }
+    fprintf(series_file,
+            "sample_index,gps,relative_time_s,real,imag,abs\n");
+    const double epoch =
+      (double)series->epoch.gpsSeconds +
+      1.0e-9 * (double)series->epoch.gpsNanoSeconds;
+    for (UINT4 i = 0; i < series->data->length; ++i) {
+        const COMPLEX8 sample = series->data->data[i];
+        const double real = (double)crealf(sample);
+        const double imag = (double)cimagf(sample);
+        const double gps = epoch + (double)i * series->deltaT;
+        fprintf(series_file,
+                "%u,%.17g,%.17g,%.9g,%.9g,%.9g\n",
+                i, gps, gps - feature_gps, real, imag,
+                hypot(real, imag));
+    }
+    fclose(series_file);
+
+    FILE *manifest = fopen(manifest_path, "a");
+    if (!manifest) {
+        GST_WARNING_OBJECT(element, "failed to append crashcar SNR manifest %s",
+                           manifest_path);
+        goto done_locked;
+    }
+    if (fseek(manifest, 0, SEEK_END) == 0 && ftell(manifest) == 0) {
+        fprintf(manifest,
+                "event_id,ifo_id,ifo,bankid,tmplt_idx,end_time,end_time_ns,"
+                "snglsnr,chisq,llr,far_sngl,log10_far_sngl,far_multi,"
+                "log10_far_multi,hit_single,hit_multi,direct_far,"
+                "bg_livetime,bg_start,bg_end,feature_gps,assignment_gps,"
+                "autocorr_power,dof,series_file,code_version\n");
+    }
+    fprintf(manifest,
+            "%ld,%d,%s,%d,%d,%d,%d,%.9g,%.9g,%.17g,%.9g,%.9g,%.9g,"
+            "%.9g,%d,%d,%.9g,%.9g,%.17g,%.17g,%.17g,%.17g,%.9g,%.9g,"
+            "%s,%s\n",
+            table->event_id, ifo_id, ifo, table->bankid, table->tmplt_idx,
+            detail_end_time->gpsSeconds, detail_end_time->gpsNanoSeconds,
+            table->snglsnr[ifo_id], table->chisq[ifo_id], llr, far_sngl,
+            log10_far_sngl, far_multi, log10_far_multi, hit_single ? 1 : 0,
+            hit_multi ? 1 : 0, direct_far, bg_livetime, bg_start, bg_end,
+            feature_gps, assignment_gps, autocorr_power, dof,
+            series_basename, CRASHCAR_CODE_VERSION);
+    fclose(manifest);
+
+done_locked:
+    g_mutex_unlock(&crashcar_snr_series_file_mutex);
+    g_free(series_basename);
+    g_free(series_path);
+    g_free(manifest_path);
+    g_free(out_dir);
+}
+
 static void crashcar_write_detail(CrashcarSinglefar *element,
                                   const PostcohInspiralTable *table,
                                   int ifo_id,
@@ -1627,17 +1765,27 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
 
             gboolean write_all_details =
               element->log10_far_threshold >= 90.0;
-            if (write_all_details ||
-                crashcar_hits_threshold(far_sngl,
-                                        element->log10_far_threshold) ||
-                crashcar_hits_threshold(table->far,
-                                        element->log10_far_threshold)) {
+            float far_multi = crashcar_best_multi_far(table);
+            gboolean hit_single_far =
+              crashcar_hits_threshold(far_sngl,
+                                      element->log10_far_threshold);
+            gboolean hit_multi_far =
+              crashcar_hits_threshold(far_multi,
+                                      element->log10_far_threshold);
+            if (write_all_details || hit_single_far || hit_multi_far) {
                 crashcar_write_detail(element, table, ifo_id, llr, direct_far,
                                       direct_far_count_ge, bg_livetime,
                                       bg_start, bg_end, window_count,
                                       total_window_count, feature_gps,
                                       assignment_gps,
                                       far_sngl, autocorr_power, dof);
+                if (!write_all_details && (hit_single_far || hit_multi_far)) {
+                    crashcar_write_snr_series_dump(
+                      element, table, ifo_id, llr, direct_far, bg_livetime,
+                      bg_start, bg_end, feature_gps, assignment_gps,
+                      far_sngl, autocorr_power, dof, hit_single_far,
+                      hit_multi_far);
+                }
             }
             g_free(window_ranks);
         }
