@@ -298,6 +298,20 @@ def assign_single_far(row: object, ifo: str, far: float,
             setattr(row, attr, far)
 
 
+def assign_row_far(row: object, far: float) -> bool:
+    if not hasattr(row, "far"):
+        return False
+    current = getattr(row, "far", 0.0) or 0.0
+    try:
+        current = float(current)
+    except (TypeError, ValueError):
+        current = 0.0
+    if abs(current - far) <= max(1e-12, abs(far) * 1e-9):
+        return False
+    setattr(row, "far", far)
+    return True
+
+
 def clear_single_far(row: object, ifo: str,
                      timescale_fields: Iterable[str]) -> int:
     cleared = 0
@@ -318,7 +332,8 @@ def clear_single_far(row: object, ifo: str,
 def patch_file(path: Path, ledger: Dict[Key, float], *,
                backup_suffix: Optional[str], dry_run: bool,
                script_dir: Path, clear_existing: bool,
-               output_policy: SingleOutputPolicy) -> dict:
+               output_policy: SingleOutputPolicy,
+               patch_row_far: bool) -> dict:
     ligolw_utils, postcoh_table_def, content_handler = import_ligolw(script_dir)
     xmldoc = ligolw_utils.load_filename(
         str(path), verbose=False, contenthandler=content_handler)
@@ -331,6 +346,7 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
     zero_before = 0
     missing = 0
     cleared = 0
+    updated_row_far = 0
     allowed = 0
     suppressed = 0
     changed_keys: set[Key] = set()
@@ -358,14 +374,21 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
                 current = 0.0
             if not _is_positive(current):
                 zero_before += 1
-            if abs(current - far) <= max(1e-12, abs(far) * 1e-9):
-                already_equal += 1
+            detector_equal = abs(current - far) <= max(1e-12, abs(far) * 1e-9)
+            row_far_updated = assign_row_far(row, far) if patch_row_far else False
+            if row_far_updated:
+                updated_row_far += 1
+            if detector_equal:
+                if row_far_updated:
+                    changed_keys.add(key)
+                else:
+                    already_equal += 1
                 continue
             assign_single_far(row, ifo, far, ("far_1w", "far_1d", "far_2h"))
             updated += 1
             changed_keys.add(key)
 
-    if (updated or cleared) and not dry_run:
+    if (updated or cleared or updated_row_far) and not dry_run:
         if backup_suffix:
             backup = path.with_name(path.name + backup_suffix)
             if not backup.exists():
@@ -391,6 +414,7 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
         "single_output_allowed_detector_rows": allowed,
         "single_output_suppressed_detector_rows": suppressed,
         "updated_detector_rows": updated,
+        "updated_row_far_rows": updated_row_far,
         "cleared_single_far_values": cleared,
         "already_equal_detector_rows": already_equal,
         "zero_or_missing_before_update": zero_before,
@@ -445,6 +469,7 @@ def main() -> int:
         raise SystemExit(f"ledger has no usable positive FAR rows: {ledger_path}")
 
     output_policy = SingleOutputPolicy.from_args(args)
+    patch_row_far = args.far_column == "far"
     files = iter_zerolag_files(run_dir, args.zerolag_glob)
     if not files:
         raise SystemExit(f"no zerolag files matched under {run_dir}")
@@ -454,7 +479,7 @@ def main() -> int:
         patch_file(
             path, ledger, backup_suffix=backup_suffix, dry_run=args.dry_run,
             script_dir=script_dir, clear_existing=args.clear_existing,
-            output_policy=output_policy)
+            output_policy=output_policy, patch_row_far=patch_row_far)
         for path in files
     ]
 
@@ -463,6 +488,7 @@ def main() -> int:
         "run_dir": str(run_dir),
         "dry_run": bool(args.dry_run),
         "backup_suffix": backup_suffix,
+        "patch_row_far": patch_row_far,
         "zerolag_file_count": len(files),
         **output_policy.summary(),
         **ledger_summary,
@@ -471,6 +497,7 @@ def main() -> int:
         "single_output_allowed_detector_rows": sum(item["single_output_allowed_detector_rows"] for item in file_summaries),
         "single_output_suppressed_detector_rows": sum(item["single_output_suppressed_detector_rows"] for item in file_summaries),
         "updated_detector_rows": sum(item["updated_detector_rows"] for item in file_summaries),
+        "updated_row_far_rows": sum(item["updated_row_far_rows"] for item in file_summaries),
         "cleared_single_far_values": sum(item["cleared_single_far_values"] for item in file_summaries),
         "already_equal_detector_rows": sum(item["already_equal_detector_rows"] for item in file_summaries),
         "zero_or_missing_before_update": sum(item["zero_or_missing_before_update"] for item in file_summaries),
@@ -494,6 +521,7 @@ def main() -> int:
         "single_output_allowed_detector_rows": total["single_output_allowed_detector_rows"],
         "single_output_suppressed_detector_rows": total["single_output_suppressed_detector_rows"],
         "updated_detector_rows": total["updated_detector_rows"],
+        "updated_row_far_rows": total["updated_row_far_rows"],
         "cleared_single_far_values": total["cleared_single_far_values"],
         "already_equal_detector_rows": total["already_equal_detector_rows"],
     }, sort_keys=True))

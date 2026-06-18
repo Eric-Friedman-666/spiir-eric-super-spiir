@@ -47,7 +47,7 @@
 #define GST_CAT_DEFAULT crashcar_singlefar_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-#define CRASHCAR_CODE_VERSION "single_stream_support_v16"
+#define CRASHCAR_CODE_VERSION "single_stream_support_v18_snr_xml_shards"
 #define CRASHCAR_CLUSTER_WINDOW_SECONDS 1.0
 
 /* Multiple crashcar elements can live in one worker process and append to the
@@ -60,6 +60,9 @@ static GMutex crashcar_cluster_mutex;
 static GMutex crashcar_support_debug_file_mutex;
 static GMutex crashcar_cluster_debug_file_mutex;
 static GArray *crashcar_global_support_points[MAX_NIFO];
+static const char *CRASHCAR_SNR_SERIES_SHARD_CLOSE =
+  "\t</LIGO_LW>\n"
+  "</LIGO_LW>\n";
 
 typedef struct {
     double end_gps;
@@ -1458,6 +1461,127 @@ static gchar *crashcar_snr_series_output_dir(
     return g_strdup("crashcar_snr_series");
 }
 
+static gboolean crashcar_snr_series_write_csv_enabled(void) {
+    const char *configured = g_getenv("CRASHCAR_SNR_SERIES_WRITE_CSV");
+    return configured && configured[0] &&
+           !crashcar_env_value_is_disabled(configured);
+}
+
+static gchar *crashcar_snr_series_xml_shard_basename(void) {
+    return g_strdup_printf("crashcar_snr_series_worker%03d.xml",
+                           crashcar_worker_id_from_env());
+}
+
+static void crashcar_write_xml_text(FILE *file, const char *text) {
+    gchar *escaped = g_markup_escape_text(text ? text : "", -1);
+    fputs(escaped, file);
+    g_free(escaped);
+}
+
+static void crashcar_write_snr_series_xml_element(
+    FILE *xml_file,
+    const PostcohInspiralTable *table,
+    int ifo_id,
+    const COMPLEX8TimeSeries *series,
+    const char *ifo,
+    double llr,
+    float far_sngl,
+    float far_multi,
+    gboolean hit_single,
+    gboolean hit_multi) {
+    const double epoch =
+      (double)series->epoch.gpsSeconds +
+      1.0e-9 * (double)series->epoch.gpsNanoSeconds;
+    fprintf(xml_file,
+            "\t<LIGO_LW Name=\"COMPLEX8TimeSeries\">\n"
+            "\t\t<Time Type=\"GPS\" Name=\"epoch\">%.17g</Time>\n"
+            "\t\t<Param Name=\"f0:param\" Type=\"real_8\" Unit=\"s^-1\">%.17g</Param>\n"
+            "\t\t<Array Type=\"real_8\" Name=\"snr:array\" Unit=\"\">\n"
+            "\t\t\t<Dim Name=\"Time\" Unit=\"s\" Start=\"0\" Scale=\"%.17g\">%u</Dim>\n"
+            "\t\t\t<Dim Name=\"Time,Real,Imaginary\">3</Dim>\n"
+            "\t\t\t<Stream Type=\"Local\" Delimiter=\" \">\n",
+            epoch, (double)series->f0, (double)series->deltaT,
+            series->data->length);
+    for (UINT4 i = 0; i < series->data->length; ++i) {
+        const COMPLEX8 sample = series->data->data[i];
+        fprintf(xml_file, "\t\t\t\t%.17g %.9g %.9g \n",
+                (double)i * series->deltaT,
+                (double)crealf(sample), (double)cimagf(sample));
+    }
+    fprintf(xml_file,
+            "\t\t\t</Stream>\n"
+            "\t\t</Array>\n"
+            "\t\t<Param Name=\"event_id:param\" Type=\"ilwd:char\">sngl_inspiral:event_id:%d</Param>\n"
+            "\t\t<Param Name=\"instrument:param\" Type=\"lstring\">",
+            ifo_id);
+    crashcar_write_xml_text(xml_file, ifo);
+    fprintf(xml_file,
+            "</Param>\n"
+            "\t\t<Param Name=\"crashcar_event_id:param\" Type=\"int_8s\">%ld</Param>\n"
+            "\t\t<Param Name=\"bankid:param\" Type=\"int_4s\">%d</Param>\n"
+            "\t\t<Param Name=\"tmplt_idx:param\" Type=\"int_4s\">%d</Param>\n"
+            "\t\t<Param Name=\"llr:param\" Type=\"real_8\">%.17g</Param>\n"
+            "\t\t<Param Name=\"far_sngl:param\" Type=\"real_8\">%.9g</Param>\n"
+            "\t\t<Param Name=\"far_multi:param\" Type=\"real_8\">%.9g</Param>\n"
+            "\t\t<Param Name=\"hit_single:param\" Type=\"int_4s\">%d</Param>\n"
+            "\t\t<Param Name=\"hit_multi:param\" Type=\"int_4s\">%d</Param>\n"
+            "\t\t<Param Name=\"code_version:param\" Type=\"lstring\">",
+            table->event_id, table->bankid, table->tmplt_idx, llr,
+            far_sngl, far_multi, hit_single ? 1 : 0, hit_multi ? 1 : 0);
+    crashcar_write_xml_text(xml_file, CRASHCAR_CODE_VERSION);
+    fprintf(xml_file, "</Param>\n"
+                      "\t</LIGO_LW>\n");
+}
+
+static gboolean crashcar_append_snr_series_xml_shard(
+    CrashcarSinglefar *element,
+    const PostcohInspiralTable *table,
+    int ifo_id,
+    const COMPLEX8TimeSeries *series,
+    const char *ifo,
+    const char *xml_path,
+    double llr,
+    float far_sngl,
+    float far_multi,
+    gboolean hit_single,
+    gboolean hit_multi) {
+    FILE *xml_file = fopen(xml_path, "r+");
+    if (!xml_file) {
+        xml_file = fopen(xml_path, "w+");
+    }
+    if (!xml_file) {
+        GST_WARNING_OBJECT(element, "failed to write crashcar SNR XML shard %s",
+                           xml_path);
+        return FALSE;
+    }
+
+    gboolean is_new = TRUE;
+    if (fseek(xml_file, 0, SEEK_END) == 0) {
+        long size = ftell(xml_file);
+        long close_len = (long)strlen(CRASHCAR_SNR_SERIES_SHARD_CLOSE);
+        if (size > close_len) {
+            is_new = FALSE;
+            fseek(xml_file, size - close_len, SEEK_SET);
+        }
+    }
+
+    if (is_new) {
+        fprintf(xml_file,
+                "<?xml version='1.0' encoding='utf-8'?>\n"
+                "<!DOCTYPE LIGO_LW SYSTEM \"http://ldas-sw.ligo.caltech.edu/doc/ligolwAPI/html/ligolw_dtd.txt\">\n"
+                "<LIGO_LW>\n"
+                "\t<LIGO_LW Name=\"crashcar_snr_series\">\n");
+    }
+
+    crashcar_write_snr_series_xml_element(xml_file, table, ifo_id, series, ifo,
+                                          llr, far_sngl, far_multi,
+                                          hit_single, hit_multi);
+    fputs(CRASHCAR_SNR_SERIES_SHARD_CLOSE, xml_file);
+
+    fclose(xml_file);
+    return TRUE;
+}
+
 static void crashcar_write_snr_series_dump(
     CrashcarSinglefar *element,
     const PostcohInspiralTable *table,
@@ -1487,12 +1611,16 @@ static void crashcar_write_snr_series_dump(
       crashcar_far_is_valid(far_sngl) ? log10((double)far_sngl) : NAN;
     const double log10_far_multi =
       crashcar_far_is_valid(far_multi) ? log10((double)far_multi) : NAN;
-    gchar *series_basename = g_strdup_printf(
-      "event%ld_%s_%d_%09d_bank%d_tmpl%d_snr.csv",
+    gchar *series_stem = g_strdup_printf(
+      "event%ld_%s_%d_%09d_bank%d_tmpl%d_snr",
       table->event_id, ifo, detail_end_time->gpsSeconds,
       detail_end_time->gpsNanoSeconds, table->bankid, table->tmplt_idx);
-    gchar *series_path = g_build_filename(out_dir, series_basename, NULL);
+    gchar *series_basename = g_strdup_printf("%s.csv", series_stem);
+    gchar *xml_basename = crashcar_snr_series_xml_shard_basename();
+    gchar *series_path = NULL;
+    gchar *xml_path = g_build_filename(out_dir, xml_basename, NULL);
     gchar *manifest_path = g_build_filename(out_dir, "manifest.csv", NULL);
+    const gboolean write_csv = crashcar_snr_series_write_csv_enabled();
 
     g_mutex_lock(&crashcar_snr_series_file_mutex);
     if (g_mkdir_with_parents(out_dir, 0775) != 0) {
@@ -1501,28 +1629,35 @@ static void crashcar_write_snr_series_dump(
         goto done_locked;
     }
 
-    FILE *series_file = fopen(series_path, "w");
-    if (!series_file) {
-        GST_WARNING_OBJECT(element, "failed to write crashcar SNR series %s",
-                           series_path);
-        goto done_locked;
-    }
-    fprintf(series_file,
-            "sample_index,gps,relative_time_s,real,imag,abs\n");
     const double epoch =
       (double)series->epoch.gpsSeconds +
       1.0e-9 * (double)series->epoch.gpsNanoSeconds;
-    for (UINT4 i = 0; i < series->data->length; ++i) {
-        const COMPLEX8 sample = series->data->data[i];
-        const double real = (double)crealf(sample);
-        const double imag = (double)cimagf(sample);
-        const double gps = epoch + (double)i * series->deltaT;
-        fprintf(series_file,
-                "%u,%.17g,%.17g,%.9g,%.9g,%.9g\n",
-                i, gps, gps - feature_gps, real, imag,
-                hypot(real, imag));
+    if (write_csv) {
+        series_path = g_build_filename(out_dir, series_basename, NULL);
+        FILE *series_file = fopen(series_path, "w");
+        if (!series_file) {
+            GST_WARNING_OBJECT(element, "failed to write crashcar SNR series %s",
+                               series_path);
+        } else {
+            fprintf(series_file,
+                    "sample_index,gps,relative_time_s,real,imag,abs\n");
+            for (UINT4 i = 0; i < series->data->length; ++i) {
+                const COMPLEX8 sample = series->data->data[i];
+                const double real = (double)crealf(sample);
+                const double imag = (double)cimagf(sample);
+                const double gps = epoch + (double)i * series->deltaT;
+                fprintf(series_file,
+                        "%u,%.17g,%.17g,%.9g,%.9g,%.9g\n",
+                        i, gps, gps - feature_gps, real, imag,
+                        hypot(real, imag));
+            }
+            fclose(series_file);
+        }
     }
-    fclose(series_file);
+
+    crashcar_append_snr_series_xml_shard(element, table, ifo_id, series, ifo,
+                                         xml_path, llr, far_sngl, far_multi,
+                                         hit_single, hit_multi);
 
     FILE *manifest = fopen(manifest_path, "a");
     if (!manifest) {
@@ -1536,25 +1671,29 @@ static void crashcar_write_snr_series_dump(
                 "snglsnr,chisq,llr,far_sngl,log10_far_sngl,far_multi,"
                 "log10_far_multi,hit_single,hit_multi,direct_far,"
                 "bg_livetime,bg_start,bg_end,feature_gps,assignment_gps,"
-                "autocorr_power,dof,series_file,code_version\n");
+                "autocorr_power,dof,series_file,xml_file,code_version\n");
     }
     fprintf(manifest,
             "%ld,%d,%s,%d,%d,%d,%d,%.9g,%.9g,%.17g,%.9g,%.9g,%.9g,"
             "%.9g,%d,%d,%.9g,%.9g,%.17g,%.17g,%.17g,%.17g,%.9g,%.9g,"
-            "%s,%s\n",
+            "%s,%s,%s\n",
             table->event_id, ifo_id, ifo, table->bankid, table->tmplt_idx,
             detail_end_time->gpsSeconds, detail_end_time->gpsNanoSeconds,
             table->snglsnr[ifo_id], table->chisq[ifo_id], llr, far_sngl,
             log10_far_sngl, far_multi, log10_far_multi, hit_single ? 1 : 0,
             hit_multi ? 1 : 0, direct_far, bg_livetime, bg_start, bg_end,
             feature_gps, assignment_gps, autocorr_power, dof,
-            series_basename, CRASHCAR_CODE_VERSION);
+            write_csv ? series_basename : "", xml_basename,
+            CRASHCAR_CODE_VERSION);
     fclose(manifest);
 
 done_locked:
     g_mutex_unlock(&crashcar_snr_series_file_mutex);
+    g_free(series_stem);
     g_free(series_basename);
+    g_free(xml_basename);
     g_free(series_path);
+    g_free(xml_path);
     g_free(manifest_path);
     g_free(out_dir);
 }
