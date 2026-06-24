@@ -10,6 +10,7 @@ the final zerolag files carry the same detector-local FAR fields as crashcar.
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import glob
 import json
@@ -19,12 +20,21 @@ import shutil
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 
 Key = Tuple[str, str, str, str, str]
+SNRIdentity = Tuple[str, str, str, str]
 IFO_ORDER = ("H1", "L1", "V1", "K1")
+
+
+@dataclass(frozen=True)
+class SNRSeriesRecord:
+    key: Key
+    identity: SNRIdentity
+    xml_path: Path
 
 
 def _maybe_add_runtime_paths(script_dir: Path) -> None:
@@ -67,6 +77,74 @@ def _float_or_none(value: object) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return out if math.isfinite(out) else None
+
+
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _text_content(node: object) -> str:
+    pcdata = getattr(node, "pcdata", None)
+    if pcdata is not None:
+        return str(pcdata).strip()
+    data = getattr(node, "data", None)
+    if data is not None:
+        return str(data).strip()
+    parts: list[str] = []
+    for child in getattr(node, "childNodes", []) or []:
+        child_data = getattr(child, "data", None)
+        child_pcdata = getattr(child, "pcdata", None)
+        if child_data is not None:
+            parts.append(str(child_data))
+        elif child_pcdata is not None:
+            parts.append(str(child_pcdata))
+    return "".join(parts).strip()
+
+
+def _node_name(node: object) -> str:
+    if hasattr(node, "getAttribute"):
+        try:
+            value = node.getAttribute("Name")
+            if value:
+                return str(value)
+        except Exception:
+            pass
+    return str(getattr(node, "Name", "") or "")
+
+
+def _iter_nodes(node: object) -> Iterable[object]:
+    yield node
+    for child in getattr(node, "childNodes", []) or []:
+        yield from _iter_nodes(child)
+
+
+def _param_value(element: object, names: Iterable[str]) -> str:
+    wanted = set(names)
+    for child in getattr(element, "childNodes", []) or []:
+        if _node_name(child) in wanted:
+            return _text_content(child)
+    return ""
+
+
+def _normalize_event_id(value: object) -> str:
+    text = str(value or "").strip()
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1]
+    return _normalize_int(text)
+
+
+def _snr_series_identity(element: object) -> Optional[SNRIdentity]:
+    if _node_name(element) != "COMPLEX8TimeSeries":
+        return None
+    event_id = _normalize_event_id(
+        _param_value(element, ("crashcar_event_id:param",))
+        or _param_value(element, ("event_id:param",)))
+    ifo = _normalize_ifo(_param_value(element, ("instrument:param",)))
+    bankid = _normalize_int(_param_value(element, ("bankid:param",)))
+    tmplt_idx = _normalize_int(_param_value(element, ("tmplt_idx:param",)))
+    if not event_id or not ifo or not bankid or not tmplt_idx:
+        return None
+    return (event_id, ifo, bankid, tmplt_idx)
 
 
 def _parse_ifo_mask(text: object) -> set[str]:
@@ -247,6 +325,88 @@ def load_ledger(path: Path, far_column: str) -> Tuple[Dict[Key, float], dict]:
     }
 
 
+def load_snr_manifest(path: Path) -> Tuple[Dict[Key, SNRSeriesRecord], dict]:
+    rows = 0
+    usable = 0
+    duplicates = 0
+    missing_xml = 0
+    records: Dict[Key, SNRSeriesRecord] = {}
+
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            rows += 1
+            xml_file = str(row.get("xml_file", "") or "").strip()
+            if not xml_file:
+                missing_xml += 1
+                continue
+            key = build_key(
+                row.get("ifo"),
+                row.get("end_time"),
+                row.get("end_time_ns"),
+                row.get("bankid"),
+                row.get("tmplt_idx"),
+            )
+            event_id = _normalize_event_id(row.get("event_id"))
+            if "" in key or not event_id:
+                continue
+            xml_path = Path(xml_file)
+            if not xml_path.is_absolute():
+                xml_path = path.parent / xml_path
+            record = SNRSeriesRecord(
+                key=key,
+                identity=(event_id, key[0], key[3], key[4]),
+                xml_path=xml_path,
+            )
+            if key in records:
+                duplicates += 1
+            else:
+                records[key] = record
+            usable += 1
+
+    xml_paths = {str(record.xml_path) for record in records.values()}
+    return records, {
+        "snr_series_manifest": str(path),
+        "snr_series_manifest_rows": rows,
+        "snr_series_manifest_usable_rows": usable,
+        "snr_series_manifest_unique_keys": len(records),
+        "snr_series_manifest_duplicate_keys": duplicates,
+        "snr_series_manifest_missing_xml_rows": missing_xml,
+        "snr_series_manifest_xml_shards": len(xml_paths),
+    }
+
+
+def _index_existing_snr_series(xmldoc: object) -> set[SNRIdentity]:
+    found: set[SNRIdentity] = set()
+    for node in _iter_nodes(xmldoc):
+        identity = _snr_series_identity(node)
+        if identity is not None:
+            found.add(identity)
+    return found
+
+
+def _index_snr_series_shard(path: Path, ligolw_utils: Any,
+                            content_handler: Any) -> Dict[SNRIdentity, object]:
+    xmldoc = ligolw_utils.load_filename(
+        str(path), verbose=False, contenthandler=content_handler)
+    out: Dict[SNRIdentity, object] = {}
+    for node in _iter_nodes(xmldoc):
+        identity = _snr_series_identity(node)
+        if identity is not None and identity not in out:
+            out[identity] = node
+    return out
+
+
+def _clone_node(node: object) -> object:
+    if hasattr(node, "cloneNode"):
+        return node.cloneNode(True)
+    return copy.deepcopy(node)
+
+
+def _append_snr_series_node(xmldoc: object, node: object) -> None:
+    xmldoc.childNodes[-1].appendChild(_clone_node(node))
+
+
 def iter_zerolag_files(run_dir: Path, patterns: Iterable[str]) -> list[Path]:
     files: list[Path] = []
     for pattern in patterns:
@@ -333,7 +493,9 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
                backup_suffix: Optional[str], dry_run: bool,
                script_dir: Path, clear_existing: bool,
                output_policy: SingleOutputPolicy,
-               patch_row_far: bool) -> dict:
+               patch_row_far: bool,
+               snr_records: Optional[Dict[Key, SNRSeriesRecord]] = None,
+               snr_cache: Optional[Dict[Path, Dict[SNRIdentity, object]]] = None) -> dict:
     ligolw_utils, postcoh_table_def, content_handler = import_ligolw(script_dir)
     xmldoc = ligolw_utils.load_filename(
         str(path), verbose=False, contenthandler=content_handler)
@@ -349,6 +511,14 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
     updated_row_far = 0
     allowed = 0
     suppressed = 0
+    snr_series_matched = 0
+    snr_series_appended = 0
+    snr_series_already_present = 0
+    snr_series_missing_node = 0
+    existing_snr_series = (
+        _index_existing_snr_series(xmldoc) if snr_records else set()
+    )
+    snr_cache = snr_cache if snr_cache is not None else {}
     changed_keys: set[Key] = set()
 
     for row in table:
@@ -378,8 +548,28 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
             row_far_updated = assign_row_far(row, far) if patch_row_far else False
             if row_far_updated:
                 updated_row_far += 1
+            snr_series_changed = False
+            if snr_records is not None:
+                snr_record = snr_records.get(key)
+                if snr_record is not None:
+                    snr_series_matched += 1
+                    if snr_record.identity in existing_snr_series:
+                        snr_series_already_present += 1
+                    else:
+                        if snr_record.xml_path not in snr_cache:
+                            snr_cache[snr_record.xml_path] = _index_snr_series_shard(
+                                snr_record.xml_path, ligolw_utils, content_handler)
+                        snr_node = snr_cache[snr_record.xml_path].get(snr_record.identity)
+                        if snr_node is None:
+                            snr_series_missing_node += 1
+                        else:
+                            if not dry_run:
+                                _append_snr_series_node(xmldoc, snr_node)
+                                existing_snr_series.add(snr_record.identity)
+                            snr_series_appended += 1
+                            snr_series_changed = True
             if detector_equal:
-                if row_far_updated:
+                if row_far_updated or snr_series_changed:
                     changed_keys.add(key)
                 else:
                     already_equal += 1
@@ -388,7 +578,7 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
             updated += 1
             changed_keys.add(key)
 
-    if (updated or cleared or updated_row_far) and not dry_run:
+    if (updated or cleared or updated_row_far or snr_series_appended) and not dry_run:
         if backup_suffix:
             backup = path.with_name(path.name + backup_suffix)
             if not backup.exists():
@@ -419,6 +609,10 @@ def patch_file(path: Path, ledger: Dict[Key, float], *,
         "already_equal_detector_rows": already_equal,
         "zero_or_missing_before_update": zero_before,
         "missing_detector_rows": missing,
+        "snr_series_matched_rows": snr_series_matched,
+        "snr_series_appended_rows": snr_series_appended,
+        "snr_series_already_present_rows": snr_series_already_present,
+        "snr_series_missing_node_rows": snr_series_missing_node,
         "changed_unique_keys": len(changed_keys),
     }
 
@@ -446,6 +640,13 @@ def parse_args() -> argparse.Namespace:
                         or os.environ.get("SINGLE_OUTPUT_DETECTOR_SCHEDULE")
                         or "",
                         help="comma-separated START:END:IFOS windows, e.g. GPS:GPS:HL,GPS:GPS:H")
+    parser.add_argument("--embed-snr-series", action="store_true",
+                        default=_truthy(os.environ.get("PATCH_ZEROLAG_SINGLE_SNR_SERIES")),
+                        help="append retained crashcar single-detector COMPLEX8TimeSeries nodes into final zerolag XML")
+    parser.add_argument("--snr-series-manifest",
+                        default=os.environ.get("PATCH_ZEROLAG_SINGLE_SNR_SERIES_MANIFEST")
+                        or "",
+                        help="manifest.csv produced by crashcar_snr_series; relative paths are resolved under --run-dir")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -468,6 +669,48 @@ def main() -> int:
     if not ledger:
         raise SystemExit(f"ledger has no usable positive FAR rows: {ledger_path}")
 
+    snr_records: Optional[Dict[Key, SNRSeriesRecord]] = None
+    snr_summary: dict = {
+        "embed_snr_series": bool(args.embed_snr_series),
+        "snr_series_manifest": "",
+        "snr_series_manifest_rows": 0,
+        "snr_series_manifest_usable_rows": 0,
+        "snr_series_manifest_unique_keys": 0,
+        "snr_series_manifest_duplicate_keys": 0,
+        "snr_series_manifest_missing_xml_rows": 0,
+        "snr_series_manifest_xml_shards": 0,
+        "snr_series_manifest_missing": False,
+        "snr_series_manifest_empty": False,
+    }
+    if args.embed_snr_series:
+        manifest = args.snr_series_manifest
+        if not manifest:
+            manifest = str(Path(
+                os.environ.get("CRASHCAR_SNR_SERIES_OUTPUT_DIR")
+                or "crashcar_snr_series") / "manifest.csv")
+        manifest_path = Path(manifest)
+        if not manifest_path.is_absolute():
+            manifest_path = run_dir / manifest_path
+        if not manifest_path.exists():
+            snr_records = {}
+            snr_summary.update({
+                "embed_snr_series": True,
+                "snr_series_manifest": str(manifest_path),
+                "snr_series_manifest_missing": True,
+            })
+        elif manifest_path.stat().st_size <= 0:
+            snr_records = {}
+            snr_summary.update({
+                "embed_snr_series": True,
+                "snr_series_manifest": str(manifest_path),
+                "snr_series_manifest_empty": True,
+            })
+        else:
+            snr_records, snr_summary = load_snr_manifest(manifest_path)
+            snr_summary["embed_snr_series"] = True
+            snr_summary["snr_series_manifest_missing"] = False
+            snr_summary["snr_series_manifest_empty"] = False
+
     output_policy = SingleOutputPolicy.from_args(args)
     patch_row_far = args.far_column == "far"
     files = iter_zerolag_files(run_dir, args.zerolag_glob)
@@ -475,11 +718,13 @@ def main() -> int:
         raise SystemExit(f"no zerolag files matched under {run_dir}")
 
     backup_suffix = None if args.no_backup else args.backup_suffix
+    snr_cache: Dict[Path, Dict[SNRIdentity, object]] = {}
     file_summaries = [
         patch_file(
             path, ledger, backup_suffix=backup_suffix, dry_run=args.dry_run,
             script_dir=script_dir, clear_existing=args.clear_existing,
-            output_policy=output_policy, patch_row_far=patch_row_far)
+            output_policy=output_policy, patch_row_far=patch_row_far,
+            snr_records=snr_records, snr_cache=snr_cache)
         for path in files
     ]
 
@@ -492,6 +737,7 @@ def main() -> int:
         "zerolag_file_count": len(files),
         **output_policy.summary(),
         **ledger_summary,
+        **snr_summary,
         "postcoh_rows": sum(item["postcoh_rows"] for item in file_summaries),
         "matched_detector_rows": sum(item["matched_detector_rows"] for item in file_summaries),
         "single_output_allowed_detector_rows": sum(item["single_output_allowed_detector_rows"] for item in file_summaries),
@@ -502,6 +748,10 @@ def main() -> int:
         "already_equal_detector_rows": sum(item["already_equal_detector_rows"] for item in file_summaries),
         "zero_or_missing_before_update": sum(item["zero_or_missing_before_update"] for item in file_summaries),
         "missing_detector_rows": sum(item["missing_detector_rows"] for item in file_summaries),
+        "snr_series_matched_rows": sum(item["snr_series_matched_rows"] for item in file_summaries),
+        "snr_series_appended_rows": sum(item["snr_series_appended_rows"] for item in file_summaries),
+        "snr_series_already_present_rows": sum(item["snr_series_already_present_rows"] for item in file_summaries),
+        "snr_series_missing_node_rows": sum(item["snr_series_missing_node_rows"] for item in file_summaries),
         "files": file_summaries,
     }
 
@@ -524,6 +774,11 @@ def main() -> int:
         "updated_row_far_rows": total["updated_row_far_rows"],
         "cleared_single_far_values": total["cleared_single_far_values"],
         "already_equal_detector_rows": total["already_equal_detector_rows"],
+        "embed_snr_series": total["embed_snr_series"],
+        "snr_series_matched_rows": total["snr_series_matched_rows"],
+        "snr_series_appended_rows": total["snr_series_appended_rows"],
+        "snr_series_already_present_rows": total["snr_series_already_present_rows"],
+        "snr_series_missing_node_rows": total["snr_series_missing_node_rows"],
     }, sort_keys=True))
     return 0
 
