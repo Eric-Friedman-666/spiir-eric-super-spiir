@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--banks-per-group", type=int, default=6)
     parser.add_argument("--max-snapshot-end-gps", type=float, default=None)
     parser.add_argument("--min-snapshot-end-gps", type=float, default=None)
+    parser.add_argument(
+        "--force-is-background",
+        choices=("0", "1"),
+        default=None,
+        help=("override is_background on selected rows; use 1 when replaying "
+              "crashcar detail rows as a pure background-accumulation set"))
     return parser.parse_args()
 
 
@@ -116,7 +122,8 @@ def ifo_from_row(row: dict[str, str]) -> str:
 def selected_output_row(filename: str,
                         source_row: int,
                         row: dict[str, str],
-                        banks_per_group: int) -> dict[str, str]:
+                        banks_per_group: int,
+                        forced_is_background: str | None = None) -> dict[str, str]:
     output = {name: "" for name in OUTPUT_COLUMNS}
     ifo = ifo_from_row(row)
     output["source_file"] = filename
@@ -126,7 +133,7 @@ def selected_output_row(filename: str,
     output["event_id"] = row.get("event_id", "")
     output["ifos"] = ifo
     output["ifo"] = ifo
-    output["is_background"] = row.get("is_background", "0")
+    output["is_background"] = forced_is_background or row.get("is_background", "0")
     output["end_time"] = row.get("end_time", "")
     output["end_time_ns"] = row.get("end_time_ns", "")
     output["rho"] = row.get("snglsnr", "")
@@ -208,7 +215,8 @@ def main() -> int:
                         if not finite_positive(row.get("chisq")):
                             continue
                         output = selected_output_row(
-                            filename, source_row, row, args.banks_per_group)
+                            filename, source_row, row, args.banks_per_group,
+                            args.force_is_background)
                         writer.writerow(output)
                         selected_rows += 1
                         feature_counts[ifo] += 1
