@@ -659,6 +659,13 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("--finalsink-single-trigger-stream", source)
         self.assertIn("single_trigger_stream_fname=options.finalsink_single_trigger_stream", source)
 
+    def test_finalsink_single_trigger_stream_uses_text_csv_writer(self) -> None:
+        source = (
+            SCRIPT_DIR.parents[1] / "python/pipemodules/postcoh_finalsink.py"
+        ).read_text()
+        self.assertIn('open(self.single_trigger_stream_fname, "a", newline="")', source)
+        self.assertNotIn('open(self.single_trigger_stream_fname, "ab")', source)
+
     def test_crashcar_pipeline_requires_template_shape_map_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

@@ -1137,7 +1137,7 @@ class FinalSink(object):
         write_header = (
             (not os.path.exists(self.single_trigger_stream_fname))
             or os.path.getsize(self.single_trigger_stream_fname) == 0)
-        with open(self.single_trigger_stream_fname, "ab") as output_file:
+        with open(self.single_trigger_stream_fname, "a", newline="") as output_file:
             writer = csv.DictWriter(
                 output_file, fieldnames=self.single_trigger_stream_fields)
             if write_header:
