@@ -1219,6 +1219,49 @@ class SingleDetectorFeature(object):
         self.is_background = is_background
         self.source_row = source_row
 
+    def to_background_dict(self, rank=None):
+        row = {
+            "ifo": self.ifo,
+            "rho": json_safe_float(self.rho),
+            "chisq": json_safe_float(self.chisq),
+            "tmplt_idx": self.tmplt_idx,
+            "bankid": self.bankid,
+            "autocorr_power": json_safe_float(self.autocorr_power),
+            "dof": json_safe_float(self.dof),
+            "end_time": json_safe_float(json_load_float(self.end_time)
+                                        if self.end_time is not None else None),
+            "end_time_ns": json_safe_float(json_load_float(self.end_time_ns)
+                                           if self.end_time_ns is not None else None),
+            "is_background": FLAG_BACKGROUND,
+        }
+        if rank is not None and is_finite_number(rank):
+            row["llr"] = float(rank)
+            row["rank"] = float(rank)
+        source = self.source_row if isinstance(self.source_row, dict) else {}
+        for key in ("source_file", "source_row", "_feature_csv_row_index"):
+            if key in source:
+                row[key] = source.get(key)
+        return row
+
+    @classmethod
+    def from_background_dict(cls, row):
+        return cls(
+            ifo=row.get("ifo"),
+            rho=json_load_float(row.get("rho")),
+            chisq=json_load_float(row.get("chisq")),
+            tmplt_idx=row.get("tmplt_idx"),
+            bankid=row.get("bankid"),
+            autocorr_power=json_load_float(row.get("autocorr_power"))
+            if row.get("autocorr_power") is not None else None,
+            dof=json_load_float(row.get("dof"))
+            if row.get("dof") is not None else None,
+            end_time=json_load_float(row.get("end_time"))
+            if row.get("end_time") is not None else None,
+            end_time_ns=json_load_float(row.get("end_time_ns"))
+            if row.get("end_time_ns") is not None else None,
+            is_background=FLAG_BACKGROUND,
+            source_row=row)
+
 
 class SingleDetectorBranch(object):
     """Prototype branch after cuda_postcoh for one or more detectors."""
@@ -1264,12 +1307,17 @@ class SingleDetectorBranch(object):
         state = SingleFarLlrBackgroundFile.load(filename)
         if state.model is not None:
             self.likelihood_model = state.model
+        has_raw_triggers = False
         for ifo, background in state.backgrounds.items():
             if ifo in self.background:
                 background.fit_min_points = self.fit_min_points
                 background.far_floor_count = self.far_floor_count
                 background._invalidate_fit_cache()
+                if background.background_triggers:
+                    has_raw_triggers = True
                 self.background[ifo].merge(background)
+        if has_raw_triggers:
+            self.rebuild_background_support_from_stored_triggers()
         self.prune_background_support()
         self.use_fitted_far = True
 
@@ -1298,6 +1346,7 @@ class SingleDetectorBranch(object):
         rank = self.rank_feature(feature, autocorr_power)
         bg = self.background[feature.ifo]
         bg.add_rank(rank)
+        bg.add_background_trigger(feature, rank)
         if livetime is not None:
             bg.add_livetime(livetime)
         return rank
@@ -1317,9 +1366,40 @@ class SingleDetectorBranch(object):
             bg.reset_rank_support()
         for feature in features:
             if feature.ifo in self.background:
-                self.background[feature.ifo].add_rank(
-                    self.rank_feature(feature))
+                rank = self.rank_feature(feature)
+                self.background[feature.ifo].add_rank(rank)
+                self.background[feature.ifo].add_background_trigger(
+                    feature, rank)
         self.update_far_llr_support(features)
+
+    def rebuild_background_support_from_stored_triggers(self):
+        """Recompute support curves from raw triggers loaded from JSON."""
+
+        for ifo, bg in self.background.items():
+            if not bg.background_triggers:
+                continue
+            trigger_rows = list(bg.background_triggers)
+            features = []
+            bg.reset_rank_support()
+            for row in trigger_rows:
+                try:
+                    feature = SingleDetectorFeature.from_background_dict(row)
+                except (TypeError, ValueError):
+                    continue
+                if feature.ifo != ifo:
+                    continue
+                if not (is_finite_positive(feature.rho)
+                        and is_finite_positive(feature.chisq)):
+                    continue
+                rank = self.rank_feature(feature)
+                bg.add_rank(rank)
+                bg.add_background_trigger(feature, rank)
+                features.append(feature)
+            for feature in features:
+                rank = self.rank_feature(feature)
+                bg.add_far_llr_point(
+                    rank, bg.direct_far(rank), feature_gps_seconds(feature))
+        self.prune_background_support()
 
     def prune_background_support(self):
         for bg in self.background.values():
@@ -1529,11 +1609,12 @@ class SingleFarLlrBackgroundFile(object):
     """Persistent single-detector FAR-LLR background.
 
     This is intentionally a one-dimensional LLR-to-FAR calibration file.  It is
-    not the coherent two-dimensional XML statistics file used by cohfar, and it
-    is not the raw trigger-background stream.
+    not the coherent two-dimensional XML statistics file used by cohfar, but it
+    does carry the full raw detector-local trigger background needed to rebuild
+    the empirical FAR surface.
     """
 
-    VERSION = 2
+    VERSION = 3
 
     def __init__(self, ifos=None, model=None, backgrounds=None):
         self.ifos = tuple(ifos or ())
@@ -1562,8 +1643,9 @@ class SingleFarLlrBackgroundFile(object):
             "version": self.VERSION,
             "created_utc": datetime.datetime.utcnow().isoformat() + "Z",
             "description": (
-                "single-detector FAR-LLR calibration file; stores fitted "
-                "support points (LLR, FAR, GPS) and category livetime"),
+                "single-detector FAR-LLR calibration file; stores full raw "
+                "detector-local background triggers plus derived support "
+                "points (LLR, FAR, GPS) and category livetime"),
             "ifos": list(self.ifos),
             "likelihood_model": (self.model.to_dict()
                                  if self.model is not None else None),
@@ -1940,10 +2022,10 @@ class RankBackground(object):
     """One-dimensional single-detector FAR-LLR calibration model.
 
     During cold start, the current artificial-shift background ranks provide a
-    direct empirical FAR.  The persistent background file stores LLR/GPS support
-    points with FAR values refreshed from the current rolling background, so
-    later foreground triggers can read FAR from the LLR-to-FAR map instead of
-    rebuilding the trigger background every time.
+    direct empirical FAR.  The persistent background file stores the full raw
+    detector-local trigger background, plus derived LLR/FAR support points.  On
+    load, the support curve is rebuilt from the full trigger set so assignment
+    never depends on a thinned plotting proxy.
     """
 
     DEFAULT_FAR_FIT_BOUNDARY = 1.0e-2
@@ -1956,6 +2038,7 @@ class RankBackground(object):
         self.livetime = 0.0
         self.livetime_segments = []
         self.far_llr_points = []
+        self.background_triggers = []
         self.fit_min_points = int(fit_min_points)
         self.far_floor_count = float(far_floor_count)
         self.far_fit_boundary = float(far_fit_boundary)
@@ -1977,6 +2060,7 @@ class RankBackground(object):
     def reset_rank_support(self):
         self._ranks = []
         self.far_llr_points = []
+        self.background_triggers = []
         self._invalidate_fit_cache()
 
     def add_livetime(self, seconds, gps=None):
@@ -1999,6 +2083,37 @@ class RankBackground(object):
         }
         self.far_llr_points.append(point)
         self._invalidate_fit_cache()
+
+    def add_background_trigger(self, feature, rank=None):
+        if feature is None:
+            return
+        self.background_triggers.append(feature.to_background_dict(rank=rank))
+        self._invalidate_fit_cache()
+
+    def current_background_triggers(self):
+        rows = []
+        for row in self.background_triggers:
+            if not isinstance(row, dict):
+                continue
+            if row.get("ifo") is None:
+                continue
+            try:
+                rho = json_load_float(row.get("rho"))
+                chisq = json_load_float(row.get("chisq"))
+            except (TypeError, ValueError):
+                continue
+            if not (is_finite_positive(rho) and is_finite_positive(chisq)):
+                continue
+            copied = dict(row)
+            copied["rho"] = json_safe_float(rho)
+            copied["chisq"] = json_safe_float(chisq)
+            for key in ("llr", "rank", "autocorr_power", "dof",
+                        "end_time", "end_time_ns"):
+                if copied.get(key) is not None:
+                    copied[key] = json_safe_float(json_load_float(
+                        copied.get(key)))
+            rows.append(copied)
+        return rows
 
     def current_far_llr_points(self):
         points = []
@@ -2028,6 +2143,16 @@ class RankBackground(object):
             json_load_float(segment.get("gps"))
             for segment in self.livetime_segments
             if segment.get("gps") is not None)
+        for row in self.background_triggers:
+            if row.get("end_time") is None:
+                continue
+            try:
+                gps = feature_gps_seconds(
+                    SingleDetectorFeature.from_background_dict(row))
+            except (TypeError, ValueError):
+                gps = None
+            if gps is not None:
+                gps_values.append(gps)
         if not gps_values:
             return
         if reference_gps is None:
@@ -2043,6 +2168,19 @@ class RankBackground(object):
                              if point.get("llr") is not None)
         self._invalidate_fit_cache()
 
+        if self.background_triggers:
+            kept_triggers = []
+            for row in self.background_triggers:
+                try:
+                    feature = SingleDetectorFeature.from_background_dict(row)
+                except (TypeError, ValueError):
+                    continue
+                gps = feature_gps_seconds(feature)
+                if gps is None or gps >= cutoff:
+                    kept_triggers.append(row)
+            self.background_triggers = kept_triggers
+            self._invalidate_fit_cache()
+
         if self.livetime_segments:
             kept_segments = []
             for segment in self.livetime_segments:
@@ -2057,6 +2195,7 @@ class RankBackground(object):
     def merge(self, other):
         self.extend_ranks(other._ranks)
         self.far_llr_points.extend(other.far_llr_points)
+        self.background_triggers.extend(other.background_triggers)
         if other.livetime_segments:
             for segment in other.livetime_segments:
                 self.add_livetime(segment.get("seconds", 0.0),
@@ -2494,9 +2633,12 @@ class RankBackground(object):
 
     def to_dict(self):
         far_llr_points = self.current_far_llr_points()
+        background_triggers = self.current_background_triggers()
         return {
             "livetime": self.livetime,
             "livetime_segments": list(self.livetime_segments),
+            "background_triggers": background_triggers,
+            "background_trigger_count": len(background_triggers),
             "far_llr_points": far_llr_points,
             "support_count": len(far_llr_points),
             "fit_min_points": self.fit_min_points,
@@ -2523,6 +2665,21 @@ class RankBackground(object):
         if bg.livetime_segments:
             bg.livetime = sum(segment["seconds"]
                               for segment in bg.livetime_segments)
+        bg.background_triggers = []
+        for row in data.get("background_triggers", []):
+            if not isinstance(row, dict):
+                continue
+            rank_value = row.get("rank")
+            if rank_value is None:
+                rank_value = row.get("llr")
+            try:
+                bg.background_triggers.append(
+                    SingleDetectorFeature.from_background_dict(
+                        row).to_background_dict(
+                            rank=(json_load_float(rank_value)
+                                  if rank_value is not None else None)))
+            except (TypeError, ValueError):
+                continue
         bg._ranks = sorted(float(rank) for rank in data.get("ranks", []))
         bg.far_llr_points = []
         for point in data.get("far_llr_points", []):
@@ -2541,6 +2698,29 @@ class RankBackground(object):
         if not bg._ranks:
             bg._ranks = sorted(float(point["llr"])
                                for point in bg.far_llr_points)
+        if bg.background_triggers and not bg._ranks:
+            ranks = []
+            for row in bg.background_triggers:
+                rank = row.get("rank")
+                if rank is None:
+                    rank = row.get("llr")
+                if is_finite_number(rank):
+                    ranks.append(float(rank))
+            bg._ranks = sorted(ranks)
+        if bg.background_triggers and not bg.far_llr_points and bg._ranks:
+            bg.far_llr_points = []
+            for row in bg.background_triggers:
+                rank = row.get("rank")
+                if rank is None:
+                    rank = row.get("llr")
+                if not is_finite_number(rank):
+                    continue
+                bg.far_llr_points.append({
+                    "llr": float(rank),
+                    "far": None,
+                    "gps": json_safe_float(feature_gps_seconds(
+                        SingleDetectorFeature.from_background_dict(row))),
+                })
         bg._invalidate_fit_cache()
         return bg
 

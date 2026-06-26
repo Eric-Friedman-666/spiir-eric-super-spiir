@@ -329,6 +329,74 @@ class EngineeringFlowContractTests(unittest.TestCase):
                 self.assertTrue(row["calculated_far"])
                 self.assertTrue(row["assign_bg_file"])
 
+    def test_full_background_triggers_drive_loaded_far_assignment(self) -> None:
+        sys.path.insert(0, str(SCRIPT_DIR))
+        from single_detector_far import (
+            SingleDetectorBranch,
+            SingleDetectorFeature,
+            make_default_likelihood_model,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            bg_file = tmp_path / "full_background.json"
+            truncated_file = tmp_path / "truncated_support_background.json"
+            background_features = [
+                SingleDetectorFeature(
+                    ifo="H1",
+                    rho=4.05 + 0.04 * idx,
+                    chisq=0.8 + 0.03 * (idx % 9),
+                    tmplt_idx=idx % 5,
+                    bankid=0,
+                    end_time=1000 + 10 * idx,
+                    end_time_ns=0,
+                )
+                for idx in range(60)
+            ]
+
+            branch = SingleDetectorBranch(
+                make_default_likelihood_model(),
+                ifos=("H1",),
+                min_snr=4.0,
+                background_window_seconds=3600,
+                fit_min_points=2,
+            )
+            branch.add_livetime(3600, ["H1"])
+            branch.rebuild_background_support(background_features)
+            branch.write_background_file(str(bg_file))
+
+            data = json.loads(bg_file.read_text())
+            h1_background = data["backgrounds"]["H1"]
+            self.assertEqual(h1_background["background_trigger_count"], 60)
+            self.assertEqual(len(h1_background["background_triggers"]), 60)
+            self.assertEqual(len(h1_background["far_llr_points"]), 60)
+
+            h1_background["far_llr_points"] = h1_background["far_llr_points"][:3]
+            h1_background["support_count"] = 3
+            truncated_file.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+            loaded = SingleDetectorBranch(
+                make_default_likelihood_model(),
+                ifos=("H1",),
+                min_snr=4.0,
+                background_window_seconds=3600,
+                fit_min_points=2,
+            )
+            loaded.load_background_file(str(truncated_file))
+            loaded_bg = loaded.background["H1"]
+            self.assertEqual(len(loaded_bg.background_triggers), 60)
+            self.assertEqual(len(loaded_bg), 60)
+            self.assertEqual(len(loaded_bg.far_llr_points), 60)
+
+            query = background_features[20]
+            llr = loaded.rank_feature(query)
+            expected_direct_far = (
+                max(float(loaded_bg.count_ge(llr)), loaded_bg.far_floor_count)
+                / loaded_bg.livetime
+            )
+            result = loaded.assign_feature(query)
+            self.assertAlmostEqual(result.direct_far, expected_direct_far)
+
     def test_fixed_background_assignment_does_not_build_bg_from_injections(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

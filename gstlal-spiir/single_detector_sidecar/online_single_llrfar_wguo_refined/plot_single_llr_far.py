@@ -60,7 +60,13 @@ def load_support(background_file):
     data = json.loads(Path(background_file).read_text())
     points = []
     for ifo, bg in data.get("backgrounds", {}).items():
-        for point in bg.get("far_llr_points", []):
+        support_rows = bg.get("far_llr_points", [])
+        if bg.get("background_triggers") and RankBackground is not None:
+            try:
+                support_rows = RankBackground.from_dict(bg).current_far_llr_points()
+            except Exception:
+                support_rows = bg.get("far_llr_points", [])
+        for point in support_rows:
             llr = safe_float(point.get("llr"))
             log_far = safe_log10(point.get("far"))
             if llr is None or log_far is None:
@@ -509,10 +515,14 @@ def main() -> int:
 
     support_llr = [p[1] for p in support]
     support_far = [p[2] for p in support]
+    background_trigger_counts = {}
+    for ifo, bg in data.get("backgrounds", {}).items():
+        background_trigger_counts[ifo] = len(bg.get("background_triggers", []))
     summary = {
         "background": args.background,
         "assigned": args.assigned,
         "support_points": len(support),
+        "background_trigger_counts": background_trigger_counts,
         "assigned_points": len(assigned),
         "plot": args.output,
         "ifos": sorted(data.get("backgrounds", {}).keys()),
