@@ -96,6 +96,16 @@ if [ -n "${SPIIR_RUNTIME_PYTHONPATH:-}" ]; then
 fi
 gstlal_online=${SPIIR_ONLINE_BIN:-$(which gstlal_inspiral_postcohspiir_online)}
 
+case "${CRASHCAR_ENABLE:-0}:${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-${CRASHCAR_ENABLE:-0}}" in
+	1:1|1:true|1:TRUE|1:yes|1:YES|1:on|1:ON)
+		if [ -z "${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME:-}" ] || [ ! -s "${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME}" ]; then
+			printf 'single_llrfar_online: crashcar requires readable CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME, got %s\n' \
+				"${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME:-<unset>}" >&2
+			exit 2
+		fi
+		;;
+esac
+
 single_trigger_stream_arg=""
 want_single_trigger_stream=0
 case "${SINGLE_TRIGGER_STREAM_ENABLE:-1}" in
@@ -109,9 +119,6 @@ if [ "${want_single_trigger_stream}" = "1" ]; then
 	if "${gstlal_online}" --help 2>&1 | grep -q -- "--finalsink-single-trigger-stream"; then
 		single_trigger_stream_file=${SINGLE_TRIGGER_STREAM_FILE:-${jobno}/${jobno}_single_triggers.csv}
 		single_trigger_stream_arg=" --finalsink-single-trigger-stream ${single_trigger_stream_file}"
-	elif [ "${CRASHCAR_ENABLE:-0}" = "1" ]; then
-		printf 'single_llrfar_online: crashcar enabled; %s lacks --finalsink-single-trigger-stream, so disabling finalsink single CSV stream\n' \
-			"${gstlal_online}" >&2
 	else
 		printf 'single_llrfar_online: requested finalsink single stream but %s lacks --finalsink-single-trigger-stream\n' \
 			"${gstlal_online}" >&2

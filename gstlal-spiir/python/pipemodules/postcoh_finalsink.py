@@ -786,10 +786,29 @@ class FinalSink(object):
                  expected_buffers_per_timestamp=None,
                  feature_best_far=False,
                  feature_best_far_threshold=0,
+                 single_trigger_stream_fname=None,
                  verbose=False):
         # best far
         self.enable_feature_best_far = feature_best_far
         self.best_far_threshold = feature_best_far_threshold
+        self.single_trigger_stream_fname = single_trigger_stream_fname
+        self.single_trigger_stream_seq = 0
+        self.single_trigger_stream_fields = [
+            "source_kind", "stream_seq", "stream_write_unix",
+            "source_file", "source_row", "bank_group", "bankid",
+            "event_id", "ifos", "ifo", "is_background", "end_time",
+            "end_time_ns", "rho", "snglsnr", "chisq", "cohsnr",
+            "cmbchisq", "far", "fap", "far_1d", "far_1w", "far_2h",
+            "end_time_sngl_H1", "end_time_ns_sngl_H1",
+            "end_time_sngl_L1", "end_time_ns_sngl_L1",
+            "snglsnr_H1", "snglsnr_L1", "chisq_H1", "chisq_L1",
+            "mass1", "mass2", "mchirp", "tmplt_idx"
+        ]
+        self.single_trigger_stream_real4_fields = set([
+            "rho", "snglsnr", "chisq", "cohsnr", "cmbchisq", "far", "fap",
+            "far_1d", "far_1w", "far_2h", "snglsnr_H1", "snglsnr_L1",
+            "chisq_H1", "chisq_L1", "mass1", "mass2", "mchirp"
+        ])
 
         # initialize
         #
@@ -1030,6 +1049,8 @@ class FinalSink(object):
                                             self.gracedb_upload_attempts)
 
                 self.postcoh_table.append(self.candidate.postcoh_inspiral)
+                self._append_single_trigger_stream_rows(
+                    [self.candidate.postcoh_inspiral])
 
                 if self.need_online_perform:
                     self.onperformer.update_eye_candy(
@@ -1045,8 +1066,10 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
         if self.cluster_window == 0:
+            output_rows = [event.postcoh_inspiral for event in newevents]
             self.postcoh_table.extend(
-                [event.postcoh_inspiral for event in newevents])
+                output_rows)
+            self._append_single_trigger_stream_rows(output_rows)
             del self.cur_event_table[:]
 
     def add_segments(self, heartbeat, buf_timestamp, duration):
@@ -1061,6 +1084,133 @@ class FinalSink(object):
                         [buf_seg])
                     this_seglist.coalesce()
                     one_type_dict[ifo] = this_seglist
+        self._append_single_trigger_stream_boundaries(
+            participating_ifos, buf_timestamp + LIGOTimeGPS(0, duration))
+
+    def _single_trigger_stream_enabled(self):
+        return bool(self.single_trigger_stream_fname)
+
+    def _stringify_single_trigger_value(self, field, value):
+        if value is None:
+            return ""
+        if field in self.single_trigger_stream_real4_fields:
+            try:
+                value = np.float32(value)
+            except (TypeError, ValueError):
+                return str(value)
+            if np.isfinite(value):
+                return "{0:.8g}".format(value)
+        try:
+            if isinstance(value, np.generic):
+                value = value.item()
+        except Exception:
+            pass
+        return str(value)
+
+    def _single_trigger_row_attr(self, row, name):
+        try:
+            return getattr(row, name)
+        except Exception:
+            return ""
+
+    def _gps_parts_for_stream(self, gps):
+        if gps is None:
+            return "", ""
+        seconds = getattr(gps, "gpsSeconds", None)
+        nanoseconds = getattr(gps, "gpsNanoSeconds", None)
+        if seconds is not None:
+            return seconds, nanoseconds or 0
+        try:
+            return int(gps), 0
+        except Exception:
+            return "", ""
+
+    def _ensure_single_trigger_stream_parent(self):
+        dirname = os.path.dirname(self.single_trigger_stream_fname)
+        if dirname and not os.path.isdir(dirname):
+            os.makedirs(dirname)
+
+    def _write_single_trigger_stream_dicts(self, rows):
+        if not self._single_trigger_stream_enabled() or not rows:
+            return
+        self._ensure_single_trigger_stream_parent()
+        write_header = (
+            (not os.path.exists(self.single_trigger_stream_fname))
+            or os.path.getsize(self.single_trigger_stream_fname) == 0)
+        with open(self.single_trigger_stream_fname, "ab") as output_file:
+            writer = csv.DictWriter(
+                output_file, fieldnames=self.single_trigger_stream_fields)
+            if write_header:
+                writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+            output_file.flush()
+
+    def _single_trigger_stream_row(self, postcoh_inspiral):
+        self.single_trigger_stream_seq += 1
+        row = dict((field, "") for field in self.single_trigger_stream_fields)
+        row.update({
+            "source_kind": "postcoh_trigger",
+            "stream_seq": self.single_trigger_stream_seq,
+            "stream_write_unix": "%.6f" % time.time(),
+            "bankid": self._single_trigger_row_attr(postcoh_inspiral, "bankid"),
+            "event_id": self._single_trigger_row_attr(postcoh_inspiral, "event_id"),
+            "ifos": self._single_trigger_row_attr(postcoh_inspiral, "ifos"),
+            "is_background": self._single_trigger_row_attr(
+                postcoh_inspiral, "is_background"),
+            "end_time": self._single_trigger_row_attr(postcoh_inspiral, "end_time"),
+            "end_time_ns": self._single_trigger_row_attr(
+                postcoh_inspiral, "end_time_ns"),
+            "cohsnr": self._single_trigger_row_attr(postcoh_inspiral, "cohsnr"),
+            "cmbchisq": self._single_trigger_row_attr(postcoh_inspiral, "cmbchisq"),
+            "far": self._single_trigger_row_attr(postcoh_inspiral, "far"),
+            "fap": self._single_trigger_row_attr(postcoh_inspiral, "fap"),
+            "far_1d": self._single_trigger_row_attr(postcoh_inspiral, "far_1d"),
+            "far_1w": self._single_trigger_row_attr(postcoh_inspiral, "far_1w"),
+            "far_2h": self._single_trigger_row_attr(postcoh_inspiral, "far_2h"),
+            "mass1": self._single_trigger_row_attr(postcoh_inspiral, "mass1"),
+            "mass2": self._single_trigger_row_attr(postcoh_inspiral, "mass2"),
+            "mchirp": self._single_trigger_row_attr(postcoh_inspiral, "mchirp"),
+            "tmplt_idx": self._single_trigger_row_attr(postcoh_inspiral, "tmplt_idx"),
+        })
+        for ifo in ("H1", "L1"):
+            for base in ("end_time_sngl", "end_time_ns_sngl", "snglsnr", "chisq"):
+                column = "%s_%s" % (base, ifo)
+                row[column] = self._single_trigger_row_attr(postcoh_inspiral, column)
+        return dict((key, self._stringify_single_trigger_value(key, value))
+                    for key, value in row.items())
+
+    def _append_single_trigger_stream_rows(self, postcoh_rows):
+        if not self._single_trigger_stream_enabled():
+            return
+        self._write_single_trigger_stream_dicts([
+            self._single_trigger_stream_row(row)
+            for row in postcoh_rows
+        ])
+
+    def _append_single_trigger_stream_boundaries(self, ifos, boundary_gps):
+        if not self._single_trigger_stream_enabled():
+            return
+        end_time, end_time_ns = self._gps_parts_for_stream(boundary_gps)
+        rows = []
+        for ifo in ifos:
+            self.single_trigger_stream_seq += 1
+            row = dict((field, "") for field in self.single_trigger_stream_fields)
+            row.update({
+                "source_kind": "chunk_boundary",
+                "stream_seq": self.single_trigger_stream_seq,
+                "stream_write_unix": "%.6f" % time.time(),
+                "ifos": ifo,
+                "ifo": ifo,
+                "is_background": "empty",
+                "end_time": end_time,
+                "end_time_ns": end_time_ns,
+            })
+            row["end_time_sngl_%s" % ifo] = end_time
+            row["end_time_ns_sngl_%s" % ifo] = end_time_ns
+            rows.append(dict((key, self._stringify_single_trigger_value(key, value))
+                             for key, value in row.items()))
+        self._write_single_trigger_stream_dicts(rows)
 
     def run_snapshot(self, timestamp):
         # Initialization

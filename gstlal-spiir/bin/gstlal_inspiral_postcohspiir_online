@@ -289,6 +289,12 @@ def parse_command_line():
                       default=None,
                       help="Set the filename to read the FAP (optional)")
     parser.add_option(
+        "--finalsink-single-trigger-stream",
+        metavar="filename",
+        default=None,
+        help=("Append a near-real-time CSV mirror of clustered zerolag rows for "
+              "the single-detector sidecar/crashcar background path."))
+    parser.add_option(
         "--reference-psd",
         metavar="filename",
         help=
@@ -891,6 +897,7 @@ finalsink = postcoh_finalsink.FinalSink(
     expected_buffers_per_timestamp=len(postcohsrcs),
     feature_best_far=options.feature_best_far,
     feature_best_far_threshold=options.feature_best_far_threshold,
+    single_trigger_stream_fname=options.finalsink_single_trigger_stream,
     verbose=options.verbose)
 
 logger.info(" output document initialized")

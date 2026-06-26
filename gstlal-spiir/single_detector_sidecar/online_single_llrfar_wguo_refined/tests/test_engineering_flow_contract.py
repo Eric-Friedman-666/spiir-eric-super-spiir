@@ -652,6 +652,89 @@ class EngineeringFlowContractTests(unittest.TestCase):
             self.assertEqual(points.count, 1)
             self.assertAlmostEqual(float(points.z[0]), -3.0)
 
+    def test_crashcar_online_cli_exposes_finalsink_single_trigger_stream(self) -> None:
+        source = (
+            SCRIPT_DIR.parents[1] / "bin/gstlal_inspiral_postcohspiir_online"
+        ).read_text()
+        self.assertIn("--finalsink-single-trigger-stream", source)
+        self.assertIn("single_trigger_stream_fname=options.finalsink_single_trigger_stream", source)
+
+    def test_crashcar_pipeline_requires_template_shape_map_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_online = tmp_path / "gstlal_inspiral_postcohspiir_online"
+            fake_online.write_text("#!/bin/sh\nprintf '%s\\n' --finalsink-single-trigger-stream\n")
+            fake_online.chmod(0o755)
+            env = dict(os.environ)
+            env.update({
+                "SLURM_ARRAY_TASK_ID": "0",
+                "BANK_DIR": str(tmp_path),
+                "DATA_START_TIME": "1",
+                "DATA_END_TIME": "2",
+                "NONINJ_STATS_LOC": str(tmp_path),
+                "DETRSP_MAP": str(tmp_path / "map.xml"),
+                "FRAME_CACHE_FILE": str(tmp_path / "frames.cache"),
+                "START_BANK": "0",
+                "BANKS_PER_GROUP": "1",
+                "ZEROLAG_SNAPSHOT_INTERVAL_SECONDS": "60",
+                "BACKGROUND_STATS_WINDOWS": "1d",
+                "CRASHCAR_ENABLE": "1",
+                "CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP": "1",
+                "CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME": str(tmp_path / "missing.csv"),
+                "SPIIR_ONLINE_BIN": str(fake_online),
+            })
+            result = subprocess.run(
+                ["bash", str(SCRIPT_DIR / "pipeline.sh")],
+                check=False,
+                env=env,
+                cwd=str(tmp_path),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("crashcar requires readable CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME", result.stderr)
+
+    def test_pipeline_rejects_missing_finalsink_single_trigger_stream_hook(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fake_online = tmp_path / "gstlal_inspiral_postcohspiir_online"
+            fake_online.write_text("#!/bin/sh\nexit 0\n")
+            fake_online.chmod(0o755)
+            shape_map = tmp_path / "shape.csv"
+            shape_map.write_text("ifo_id,bankid,tmplt_idx,autocorr_power,dof\n")
+            env = dict(os.environ)
+            env.update({
+                "SLURM_ARRAY_TASK_ID": "0",
+                "BANK_DIR": str(tmp_path),
+                "DATA_START_TIME": "1",
+                "DATA_END_TIME": "2",
+                "NONINJ_STATS_LOC": str(tmp_path),
+                "DETRSP_MAP": str(tmp_path / "map.xml"),
+                "FRAME_CACHE_FILE": str(tmp_path / "frames.cache"),
+                "START_BANK": "0",
+                "BANKS_PER_GROUP": "1",
+                "ZEROLAG_SNAPSHOT_INTERVAL_SECONDS": "60",
+                "BACKGROUND_STATS_WINDOWS": "1d",
+                "CRASHCAR_ENABLE": "1",
+                "CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP": "1",
+                "CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME": str(shape_map),
+                "SINGLE_TRIGGER_STREAM_ENABLE": "1",
+                "SINGLE_INPUT_KIND": "singlecsv",
+                "SPIIR_ONLINE_BIN": str(fake_online),
+            })
+            result = subprocess.run(
+                ["bash", str(SCRIPT_DIR / "pipeline.sh")],
+                check=False,
+                env=env,
+                cwd=str(tmp_path),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("lacks --finalsink-single-trigger-stream", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

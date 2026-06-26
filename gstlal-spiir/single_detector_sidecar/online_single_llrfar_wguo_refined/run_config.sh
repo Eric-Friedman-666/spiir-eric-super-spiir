@@ -188,6 +188,7 @@ export CRASHCAR_MIN_SNR=${CRASHCAR_MIN_SNR:-4.0}
 export CRASHCAR_FAR_FLOOR_COUNT=${CRASHCAR_FAR_FLOOR_COUNT:-1.0}
 export CRASHCAR_LIVETIME_STEP=${CRASHCAR_LIVETIME_STEP:-1.0}
 export CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME=${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME:-}
+export CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP=${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-${CRASHCAR_ENABLE}}
 
 # Crashcar needs the matching in-worktree Python wrapper and GStreamer plugin.
 # Fill these defaults only for crashcar runs so a submit command cannot

@@ -292,6 +292,8 @@ static gboolean crashcar_parse_template_shape_line(
     return TRUE;
 }
 
+static gboolean crashcar_env_truthy(const char *name);
+
 static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
     if (element->template_shape_map_loaded) return;
     element->template_shape_map_loaded = TRUE;
@@ -301,6 +303,12 @@ static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
     }
     if (!element->template_shape_map_fname ||
         !element->template_shape_map_fname[0]) {
+        if (crashcar_env_truthy("CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP")) {
+            GST_ERROR_OBJECT(element,
+                             "CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP is set but "
+                             "template-shape-map-fname is empty");
+            g_error("crashcar template shape map is required but not configured");
+        }
         GST_INFO_OBJECT(element,
                         "no crashcar template shape map configured; using defaults");
         return;
@@ -308,6 +316,13 @@ static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
 
     FILE *input = fopen(element->template_shape_map_fname, "r");
     if (!input) {
+        if (crashcar_env_truthy("CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP")) {
+            GST_ERROR_OBJECT(element,
+                             "CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP is set but "
+                             "failed to open crashcar template shape map %s",
+                             element->template_shape_map_fname);
+            g_error("crashcar template shape map is required but cannot be opened");
+        }
         GST_WARNING_OBJECT(element,
                            "failed to open crashcar template shape map %s; using defaults",
                            element->template_shape_map_fname);
@@ -344,6 +359,14 @@ static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
         ++loaded;
     }
     fclose(input);
+    if (loaded == 0 &&
+        crashcar_env_truthy("CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP")) {
+        GST_ERROR_OBJECT(element,
+                         "CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP is set but "
+                         "loaded zero rows from crashcar template shape map %s",
+                         element->template_shape_map_fname);
+        g_error("crashcar template shape map is required but loaded zero rows");
+    }
     GST_INFO_OBJECT(element, "loaded %u crashcar template shape rows from %s",
                     loaded, element->template_shape_map_fname);
 }
