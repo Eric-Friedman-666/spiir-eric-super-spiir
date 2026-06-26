@@ -666,6 +666,15 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn('open(self.single_trigger_stream_fname, "a", newline="")', source)
         self.assertNotIn('open(self.single_trigger_stream_fname, "ab")', source)
 
+    def test_finalsink_boundary_rows_do_not_add_detector_specific_extra_columns(self) -> None:
+        source = (
+            SCRIPT_DIR.parents[1] / "python/pipemodules/postcoh_finalsink.py"
+        ).read_text()
+        boundary_source = source.split("def _append_single_trigger_stream_boundaries", 1)[1]
+        boundary_source = boundary_source.split("def run_snapshot", 1)[0]
+        self.assertNotIn('row["end_time_sngl_%s" % ifo]', boundary_source)
+        self.assertNotIn('row["end_time_ns_sngl_%s" % ifo]', boundary_source)
+
     def test_crashcar_pipeline_requires_template_shape_map_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

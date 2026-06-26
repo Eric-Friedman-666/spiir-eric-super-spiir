@@ -1206,8 +1206,6 @@ class FinalSink(object):
                 "end_time": end_time,
                 "end_time_ns": end_time_ns,
             })
-            row["end_time_sngl_%s" % ifo] = end_time
-            row["end_time_ns_sngl_%s" % ifo] = end_time_ns
             rows.append(dict((key, self._stringify_single_trigger_value(key, value))
                              for key, value in row.items()))
         self._write_single_trigger_stream_dicts(rows)
