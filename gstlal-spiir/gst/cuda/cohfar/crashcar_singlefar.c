@@ -1885,8 +1885,14 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             double direct_far = INFINITY;
             double fitted_far = NAN;
             gboolean has_fitted_far = FALSE;
-            if (full_window_ready && allow_single_output &&
-                !preserve_table_single_far) {
+            /*
+             * Compute single-detector background/FAR diagnostics for every
+             * eligible trigger once the accumulation window is ready.  The
+             * single-output policy only controls whether this FAR is written
+             * back to the zerolag table; simultaneous-detector periods still
+             * need finite direct FAR values for BG support and plotting.
+             */
+            if (full_window_ready && !preserve_table_single_far) {
                 window_count = crashcar_collect_window_ranks(
                   element, ifo_id, bg_start, bg_end, &window_ranks,
                   &direct_far_count_ge, llr);
