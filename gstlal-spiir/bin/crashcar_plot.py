@@ -42,6 +42,7 @@ SNR_XMIN = 4.0
 FAR_POINT_SIZE = 10.0
 FIT_CURVE_MAX_POINTS = 700
 TAIL_FIT_COLOR = "#2ca02c"
+TAIL_BOUNDARY_LOG10_FAR = -2.5
 DEFAULT_SEGMENT_GLOB = "run/[0-9][0-9][0-9]/H1L1V1_SEGMENTS_*.xml.gz"
 DEFAULT_SINGLE_FAR_BASES = ("far_1w_sngl", "far_1d_sngl", "far_2h_sngl", "far_sngl")
 DEFAULT_COHERENT_FAR_BASES = ("far_1w", "far_1d", "far_2h", "far")
@@ -519,7 +520,7 @@ def thin_curve(xs: np.ndarray, ys: np.ndarray, max_points: int = FIT_CURVE_MAX_P
     return xs[indices], ys[indices]
 
 
-def panel_a_segmented_fit(points: list[dict], tail_boundary: float) -> dict | None:
+def panel_a_segmented_fit(points: list[dict], tail_boundary: float = TAIL_BOUNDARY_LOG10_FAR) -> dict | None:
     rows = [
         (as_float(point.get("llr")), as_float(point.get("log_far")))
         for point in points
@@ -535,21 +536,14 @@ def panel_a_segmented_fit(points: list[dict], tail_boundary: float) -> dict | No
     support_y = np.minimum.accumulate(ys)
     support_x_plot, support_y_plot = thin_curve(xs, support_y)
 
-    tail_mask = support_y <= tail_boundary
-    tail_source = "boundary"
-    if np.count_nonzero(tail_mask) < 3:
-        tail_count = min(xs.size, max(3, min(50, xs.size // 4 if xs.size >= 12 else xs.size)))
-        tail_mask = np.zeros(xs.size, dtype=bool)
-        tail_mask[-tail_count:] = True
-        tail_source = "highest_llr_fallback"
-
+    tail_mask = ys <= tail_boundary
     tail_x = xs[tail_mask]
-    tail_y = support_y[tail_mask]
+    tail_y = ys[tail_mask]
     result = {
         "support_point_count": int(xs.size),
         "support_plot_point_count": int(support_x_plot.size),
         "tail_point_count": int(tail_x.size),
-        "tail_source": tail_source,
+        "tail_source": "fixed_log10_far_boundary",
         "tail_boundary_log10_far": float(tail_boundary),
         "support_x": support_x_plot,
         "support_y": support_y_plot,
@@ -563,7 +557,7 @@ def panel_a_segmented_fit(points: list[dict], tail_boundary: float) -> dict | No
     if tail_x.size >= 2 and np.unique(tail_x).size >= 2:
         slope, intercept = np.polyfit(tail_x, tail_y, 1)
         line_x_min = max(float(np.nanmin(tail_x)), LLR_XMIN)
-        line_x_max = max(float(np.nanmax(xs)), line_x_min + 1e-6)
+        line_x_max = max(float(np.nanmax(tail_x)), line_x_min + 1e-6)
         line_x = np.linspace(line_x_min, line_x_max, 160)
         result.update(
             {
@@ -654,7 +648,6 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                     "tail_intercept": fit["tail_intercept"],
                 }
                 if fit["tail_line_x"].size:
-                    tail_label = "segmented tail fit" if fit["tail_source"] == "boundary" else "high-LLR fit"
                     ax.plot(
                         fit["tail_line_x"],
                         fit["tail_line_y"],
@@ -662,7 +655,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                         linewidth=2.0,
                         linestyle="-",
                         alpha=0.96,
-                        label=f"{ifo} {tail_label}",
+                        label=f"{ifo} tail fit (log10 FAR <= {TAIL_BOUNDARY_LOG10_FAR:g})",
                     )
         else:
             ax.text(0.03, 0.90 if ifo == "H1" else 0.82, f"{ifo}: no worker{panel_a_worker} BG rows", transform=ax.transAxes, color=IFO_COLORS[ifo])
@@ -752,6 +745,8 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "worker000_panel_a_points_original": panel_a.get("points_original", 0),
         "worker000_panel_a_segmented_fit": panel_a_fit_summary,
         "worker000_panel_a_fit_display": "tail_fit_only_green_lines",
+        "worker000_panel_a_tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
+        "worker000_panel_a_tail_boundary_source": "fixed_code_constant",
         "background_online_summary": online_summary,
         "panel_a_source": panel_a.get("files", []),
         "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} crashcar C detail/direct-FAR rows with bg_policy={panel_a_policy}; panels b-d aggregate all workers and all bank IDs present in the zerolag XML glob.",
@@ -1065,7 +1060,7 @@ def main() -> None:
     parser.add_argument("--single-far-priority", default=",".join(DEFAULT_SINGLE_FAR_BASES))
     parser.add_argument("--coherent-far-priority", default=",".join(DEFAULT_COHERENT_FAR_BASES))
     parser.add_argument("--background-accumulation-seconds", type=float, default=10800.0, help="BG accumulation window used for panel (a) H/L online fractions.")
-    parser.add_argument("--tail-boundary-log10-far", type=float, default=-2.5)
+    parser.add_argument("--tail-boundary-log10-far", type=float, default=TAIL_BOUNDARY_LOG10_FAR, help=argparse.SUPPRESS)
     parser.add_argument("--max-panel-a-points", type=int, default=0, help="0 means plot all worker detail support points.")
     parser.add_argument("--panel-a-bg-policy", choices=("latest", "all"), default="latest", help="Panel (a) defaults to the latest worker BG support per IFO; use all to debug historical BG updates.")
     parser.add_argument("--template-autocorr-json", type=Path, default=None)
@@ -1096,7 +1091,7 @@ def main() -> None:
 
     first_plot = output_dir / f"{safe_label}_first_2x2_zerolag_current_{stamp}.png"
     second_plot = output_dir / f"{safe_label}_second_2x2_snr_current_{stamp}.png"
-    first = plot_first_2x2(first_payload, first_plot, label, args.tail_boundary_log10_far)
+    first = plot_first_2x2(first_payload, first_plot, label, TAIL_BOUNDARY_LOG10_FAR)
     second = plot_second_2x2(run_root, second_plot, label, args.template_autocorr_json)
 
     meta = {
@@ -1113,7 +1108,8 @@ def main() -> None:
             "single_far_priority": single_far_bases,
             "coherent_far_priority": coherent_far_bases,
             "background_accumulation_seconds": args.background_accumulation_seconds,
-            "tail_boundary_log10_far": args.tail_boundary_log10_far,
+            "tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
+            "tail_boundary_source": "fixed_code_constant",
             "max_panel_a_points": args.max_panel_a_points,
             "panel_a_bg_policy": args.panel_a_bg_policy,
             "template_autocorr_json": str(args.template_autocorr_json) if args.template_autocorr_json else None,
