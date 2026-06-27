@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import io
 import json
 import math
 import re
@@ -38,8 +39,12 @@ IFO_COLORS = {"H1": "#1f77b4", "L1": "#ff7f0e", "V1": "#2ca02c", "K1": "#9467bd"
 CHISQ_VIEW = (0.5, 1.5)
 LLR_XMIN = -20.0
 SNR_XMIN = 4.0
+FAR_POINT_SIZE = 7.0
+FIT_CURVE_MAX_POINTS = 700
+DEFAULT_SEGMENT_GLOB = "run/[0-9][0-9][0-9]/H1L1V1_SEGMENTS_*.xml.gz"
 DEFAULT_SINGLE_FAR_BASES = ("far_1w_sngl", "far_1d_sngl", "far_2h_sngl", "far_sngl")
 DEFAULT_COHERENT_FAR_BASES = ("far_1w", "far_1d", "far_2h", "far")
+ZEROLAG_NAME_RE = re.compile(r"_zerolag_(\d+)_(\d+)\.xml(?:\.gz)?$")
 
 
 def as_float(value, default=float("nan")) -> float:
@@ -116,6 +121,147 @@ def parse_postcoh_rows(path: Path) -> Iterable[dict[str, str]]:
                 values = values[:-1]
             if len(values) == len(columns):
                 yield dict(zip(columns, values))
+
+
+def parse_ligolw_table_rows(path: Path, table_name: str) -> Iterable[dict[str, str]]:
+    columns: list[str] = []
+    in_table = False
+    in_stream = False
+    with gzip.open(path, "rt", errors="replace") as handle:
+        for line in handle:
+            if not in_table:
+                if f'<Table Name="{table_name}"' in line:
+                    in_table = True
+                continue
+            match = re.search(r'<Column Name="([^"]+)"', line)
+            if match:
+                columns.append(match.group(1))
+                continue
+            if f'<Stream Name="{table_name}"' in line:
+                in_stream = True
+                continue
+            if in_stream:
+                if "</Stream>" in line:
+                    break
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    values = next(csv.reader(io.StringIO(stripped)))
+                except Exception:
+                    continue
+                if len(values) == len(columns) + 1 and values[-1] == "":
+                    values = values[:-1]
+                if len(values) == len(columns):
+                    yield dict(zip(columns, values))
+                continue
+            if "</Table>" in line:
+                break
+
+
+def parse_segment_intervals(path: Path) -> list[tuple[str, float, float]]:
+    segment_def_ifos: dict[str, str] = {}
+    for row in parse_ligolw_table_rows(path, "segment_definer:table"):
+        segment_def_ifos[str(row.get("segment_def_id", ""))] = str(row.get("ifos", "")).strip()
+
+    intervals: list[tuple[str, float, float]] = []
+    for row in parse_ligolw_table_rows(path, "segment:table"):
+        ifo = segment_def_ifos.get(str(row.get("segment_definer:segment_def_id", "")), "")
+        if ifo not in ("H1", "L1"):
+            continue
+        start = as_float(row.get("start_time")) + 1e-9 * as_float(row.get("start_time_ns"), 0.0)
+        end = as_float(row.get("end_time")) + 1e-9 * as_float(row.get("end_time_ns"), 0.0)
+        if math.isfinite(start) and math.isfinite(end) and end > start:
+            intervals.append((ifo, start, end))
+    return intervals
+
+
+def union_duration(intervals: list[tuple[float, float]]) -> float:
+    clean = sorted((float(start), float(end)) for start, end in intervals if end > start)
+    if not clean:
+        return 0.0
+    total = 0.0
+    cur_start, cur_end = clean[0]
+    for start, end in clean[1:]:
+        if start <= cur_end:
+            cur_end = max(cur_end, end)
+            continue
+        total += cur_end - cur_start
+        cur_start, cur_end = start, end
+    total += cur_end - cur_start
+    return total
+
+
+def infer_background_window(zerolag: dict, accumulation_seconds: float) -> dict | None:
+    starts: list[tuple[int, int]] = []
+    for filename in zerolag.get("files", []):
+        match = ZEROLAG_NAME_RE.search(Path(filename).name)
+        if match:
+            starts.append((int(match.group(1)), int(match.group(2))))
+    if not starts or accumulation_seconds <= 0:
+        return None
+    min_start = min(start for start, _duration in starts)
+    max_start = max(start for start, _duration in starts)
+    max_duration = max(duration for start, duration in starts if start == max_start)
+    if max_start - min_start >= accumulation_seconds:
+        end = float(max_start)
+        start = end - float(accumulation_seconds)
+        mode = "latest_completed_accumulation"
+    else:
+        start = float(min_start)
+        end = float(max_start + max_duration)
+        mode = "partial_available_accumulation"
+    return {
+        "start": start,
+        "end": end,
+        "duration": max(0.0, end - start),
+        "mode": mode,
+        "accumulation_seconds": float(accumulation_seconds),
+        "zerolag_start_min": int(min_start),
+        "zerolag_start_max": int(max_start),
+    }
+
+
+def load_online_summary(run_root: Path, segment_glob: str, background_window: dict | None) -> dict:
+    if not background_window or background_window.get("duration", 0.0) <= 0:
+        return {
+            "available": False,
+            "reason": "background window unavailable",
+            "segment_glob": segment_glob,
+            "by_ifo": {},
+        }
+    start = float(background_window["start"])
+    end = float(background_window["end"])
+    duration = float(background_window["duration"])
+    files = sorted(run_root.glob(segment_glob))
+    intervals_by_ifo: dict[str, list[tuple[float, float]]] = {"H1": [], "L1": []}
+    parsed_files = 0
+    for path in files:
+        intervals = parse_segment_intervals(path)
+        if intervals:
+            parsed_files += 1
+        for ifo, seg_start, seg_end in intervals:
+            clipped_start = max(start, seg_start)
+            clipped_end = min(end, seg_end)
+            if clipped_end > clipped_start:
+                intervals_by_ifo[ifo].append((clipped_start, clipped_end))
+
+    by_ifo = {}
+    for ifo in ("H1", "L1"):
+        online_seconds = union_duration(intervals_by_ifo[ifo])
+        by_ifo[ifo] = {
+            "online_seconds": online_seconds,
+            "fraction": online_seconds / duration if duration > 0 else float("nan"),
+            "raw_interval_count": len(intervals_by_ifo[ifo]),
+        }
+    return {
+        "available": bool(files),
+        "segment_glob": segment_glob,
+        "segment_file_count": len(files),
+        "parsed_segment_file_count": parsed_files,
+        "background_window": background_window,
+        "by_ifo": by_ifo,
+    }
 
 
 def load_zerolag(run_root: Path, zerolag_glob: str) -> dict:
@@ -365,6 +511,78 @@ def point_summary(points: list[dict], view: list[dict]) -> dict:
     }
 
 
+def thin_curve(xs: np.ndarray, ys: np.ndarray, max_points: int = FIT_CURVE_MAX_POINTS) -> tuple[np.ndarray, np.ndarray]:
+    if xs.size <= max_points:
+        return xs, ys
+    indices = np.unique(np.linspace(0, xs.size - 1, max_points).astype(int))
+    return xs[indices], ys[indices]
+
+
+def panel_a_segmented_fit(points: list[dict], tail_boundary: float) -> dict | None:
+    rows = [
+        (as_float(point.get("llr")), as_float(point.get("log_far")))
+        for point in points
+        if math.isfinite(as_float(point.get("llr"))) and math.isfinite(as_float(point.get("log_far")))
+    ]
+    if len(rows) < 2:
+        return None
+
+    arr = np.asarray(rows, dtype=float)
+    order = np.argsort(arr[:, 0], kind="mergesort")
+    xs = arr[order, 0]
+    ys = arr[order, 1]
+    support_y = np.minimum.accumulate(ys)
+    support_x_plot, support_y_plot = thin_curve(xs, support_y)
+
+    tail_mask = support_y <= tail_boundary
+    tail_source = "boundary"
+    if np.count_nonzero(tail_mask) < 3:
+        tail_count = min(xs.size, max(3, min(50, xs.size // 4 if xs.size >= 12 else xs.size)))
+        tail_mask = np.zeros(xs.size, dtype=bool)
+        tail_mask[-tail_count:] = True
+        tail_source = "highest_llr_fallback"
+
+    tail_x = xs[tail_mask]
+    tail_y = support_y[tail_mask]
+    result = {
+        "support_point_count": int(xs.size),
+        "support_plot_point_count": int(support_x_plot.size),
+        "tail_point_count": int(tail_x.size),
+        "tail_source": tail_source,
+        "tail_boundary_log10_far": float(tail_boundary),
+        "support_x": support_x_plot,
+        "support_y": support_y_plot,
+        "tail_line_x": np.asarray([], dtype=float),
+        "tail_line_y": np.asarray([], dtype=float),
+        "tail_x_min": float(np.nanmin(tail_x)) if tail_x.size else None,
+        "tail_x_max": float(np.nanmax(tail_x)) if tail_x.size else None,
+        "tail_slope": None,
+        "tail_intercept": None,
+    }
+    if tail_x.size >= 2 and np.unique(tail_x).size >= 2:
+        slope, intercept = np.polyfit(tail_x, tail_y, 1)
+        line_x_min = max(float(np.nanmin(tail_x)), LLR_XMIN)
+        line_x_max = max(float(np.nanmax(xs)), line_x_min + 1e-6)
+        line_x = np.linspace(line_x_min, line_x_max, 160)
+        result.update(
+            {
+                "tail_line_x": line_x,
+                "tail_line_y": slope * line_x + intercept,
+                "tail_slope": float(slope),
+                "tail_intercept": float(intercept),
+            }
+        )
+    return result
+
+
+def format_online_label(online_summary: dict, ifo: str) -> str:
+    info = online_summary.get("by_ifo", {}).get(ifo, {})
+    fraction = as_float(info.get("fraction"))
+    if math.isfinite(fraction):
+        return f", online {100.0 * fraction:.1f}%"
+    return ""
+
+
 def plot_far_points(ax, points: list[dict], cmap, norm, xlabel: str, ylabel: str, title: str):
     view = final_view_points(points)
     if view:
@@ -374,14 +592,14 @@ def plot_far_points(ax, points: list[dict], cmap, norm, xlabel: str, ylabel: str
             c=[far_bin(p["log_far"]) for p in view],
             cmap=cmap,
             norm=norm,
-            s=4.0,
+            s=FAR_POINT_SIZE,
             marker=".",
             linewidths=0,
-            alpha=0.72,
+            alpha=0.76,
             rasterized=True,
         )
     else:
-        artist = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=4.0, marker=".")
+        artist = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=FAR_POINT_SIZE, marker=".")
         ax.text(0.5, 0.5, "no points in view", ha="center", va="center", transform=ax.transAxes)
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -399,6 +617,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
     panel_a = payload["panel_a"]
     single_points = payload["single_points"]
     multi_points = payload["multi_points"]
+    online_summary = payload.get("online_summary", {})
 
     fig, axes = plt.subplots(2, 2, figsize=(17.0, 12.5), constrained_layout=True)
     fig.suptitle(f"{title}: background and FAR surfaces", fontsize=17, fontweight="bold")
@@ -406,6 +625,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
     ax = axes[0, 0]
     panel_a_worker = panel_a.get("worker", "000")
     panel_a_policy = panel_a.get("bg_policy", "latest")
+    panel_a_fit_summary: dict[str, dict] = {}
     for ifo in ("H1", "L1"):
         pts = [p for p in panel_a.get("points", []) if p["ifo"] == ifo]
         if pts:
@@ -417,8 +637,42 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                 alpha=0.30,
                 color=IFO_COLORS[ifo],
                 rasterized=True,
-                label=f"{ifo} worker{panel_a_worker} {panel_a_policy} BG rows ({len(pts)})",
+                label=f"{ifo} worker{panel_a_worker} {panel_a_policy} BG rows ({len(pts)}){format_online_label(online_summary, ifo)}",
             )
+            fit = panel_a_segmented_fit(pts, tail_boundary)
+            if fit:
+                panel_a_fit_summary[ifo] = {
+                    "support_point_count": fit["support_point_count"],
+                    "support_plot_point_count": fit["support_plot_point_count"],
+                    "tail_point_count": fit["tail_point_count"],
+                    "tail_source": fit["tail_source"],
+                    "tail_boundary_log10_far": fit["tail_boundary_log10_far"],
+                    "tail_x_min": fit["tail_x_min"],
+                    "tail_x_max": fit["tail_x_max"],
+                    "tail_slope": fit["tail_slope"],
+                    "tail_intercept": fit["tail_intercept"],
+                }
+                ax.plot(
+                    fit["support_x"],
+                    fit["support_y"],
+                    color=IFO_COLORS[ifo],
+                    linewidth=1.35,
+                    alpha=0.90,
+                    label=f"{ifo} segmented support",
+                )
+                if fit["tail_line_x"].size:
+                    tail_label = "segmented tail fit" if fit["tail_source"] == "boundary" else "high-LLR fit"
+                    ax.plot(
+                        fit["tail_line_x"],
+                        fit["tail_line_y"],
+                        color=IFO_COLORS[ifo],
+                        linewidth=1.7,
+                        linestyle="--",
+                        alpha=0.96,
+                        label=f"{ifo} {tail_label}",
+                    )
+                    if fit["tail_x_min"] is not None:
+                        ax.axvline(fit["tail_x_min"], color=IFO_COLORS[ifo], linestyle=":", linewidth=0.9, alpha=0.55)
         else:
             ax.text(0.03, 0.90 if ifo == "H1" else 0.82, f"{ifo}: no worker{panel_a_worker} BG rows", transform=ax.transAxes, color=IFO_COLORS[ifo])
     ax.axhline(tail_boundary, color="0.25", linestyle="-.", linewidth=1.1, label=f"tail boundary {tail_boundary:g}")
@@ -427,7 +681,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
     ax.set_xlim(left=LLR_XMIN)
     ax.set_title(f"Panel (a): worker{panel_a_worker} H/L {panel_a_policy} BG support\ncrashcar C direct-FAR/detail rows", fontweight="bold")
     ax.grid(True, alpha=0.25)
-    ax.legend(loc="lower left", fontsize=8)
+    ax.legend(loc="best", fontsize=7)
 
     cmap = ListedColormap(FAR_BIN_COLORS)
     norm = BoundaryNorm(np.arange(-0.5, len(FAR_BIN_LABELS) + 0.5), cmap.N)
@@ -497,6 +751,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "snr_xmin": SNR_XMIN,
         "colorbar_count": 1,
         "colorbar_location": "right",
+        "far_point_size": FAR_POINT_SIZE,
         "worker000_panel_a_counts": panel_a.get("counts_ready", {}),
         "worker000_panel_a_counts_selected": panel_a.get("counts_ready_selected", {}),
         "worker000_panel_a_bg_policy": panel_a.get("bg_policy", "latest"),
@@ -504,6 +759,8 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "worker000_panel_a_ready_windows": panel_a.get("ready_windows", []),
         "worker000_panel_a_points_plotted": panel_a.get("points_plotted", 0),
         "worker000_panel_a_points_original": panel_a.get("points_original", 0),
+        "worker000_panel_a_segmented_fit": panel_a_fit_summary,
+        "background_online_summary": online_summary,
         "panel_a_source": panel_a.get("files", []),
         "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} crashcar C detail/direct-FAR rows with bg_policy={panel_a_policy}; panels b-d aggregate all workers and all bank IDs present in the zerolag XML glob.",
     }
@@ -810,10 +1067,12 @@ def main() -> None:
     parser.add_argument("--stamp", default=None, help="Timestamp suffix; default is current UTC.")
     parser.add_argument("--zerolag-glob", default="run/[0-9][0-9][0-9]/*_zerolag_*.xml.gz")
     parser.add_argument("--detail-glob", default="run/crashcar_singlefar_detail_worker*.csv")
+    parser.add_argument("--segment-glob", default=DEFAULT_SEGMENT_GLOB)
     parser.add_argument("--panel-a-worker", default="000")
     parser.add_argument("--ifo-id-map", default="0:H1,1:L1,2:V1,3:K1")
     parser.add_argument("--single-far-priority", default=",".join(DEFAULT_SINGLE_FAR_BASES))
     parser.add_argument("--coherent-far-priority", default=",".join(DEFAULT_COHERENT_FAR_BASES))
+    parser.add_argument("--background-accumulation-seconds", type=float, default=10800.0, help="BG accumulation window used for panel (a) H/L online fractions.")
     parser.add_argument("--tail-boundary-log10-far", type=float, default=-2.5)
     parser.add_argument("--max-panel-a-points", type=int, default=0, help="0 means plot all worker detail support points.")
     parser.add_argument("--panel-a-bg-policy", choices=("latest", "all"), default="latest", help="Panel (a) defaults to the latest worker BG support per IFO; use all to debug historical BG updates.")
@@ -833,11 +1092,14 @@ def main() -> None:
 
     zerolag = load_zerolag(run_root, args.zerolag_glob)
     panel_a = load_panel_a_detail(run_root, args.detail_glob, args.panel_a_worker, ifo_id_map, args.max_panel_a_points, args.panel_a_bg_policy)
+    background_window = infer_background_window(zerolag, args.background_accumulation_seconds)
+    online_summary = load_online_summary(run_root, args.segment_glob, background_window)
     first_payload = {
         "zerolag": zerolag,
         "panel_a": panel_a,
         "single_points": build_single_points(zerolag["rows"], single_far_bases),
         "multi_points": build_multi_points(zerolag["rows"], coherent_far_bases),
+        "online_summary": online_summary,
     }
 
     first_plot = output_dir / f"{safe_label}_first_2x2_zerolag_current_{stamp}.png"
@@ -853,10 +1115,12 @@ def main() -> None:
         "parameters": {
             "zerolag_glob": args.zerolag_glob,
             "detail_glob": args.detail_glob,
+            "segment_glob": args.segment_glob,
             "panel_a_worker": args.panel_a_worker,
             "ifo_id_map": ifo_id_map,
             "single_far_priority": single_far_bases,
             "coherent_far_priority": coherent_far_bases,
+            "background_accumulation_seconds": args.background_accumulation_seconds,
             "tail_boundary_log10_far": args.tail_boundary_log10_far,
             "max_panel_a_points": args.max_panel_a_points,
             "panel_a_bg_policy": args.panel_a_bg_policy,
