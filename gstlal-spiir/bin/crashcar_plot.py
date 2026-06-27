@@ -39,8 +39,9 @@ IFO_COLORS = {"H1": "#1f77b4", "L1": "#ff7f0e", "V1": "#2ca02c", "K1": "#9467bd"
 CHISQ_VIEW = (0.5, 1.5)
 LLR_XMIN = -20.0
 SNR_XMIN = 4.0
-FAR_POINT_SIZE = 7.0
+FAR_POINT_SIZE = 10.0
 FIT_CURVE_MAX_POINTS = 700
+TAIL_FIT_COLOR = "#2ca02c"
 DEFAULT_SEGMENT_GLOB = "run/[0-9][0-9][0-9]/H1L1V1_SEGMENTS_*.xml.gz"
 DEFAULT_SINGLE_FAR_BASES = ("far_1w_sngl", "far_1d_sngl", "far_2h_sngl", "far_sngl")
 DEFAULT_COHERENT_FAR_BASES = ("far_1w", "far_1d", "far_2h", "far")
@@ -652,27 +653,17 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                     "tail_slope": fit["tail_slope"],
                     "tail_intercept": fit["tail_intercept"],
                 }
-                ax.plot(
-                    fit["support_x"],
-                    fit["support_y"],
-                    color=IFO_COLORS[ifo],
-                    linewidth=1.35,
-                    alpha=0.90,
-                    label=f"{ifo} segmented support",
-                )
                 if fit["tail_line_x"].size:
                     tail_label = "segmented tail fit" if fit["tail_source"] == "boundary" else "high-LLR fit"
                     ax.plot(
                         fit["tail_line_x"],
                         fit["tail_line_y"],
-                        color=IFO_COLORS[ifo],
-                        linewidth=1.7,
-                        linestyle="--",
+                        color=TAIL_FIT_COLOR,
+                        linewidth=2.0,
+                        linestyle="-",
                         alpha=0.96,
                         label=f"{ifo} {tail_label}",
                     )
-                    if fit["tail_x_min"] is not None:
-                        ax.axvline(fit["tail_x_min"], color=IFO_COLORS[ifo], linestyle=":", linewidth=0.9, alpha=0.55)
         else:
             ax.text(0.03, 0.90 if ifo == "H1" else 0.82, f"{ifo}: no worker{panel_a_worker} BG rows", transform=ax.transAxes, color=IFO_COLORS[ifo])
     ax.axhline(tail_boundary, color="0.25", linestyle="-.", linewidth=1.1, label=f"tail boundary {tail_boundary:g}")
@@ -760,6 +751,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "worker000_panel_a_points_plotted": panel_a.get("points_plotted", 0),
         "worker000_panel_a_points_original": panel_a.get("points_original", 0),
         "worker000_panel_a_segmented_fit": panel_a_fit_summary,
+        "worker000_panel_a_fit_display": "tail_fit_only_green_lines",
         "background_online_summary": online_summary,
         "panel_a_source": panel_a.get("files", []),
         "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} crashcar C detail/direct-FAR rows with bg_policy={panel_a_policy}; panels b-d aggregate all workers and all bank IDs present in the zerolag XML glob.",
