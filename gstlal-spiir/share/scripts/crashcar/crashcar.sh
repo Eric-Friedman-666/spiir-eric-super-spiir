@@ -32,12 +32,12 @@ set -a
 source "${CONFIG_FILE}"
 set +a
 
-RUN_PARENT=${RUN_PARENT:-$(cd "${SCRIPT_DIR}/.." && pwd)}
-RUN_SLUG=${RUN_SLUG:-crashcar}
-RUN_TIMESTAMP=${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}
-RUN_ROOT=${RUN_ROOT:-"${RUN_PARENT}/run_${RUN_SLUG}_${RUN_TIMESTAMP}"}
+RUN_PARENT=${run_parent:-${RUN_PARENT:-$(cd "${SCRIPT_DIR}/.." && pwd)}}
+RUN_SLUG=${run_slug:-${RUN_SLUG:-crashcar}}
+RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
+RUN_ROOT=${run_root:-${RUN_ROOT:-"${RUN_PARENT}/run_${RUN_SLUG}_${RUN_TIMESTAMP}"}}
 
-if [ -e "${RUN_ROOT}" ] && [ "${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}" != "1" ]; then
+if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}}" != "1" ]; then
     printf 'crashcar: run root already exists: %s\n' "${RUN_ROOT}" >&2
     printf 'Set CRASHCAR_ALLOW_EXISTING_RUN_ROOT=1 only if you know it is safe.\n' >&2
     exit 2
@@ -70,7 +70,7 @@ EOF
 printf 'crashcar: staged run root %s\n' "${RUN_ROOT}"
 printf 'crashcar: config snapshot %s\n' "${RUN_ROOT}/scripts/crashcar.env"
 
-if [ "${CRASHCAR_DRY_RUN:-0}" = "1" ]; then
+if [ "${crashcar_dry_run:-${CRASHCAR_DRY_RUN:-0}}" = "1" ]; then
     printf 'crashcar: dry run requested; not starting controller or submitting Slurm\n'
     printf 'crashcar: controller command would be:\n'
     printf '  CRASHCAR_CONFIG_FILE=%q bash %q\n' \
