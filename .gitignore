@@ -32,3 +32,10 @@ configure
 */gnuscripts/test-driver
 libtool
 artifacts
+install/
+install
+install_local/
+install_local
+logs/
+logs
+runs/
