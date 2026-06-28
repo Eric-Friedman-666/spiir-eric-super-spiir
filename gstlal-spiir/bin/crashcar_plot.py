@@ -4,8 +4,10 @@
 The plotting contract follows Eric-bless-crashcar.pdf Section 4.1:
 
 * Figure 1 panels (b)-(d) read the run-local FinalSink zerolag XML files.
-* Figure 1 panel (a) reads worker-0 crashcar C detail/direct-FAR rows as the
-  native-background proxy when no serialized native background object exists.
+* Figure 1 panel (a) reconstructs the selected worker's native single-detector
+  BG support from the run-local raw single-trigger stream and the crashcar
+  template shape map. The older crashcar C detail/direct-FAR rows are only used
+  as a fallback/debug data source and to infer the current per-IFO BG window.
 * Figure 2 reads crashcar_snr_series/manifest.csv and either per-event CSV
   series files or XML shards. Missing SNR-series inputs are reported and left
   blank; no replacement curve is synthesized.
@@ -14,12 +16,14 @@ The plotting contract follows Eric-bless-crashcar.pdf Section 4.1:
 from __future__ import annotations
 
 import argparse
+import bisect
 import csv
 import gzip
 import io
 import json
 import math
 import re
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,9 +49,38 @@ FIT_CURVE_MAX_POINTS = 700
 TAIL_FIT_COLOR = "#2ca02c"
 TAIL_BOUNDARY_LOG10_FAR = -2.5
 DEFAULT_SEGMENT_GLOB = "run/[0-9][0-9][0-9]/H1L1V1_SEGMENTS_*.xml.gz"
+DEFAULT_RAW_TRIGGER_GLOB = "run/[0-9][0-9][0-9]/*_single_triggers.csv"
+DEFAULT_TEMPLATE_SHAPE_MAP = "artifacts/crashcar_template_shape_map.csv"
 DEFAULT_SINGLE_FAR_BASES = ("far_1w_sngl", "far_1d_sngl", "far_2h_sngl", "far_sngl")
 DEFAULT_COHERENT_FAR_BASES = ("far_1w", "far_1d", "far_2h", "far")
 ZEROLAG_NAME_RE = re.compile(r"_zerolag_(\d+)_(\d+)\.xml(?:\.gz)?$")
+
+
+_SIDECAR_IMPORT_ERROR = None
+try:
+    _script_path = Path(__file__).resolve()
+    _sidecar_candidates = [
+        _script_path.parent.parent / "single_detector_sidecar" / "online_single_llrfar_wguo_refined",
+        _script_path.parent.parent.parent / "gstlal-spiir" / "single_detector_sidecar" / "online_single_llrfar_wguo_refined",
+    ]
+    for _candidate in _sidecar_candidates:
+        if (_candidate / "single_detector_far.py").exists():
+            sys.path.insert(0, str(_candidate))
+            break
+    from single_detector_far import (  # type: ignore
+        FLAG_FOREGROUND,
+        SingleDetectorFeature,
+        feature_gps_seconds,
+        features_from_feature_csv_row,
+        make_default_likelihood_model,
+    )
+except Exception as exc:  # pragma: no cover - recorded in plot metadata.
+    _SIDECAR_IMPORT_ERROR = repr(exc)
+    FLAG_FOREGROUND = 0
+    SingleDetectorFeature = None
+    feature_gps_seconds = None
+    features_from_feature_csv_row = None
+    make_default_likelihood_model = None
 
 
 def as_float(value, default=float("nan")) -> float:
@@ -366,6 +399,11 @@ def load_zerolag(run_root: Path, zerolag_glob: str) -> dict:
     }
 
 
+def normalize_worker_id(value: str) -> str:
+    text = str(value).strip()
+    return text.zfill(3) if text.isdigit() else text
+
+
 def load_panel_a_detail(
     run_root: Path,
     detail_glob: str,
@@ -374,10 +412,11 @@ def load_panel_a_detail(
     max_points: int,
     bg_policy: str,
 ) -> dict:
-    target_token = f"worker{panel_a_worker}"
-    candidates = sorted(path for path in run_root.glob(detail_glob) if target_token in path.name)
+    worker_id = normalize_worker_id(panel_a_worker)
+    worker_pattern = re.compile(rf"worker{re.escape(worker_id)}(?:\.csv)?$")
+    candidates = sorted(path for path in run_root.glob(detail_glob) if worker_pattern.search(path.name))
     if not candidates:
-        return {"exists": False, "files": [], "points": [], "counts": {}, "reason": f"no file matching {target_token}"}
+        return {"exists": False, "files": [], "points": [], "counts": {}, "reason": f"no file matching worker{worker_id}"}
 
     points: list[dict] = []
     counts_all: Counter[str] = Counter()
@@ -444,7 +483,7 @@ def load_panel_a_detail(
 
     return {
         "exists": True,
-        "worker": panel_a_worker,
+        "worker": worker_id,
         "files": [str(path) for path in candidates],
         "rows_seen": rows_seen,
         "points": points,
@@ -470,6 +509,300 @@ def load_panel_a_detail(
         "points_original": original_points,
         "points_plotted": len(points),
         "downsampled": downsampled,
+    }
+
+
+def normalized_index_strings(value, width: int | None = None) -> list[str]:
+    if value in (None, ""):
+        return []
+    output: list[str] = []
+    text = str(value).strip()
+    if text:
+        output.append(text)
+    try:
+        integer = int(float(text))
+    except Exception:
+        return output
+    output.append(str(integer))
+    if width:
+        output.append(str(integer).zfill(width))
+    deduped: list[str] = []
+    for item in output:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped
+
+
+def load_crashcar_template_shape_map(path: Path) -> dict:
+    """Load crashcar's exported template shape CSV, preserving power and dof."""
+    mapping: dict[str, dict[str, float]] = {}
+    if not path.exists():
+        return mapping
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            power = finite_positive(row.get("autocorr_power"))
+            dof = finite_positive(row.get("dof"))
+            if power is None and dof is None:
+                continue
+            entry: dict[str, float] = {}
+            if power is not None:
+                entry["autocorr_power"] = power
+            if dof is not None:
+                entry["dof"] = dof
+            ifo_values = [row.get("ifo"), row.get("ifo_id")]
+            bank_values = normalized_index_strings(row.get("bankid"), width=4)
+            tmplt_values = normalized_index_strings(row.get("tmplt_idx"))
+            for ifo in ifo_values:
+                if ifo in (None, ""):
+                    continue
+                for bankid in bank_values:
+                    for tmplt_idx in tmplt_values:
+                        mapping[f"{ifo}:{bankid}:{tmplt_idx}"] = dict(entry)
+    return mapping
+
+
+def support_windows_from_detail(panel_a_detail: dict, background_accumulation_seconds: float) -> dict[str, dict]:
+    """Infer current per-IFO BG windows from detail rows without using them as points."""
+    windows: dict[str, dict] = {}
+    latest_by_ifo: dict[str, tuple[int, int]] = {}
+    for row in panel_a_detail.get("ready_windows", []):
+        ifo = row.get("ifo")
+        if ifo not in ("H1", "L1"):
+            continue
+        bg_start = int(row.get("bg_start", 0))
+        bg_end = int(row.get("bg_end", 0))
+        if bg_end <= bg_start:
+            continue
+        key = (bg_end, bg_start)
+        if key > latest_by_ifo.get(ifo, (-1, -1)):
+            latest_by_ifo[ifo] = key
+    for ifo, (bg_end, bg_start) in latest_by_ifo.items():
+        windows[ifo] = {
+            "start": float(bg_start),
+            "end": float(bg_end),
+            "duration": float(bg_end - bg_start),
+            "row_count": 0,
+            "distinct_window_count": 1,
+            "multiple_windows": False,
+            "source": "detail_window_metadata",
+        }
+    if windows:
+        return windows
+    return {
+        ifo: {
+            "start": float("nan"),
+            "end": float("nan"),
+            "duration": float(background_accumulation_seconds),
+            "row_count": 0,
+            "distinct_window_count": 0,
+            "multiple_windows": False,
+            "source": "unavailable",
+        }
+        for ifo in ("H1", "L1")
+    }
+
+
+def select_worker_raw_trigger_files(run_root: Path, raw_glob: str, panel_a_worker: str) -> list[Path]:
+    worker_id = normalize_worker_id(panel_a_worker)
+    files = []
+    for path in sorted(run_root.glob(raw_glob)):
+        if path.parent.name == worker_id or path.name.startswith(f"{worker_id}_"):
+            files.append(path)
+    return files
+
+
+def raw_support_features(
+    raw_files: list[Path],
+    shape_map: dict,
+    min_snr: float = SNR_XMIN,
+) -> tuple[list, dict]:
+    if features_from_feature_csv_row is None:
+        return [], {"sidecar_import_error": _SIDECAR_IMPORT_ERROR}
+    features = []
+    rows_seen = 0
+    for path in raw_files:
+        with path.open(newline="") as handle:
+            reader = csv.DictReader(handle)
+            for row_index, row in enumerate(reader, 1):
+                rows_seen += 1
+                row["_source_file"] = str(path)
+                row["_source_index"] = row_index
+                for feature in features_from_feature_csv_row(row, ("H1", "L1"), min_snr, shape_map, source_row_index=row_index):
+                    if int(float(feature.is_background if feature.is_background not in (None, "") else FLAG_FOREGROUND)) != FLAG_FOREGROUND:
+                        continue
+                    features.append(feature)
+    features.sort(key=lambda feature: (
+        feature_gps_seconds(feature) if feature_gps_seconds is not None and feature_gps_seconds(feature) is not None else -float("inf"),
+        feature.ifo,
+        str(feature.bankid),
+        str(feature.tmplt_idx),
+    ))
+    return features, {"rows_seen": rows_seen, "features_seen": len(features)}
+
+
+def build_panel_a_raw_background(
+    run_root: Path,
+    raw_glob: str,
+    panel_a_worker: str,
+    panel_a_detail: dict,
+    segment_glob: str,
+    background_accumulation_seconds: float,
+    max_points: int,
+    shape_map_path: Path,
+) -> dict:
+    if make_default_likelihood_model is None or feature_gps_seconds is None:
+        return {
+            "exists": False,
+            "source_kind": "raw_background_support",
+            "files": [],
+            "points": [],
+            "counts_ready": {},
+            "counts_ready_selected": {},
+            "reason": f"sidecar helper import failed: {_SIDECAR_IMPORT_ERROR}",
+        }
+
+    worker_id = normalize_worker_id(panel_a_worker)
+    raw_files = select_worker_raw_trigger_files(run_root, raw_glob, worker_id)
+    if not raw_files:
+        return {
+            "exists": False,
+            "source_kind": "raw_background_support",
+            "worker": worker_id,
+            "files": [],
+            "points": [],
+            "counts_ready": {},
+            "counts_ready_selected": {},
+            "reason": f"no raw trigger file matching worker{worker_id}",
+        }
+
+    shape_map = load_crashcar_template_shape_map(shape_map_path)
+    windows = support_windows_from_detail(panel_a_detail, background_accumulation_seconds)
+    window_panel = {
+        "points": [
+            {
+                "ifo": ifo,
+                "bg_start": int(info["start"]),
+                "bg_end": int(info["end"]),
+            }
+            for ifo, info in windows.items()
+            if math.isfinite(as_float(info.get("start"))) and math.isfinite(as_float(info.get("end")))
+        ]
+    }
+    online_summary = load_panel_a_online_summary(run_root, segment_glob, window_panel)
+    model = make_default_likelihood_model()
+    features, raw_summary = raw_support_features(raw_files, shape_map, SNR_XMIN)
+
+    by_ifo: dict[str, list[tuple[float, object, float]]] = {"H1": [], "L1": []}
+    for feature in features:
+        if feature.ifo not in by_ifo:
+            continue
+        gps = feature_gps_seconds(feature)
+        if gps is None or not math.isfinite(gps):
+            continue
+        window = windows.get(feature.ifo)
+        if not window:
+            continue
+        start = as_float(window.get("start"))
+        end = as_float(window.get("end"))
+        if not (math.isfinite(start) and math.isfinite(end) and start <= gps < end):
+            continue
+        llr = model.rank(feature.rho, feature.chisq, feature.autocorr_power, ifo=feature.ifo, dof=feature.dof)
+        if math.isfinite(llr):
+            by_ifo[feature.ifo].append((llr, feature, gps))
+
+    points: list[dict] = []
+    counts_ready: dict[str, int] = {}
+    min_far_by_ifo: dict[str, float] = {}
+    floor_far_by_ifo: dict[str, float] = {}
+    for ifo, entries in by_ifo.items():
+        entries.sort(key=lambda item: item[0])
+        ranks = [entry[0] for entry in entries]
+        counts_ready[ifo] = len(entries)
+        livetime = as_float(online_summary.get("by_ifo", {}).get(ifo, {}).get("online_seconds"))
+        window = windows.get(ifo, {})
+        if livetime > 0:
+            floor_far_by_ifo[ifo] = 1.0 / livetime
+        for llr, feature, gps in entries:
+            count_ge = len(ranks) - bisect.bisect_left(ranks, llr)
+            direct_far = max(float(count_ge), 1.0) / livetime if livetime > 0.0 else float("inf")
+            if not finite_positive(direct_far):
+                continue
+            min_far_by_ifo[ifo] = min(min_far_by_ifo.get(ifo, direct_far), direct_far)
+            points.append(
+                {
+                    "ifo": ifo,
+                    "llr": float(llr),
+                    "log_far": math.log10(direct_far),
+                    "direct_far": direct_far,
+                    "direct_far_count_ge": int(count_ge),
+                    "bg_livetime": livetime,
+                    "window_count": len(entries),
+                    "total_window_count": sum(len(values) for values in by_ifo.values()),
+                    "bg_start": int(window.get("start", 0)),
+                    "bg_end": int(window.get("end", 0)),
+                    "event_id": getattr(feature, "source_row", {}).get("event_id", "") if isinstance(getattr(feature, "source_row", None), dict) else "",
+                    "snglsnr": float(feature.rho),
+                    "chisq": float(feature.chisq),
+                    "bankid": getattr(feature, "bankid", ""),
+                    "tmplt_idx": getattr(feature, "tmplt_idx", ""),
+                    "worker": worker_id,
+                    "gps": gps,
+                }
+            )
+
+    downsampled = False
+    original_points = len(points)
+    if max_points > 0 and len(points) > max_points:
+        step = max(1, math.ceil(len(points) / max_points))
+        points = points[::step]
+        downsampled = True
+
+    for ifo, window in windows.items():
+        if ifo in counts_ready:
+            window["row_count"] = counts_ready[ifo]
+            online_window = (
+                online_summary.get("by_ifo", {})
+                .get(ifo, {})
+                .get("background_window")
+            )
+            if isinstance(online_window, dict):
+                online_window["row_count"] = counts_ready[ifo]
+
+    return {
+        "exists": True,
+        "source_kind": "raw_background_support",
+        "worker": worker_id,
+        "files": [str(path) for path in raw_files],
+        "shape_map": str(shape_map_path),
+        "shape_map_rows": len(shape_map),
+        "rows_seen": raw_summary.get("rows_seen", 0),
+        "points": points,
+        "counts_all": counts_ready,
+        "counts_ready": counts_ready,
+        "counts_ready_selected": dict(Counter(point["ifo"] for point in points)),
+        "bg_policy": "latest",
+        "latest_total_window_count_by_ifo": {ifo: len(entries) for ifo, entries in by_ifo.items()},
+        "latest_bg_end_by_ifo": {ifo: int(info.get("end", 0)) for ifo, info in windows.items()},
+        "ready_windows": [
+            {
+                "ifo": ifo,
+                "bg_start": int(info.get("start", 0)),
+                "bg_end": int(info.get("end", 0)),
+                "window_count": counts_ready.get(ifo, 0),
+                "total_window_count": sum(counts_ready.values()),
+                "rows": counts_ready.get(ifo, 0),
+                "source": info.get("source", ""),
+            }
+            for ifo, info in sorted(windows.items())
+        ],
+        "points_original": original_points,
+        "points_plotted": len(points),
+        "downsampled": downsampled,
+        "raw_features_seen": raw_summary.get("features_seen", 0),
+        "online_summary": online_summary,
+        "min_direct_far_by_ifo": min_far_by_ifo,
+        "floor_far_by_ifo": floor_far_by_ifo,
     }
 
 
@@ -717,6 +1050,11 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
     ax = axes[0, 0]
     panel_a_worker = panel_a.get("worker", "000")
     panel_a_policy = panel_a.get("bg_policy", "latest")
+    panel_a_source_kind = panel_a.get("source_kind", "detail_direct_far_proxy")
+    panel_a_source_label = (
+        "raw BG support" if panel_a_source_kind == "raw_background_support"
+        else "detail/direct-FAR proxy"
+    )
     panel_a_fit_summary: dict[str, dict] = {}
     for ifo in ("H1", "L1"):
         pts = [p for p in panel_a.get("points", []) if p["ifo"] == ifo]
@@ -729,7 +1067,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                 alpha=0.30,
                 color=IFO_COLORS[ifo],
                 rasterized=True,
-                label=f"{ifo} worker{panel_a_worker} {panel_a_policy} BG rows ({len(pts)}){format_online_label(panel_a_online_summary, ifo)}",
+                label=f"{ifo} worker{panel_a_worker} {panel_a_source_label} ({len(pts)}){format_online_label(panel_a_online_summary, ifo)}",
             )
             fit = panel_a_segmented_fit(pts, tail_boundary)
             if fit:
@@ -767,12 +1105,12 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                         label=f"{ifo} tail fit (log10 FAR <= {TAIL_BOUNDARY_LOG10_FAR:g})",
                     )
         else:
-            ax.text(0.03, 0.90 if ifo == "H1" else 0.82, f"{ifo}: no worker{panel_a_worker} BG rows", transform=ax.transAxes, color=IFO_COLORS[ifo])
+            ax.text(0.03, 0.90 if ifo == "H1" else 0.82, f"{ifo}: no worker{panel_a_worker} BG support rows", transform=ax.transAxes, color=IFO_COLORS[ifo])
     ax.axhline(tail_boundary, color="0.25", linestyle="-.", linewidth=1.1, label=f"tail boundary {tail_boundary:g}")
     ax.set_xlabel("LLR")
     ax.set_ylabel("log10(direct FAR)")
     ax.set_xlim(left=LLR_XMIN)
-    ax.set_title(f"Panel (a): worker{panel_a_worker} H/L {panel_a_policy} BG support\ncrashcar C direct-FAR/detail rows", fontweight="bold")
+    ax.set_title(f"Panel (a): worker{panel_a_worker} H/L {panel_a_policy} BG support\n{panel_a_source_label}", fontweight="bold")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best", fontsize=7)
 
@@ -858,11 +1196,15 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "worker000_panel_a_fit_display": "tail_fit_same_color_lines_with_cross_tail_points",
         "worker000_panel_a_tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
         "worker000_panel_a_tail_boundary_source": "fixed_code_constant",
+        "worker000_panel_a_source_kind": panel_a_source_kind,
+        "worker000_panel_a_shape_map": panel_a.get("shape_map"),
+        "worker000_panel_a_min_direct_far_by_ifo": panel_a.get("min_direct_far_by_ifo", {}),
+        "worker000_panel_a_floor_far_by_ifo": panel_a.get("floor_far_by_ifo", {}),
         "background_online_summary": panel_a_online_summary,
         "panel_a_background_online_summary": panel_a_online_summary,
         "global_latest_background_online_summary": global_online_summary,
         "panel_a_source": panel_a.get("files", []),
-        "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} crashcar C detail/direct-FAR rows with bg_policy={panel_a_policy}; each Panel (a) online fraction is computed from that curve's own 3h BG window. Panels b-d aggregate all workers and all bank IDs present in the zerolag XML glob.",
+        "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} {panel_a_source_label} with bg_policy={panel_a_policy}; each Panel (a) online fraction is computed from that curve's own 3h BG window. Panels b-d aggregate all workers and all bank IDs present in the zerolag XML glob.",
     }
 
 
@@ -1167,8 +1509,10 @@ def main() -> None:
     parser.add_argument("--stamp", default=None, help="Timestamp suffix; default is current UTC.")
     parser.add_argument("--zerolag-glob", default="run/[0-9][0-9][0-9]/*_zerolag_*.xml.gz")
     parser.add_argument("--detail-glob", default="run/crashcar_singlefar_detail_worker*.csv")
+    parser.add_argument("--raw-trigger-glob", default=DEFAULT_RAW_TRIGGER_GLOB)
     parser.add_argument("--segment-glob", default=DEFAULT_SEGMENT_GLOB)
     parser.add_argument("--panel-a-worker", default="000")
+    parser.add_argument("--panel-a-source", choices=("raw", "detail"), default="raw", help="Use raw reconstructed BG support for panel (a) by default; detail is a legacy diagnostic fallback.")
     parser.add_argument("--ifo-id-map", default="0:H1,1:L1,2:V1,3:K1")
     parser.add_argument("--single-far-priority", default=",".join(DEFAULT_SINGLE_FAR_BASES))
     parser.add_argument("--coherent-far-priority", default=",".join(DEFAULT_COHERENT_FAR_BASES))
@@ -1176,6 +1520,7 @@ def main() -> None:
     parser.add_argument("--tail-boundary-log10-far", type=float, default=TAIL_BOUNDARY_LOG10_FAR, help=argparse.SUPPRESS)
     parser.add_argument("--max-panel-a-points", type=int, default=0, help="0 means plot all worker detail support points.")
     parser.add_argument("--panel-a-bg-policy", choices=("latest", "all"), default="latest", help="Panel (a) defaults to the latest worker BG support per IFO; use all to debug historical BG updates.")
+    parser.add_argument("--shape-map", default=DEFAULT_TEMPLATE_SHAPE_MAP, help="Crashcar template shape CSV with autocorr_power and dof for panel (a) raw BG reconstruction.")
     parser.add_argument("--template-autocorr-json", type=Path, default=None)
     args = parser.parse_args()
 
@@ -1191,10 +1536,30 @@ def main() -> None:
     ifo_id_map = parse_ifo_id_map(args.ifo_id_map)
 
     zerolag = load_zerolag(run_root, args.zerolag_glob)
-    panel_a = load_panel_a_detail(run_root, args.detail_glob, args.panel_a_worker, ifo_id_map, args.max_panel_a_points, args.panel_a_bg_policy)
+    panel_a_detail = load_panel_a_detail(run_root, args.detail_glob, args.panel_a_worker, ifo_id_map, args.max_panel_a_points, args.panel_a_bg_policy)
+    if args.panel_a_source == "raw":
+        shape_map_path = Path(args.shape_map)
+        if not shape_map_path.is_absolute():
+            shape_map_path = run_root / shape_map_path
+        panel_a = build_panel_a_raw_background(
+            run_root,
+            args.raw_trigger_glob,
+            args.panel_a_worker,
+            panel_a_detail,
+            args.segment_glob,
+            args.background_accumulation_seconds,
+            args.max_panel_a_points,
+            shape_map_path,
+        )
+        if not panel_a.get("exists"):
+            panel_a = panel_a_detail
+            panel_a["source_kind"] = "detail_direct_far_proxy_fallback"
+    else:
+        panel_a = panel_a_detail
+        panel_a["source_kind"] = "detail_direct_far_proxy"
     background_window = infer_background_window(zerolag, args.background_accumulation_seconds)
     online_summary = load_online_summary(run_root, args.segment_glob, background_window)
-    panel_a_online_summary = load_panel_a_online_summary(run_root, args.segment_glob, panel_a)
+    panel_a_online_summary = panel_a.get("online_summary") or load_panel_a_online_summary(run_root, args.segment_glob, panel_a)
     first_payload = {
         "zerolag": zerolag,
         "panel_a": panel_a,
@@ -1217,8 +1582,10 @@ def main() -> None:
         "parameters": {
             "zerolag_glob": args.zerolag_glob,
             "detail_glob": args.detail_glob,
+            "raw_trigger_glob": args.raw_trigger_glob,
             "segment_glob": args.segment_glob,
             "panel_a_worker": args.panel_a_worker,
+            "panel_a_source": args.panel_a_source,
             "ifo_id_map": ifo_id_map,
             "single_far_priority": single_far_bases,
             "coherent_far_priority": coherent_far_bases,
@@ -1227,6 +1594,7 @@ def main() -> None:
             "tail_boundary_source": "fixed_code_constant",
             "max_panel_a_points": args.max_panel_a_points,
             "panel_a_bg_policy": args.panel_a_bg_policy,
+            "shape_map": str(args.shape_map),
             "template_autocorr_json": str(args.template_autocorr_json) if args.template_autocorr_json else None,
         },
         "first": first,
