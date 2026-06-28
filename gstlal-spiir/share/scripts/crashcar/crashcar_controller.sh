@@ -84,6 +84,34 @@ CRASHCAR_LOG10_FAR_THRESHOLD=${crashcar_log10_far_threshold:-${CRASHCAR_LOG10_FA
 CRASHCAR_PRESERVE_TABLE_SINGLE_FAR=${crashcar_preserve_table_single_far:-${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}}
 CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP=${crashcar_require_template_shape_map:-${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}}
 
+INJECTION_MODE_RAW=${injection_mode:-${INJECTION_MODE:-False}}
+case "$(printf '%s' "${INJECTION_MODE_RAW}" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes) INJECTION_MODE=True ;;
+    false|0|no|"") INJECTION_MODE=False ;;
+    *)
+        printf 'crashcar_controller: invalid injection_mode=%s; expected True or False\n' "${INJECTION_MODE_RAW}" >&2
+        exit 2
+        ;;
+esac
+INJECTION_FILE=${injection_file:-${WGUO_O3A_INJECTION_FILE:-}}
+INJECTION_BG_DATA_FILE=${injection_bg_data_file:-}
+INJECTION_BG_DETRSP_MAP=${injection_bg_detector_response_file:-}
+INJECTION_BG_START_GPS=${injection_bg_start_gps:-}
+INJECTION_BG_DURATION_HOUR=${injection_bg_duration_hour:-}
+INJECTION_BG_SEGMENT_XML=${injection_bg_segment_xml:-}
+INJECTION_BG_DURATION_SECONDS=
+INJECTION_BG_END_GPS=
+if [ "${INJECTION_MODE}" = "True" ]; then
+    : "${INJECTION_FILE:?injection_file required when injection_mode=True}"
+    : "${INJECTION_BG_DATA_FILE:?injection_bg_data_file required when injection_mode=True}"
+    : "${INJECTION_BG_DETRSP_MAP:?injection_bg_detector_response_file required when injection_mode=True}"
+    : "${INJECTION_BG_START_GPS:?injection_bg_start_gps required when injection_mode=True}"
+    : "${INJECTION_BG_DURATION_HOUR:?injection_bg_duration_hour required when injection_mode=True}"
+    : "${INJECTION_BG_SEGMENT_XML:?injection_bg_segment_xml required when injection_mode=True}"
+    INJECTION_BG_DURATION_SECONDS=$((INJECTION_BG_DURATION_HOUR * 3600))
+    INJECTION_BG_END_GPS=$((INJECTION_BG_START_GPS + INJECTION_BG_DURATION_SECONDS))
+fi
+
 H_ONLY_SECONDS=${h_only_seconds:-${H_ONLY_SECONDS:-0}}
 L_ONLY_SECONDS=${l_only_seconds:-${L_ONLY_SECONDS:-0}}
 HL_SECONDS=${hl_seconds:-${HL_SECONDS:-0}}
