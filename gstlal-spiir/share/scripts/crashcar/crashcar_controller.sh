@@ -38,11 +38,19 @@ if [ -z "${END_GPS}" ]; then
     END_GPS=$((START_GPS + DURATION))
 fi
 DURATION=$((END_GPS - START_GPS))
-BACKGROUND_ACCUMULATION=${background_accumulation:-${BACKGROUND_ACCUMULATION:-${background_accumulation_seconds:-${BACKGROUND_ACCUMULATION_SECONDS:-10800}}}}
-BACKGROUND_UPDATE=${background_update:-${BACKGROUND_UPDATE:-${background_update_trigger_seconds:-${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}}}}
+if [ -n "${BG_accumulation_hour:-}" ]; then
+    BACKGROUND_ACCUMULATION=$((BG_accumulation_hour * 3600))
+else
+    BACKGROUND_ACCUMULATION=${background_accumulation:-${BACKGROUND_ACCUMULATION:-${background_accumulation_seconds:-${BACKGROUND_ACCUMULATION_SECONDS:-10800}}}}
+fi
+if [ -n "${BG_update_hour:-}" ]; then
+    BACKGROUND_UPDATE=$((BG_update_hour * 3600))
+else
+    BACKGROUND_UPDATE=${background_update:-${BACKGROUND_UPDATE:-${background_update_trigger_seconds:-${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}}}}
+fi
 SNAPSHOT_INTERVAL=${snapshot_interval:-${SNAPSHOT_INTERVAL:-${BACKGROUND_UPDATE}}}
-WORKER_COUNT=${worker_count:-${WORKER_COUNT:-2}}
-BANKS_PER_WORKER=${banks_per_worker:-${BANKS_PER_WORKER:-8}}
+WORKER_COUNT=${worker_number:-${worker_count:-${WORKER_COUNT:-2}}}
+BANKS_PER_WORKER=${bank_per_worker:-${banks_per_worker:-${BANKS_PER_WORKER:-8}}}
 START_BANK=${start_bank:-${START_BANK:-0}}
 
 SEGMENT_XML=${segment_xml:-${SEGMENT_XML:-}}
@@ -54,8 +62,8 @@ FRAME_CACHE=${data_file:-${frame_cache:-${FRAME_CACHE:-}}}
 : "${FRAME_CACHE:?data_file required in ${CONFIG_FILE}}"
 NONINJ_STATS_LOC=${noninj_stats_loc:-${NONINJ_STATS_LOC:-}}
 : "${NONINJ_STATS_LOC:?noninj_stats_loc required in ${CONFIG_FILE}}"
-O3_BANK_DIR=${o3_bank_dir:-${O3_BANK_DIR:-}}
-: "${O3_BANK_DIR:?o3_bank_dir required in ${CONFIG_FILE}}"
+O3_BANK_DIR=${bank_file:-${o3_bank_dir:-${O3_BANK_DIR:-}}}
+: "${O3_BANK_DIR:?bank_file required in ${CONFIG_FILE}}"
 WGUO_BANK_STATS_DIR=${wguo_bank_stats_dir:-${WGUO_BANK_STATS_DIR:-}}
 : "${WGUO_BANK_STATS_DIR:?wguo_bank_stats_dir required in ${CONFIG_FILE}}"
 DEFAULT_SHAPE_DOF=${default_shape_dof:-${DEFAULT_SHAPE_DOF:-74.30962572260326}}
