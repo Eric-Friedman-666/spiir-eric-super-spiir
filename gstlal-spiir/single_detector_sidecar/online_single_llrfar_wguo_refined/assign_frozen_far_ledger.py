@@ -45,6 +45,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--background-required-seconds", type=float,
                         default=DEFAULT_BACKGROUND_ACCUMULATION_SECONDS)
     parser.add_argument(
+        "--segment-xml",
+        action="append",
+        default=[],
+        help=(
+            "LIGO-LW segment XML/XML.GZ used to compute detector-specific "
+            "background livetime denominators. May be passed more than once."
+        ))
+    parser.add_argument(
         "--background-update-seconds",
         type=float,
         default=float(os.environ.get("BACKGROUND_UPDATE_TRIGGER_SECONDS", "3600") or 3600.0),
@@ -262,7 +270,7 @@ def utc_now() -> tuple[str, float]:
 def make_branch(args: argparse.Namespace,
                 ifos: tuple[str, ...],
                 background_features: list[sdf.SingleDetectorFeature],
-                livetime: float) -> sdf.SingleDetectorBranch:
+                livetime_by_ifo: dict[str, float]) -> sdf.SingleDetectorBranch:
     model = sdf.make_likelihood_model_from_args(args)
     branch = sdf.SingleDetectorBranch(
         model,
@@ -277,7 +285,8 @@ def make_branch(args: argparse.Namespace,
             snr_bins=sdf.parse_snr_bins(args.snr_bins),
             min_count=args.min_calibration_count)
     for ifo in ifos:
-        if any(feature.ifo == ifo for feature in background_features):
+        livetime = float(livetime_by_ifo.get(ifo, 0.0) or 0.0)
+        if livetime > 0.0 and any(feature.ifo == ifo for feature in background_features):
             branch.add_livetime(livetime, [ifo])
     branch.rebuild_background_support(background_features)
     branch.use_fitted_far = True
@@ -289,6 +298,27 @@ def feature_in_window(feature: sdf.SingleDetectorFeature,
                       end: float) -> bool:
     gps = feature_time(feature)
     return gps is not None and float(gps) >= start and float(gps) < end
+
+
+def load_segment_maps(args: argparse.Namespace) -> dict[str, list[tuple[float, float]]]:
+    if not args.segment_xml:
+        return {}
+    return sdf.merge_segment_maps(
+        [sdf.load_ligolw_segment_xml(path) for path in args.segment_xml]
+    )
+
+
+def window_livetime_by_ifo(segment_map: dict[str, list[tuple[float, float]]],
+                           ifos: tuple[str, ...],
+                           start: float,
+                           end: float) -> dict[str, float]:
+    span = max(0.0, float(end) - float(start))
+    if not segment_map:
+        return {ifo: span for ifo in ifos}
+    return {
+        ifo: sdf.segment_livetime_seconds(segment_map, ifo, start, end)
+        for ifo in ifos
+    }
 
 
 def background_id_for_end(end: float,
@@ -473,6 +503,7 @@ def main() -> int:
         )
         return 2
     ifos = sdf.split_ifos(args.ifos)
+    segment_map = load_segment_maps(args)
     output_path = Path(args.output)
     summary_path = Path(args.summary)
     candidate_path = Path(args.candidate_output) if args.candidate_output else None
@@ -540,10 +571,11 @@ def main() -> int:
         start = end - float(args.background_window_seconds)
         if args.data_start_gps is not None:
             start = max(start, float(args.data_start_gps))
-        livetime = end - start
-        if livetime < float(args.background_required_seconds):
+        span = end - start
+        if span < float(args.background_required_seconds):
             skipped_not_ready += len(groups[end])
             continue
+        livetime_by_ifo = window_livetime_by_ifo(segment_map, ifos, start, end)
         background_features = [
             feature for feature in foreground_features
             if feature_in_window(feature, start, end)
@@ -551,7 +583,8 @@ def main() -> int:
         if len(background_features) <= 30:
             skipped_not_ready += len(groups[end])
             continue
-        branch = make_branch(args, ifos, background_features, livetime)
+        branch = make_branch(args, ifos, background_features, livetime_by_ifo)
+        actual_livetime_by_ifo = branch_livetime_by_ifo(branch)
         bg_id = background_id_for_end(end, args, background_windows)
         bg_file = archive_background(branch, args.background_archive_dir, bg_id)
         rows = sdf.results_to_plot_rows(
@@ -562,7 +595,9 @@ def main() -> int:
             "background_file": bg_file or None,
             "background_start": start,
             "background_end": end,
-            "background_livetime_seconds": livetime,
+            "background_span_seconds": span,
+            "background_livetime_seconds": span,
+            "background_livetime_by_ifo": actual_livetime_by_ifo,
             "background_feature_rows": len(background_features),
             "assigned_rows": len(rows),
             "assignment_update_utc": assignment_utc,
@@ -573,7 +608,8 @@ def main() -> int:
             row["assign_bg_file"] = bg_file
             row["assign_bg_start"] = start
             row["assign_bg_end"] = end
-            row["assign_bg_livetime_seconds"] = livetime
+            row["assign_bg_livetime_seconds"] = actual_livetime_by_ifo.get(
+                row.get("ifo", ""), "")
             row["assign_bg_update_utc"] = assignment_utc
             row["assign_bg_update_unix"] = assignment_unix
             row["assignment_utc"] = assignment_utc
@@ -626,6 +662,7 @@ def main() -> int:
         "background_window_seconds": args.background_window_seconds,
         "background_required_seconds": args.background_required_seconds,
         "background_update_seconds": args.background_update_seconds,
+        "segment_xml": list(args.segment_xml or []),
         "initial_window_policy": args.initial_window_policy,
         "formal_assigned_far_rows_H1": counts["H1"],
         "formal_assigned_far_rows_L1": counts["L1"],
