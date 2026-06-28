@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=crashcar
 #SBATCH --ntasks=1
-#SBATCH --time=24:00:00
-#SBATCH --mem=32g
+#SBATCH --mem=64g
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
 #SBATCH --array=0-1

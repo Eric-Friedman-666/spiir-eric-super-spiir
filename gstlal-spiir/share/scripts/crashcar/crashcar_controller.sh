@@ -493,6 +493,7 @@ payload = {
 for key, rel in [
     ("background_summary", "crashcar_run_summary.json"),
     ("plot_summary", "crashcar_day1_last_bg3h_plot_summary.json"),
+    ("snr_series_manifest", "crashcar_snr_series_manifest.json"),
 ]:
     path = artifacts / rel
     if path.exists():
@@ -502,6 +503,53 @@ for key, rel in [
             payload[key] = {"error": repr(exc)}
 Path(os.environ["REPORT"]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 PY
+}
+
+archive_snr_series() {
+    local snr_dir="${RUN_DIR}/crashcar_snr_series"
+    local archive="${ARTIFACTS}/crashcar_snr_series.tar.gz"
+    local manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
+    if [ ! -d "${snr_dir}" ]; then
+        log "ERROR missing SNR series directory ${snr_dir}"
+        SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+Path(os.environ["MANIFEST"]).write_text(json.dumps({
+    "archive": os.environ["ARCHIVE"],
+    "byte_count": 0,
+    "error": "missing_snr_series_dir",
+    "exists": False,
+    "file_count": 0,
+    "snr_series_dir": os.environ["SNR_DIR"],
+}, indent=2, sort_keys=True) + "\n")
+PY
+        return 2
+    fi
+    tar -C "${RUN_DIR}" -czf "${archive}" crashcar_snr_series
+    SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["SNR_DIR"])
+archive = Path(os.environ["ARCHIVE"])
+files = [p for p in root.rglob("*") if p.is_file()]
+payload = {
+    "archive": str(archive),
+    "archive_bytes": archive.stat().st_size if archive.exists() else 0,
+    "archive_exists": archive.exists(),
+    "byte_count": sum(p.stat().st_size for p in files),
+    "exists": root.is_dir(),
+    "file_count": len(files),
+    "sample_files": [str(p.relative_to(root)) for p in sorted(files)[:20]],
+    "snr_series_dir": str(root),
+}
+Path(os.environ["MANIFEST"]).write_text(
+    json.dumps(payload, indent=2, sort_keys=True) + "\n")
+PY
+    log "archived SNR series ${archive}"
 }
 
 submit_job() {
@@ -699,12 +747,17 @@ monitor_job() {
                 write_final_report "${phase}" "${job}" "${sacct_state}" "${raw}" "${detail}"
                 exit 3
             fi
+            if ! archive_snr_series; then
+                write_status phase=failed_postprocess job_id="${job}" reason=snr_series_archive_failed sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
+                write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
+                exit 4
+            fi
             write_status phase=postprocessing_last_bg3h job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}"
             log "slurm completed; building final last-3h background artifacts"
             if postprocess_last_bg3h; then
                 raw=$(run_summary_json)
                 detail=$(detail_summary_json)
-                write_status phase=completed job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}" last_bg3h_background="${ARTIFACTS}/crashcar_day1_last_bg3h_full_background.json" last_bg3h_plot="${ARTIFACTS}/crashcar_day1_last_bg3h_background.png" run_summary="${ARTIFACTS}/crashcar_run_summary.json"
+                write_status phase=completed job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}" last_bg3h_background="${ARTIFACTS}/crashcar_day1_last_bg3h_full_background.json" last_bg3h_plot="${ARTIFACTS}/crashcar_day1_last_bg3h_background.png" run_summary="${ARTIFACTS}/crashcar_run_summary.json" snr_series_archive="${ARTIFACTS}/crashcar_snr_series.tar.gz" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
                 write_final_report completed "${job}" "${sacct_state}" "${raw}" "${detail}"
                 log "completed; report=${REPORT}"
                 exit 0
