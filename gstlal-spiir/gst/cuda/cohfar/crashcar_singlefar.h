@@ -64,6 +64,11 @@ typedef struct {
 } CrashcarSupportPoint;
 
 typedef struct {
+    double start_gps;
+    double end_gps;
+} CrashcarLivetimeSegment;
+
+typedef struct {
     GstBaseTransform element;
 
     char *ifos;
@@ -80,9 +85,11 @@ typedef struct {
     double background_update_seconds;
     double snapshot_interval_seconds;
     double data_start_gps;
+    gboolean have_livetime_segments;
     double livetime[MAX_NIFO];
     GArray *ranks[MAX_NIFO];
     GArray *support_points[MAX_NIFO];
+    GArray *livetime_segments[MAX_NIFO];
 
     char *template_shape_map_fname;
     GHashTable *template_shape_map;

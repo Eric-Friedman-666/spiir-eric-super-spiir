@@ -115,6 +115,71 @@ static GArray *crashcar_support_array_locked(int ifo_id) {
     return crashcar_global_support_points[ifo_id];
 }
 
+static int crashcar_ifo_id_from_label(const char *label) {
+    if (!label) return -1;
+    while (g_ascii_isspace(*label) || *label == '"' || *label == '\'') ++label;
+    if (g_str_has_prefix(label, "H1")) return 0;
+    if (g_str_has_prefix(label, "L1")) return 1;
+    if (g_str_has_prefix(label, "V1")) return 2;
+    if (g_str_has_prefix(label, "K1")) return 3;
+    return -1;
+}
+
+static gboolean crashcar_parse_double_field(const char *text, double *out) {
+    if (!text || !out) return FALSE;
+    while (g_ascii_isspace(*text) || *text == '"' || *text == '\'') ++text;
+    char *end = NULL;
+    double value = g_ascii_strtod(text, &end);
+    while (end && (*end == '"' || *end == '\'' || g_ascii_isspace(*end))) ++end;
+    if (end == text || !isfinite(value)) return FALSE;
+    *out = value;
+    return TRUE;
+}
+
+static void crashcar_load_livetime_segments(CrashcarSinglefar *element) {
+    const char *fname = g_getenv("CRASHCAR_SEGMENT_LIVETIME_CSV");
+    if (!fname || !fname[0]) return;
+
+    FILE *file = fopen(fname, "r");
+    if (!file) {
+        GST_WARNING("unable to open CRASHCAR_SEGMENT_LIVETIME_CSV=%s", fname);
+        return;
+    }
+
+    char line[1024];
+    guint loaded = 0;
+    while (fgets(line, sizeof(line), file)) {
+        g_strchomp(line);
+        char *trimmed = g_strstrip(line);
+        if (!trimmed[0] || trimmed[0] == '#') continue;
+        if (g_ascii_strncasecmp(trimmed, "ifo,", 4) == 0) continue;
+
+        char **fields = g_strsplit(trimmed, ",", 4);
+        if (!fields || !fields[0] || !fields[1] || !fields[2]) {
+            g_strfreev(fields);
+            continue;
+        }
+        int ifo_id = crashcar_ifo_id_from_label(fields[0]);
+        double start = NAN;
+        double end = NAN;
+        if (ifo_id >= 0 &&
+            crashcar_parse_double_field(fields[1], &start) &&
+            crashcar_parse_double_field(fields[2], &end) &&
+            end > start) {
+            CrashcarLivetimeSegment segment;
+            segment.start_gps = start;
+            segment.end_gps = end;
+            g_array_append_val(element->livetime_segments[ifo_id], segment);
+            element->have_livetime_segments = TRUE;
+            ++loaded;
+        }
+        g_strfreev(fields);
+    }
+    fclose(file);
+    GST_INFO("loaded %u crashcar single-FAR livetime segments from %s",
+             loaded, fname);
+}
+
 static GArray *crashcar_cluster_events_locked(void) {
     if (!crashcar_cluster_events) {
         crashcar_cluster_events =
@@ -752,6 +817,32 @@ static guint crashcar_window_total_support(const CrashcarSinglefar *element,
     }
     g_mutex_unlock(&crashcar_support_mutex);
     return total;
+}
+
+static double crashcar_window_ifo_livetime(const CrashcarSinglefar *element,
+                                           int ifo_id,
+                                           double start,
+                                           double end) {
+    if (!element || ifo_id < 0 || ifo_id >= MAX_NIFO || end <= start) {
+        return 0.0;
+    }
+    if (!element->have_livetime_segments) {
+        return end - start;
+    }
+
+    double livetime = 0.0;
+    GArray *segments = element->livetime_segments[ifo_id];
+    if (!segments) return 0.0;
+    for (guint i = 0; i < segments->len; ++i) {
+        CrashcarLivetimeSegment segment =
+          g_array_index(segments, CrashcarLivetimeSegment, i);
+        const double overlap_start = MAX(start, segment.start_gps);
+        const double overlap_end = MIN(end, segment.end_gps);
+        if (overlap_end > overlap_start) {
+            livetime += overlap_end - overlap_start;
+        }
+    }
+    return livetime;
 }
 
 static double crashcar_window_direct_far(const CrashcarSinglefar *element,
@@ -1864,7 +1955,9 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             if (element->data_start_gps > 0.0 && bg_start < element->data_start_gps) {
                 bg_start = element->data_start_gps;
             }
-            const double bg_livetime = bg_end - bg_start;
+            const double bg_span = bg_end - bg_start;
+            const double bg_livetime =
+              crashcar_window_ifo_livetime(element, ifo_id, bg_start, bg_end);
             const gboolean required_window_ready =
               element->data_start_gps <= 0.0 ||
               bg_end >= element->data_start_gps +
@@ -1872,7 +1965,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             const gboolean full_window_ready =
               isfinite(feature_gps) && isfinite(assignment_gps) &&
               element->background_window_seconds > 0.0 &&
-              bg_livetime >= element->background_window_seconds - 1.0e-6 &&
+              bg_span >= element->background_window_seconds - 1.0e-6 &&
               required_window_ready;
 
             const gboolean allow_single_output =
@@ -1892,7 +1985,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
              * back to the zerolag table; simultaneous-detector periods still
              * need finite direct FAR values for BG support and plotting.
              */
-            if (full_window_ready && !preserve_table_single_far) {
+            if (full_window_ready && bg_livetime > 0.0 &&
+                !preserve_table_single_far) {
                 window_count = crashcar_collect_window_ranks(
                   element, ifo_id, bg_start, bg_end, &window_ranks,
                   &direct_far_count_ge, llr);
@@ -2084,6 +2178,10 @@ static void crashcar_singlefar_dispose(GObject *object) {
             g_array_free(element->support_points[ifo_id], TRUE);
             element->support_points[ifo_id] = NULL;
         }
+        if (element->livetime_segments[ifo_id]) {
+            g_array_free(element->livetime_segments[ifo_id], TRUE);
+            element->livetime_segments[ifo_id] = NULL;
+        }
     }
 
     G_OBJECT_CLASS(crashcar_singlefar_parent_class)->dispose(object);
@@ -2195,12 +2293,16 @@ static void crashcar_singlefar_init(CrashcarSinglefar *element) {
         crashcar_env_double("ZEROLAG_SNAPSHOT_INTERVAL_SECONDS",
           crashcar_env_double("FINALSINK_SNAPSHOT_INTERVAL_SECONDS", 0.0)));
     element->data_start_gps = crashcar_env_double("DATA_START_TIME", 0.0);
+    element->have_livetime_segments = FALSE;
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         element->livetime[ifo_id] = 0.0;
         element->ranks[ifo_id] = g_array_new(FALSE, FALSE, sizeof(double));
         element->support_points[ifo_id] =
           g_array_new(FALSE, FALSE, sizeof(CrashcarSupportPoint));
+        element->livetime_segments[ifo_id] =
+          g_array_new(FALSE, FALSE, sizeof(CrashcarLivetimeSegment));
     }
+    crashcar_load_livetime_segments(element);
     element->template_shape_map_fname = NULL;
     element->template_shape_map = NULL;
     element->template_shape_map_loaded = FALSE;

@@ -12,6 +12,7 @@ import bisect
 import csv
 import datetime
 import glob
+import gzip
 import json
 import math
 import os
@@ -163,6 +164,16 @@ def add_feature_csv_arguments(parser):
         help=("livetime in seconds for the bootstrap/support background; "
               "default is inferred from feature GPS span"))
     parser.add_argument(
+        "--segment-xml", action="append", default=[],
+        help=("LIGO-LW segment XML/XML.GZ used to compute detector-specific "
+              "background livetime denominators; may be repeated"))
+    parser.add_argument(
+        "--background-start-gps", type=float, default=None,
+        help="GPS start of the background window used with --segment-xml")
+    parser.add_argument(
+        "--background-end-gps", type=float, default=None,
+        help="GPS end of the background window used with --segment-xml")
+    parser.add_argument(
         "--background-input",
         help="single-detector FAR-LLR background JSON file to load before assigning FAR")
     parser.add_argument(
@@ -262,6 +273,9 @@ def command_feature_csv(args):
         bootstrap_background_from_foreground=(
             args.bootstrap_background_from_foreground),
         background_livetime=args.background_livetime,
+        segment_xml_files=args.segment_xml,
+        background_start_gps=args.background_start_gps,
+        background_end_gps=args.background_end_gps,
         likelihood_model=likelihood_model,
         background_input=args.background_input,
         background_output=args.background_output,
@@ -381,6 +395,9 @@ def calculate_single_detector_rows_from_feature_csv(
         foreground_count=1000,
         bootstrap_background_from_foreground=False,
         background_livetime=None,
+        segment_xml_files=None,
+        background_start_gps=None,
+        background_end_gps=None,
         likelihood_model=None,
         background_input=None,
         background_output=None,
@@ -460,15 +477,31 @@ def calculate_single_detector_rows_from_feature_csv(
             snr_bins=calibration_snr_bins,
             min_count=min_calibration_count)
 
+    segment_map = {}
+    if segment_xml_files:
+        if background_start_gps is None or background_end_gps is None:
+            raise ValueError(
+                "--segment-xml requires --background-start-gps and "
+                "--background-end-gps")
+        segment_map = merge_segment_maps(
+            [load_ligolw_segment_xml(path) for path in segment_xml_files])
+
     if background_features:
-        livetime = background_livetime
-        if livetime is None:
-            livetime = infer_feature_livetime_seconds(background_features)
-        if livetime is None or float(livetime) <= 0.0:
+        fallback_livetime = background_livetime
+        if fallback_livetime is None:
+            fallback_livetime = infer_feature_livetime_seconds(background_features)
+        if fallback_livetime is None or float(fallback_livetime) <= 0.0:
             raise ValueError(
                 "background livetime is required to assign FAR from LLR")
         for ifo in ifos:
-            if any(feature.ifo == ifo for feature in background_features):
+            if not any(feature.ifo == ifo for feature in background_features):
+                continue
+            if segment_map:
+                livetime = segment_livetime_seconds(
+                    segment_map, ifo, background_start_gps, background_end_gps)
+            else:
+                livetime = fallback_livetime
+            if float(livetime) > 0.0:
                 branch.add_livetime(livetime, [ifo])
         if calibrate_noise_dof:
             branch.rebuild_background_support(background_features)
@@ -617,6 +650,97 @@ def first_present(row, names):
         if value not in (None, ""):
             return value
     return None
+
+
+def segment_def_id_suffix(value):
+    if value is None:
+        return None
+    text = str(value).strip().strip('"').strip("'")
+    if not text:
+        return None
+    return text.rsplit(":", 1)[-1]
+
+
+def open_text_maybe_gzip(filename):
+    if str(filename).endswith(".gz"):
+        return gzip.open(filename, "rt")
+    return open(filename, "r")
+
+
+def load_ligolw_segment_xml(filename):
+    """Return {ifo: [(start, end), ...]} from a LIGO-LW segment XML file."""
+
+    definer_by_id = {}
+    segments = {}
+    stream = None
+    with open_text_maybe_gzip(filename) as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if '<Stream' in stripped and 'Name="segment_definer:table"' in stripped:
+                stream = "segment_definer"
+                continue
+            if '<Stream' in stripped and 'Name="segment:table"' in stripped:
+                stream = "segment"
+                continue
+            if stream and stripped.startswith("</Stream>"):
+                stream = None
+                continue
+            if stream not in ("segment_definer", "segment"):
+                continue
+            if stripped.startswith("<"):
+                continue
+            row = next(csv.reader([stripped]))
+            if stream == "segment_definer":
+                if len(row) < 5:
+                    continue
+                ifo = row[1].strip().strip('"').strip("'")
+                def_id = segment_def_id_suffix(row[4])
+                if ifo and def_id is not None:
+                    definer_by_id[def_id] = ifo
+                    segments.setdefault(ifo, [])
+            else:
+                if len(row) < 7:
+                    continue
+                def_id = segment_def_id_suffix(row[3])
+                ifo = definer_by_id.get(def_id)
+                if not ifo:
+                    continue
+                try:
+                    end = float(row[0])
+                    end += float(row[1] or 0.0) * 1.0e-9
+                    start = float(row[5])
+                    start += float(row[6] or 0.0) * 1.0e-9
+                except (TypeError, ValueError):
+                    continue
+                if end > start:
+                    segments.setdefault(ifo, []).append((start, end))
+    for ifo in segments:
+        segments[ifo].sort()
+    return segments
+
+
+def merge_segment_maps(segment_maps):
+    merged = {}
+    for segment_map in segment_maps:
+        for ifo, values in segment_map.items():
+            merged.setdefault(ifo, []).extend(values)
+    for ifo in merged:
+        merged[ifo].sort()
+    return merged
+
+
+def segment_livetime_seconds(segments, ifo, start, end):
+    if start is None or end is None or end <= start:
+        return 0.0
+    livetime = 0.0
+    for seg_start, seg_end in segments.get(ifo, []):
+        overlap_start = max(float(start), float(seg_start))
+        overlap_end = min(float(end), float(seg_end))
+        if overlap_end > overlap_start:
+            livetime += overlap_end - overlap_start
+    return livetime
 
 
 def parse_row_flag(value):

@@ -120,6 +120,17 @@ SINGLE_FROZEN_BACKGROUND_JSON=${SINGLE_FROZEN_BACKGROUND_JSON:-}
 SINGLE_FROZEN_BACKGROUND_RUN_DIR=${SINGLE_FROZEN_BACKGROUND_RUN_DIR:-}
 SINGLE_FROZEN_BACKGROUND_ID=${SINGLE_FROZEN_BACKGROUND_ID:-BG-FROZEN}
 SINGLE_FROZEN_BACKGROUND_SOURCE=${SINGLE_FROZEN_BACKGROUND_SOURCE:-}
+SINGLE_SEGMENT_XML=${SINGLE_SEGMENT_XML:-${SEGMENT_XML:-${WGUO_O3A_SEGMENT_XML:-}}}
+
+segment_xml_args=()
+if [ -n "${SINGLE_SEGMENT_XML}" ]; then
+    IFS=',' read -r -a segment_xml_paths <<< "${SINGLE_SEGMENT_XML}"
+    for segment_xml_path in "${segment_xml_paths[@]}"; do
+        if [ -n "${segment_xml_path}" ]; then
+            segment_xml_args+=(--segment-xml "${segment_xml_path}")
+        fi
+    done
+fi
 
 case "${SINGLE_BACKGROUND_MODE}" in
     rolling|frozen) ;;
@@ -463,6 +474,9 @@ PY
         --max-new-windows-per-run "${ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN:-20}"
         --background-archive-dir "${BACKGROUND_ARCHIVE_DIR}"
     )
+    if [ "${#segment_xml_args[@]}" -gt 0 ]; then
+        ledger_args+=("${segment_xml_args[@]}")
+    fi
     if [ -n "${DATA_START_TIME:-}" ]; then
         ledger_args+=(--data-start-gps "${DATA_START_TIME}")
     fi
@@ -639,6 +653,9 @@ if [ "${SINGLE_BACKGROUND_MODE}" = "frozen" ]; then
         --fixed-background-id "${SINGLE_FROZEN_BACKGROUND_ID}"
         --fixed-background-source "${SINGLE_FROZEN_BACKGROUND_SOURCE:-${frozen_source}}"
     )
+    if [ "${#segment_xml_args[@]}" -gt 0 ]; then
+        ledger_args+=("${segment_xml_args[@]}")
+    fi
 
     python3 "${SCRIPT_DIR:-.}/assign_frozen_far_ledger.py" "${ledger_args[@]}"
 
@@ -759,6 +776,33 @@ with open(os.environ["SUMMARY_JSON"]) as f:
 print(float(data.get("duration_seconds") or data.get("background_duration_seconds") or 0.0))
 PY
 )
+background_start_gps=$(SUMMARY_JSON="${SUMMARY_JSON}" python3 - <<'PY'
+import json, os
+with open(os.environ["SUMMARY_JSON"]) as f:
+    data=json.load(f)
+value = data.get("data_gps_start", data.get("gps_start", ""))
+print("" if value in (None, "") else value)
+PY
+)
+background_end_gps=$(SUMMARY_JSON="${SUMMARY_JSON}" python3 - <<'PY'
+import json, os
+with open(os.environ["SUMMARY_JSON"]) as f:
+    data=json.load(f)
+value = data.get("data_gps_end", data.get("gps_end", ""))
+print("" if value in (None, "") else value)
+PY
+)
+feature_far_segment_args=("${segment_xml_args[@]}")
+if [ "${#segment_xml_args[@]}" -gt 0 ]; then
+    if [ -z "${background_start_gps}" ] || [ -z "${background_end_gps}" ]; then
+        echo "single-detector updater: segment XML was provided but background GPS bounds are unavailable" >&2
+        exit 2
+    fi
+    feature_far_segment_args+=(
+        --background-start-gps "${background_start_gps}"
+        --background-end-gps "${background_end_gps}"
+    )
+fi
 
 background_required=$(python3 - <<'PY'
 import os
@@ -880,6 +924,7 @@ python3 "${SCRIPT_DIR:-.}/single_detector_far.py" feature-csv \
     --foreground-count "${holdout}" \
     --bootstrap-background-from-foreground \
     --background-livetime "${background_duration}" \
+    "${feature_far_segment_args[@]}" \
     --calibrate-noise-dof \
     --snr-bins 4,5,6,8,inf \
     --min-calibration-count 20 \
@@ -932,6 +977,9 @@ ledger_args=(
     --max-new-windows-per-run "${ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN:-20}"
     --background-archive-dir "${BACKGROUND_ARCHIVE_DIR}"
 )
+if [ "${#segment_xml_args[@]}" -gt 0 ]; then
+    ledger_args+=("${segment_xml_args[@]}")
+fi
 if [ -n "${DATA_START_TIME:-}" ]; then
     ledger_args+=(--data-start-gps "${DATA_START_TIME}")
 fi

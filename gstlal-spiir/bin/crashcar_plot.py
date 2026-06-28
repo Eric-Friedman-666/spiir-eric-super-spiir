@@ -39,7 +39,8 @@ IFO_COLORS = {"H1": "#1f77b4", "L1": "#ff7f0e", "V1": "#2ca02c", "K1": "#9467bd"
 CHISQ_VIEW = (0.5, 1.5)
 LLR_XMIN = -20.0
 SNR_XMIN = 4.0
-FAR_POINT_SIZE = 10.0
+FAR_POINT_SIZE = 16.0
+TAIL_POINT_SIZE = 26.0
 FIT_CURVE_MAX_POINTS = 700
 TAIL_FIT_COLOR = "#2ca02c"
 TAIL_BOUNDARY_LOG10_FAR = -2.5
@@ -266,6 +267,81 @@ def load_online_summary(run_root: Path, segment_glob: str, background_window: di
     }
 
 
+def selected_panel_a_windows(panel_a: dict) -> dict[str, dict]:
+    windows: dict[str, dict] = {}
+    for ifo in ("H1", "L1"):
+        counts: Counter[tuple[int, int]] = Counter()
+        for point in panel_a.get("points", []):
+            if point.get("ifo") != ifo:
+                continue
+            bg_start = point.get("bg_start")
+            bg_end = point.get("bg_end")
+            if bg_start is None or bg_end is None:
+                continue
+            counts[(int(bg_start), int(bg_end))] += 1
+        if not counts:
+            continue
+        (bg_start, bg_end), row_count = counts.most_common(1)[0]
+        windows[ifo] = {
+            "start": float(bg_start),
+            "end": float(bg_end),
+            "duration": float(max(0, bg_end - bg_start)),
+            "row_count": int(row_count),
+            "distinct_window_count": int(len(counts)),
+            "multiple_windows": len(counts) > 1,
+        }
+    return windows
+
+
+def load_panel_a_online_summary(run_root: Path, segment_glob: str, panel_a: dict) -> dict:
+    windows = selected_panel_a_windows(panel_a)
+    if not windows:
+        return {
+            "available": False,
+            "reason": "panel-a BG windows unavailable",
+            "segment_glob": segment_glob,
+            "by_ifo": {},
+        }
+
+    files = sorted(run_root.glob(segment_glob))
+    intervals_by_ifo: dict[str, list[tuple[float, float]]] = {"H1": [], "L1": []}
+    parsed_files = 0
+    for path in files:
+        intervals = parse_segment_intervals(path)
+        if intervals:
+            parsed_files += 1
+        for ifo, seg_start, seg_end in intervals:
+            if ifo in intervals_by_ifo:
+                intervals_by_ifo[ifo].append((seg_start, seg_end))
+
+    by_ifo = {}
+    for ifo, window in windows.items():
+        start = float(window["start"])
+        end = float(window["end"])
+        duration = float(window["duration"])
+        clipped_intervals = []
+        for seg_start, seg_end in intervals_by_ifo.get(ifo, []):
+            clipped_start = max(start, seg_start)
+            clipped_end = min(end, seg_end)
+            if clipped_end > clipped_start:
+                clipped_intervals.append((clipped_start, clipped_end))
+        online_seconds = union_duration(clipped_intervals)
+        by_ifo[ifo] = {
+            "online_seconds": online_seconds,
+            "fraction": online_seconds / duration if duration > 0 else float("nan"),
+            "raw_interval_count": len(clipped_intervals),
+            "background_window": window,
+        }
+
+    return {
+        "available": bool(files),
+        "segment_glob": segment_glob,
+        "segment_file_count": len(files),
+        "parsed_segment_file_count": parsed_files,
+        "by_ifo": by_ifo,
+    }
+
+
 def load_zerolag(run_root: Path, zerolag_glob: str) -> dict:
     files = sorted(run_root.glob(zerolag_glob))
     rows: list[dict] = []
@@ -306,7 +382,7 @@ def load_panel_a_detail(
     points: list[dict] = []
     counts_all: Counter[str] = Counter()
     counts_ready: Counter[str] = Counter()
-    counts_by_window: Counter[tuple[str, int, int]] = Counter()
+    counts_by_window: Counter[tuple[str, int, int, int, int]] = Counter()
     rows_seen = 0
     for path in candidates:
         with path.open(newline="") as handle:
@@ -319,17 +395,21 @@ def load_panel_a_detail(
                 direct_far = finite_positive(row.get("direct_far"))
                 window_count = finite_positive(row.get("window_count"))
                 total_window_count = finite_positive(row.get("total_window_count"))
+                bg_start = finite_positive(row.get("bg_start"))
+                bg_end = finite_positive(row.get("bg_end"))
                 llr = as_float(row.get("llr"))
                 if (
                     ifo not in ("H1", "L1")
                     or direct_far is None
                     or window_count is None
                     or total_window_count is None
+                    or bg_start is None
+                    or bg_end is None
                     or not math.isfinite(llr)
                 ):
                     continue
                 counts_ready[ifo] += 1
-                window_key = (ifo, int(window_count), int(total_window_count))
+                window_key = (ifo, int(bg_start), int(bg_end), int(window_count), int(total_window_count))
                 counts_by_window[window_key] += 1
                 points.append(
                     {
@@ -339,6 +419,8 @@ def load_panel_a_detail(
                         "direct_far": direct_far,
                         "window_count": int(window_count),
                         "total_window_count": int(total_window_count),
+                        "bg_start": int(bg_start),
+                        "bg_end": int(bg_end),
                         "event_id": row.get("event_id", ""),
                         "snglsnr": as_float(row.get("snglsnr")),
                         "chisq": as_float(row.get("chisq")),
@@ -348,10 +430,12 @@ def load_panel_a_detail(
     downsampled = False
     original_points = len(points)
     latest_total_by_ifo: dict[str, int] = {}
+    latest_bg_end_by_ifo: dict[str, int] = {}
     if bg_policy == "latest":
         for point in points:
             latest_total_by_ifo[point["ifo"]] = max(latest_total_by_ifo.get(point["ifo"], -1), point["total_window_count"])
-        points = [point for point in points if point["total_window_count"] == latest_total_by_ifo.get(point["ifo"])]
+            latest_bg_end_by_ifo[point["ifo"]] = max(latest_bg_end_by_ifo.get(point["ifo"], -1), point["bg_end"])
+        points = [point for point in points if point["bg_end"] == latest_bg_end_by_ifo.get(point["ifo"])]
 
     if max_points > 0 and len(points) > max_points:
         step = max(1, math.ceil(len(points) / max_points))
@@ -369,9 +453,19 @@ def load_panel_a_detail(
         "counts_ready_selected": dict(Counter(point["ifo"] for point in points)),
         "bg_policy": bg_policy,
         "latest_total_window_count_by_ifo": latest_total_by_ifo,
+        "latest_bg_end_by_ifo": latest_bg_end_by_ifo,
         "ready_windows": [
-            {"ifo": ifo, "window_count": window, "total_window_count": total, "rows": rows}
-            for (ifo, window, total), rows in sorted(counts_by_window.items(), key=lambda item: (item[0][0], item[0][2], item[0][1]))
+            {
+                "ifo": ifo,
+                "bg_start": bg_start,
+                "bg_end": bg_end,
+                "window_count": window,
+                "total_window_count": total,
+                "rows": rows,
+            }
+            for (ifo, bg_start, bg_end, window, total), rows in sorted(
+                counts_by_window.items(), key=lambda item: (item[0][0], item[0][2], item[0][4], item[0][3])
+            )
         ],
         "points_original": original_points,
         "points_plotted": len(points),
@@ -549,6 +643,8 @@ def panel_a_segmented_fit(points: list[dict], tail_boundary: float = TAIL_BOUNDA
         "support_y": support_y_plot,
         "tail_line_x": np.asarray([], dtype=float),
         "tail_line_y": np.asarray([], dtype=float),
+        "tail_x": tail_x,
+        "tail_y": tail_y,
         "tail_x_min": float(np.nanmin(tail_x)) if tail_x.size else None,
         "tail_x_max": float(np.nanmax(tail_x)) if tail_x.size else None,
         "tail_slope": None,
@@ -612,7 +708,8 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
     panel_a = payload["panel_a"]
     single_points = payload["single_points"]
     multi_points = payload["multi_points"]
-    online_summary = payload.get("online_summary", {})
+    global_online_summary = payload.get("online_summary", {})
+    panel_a_online_summary = payload.get("panel_a_online_summary", {})
 
     fig, axes = plt.subplots(2, 2, figsize=(17.0, 12.5), constrained_layout=True)
     fig.suptitle(f"{title}: background and FAR surfaces", fontsize=17, fontweight="bold")
@@ -632,7 +729,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                 alpha=0.30,
                 color=IFO_COLORS[ifo],
                 rasterized=True,
-                label=f"{ifo} worker{panel_a_worker} {panel_a_policy} BG rows ({len(pts)}){format_online_label(online_summary, ifo)}",
+                label=f"{ifo} worker{panel_a_worker} {panel_a_policy} BG rows ({len(pts)}){format_online_label(panel_a_online_summary, ifo)}",
             )
             fit = panel_a_segmented_fit(pts, tail_boundary)
             if fit:
@@ -647,11 +744,23 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                     "tail_slope": fit["tail_slope"],
                     "tail_intercept": fit["tail_intercept"],
                 }
+                if fit["tail_x"].size:
+                    ax.scatter(
+                        fit["tail_x"],
+                        fit["tail_y"],
+                        s=TAIL_POINT_SIZE,
+                        marker="x",
+                        linewidths=0.85,
+                        alpha=0.88,
+                        color=IFO_COLORS[ifo],
+                        rasterized=True,
+                        label=f"{ifo} tail points (log10 FAR <= {TAIL_BOUNDARY_LOG10_FAR:g})",
+                    )
                 if fit["tail_line_x"].size:
                     ax.plot(
                         fit["tail_line_x"],
                         fit["tail_line_y"],
-                        color=TAIL_FIT_COLOR,
+                        color=IFO_COLORS[ifo],
                         linewidth=2.0,
                         linestyle="-",
                         alpha=0.96,
@@ -736,20 +845,24 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "colorbar_count": 1,
         "colorbar_location": "right",
         "far_point_size": FAR_POINT_SIZE,
+        "tail_point_size": TAIL_POINT_SIZE,
         "worker000_panel_a_counts": panel_a.get("counts_ready", {}),
         "worker000_panel_a_counts_selected": panel_a.get("counts_ready_selected", {}),
         "worker000_panel_a_bg_policy": panel_a.get("bg_policy", "latest"),
         "worker000_panel_a_latest_total_window_count_by_ifo": panel_a.get("latest_total_window_count_by_ifo", {}),
+        "worker000_panel_a_latest_bg_end_by_ifo": panel_a.get("latest_bg_end_by_ifo", {}),
         "worker000_panel_a_ready_windows": panel_a.get("ready_windows", []),
         "worker000_panel_a_points_plotted": panel_a.get("points_plotted", 0),
         "worker000_panel_a_points_original": panel_a.get("points_original", 0),
         "worker000_panel_a_segmented_fit": panel_a_fit_summary,
-        "worker000_panel_a_fit_display": "tail_fit_only_green_lines",
+        "worker000_panel_a_fit_display": "tail_fit_same_color_lines_with_cross_tail_points",
         "worker000_panel_a_tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
         "worker000_panel_a_tail_boundary_source": "fixed_code_constant",
-        "background_online_summary": online_summary,
+        "background_online_summary": panel_a_online_summary,
+        "panel_a_background_online_summary": panel_a_online_summary,
+        "global_latest_background_online_summary": global_online_summary,
         "panel_a_source": panel_a.get("files", []),
-        "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} crashcar C detail/direct-FAR rows with bg_policy={panel_a_policy}; panels b-d aggregate all workers and all bank IDs present in the zerolag XML glob.",
+        "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} crashcar C detail/direct-FAR rows with bg_policy={panel_a_policy}; each Panel (a) online fraction is computed from that curve's own 3h BG window. Panels b-d aggregate all workers and all bank IDs present in the zerolag XML glob.",
     }
 
 
@@ -1081,12 +1194,14 @@ def main() -> None:
     panel_a = load_panel_a_detail(run_root, args.detail_glob, args.panel_a_worker, ifo_id_map, args.max_panel_a_points, args.panel_a_bg_policy)
     background_window = infer_background_window(zerolag, args.background_accumulation_seconds)
     online_summary = load_online_summary(run_root, args.segment_glob, background_window)
+    panel_a_online_summary = load_panel_a_online_summary(run_root, args.segment_glob, panel_a)
     first_payload = {
         "zerolag": zerolag,
         "panel_a": panel_a,
         "single_points": build_single_points(zerolag["rows"], single_far_bases),
         "multi_points": build_multi_points(zerolag["rows"], coherent_far_bases),
         "online_summary": online_summary,
+        "panel_a_online_summary": panel_a_online_summary,
     }
 
     first_plot = output_dir / f"{safe_label}_first_2x2_zerolag_current_{stamp}.png"
