@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+i=${SLURM_ARRAY_TASK_ID:-0}
+jobno=$(seq -f "%03g" "${i}" "${i}")
+mkdir -p "${jobno}" logs monitor crashcar_snr_series
+
+CRASH_ROOT=${CRASH_ROOT:?CRASH_ROOT required}
+TOP_RUN_ROOT=${TOP_RUN_ROOT:?TOP_RUN_ROOT required}
+export PATH="${CRASH_ROOT}/install/bin:${PATH}"
+export PATH="${TOP_RUN_ROOT}/bin:${PATH}"
+export PYTHONPATH="${CRASH_ROOT}/install/lib/python3.10/site-packages:${PYTHONPATH:-}"
+export GST_PLUGIN_PATH="${CRASH_ROOT}/install/lib/gstreamer-1.0:${GST_PLUGIN_PATH:-}"
+export LD_LIBRARY_PATH="${CRASH_ROOT}/install/lib:${LD_LIBRARY_PATH:-}"
+export GST_REGISTRY="${PWD}/gst-registry-crashcar-${jobno}.bin"
+export GST_REGISTRY_UPDATE=yes
+
+bankdir=${WGUO_O3A_BANK_DIR:-/fred/oz016/sunil/O3b_py3_banks}
+macrostart=${WGUO_O3A_START_GPS:?WGUO_O3A_START_GPS required}
+macroend=${WGUO_O3A_END_GPS:?WGUO_O3A_END_GPS required}
+noninj_stats_loc=${WGUO_O3A_NONINJ_STATS_LOC:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}
+map=${WGUO_O3A_DETRSP_MAP:-/fred/oz016/wguo/odds_ratio/O3a/chunk14/multi_det-BNS-LVK_inj/H1L1V1_1248134334_detrsp_map.xml}
+cache=${WGUO_O3A_FRAME_CACHE:-/fred/oz016/sunil/run_utils/frames_chache/frame_O3a.cache}
+start=${WGUO_O3A_START_BANK:-0}
+bpj=${WGUO_O3A_BANKS_PER_GROUP:-8}
+snapshot_interval=${WGUO_O3A_SNAPSHOT_INTERVAL:-3600}
+collect_walltime=${WGUO_O3A_COLLECT_WALLTIME:-10800,10800,10800}
+if [[ "${collect_walltime}" != *,* ]]; then
+    collect_walltime="${BACKGROUND_ACCUMULATION_SECONDS:-10800},${BACKGROUND_ACCUMULATION_SECONDS:-10800},${BACKGROUND_ACCUMULATION_SECONDS:-10800}"
+fi
+far_factor=${WGUO_O3A_FAR_FACTOR:-25}
+gracedb_far_thresh=${WGUO_O3A_GRACEDB_FAR_THRESH:-0}
+need_online=${WGUO_O3A_FINALSINK_NEED_ONLINE_PERFORM:-0}
+
+export DATA_START_TIME="${macrostart}"
+export MAX_DATA_DURATION_SECONDS=$((macroend - macrostart))
+export DATA_END_TIME="${macroend}"
+export CRASHCAR_ENABLE=1
+export CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP=${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}
+export CRASHCAR_SEGMENT_LIVETIME_CSV=${CRASHCAR_SEGMENT_LIVETIME_CSV:-}
+export WGUO_O3A_SEGMENT_XML=${WGUO_O3A_SEGMENT_XML:-${SEGMENT_XML:-${SINGLE_SEGMENT_XML:-}}}
+export CRASHCAR_WORKER_ID=${i}
+export CRASHCAR_DETAIL_OUTPUT_FNAME="${PWD}/crashcar_singlefar_detail_worker${jobno}.csv"
+export CRASHCAR_LOG10_FAR_THRESHOLD=${CRASHCAR_LOG10_FAR_THRESHOLD:-90}
+export CRASHCAR_SNR_SERIES_OUTPUT_DIR="${PWD}/crashcar_snr_series"
+export CRASHCAR_PRESERVE_TABLE_SINGLE_FAR=${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}
+export CRASHCAR_MULTI_FAR_COMBINE_MODE=${CRASHCAR_MULTI_FAR_COMBINE_MODE:-max}
+export CRASHCAR_MULTI_FAR_FACTOR=${CRASHCAR_MULTI_FAR_FACTOR:-94}
+export CRASHCAR_FAR_FLOOR_COUNT=${CRASHCAR_FAR_FLOOR_COUNT:-1.0}
+export CRASHCAR_LIVETIME_STEP=${CRASHCAR_LIVETIME_STEP:-1.0}
+export CRASHCAR_MIN_SNR=${CRASHCAR_MIN_SNR:-4.0}
+export BACKGROUND_ACCUMULATION_SECONDS=${BACKGROUND_ACCUMULATION_SECONDS:-10800}
+export FORMAL_BACKGROUND_ACCUMULATION_SECONDS=${FORMAL_BACKGROUND_ACCUMULATION_SECONDS:-10800}
+export CRASHCAR_BACKGROUND_REQUIRED_SECONDS=${CRASHCAR_BACKGROUND_REQUIRED_SECONDS:-10800}
+export BACKGROUND_UPDATE_TRIGGER_SECONDS=${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}
+export CRASHCAR_SNAPSHOT_INTERVAL_SECONDS=${CRASHCAR_SNAPSHOT_INTERVAL_SECONDS:-3600}
+export CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME=${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME:-}
+
+macrofarinput=${noninj_stats_loc}/${jobno}/${jobno}_marginalized_stats_2w.xml.gz,${noninj_stats_loc}/${jobno}/${jobno}_marginalized_stats_1d.xml.gz,${noninj_stats_loc}/${jobno}/${jobno}_marginalized_stats_2h.xml.gz
+macrolocfapoutput=${PWD}/${jobno}/${jobno}_marginalized_stats_2w.xml.gz,${PWD}/${jobno}/${jobno}_marginalized_stats_1d.xml.gz,${PWD}/${jobno}/${jobno}_marginalized_stats_2h.xml.gz
+
+for f in ${macrofarinput//,/ }; do
+    [ -f "$f" ] || { echo "missing external stats $f" >&2; exit 2; }
+done
+[ -f "${map}" ] || { echo "missing detrsp map ${map}" >&2; exit 2; }
+[ -f "${cache}" ] || { echo "missing frame cache ${cache}" >&2; exit 2; }
+
+cmd=(
+  gstlal_inspiral_postcohspiir_online
+  --state-channel-name H1=GDS-CALIB_STATE_VECTOR
+  --state-channel-name L1=GDS-CALIB_STATE_VECTOR
+  --state-channel-name V1=DQ_ANALYSIS_STATE_VECTOR
+  --state-vector-on-bits H1=3
+  --state-vector-on-bits L1=3
+  --state-vector-on-bits V1=1027
+  --state-vector-off-bits H1=0
+  --state-vector-off-bits L1=0
+  --state-vector-off-bits V1=0
+  --job-tag "${jobno}"
+  --tmp-space _CONDOR_SCRATCH_DIR
+)
+
+for bank in $(seq -f "%04g" $((start + bpj * i)) $((start + bpj * (i + 1) - 1))); do
+  H1bank=${bankdir}/iir_H1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
+  L1bank=${bankdir}/iir_L1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
+  V1bank=${bankdir}/iir_V1-GSTLAL_SPLIT_BANK_${bank}-a1-0-0.xml.gz
+  for bf in "$H1bank" "$L1bank" "$V1bank"; do
+    [ -f "$bf" ] || { echo "missing bank $bf" >&2; exit 2; }
+  done
+  cmd+=(--iir-bank "H1:${H1bank},L1:${L1bank},V1:${V1bank}")
+done
+
+cmd+=(
+  --data-source frames
+  --channel-name H1=GDS-CALIB_STRAIN_CLEAN
+  --channel-name L1=GDS-CALIB_STRAIN_CLEAN
+  --channel-name V1=Hrec_hoft_16384Hz
+  --gpu-acc on
+  --ht-gate-threshold 15.0
+  --cuda-postcoh-snglsnr-thresh 4
+  --cuda-postcoh-hist-trials 100
+  --cuda-postcoh-detrsp-fname "${map}"
+  --cuda-postcoh-output-skymap 100
+  --check-time-stamp
+  --finalsink-output-prefix "${jobno}/${jobno}_zerolag"
+  --finalsink-single-trigger-stream "${jobno}/${jobno}_single_triggers.csv"
+  --finalsink-snapshot-interval "${snapshot_interval}"
+  --cohfar-accumbackground-snapshot-interval "${snapshot_interval}"
+)
+
+for bank in $(seq -f "%04g" $((start + bpj * i)) $((start + bpj * (i + 1) - 1))); do
+  cmd+=(--cohfar-accumbackground-output-prefix "${jobno}/bank${bank}_stats")
+done
+
+cmd+=(
+  --cohfar-assignfar-input-fname "${macrofarinput}"
+  --cohfar-assignfar-silent-time 0
+  --cohfar-assignfar-refresh-interval "${snapshot_interval}"
+  --finalsink-fapupdater-interval "${snapshot_interval}"
+  --finalsink-cluster-window 1
+  --finalsink-fapupdater-collect-walltime "${collect_walltime}"
+  --finalsink-far-factor "${far_factor}"
+  --finalsink-gracedb-far-thresh "${gracedb_far_thresh}"
+  --finalsink-need-online-perform "${need_online}"
+  --finalsink-gracedb-group Test
+  --finalsink-gracedb-search MDC
+  --finalsink-gracedb-service-url https://gracedb-playground.ligo.org/api/
+  --cuda-postcoh-detrsp-refresh-interval 86400
+  --code-version "${CRASHCAR_CODE_VERSION:-spiir-crashcar}"
+  --frame-cache "${cache}"
+  --gps-start-time "${macrostart}"
+  --gps-end-time "${macroend}"
+  --finalsink-singlefar-veto-thresh 0.5
+  --track-psd
+  --psd-fft-length 4
+  --finalsink-fapupdater-output-fname "${macrolocfapoutput}"
+)
+
+{
+  printf 'RUN_ROOT=%s\n' "$PWD"
+  printf 'CRASHCAR_CMD'
+  printf ' %q' "${cmd[@]}"
+  printf '\n'
+  env | grep -E '^(CRASHCAR|BACKGROUND|FORMAL|DATA_|WGUO_O3A|GST_|PYTHONPATH|LD_LIBRARY_PATH|PATH)=' | sort
+} > "logs/crashcar_command_${jobno}.txt"
+
+"${cmd[@]}"
