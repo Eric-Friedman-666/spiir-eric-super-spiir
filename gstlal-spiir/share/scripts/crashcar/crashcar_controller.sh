@@ -67,7 +67,7 @@ FRAME_CACHE=${data_file:-${frame_cache:-${FRAME_CACHE:-}}}
 SEGMENT_XML=${segment_xml:-${SEGMENT_XML:-}}
 if [ -z "${SEGMENT_XML}" ]; then
     detrsp_dir=$(dirname "${DETRSP_MAP}")
-    candidate_segment=$(find "${detrsp_dir}" -path "*/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}.xml.gz" -print 2>/dev/null | head -n 1 || true)
+    candidate_segment=$(find "${detrsp_dir}" -path "*/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}.xml.gz" -print 2>/dev/null | sort | head -n 1 || true)
     if [ -n "${candidate_segment}" ]; then
         SEGMENT_XML=${candidate_segment}
     fi
