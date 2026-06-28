@@ -34,11 +34,12 @@ set -a
 source "${CONFIG_FILE}"
 set +a
 
-RUN_PARENT=${run_parent:-${RUN_PARENT:-"${SOURCE_ROOT_DEFAULT}/runs"}}
+ROOT_VALUE=${root:-${ROOT:-${source_root:-${SOURCE_ROOT:-"${SOURCE_ROOT_DEFAULT}"}}}}
+RUN_PARENT=${run_parent:-${RUN_PARENT:-"${ROOT_VALUE}/runs"}}
 RUN_ID=${run_id:-${RUN_ID:-${run_slug:-${RUN_SLUG:-crashcar}}}}
 RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
 RUN_ROOT=${run_root:-${RUN_ROOT:-"${RUN_PARENT}/${RUN_ID}/${RUN_TIMESTAMP}"}}
-SOURCE_ROOT_VALUE=${source_root:-${SOURCE_ROOT:-"${SOURCE_ROOT_DEFAULT}"}}
+SOURCE_ROOT_VALUE=${source_root:-${SOURCE_ROOT:-"${ROOT_VALUE}"}}
 
 if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}}" != "1" ]; then
     printf 'crashcar: run root already exists: %s\n' "${RUN_ROOT}" >&2

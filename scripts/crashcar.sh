@@ -11,4 +11,12 @@ if [ ! -x "${LAUNCHER}" ]; then
     exit 2
 fi
 
-exec "${LAUNCHER}" "${CONFIG_FILE}"
+if [ -f "${CONFIG_FILE}" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${CONFIG_FILE}"
+    set +a
+fi
+
+ROOT_VALUE=${root:-${ROOT:-${source_root:-${SOURCE_ROOT:-"${REPO_ROOT}"}}}}
+SOURCE_ROOT="${ROOT_VALUE}" exec "${LAUNCHER}" "${CONFIG_FILE}"

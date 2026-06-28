@@ -21,7 +21,7 @@ set -a
 source "${CONFIG_FILE}"
 set +a
 
-SOURCE_ROOT=${source_root:-${SOURCE_ROOT:-}}
+SOURCE_ROOT=${source_root:-${SOURCE_ROOT:-${root:-${ROOT:-}}}}
 if [ -z "${SOURCE_ROOT}" ]; then
     printf 'crashcar_controller: source_root was not provided by launcher or config\n' >&2
     exit 2
