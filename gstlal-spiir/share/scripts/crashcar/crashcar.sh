@@ -10,8 +10,9 @@ Usage:
   bash scripts/crashcar.sh [path/to/crashcar.env]
 
 The config defaults to scripts/crashcar.env.  The launcher creates a fresh
-run root, copies the fixed crashcar scripts into that root, snapshots the
-config, then runs scripts/crashcar_controller.sh there.
+run root under run_parent/run_id/<UTC timestamp>, copies the fixed crashcar
+scripts into that root, snapshots the config, then runs
+scripts/crashcar_controller.sh there.
 EOF
 }
 
@@ -33,9 +34,9 @@ source "${CONFIG_FILE}"
 set +a
 
 RUN_PARENT=${run_parent:-${RUN_PARENT:-$(cd "${SCRIPT_DIR}/.." && pwd)}}
-RUN_SLUG=${run_slug:-${RUN_SLUG:-crashcar}}
+RUN_ID=${run_id:-${RUN_ID:-${run_slug:-${RUN_SLUG:-crashcar}}}}
 RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
-RUN_ROOT=${run_root:-${RUN_ROOT:-"${RUN_PARENT}/run_${RUN_SLUG}_${RUN_TIMESTAMP}"}}
+RUN_ROOT=${run_root:-${RUN_ROOT:-"${RUN_PARENT}/${RUN_ID}/${RUN_TIMESTAMP}"}}
 
 if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}}" != "1" ]; then
     printf 'crashcar: run root already exists: %s\n' "${RUN_ROOT}" >&2
@@ -55,6 +56,9 @@ chmod +x \
 
 cat > "${RUN_ROOT}/README.crashcar_launch.txt" <<EOF
 Crashcar launch root
+
+Run id:
+  ${RUN_ID}
 
 Start command:
   cd $(cd "${SCRIPT_DIR}/.." && pwd)
