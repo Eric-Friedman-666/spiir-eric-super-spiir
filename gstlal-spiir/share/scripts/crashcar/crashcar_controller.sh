@@ -33,8 +33,11 @@ START_GPS=${start_gps:-${START_GPS:-}}
 : "${START_GPS:?start_gps required in ${CONFIG_FILE}}"
 END_GPS=${end_gps:-${END_GPS:-}}
 DURATION=${duration:-${DURATION:-}}
+if [ -z "${DURATION}" ] && [ -n "${duration_hour:-}" ]; then
+    DURATION=$((duration_hour * 3600))
+fi
 if [ -z "${END_GPS}" ]; then
-    : "${DURATION:?duration required when end_gps is unset}"
+    : "${DURATION:?duration_hour required when end_gps is unset}"
     END_GPS=$((START_GPS + DURATION))
 fi
 DURATION=$((END_GPS - START_GPS))
