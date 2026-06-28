@@ -2041,7 +2041,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                                       total_window_count, feature_gps,
                                       assignment_gps,
                                       far_sngl, autocorr_power, dof);
-                if (!write_all_details && (hit_single_far || hit_multi_far)) {
+                if (hit_single_far || hit_multi_far) {
                     crashcar_write_snr_series_dump(
                       element, table, ifo_id, llr, direct_far, bg_livetime,
                       bg_start, bg_end, feature_gps, assignment_gps,
