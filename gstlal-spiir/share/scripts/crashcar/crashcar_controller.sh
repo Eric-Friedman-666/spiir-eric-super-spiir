@@ -48,10 +48,10 @@ START_BANK=${start_bank:-${START_BANK:-0}}
 SEGMENT_XML=${segment_xml:-${SEGMENT_XML:-}}
 : "${SEGMENT_XML:?segment_xml required in ${CONFIG_FILE}}"
 LIVETIME_CSV=${livetime_csv:-${LIVETIME_CSV:-"${ARTIFACTS}/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}_livetime.csv"}}
-DETRSP_MAP=${detrsp_map:-${DETRSP_MAP:-}}
-: "${DETRSP_MAP:?detrsp_map required in ${CONFIG_FILE}}"
-FRAME_CACHE=${frame_cache:-${FRAME_CACHE:-}}
-: "${FRAME_CACHE:?frame_cache required in ${CONFIG_FILE}}"
+DETRSP_MAP=${detector_response_file:-${detrsp_map:-${DETRSP_MAP:-}}}
+: "${DETRSP_MAP:?detector_response_file required in ${CONFIG_FILE}}"
+FRAME_CACHE=${data_file:-${frame_cache:-${FRAME_CACHE:-}}}
+: "${FRAME_CACHE:?data_file required in ${CONFIG_FILE}}"
 NONINJ_STATS_LOC=${noninj_stats_loc:-${NONINJ_STATS_LOC:-}}
 : "${NONINJ_STATS_LOC:?noninj_stats_loc required in ${CONFIG_FILE}}"
 O3_BANK_DIR=${o3_bank_dir:-${O3_BANK_DIR:-}}
