@@ -49,7 +49,9 @@ if [ -n "${BG_accumulation_hour:-}" ]; then
 else
     BACKGROUND_ACCUMULATION=${background_accumulation:-${BACKGROUND_ACCUMULATION:-${background_accumulation_seconds:-${BACKGROUND_ACCUMULATION_SECONDS:-10800}}}}
 fi
-if [ -n "${BG_update_hour:-}" ]; then
+if [ -n "${zerolag_update_hour:-}" ]; then
+    BACKGROUND_UPDATE=$((zerolag_update_hour * 3600))
+elif [ -n "${BG_update_hour:-}" ]; then
     BACKGROUND_UPDATE=$((BG_update_hour * 3600))
 else
     BACKGROUND_UPDATE=${background_update:-${BACKGROUND_UPDATE:-${background_update_trigger_seconds:-${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}}}}
@@ -81,7 +83,24 @@ WGUO_BANK_STATS_DIR=${wguo_bank_stats_dir:-${WGUO_BANK_STATS_DIR:-/fred/oz016/wg
 DEFAULT_SHAPE_DOF=${default_shape_dof:-${DEFAULT_SHAPE_DOF:-74.30962572260326}}
 NOISE_BETA=${noise_beta:-${NOISE_BETA:--1.0}}
 RANK_OFFSET=${rank_offset:-${RANK_OFFSET:-0.0}}
-FAR_FIT_BOUNDARY=${tail_FAR:-${far_fit_boundary:-${FAR_FIT_BOUNDARY:-0.01}}}
+TAIL_LOG_FAR=${tail_log_FAR:-${tai_log_FAR:-${TAIL_LOG_FAR:-}}}
+if [ -n "${TAIL_LOG_FAR}" ]; then
+    FAR_FIT_BOUNDARY=$(python3 - "${TAIL_LOG_FAR}" <<'PY'
+import math
+import sys
+print("{:.17g}".format(math.pow(10.0, float(sys.argv[1]))))
+PY
+)
+else
+    FAR_FIT_BOUNDARY=${tail_FAR:-${far_fit_boundary:-${FAR_FIT_BOUNDARY:-0.01}}}
+    TAIL_LOG_FAR=$(python3 - "${FAR_FIT_BOUNDARY}" <<'PY'
+import math
+import sys
+value = float(sys.argv[1])
+print("{:.17g}".format(math.log10(value))) if value > 0 else print("")
+PY
+)
+fi
 CRASHCAR_CODE_VERSION=${crashcar_code_version:-${CRASHCAR_CODE_VERSION:-"spiir-crashcar-${GITHUB_BRANCH}"}}
 SLURM_JOB_NAME=${slurm_job_name:-${SLURM_JOB_NAME:-crashcar}}
 SLURM_TIME=${slurm_time:-${SLURM_TIME:-}}
@@ -415,6 +434,7 @@ write_final_report() {
         L_ONLY_SECONDS="${L_ONLY_SECONDS}" HL_SECONDS="${HL_SECONDS}" HL_NONE_SECONDS="${HL_NONE_SECONDS}" \
         FIRST3_H_ONLY_SECONDS="${FIRST3_H_ONLY_SECONDS}" FIRST3_L_ONLY_SECONDS="${FIRST3_L_ONLY_SECONDS}" \
         FIRST3_HL_SECONDS="${FIRST3_HL_SECONDS}" FIRST3_HL_NONE_SECONDS="${FIRST3_HL_NONE_SECONDS}" \
+        TAIL_LOG_FAR="${TAIL_LOG_FAR}" FAR_FIT_BOUNDARY="${FAR_FIT_BOUNDARY}" \
         CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}" \
         CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}" \
         python3 - "${phase}" "${job}" "${sacct_text}" "${raw_json}" "${detail_json}" <<'PY'
@@ -438,6 +458,10 @@ payload = {
     "duration": int(os.environ["DURATION"]),
     "background_accumulation_seconds": float(os.environ["BACKGROUND_ACCUMULATION"]),
     "background_update_seconds": float(os.environ["BACKGROUND_UPDATE"]),
+    "tail_log_FAR": (
+        float(os.environ["TAIL_LOG_FAR"])
+        if os.environ.get("TAIL_LOG_FAR") else None),
+    "tail_FAR": float(os.environ["FAR_FIT_BOUNDARY"]),
     "worker_count": int(os.environ["WORKER_COUNT"]),
     "banks_per_worker": int(os.environ["BANKS_PER_WORKER"]),
     "single_only_seconds": float(os.environ["SINGLE_ONLY_SECONDS"] or 0.0),
@@ -500,7 +524,7 @@ submit_job() {
     fi
     job=$(sbatch "${sbatch_args[@]}")
     printf '%s\n' "${job}" > "${CONTROLLER_DIR}/job_id.txt"
-    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" tail_FAR="${FAR_FIT_BOUNDARY}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
+    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" tail_log_FAR="${TAIL_LOG_FAR}" tail_FAR="${FAR_FIT_BOUNDARY}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
     log "submitted Slurm job=${job} workers=${WORKER_COUNT} banks_per_worker=${BANKS_PER_WORKER} gps=${START_GPS}-${END_GPS}"
 }
 
@@ -715,6 +739,7 @@ EOF
         duration="${DURATION}" \
         background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" \
         background_update_seconds="${BACKGROUND_UPDATE}" \
+        tail_log_FAR="${TAIL_LOG_FAR}" \
         tail_FAR="${FAR_FIT_BOUNDARY}" \
         injection_mode="${INJECTION_MODE}" \
         injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" \
