@@ -48,14 +48,19 @@ if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALL
 fi
 
 mkdir -p "${RUN_ROOT}/scripts"
-for script in crashcar_controller.sh crashcar_sbatch.sh crashcar_pipeline.sh; do
+for script in \
+    crashcar_controller.sh \
+    crashcar_sbatch.sh \
+    crashcar_pipeline.sh \
+    materialize_snr_autocorrelation.py; do
     cp "${SCRIPT_DIR}/${script}" "${RUN_ROOT}/scripts/${script}"
 done
 cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.env"
 chmod +x \
     "${RUN_ROOT}/scripts/crashcar_controller.sh" \
     "${RUN_ROOT}/scripts/crashcar_sbatch.sh" \
-    "${RUN_ROOT}/scripts/crashcar_pipeline.sh"
+    "${RUN_ROOT}/scripts/crashcar_pipeline.sh" \
+    "${RUN_ROOT}/scripts/materialize_snr_autocorrelation.py"
 
 cat > "${RUN_ROOT}/README.crashcar_launch.txt" <<EOF
 Crashcar launch root

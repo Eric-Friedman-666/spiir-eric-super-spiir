@@ -77,6 +77,7 @@ typedef struct {
 
     gboolean enabled;
     double log10_far_threshold;
+    double snr_series_log10_far_threshold;
     double min_snr;
     double far_floor_count;
     double livetime_step;

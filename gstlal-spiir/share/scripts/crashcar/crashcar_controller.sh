@@ -123,6 +123,7 @@ print("{:.17g}".format(math.log10(value))) if value > 0 else print("")
 PY
 )
 fi
+SNR_SERIES_LOG_FAR_THRESHOLD=${SNR_series_logFAR_threshold:-${snr_series_logFAR_threshold:-${SNR_SERIES_LOG_FAR_THRESHOLD:--4}}}
 CRASHCAR_CODE_VERSION=${crashcar_code_version:-${CRASHCAR_CODE_VERSION:-"spiir-crashcar-${GITHUB_BRANCH}"}}
 SLURM_JOB_NAME=${slurm_job_name:-${SLURM_JOB_NAME:-crashcar}}
 SLURM_TIME=${slurm_time:-${SLURM_TIME:-7-00:00:00}}
@@ -390,6 +391,7 @@ validate_inputs() {
         "${CRASH_SCRIPT_DIR}/dump_segment_livetime_csv.py" \
         "${CRASH_SCRIPT_DIR}/plot_single_llr_far.py" \
         "${CRASH_SCRIPT_DIR}/export_template_shape_map.py" \
+        "${SCRIPT_DIR}/materialize_snr_autocorrelation.py" \
         "${WGUO_BANK_STATS_DIR}"; do
         [ -e "${p}" ] || { log "ERROR missing input ${p}"; write_status phase=failed reason="missing ${p}"; exit 2; }
     done
@@ -549,8 +551,17 @@ Path(os.environ["MANIFEST"]).write_text(json.dumps({
 PY
         return 2
     fi
+    python3 "${SCRIPT_DIR}/materialize_snr_autocorrelation.py" \
+        --manifest "${snr_dir}/manifest.csv" \
+        --snr-dir "${snr_dir}" \
+        --bank-dir "${O3_BANK_DIR}" \
+        > "${CONTROLLER_DIR}/materialize_snr_autocorrelation.log" \
+        2>&1 || {
+            log "ERROR failed to materialize SNR template autocorrelation companions"
+            return 1
+        }
     tar -C "${RUN_DIR}" -czf "${archive}" crashcar_snr_series
-    SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" python3 - <<'PY'
+    SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
@@ -558,15 +569,32 @@ from pathlib import Path
 root = Path(os.environ["SNR_DIR"])
 archive = Path(os.environ["ARCHIVE"])
 files = [p for p in root.rglob("*") if p.is_file()]
+manifest = root / "manifest.csv"
+manifest_rows = 0
+data_series_files = 0
+template_autocorrelation_files = 0
+if manifest.exists():
+    import csv
+    with manifest.open(newline="") as input_file:
+        for row in csv.DictReader(input_file):
+            manifest_rows += 1
+            if row.get("series_file"):
+                data_series_files += 1
+            if row.get("template_autocorrelation_file"):
+                template_autocorrelation_files += 1
 payload = {
     "archive": str(archive),
     "archive_bytes": archive.stat().st_size if archive.exists() else 0,
     "archive_exists": archive.exists(),
     "byte_count": sum(p.stat().st_size for p in files),
+    "data_series_files": data_series_files,
     "exists": root.is_dir(),
     "file_count": len(files),
+    "manifest_rows": manifest_rows,
     "sample_files": [str(p.relative_to(root)) for p in sorted(files)[:20]],
     "snr_series_dir": str(root),
+    "snr_series_logFAR_threshold": os.environ["SNR_SERIES_LOG_FAR_THRESHOLD"],
+    "template_autocorrelation_files": template_autocorrelation_files,
 }
 Path(os.environ["MANIFEST"]).write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -585,7 +613,7 @@ submit_job() {
         --cpus-per-task="${SLURM_CPUS_PER_TASK}"
         --gres="${SLURM_GRES}"
         --array="0-$((WORKER_COUNT - 1))"
-        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${SNAPSHOT_INTERVAL}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${BACKGROUND_ACCUMULATION}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${SNAPSHOT_INTERVAL}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
+        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${SNAPSHOT_INTERVAL}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${BACKGROUND_ACCUMULATION}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${SNAPSHOT_INTERVAL}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
         --chdir="${RUN_DIR}"
     )
     if [ -n "${SLURM_TIME}" ]; then
@@ -594,7 +622,7 @@ submit_job() {
     sbatch_args+=("${SCRIPT_DIR}/crashcar_sbatch.sh")
     job=$(sbatch "${sbatch_args[@]}")
     printf '%s\n' "${job}" > "${CONTROLLER_DIR}/job_id.txt"
-    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" tail_log_FAR="${TAIL_LOG_FAR}" tail_FAR="${FAR_FIT_BOUNDARY}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
+    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" tail_log_FAR="${TAIL_LOG_FAR}" tail_FAR="${FAR_FIT_BOUNDARY}" SNR_series_logFAR_threshold="${SNR_SERIES_LOG_FAR_THRESHOLD}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
     log "submitted Slurm job=${job} workers=${WORKER_COUNT} banks_per_worker=${BANKS_PER_WORKER} gps=${START_GPS}-${END_GPS}"
 }
 
@@ -815,6 +843,7 @@ EOF
         background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" \
         background_update_seconds="${BACKGROUND_UPDATE}" \
         tail_log_FAR="${TAIL_LOG_FAR}" \
+        SNR_series_logFAR_threshold="${SNR_SERIES_LOG_FAR_THRESHOLD}" \
         tail_FAR="${FAR_FIT_BOUNDARY}" \
         injection_mode="${INJECTION_MODE}" \
         injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" \

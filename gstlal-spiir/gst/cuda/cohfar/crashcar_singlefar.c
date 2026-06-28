@@ -47,7 +47,7 @@
 #define GST_CAT_DEFAULT crashcar_singlefar_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-#define CRASHCAR_CODE_VERSION "single_stream_support_v18_snr_xml_shards"
+#define CRASHCAR_CODE_VERSION "single_stream_support_v19_snr_threshold_autocorr"
 #define CRASHCAR_CLUSTER_WINDOW_SECONDS 1.0
 
 /* Multiple crashcar elements can live in one worker process and append to the
@@ -2034,6 +2034,12 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             gboolean hit_multi_far =
               crashcar_hits_threshold(far_multi,
                                       element->log10_far_threshold);
+            gboolean snr_series_hit_single_far =
+              crashcar_hits_threshold(
+                far_sngl, element->snr_series_log10_far_threshold);
+            gboolean snr_series_hit_multi_far =
+              crashcar_hits_threshold(
+                far_multi, element->snr_series_log10_far_threshold);
             if (write_all_details || hit_single_far || hit_multi_far) {
                 crashcar_write_detail(element, table, ifo_id, llr, direct_far,
                                       direct_far_count_ge, bg_livetime,
@@ -2041,13 +2047,13 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                                       total_window_count, feature_gps,
                                       assignment_gps,
                                       far_sngl, autocorr_power, dof);
-                if (hit_single_far || hit_multi_far) {
-                    crashcar_write_snr_series_dump(
-                      element, table, ifo_id, llr, direct_far, bg_livetime,
-                      bg_start, bg_end, feature_gps, assignment_gps,
-                      far_sngl, autocorr_power, dof, hit_single_far,
-                      hit_multi_far);
-                }
+            }
+            if (snr_series_hit_single_far || snr_series_hit_multi_far) {
+                crashcar_write_snr_series_dump(
+                  element, table, ifo_id, llr, direct_far, bg_livetime,
+                  bg_start, bg_end, feature_gps, assignment_gps,
+                  far_sngl, autocorr_power, dof, snr_series_hit_single_far,
+                  snr_series_hit_multi_far);
             }
             g_free(window_ranks);
         }
@@ -2277,6 +2283,8 @@ static void crashcar_singlefar_init(CrashcarSinglefar *element) {
     element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);
     element->enabled = FALSE;
     element->log10_far_threshold = -4.0;
+    element->snr_series_log10_far_threshold =
+      crashcar_env_double("CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD", -4.0);
     element->min_snr = 4.0;
     element->far_floor_count = 1.0;
     element->livetime_step = 1.0;
