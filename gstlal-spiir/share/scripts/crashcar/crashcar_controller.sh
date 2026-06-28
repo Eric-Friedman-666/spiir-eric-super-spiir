@@ -69,12 +69,34 @@ FRAME_CACHE=${data_file:-${frame_cache:-${FRAME_CACHE:-}}}
 SEGMENT_XML=${segment_xml:-${SEGMENT_XML:-}}
 if [ -z "${SEGMENT_XML}" ]; then
     detrsp_dir=$(dirname "${DETRSP_MAP}")
-    candidate_segment=$(find "${detrsp_dir}" -path "*/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}.xml.gz" -print 2>/dev/null | sort | head -n 1 || true)
+    candidate_segment=$(python3 - "${detrsp_dir}" "${START_GPS}" "${END_GPS}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+start = int(float(sys.argv[2]))
+end = int(float(sys.argv[3]))
+pattern = re.compile(r"H1L1V1_SEGMENTS_(\d+)_(\d+)\.xml\.gz$")
+matches = []
+for path in root.glob("**/H1L1V1_SEGMENTS_*_*.xml.gz"):
+    match = pattern.search(path.name)
+    if not match:
+        continue
+    seg_start = int(match.group(1))
+    seg_duration = int(match.group(2))
+    seg_end = seg_start + seg_duration
+    if seg_start <= start and seg_end >= end:
+        matches.append((seg_start, seg_duration, str(path)))
+if matches:
+    print(sorted(matches, key=lambda item: (item[0], item[1], item[2]))[0][2])
+PY
+)
     if [ -n "${candidate_segment}" ]; then
         SEGMENT_XML=${candidate_segment}
     fi
 fi
-: "${SEGMENT_XML:?segment_xml could not be inferred; set segment_xml or injection_bg_segment_xml explicitly}"
+: "${SEGMENT_XML:?segment_xml could not be inferred; set segment_xml explicitly}"
 LIVETIME_CSV=${livetime_csv:-${LIVETIME_CSV:-"${ARTIFACTS}/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}_livetime.csv"}}
 NONINJ_STATS_LOC=${noninj_stats_loc:-${NONINJ_STATS_LOC:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}}
 O3_BANK_DIR=${bank_file:-${o3_bank_dir:-${O3_BANK_DIR:-}}}
