@@ -22,7 +22,10 @@ source "${CONFIG_FILE}"
 set +a
 
 SOURCE_ROOT=${source_root:-${SOURCE_ROOT:-}}
-: "${SOURCE_ROOT:?source_root required in ${CONFIG_FILE}}"
+if [ -z "${SOURCE_ROOT}" ]; then
+    printf 'crashcar_controller: source_root was not provided by launcher or config\n' >&2
+    exit 2
+fi
 CRASH_RUNTIME_ROOT=${crash_runtime_root:-${CRASH_RUNTIME_ROOT:-"${ROOT}/crashcar_runtime"}}
 CRASH_SCRIPT_DIR="${SOURCE_ROOT}/gstlal-spiir/single_detector_sidecar/online_single_llrfar_wguo_refined"
 GITHUB_REMOTE=${github_remote:-${GITHUB_REMOTE:-github}}
@@ -56,27 +59,33 @@ WORKER_COUNT=${worker_number:-${worker_count:-${WORKER_COUNT:-2}}}
 BANKS_PER_WORKER=${bank_per_worker:-${banks_per_worker:-${BANKS_PER_WORKER:-8}}}
 START_BANK=${start_bank:-${START_BANK:-0}}
 
-SEGMENT_XML=${segment_xml:-${SEGMENT_XML:-}}
-: "${SEGMENT_XML:?segment_xml required in ${CONFIG_FILE}}"
-LIVETIME_CSV=${livetime_csv:-${LIVETIME_CSV:-"${ARTIFACTS}/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}_livetime.csv"}}
 DETRSP_MAP=${detector_response_file:-${detrsp_map:-${DETRSP_MAP:-}}}
 : "${DETRSP_MAP:?detector_response_file required in ${CONFIG_FILE}}"
 FRAME_CACHE=${data_file:-${frame_cache:-${FRAME_CACHE:-}}}
 : "${FRAME_CACHE:?data_file required in ${CONFIG_FILE}}"
-NONINJ_STATS_LOC=${noninj_stats_loc:-${NONINJ_STATS_LOC:-}}
-: "${NONINJ_STATS_LOC:?noninj_stats_loc required in ${CONFIG_FILE}}"
+
+SEGMENT_XML=${segment_xml:-${SEGMENT_XML:-}}
+if [ -z "${SEGMENT_XML}" ]; then
+    detrsp_dir=$(dirname "${DETRSP_MAP}")
+    candidate_segment=$(find "${detrsp_dir}" -path "*/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}.xml.gz" -print 2>/dev/null | head -n 1 || true)
+    if [ -n "${candidate_segment}" ]; then
+        SEGMENT_XML=${candidate_segment}
+    fi
+fi
+: "${SEGMENT_XML:?segment_xml could not be inferred; set segment_xml or injection_bg_segment_xml explicitly}"
+LIVETIME_CSV=${livetime_csv:-${LIVETIME_CSV:-"${ARTIFACTS}/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}_livetime.csv"}}
+NONINJ_STATS_LOC=${noninj_stats_loc:-${NONINJ_STATS_LOC:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}}
 O3_BANK_DIR=${bank_file:-${o3_bank_dir:-${O3_BANK_DIR:-}}}
 : "${O3_BANK_DIR:?bank_file required in ${CONFIG_FILE}}"
-WGUO_BANK_STATS_DIR=${wguo_bank_stats_dir:-${WGUO_BANK_STATS_DIR:-}}
-: "${WGUO_BANK_STATS_DIR:?wguo_bank_stats_dir required in ${CONFIG_FILE}}"
+WGUO_BANK_STATS_DIR=${wguo_bank_stats_dir:-${WGUO_BANK_STATS_DIR:-/fred/oz016/wguo/packages/spiir/src/spiir/search/bank_dofs}}
 DEFAULT_SHAPE_DOF=${default_shape_dof:-${DEFAULT_SHAPE_DOF:-74.30962572260326}}
 NOISE_BETA=${noise_beta:-${NOISE_BETA:--1.0}}
 RANK_OFFSET=${rank_offset:-${RANK_OFFSET:-0.0}}
 FAR_FIT_BOUNDARY=${tail_FAR:-${far_fit_boundary:-${FAR_FIT_BOUNDARY:-0.01}}}
 CRASHCAR_CODE_VERSION=${crashcar_code_version:-${CRASHCAR_CODE_VERSION:-"spiir-crashcar-${GITHUB_BRANCH}"}}
 SLURM_JOB_NAME=${slurm_job_name:-${SLURM_JOB_NAME:-crashcar}}
-SLURM_TIME=${slurm_time:-${SLURM_TIME:-24:00:00}}
-SLURM_MEM=${slurm_mem:-${SLURM_MEM:-32g}}
+SLURM_TIME=${slurm_time:-${SLURM_TIME:-}}
+SLURM_MEM=${slurm_mem:-${SLURM_MEM:-64g}}
 SLURM_CPUS_PER_TASK=${slurm_cpus_per_task:-${SLURM_CPUS_PER_TASK:-4}}
 SLURM_GRES=${slurm_gres:-${SLURM_GRES:-gpu:1}}
 TMUX_SESSION=${tmux_session:-${TMUX_SESSION:-codex1}}
@@ -475,16 +484,21 @@ submit_job() {
     local template_map="${ARTIFACTS}/crashcar_template_shape_map.csv"
     cd "${RUN_DIR}"
     local job
-    job=$(sbatch --parsable \
-        --job-name="${SLURM_JOB_NAME}" \
-        --time="${SLURM_TIME}" \
-        --mem="${SLURM_MEM}" \
-        --cpus-per-task="${SLURM_CPUS_PER_TASK}" \
-        --gres="${SLURM_GRES}" \
-        --array="0-$((WORKER_COUNT - 1))" \
-        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${SNAPSHOT_INTERVAL}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${BACKGROUND_ACCUMULATION}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${SNAPSHOT_INTERVAL}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}" \
-        --chdir="${RUN_DIR}" \
-        "${SCRIPT_DIR}/crashcar_sbatch.sh")
+    local sbatch_args=(
+        --parsable
+        --job-name="${SLURM_JOB_NAME}"
+        --mem="${SLURM_MEM}"
+        --cpus-per-task="${SLURM_CPUS_PER_TASK}"
+        --gres="${SLURM_GRES}"
+        --array="0-$((WORKER_COUNT - 1))"
+        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${SNAPSHOT_INTERVAL}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${BACKGROUND_ACCUMULATION}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${SNAPSHOT_INTERVAL}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
+        --chdir="${RUN_DIR}"
+        "${SCRIPT_DIR}/crashcar_sbatch.sh"
+    )
+    if [ -n "${SLURM_TIME}" ]; then
+        sbatch_args+=(--time="${SLURM_TIME}")
+    fi
+    job=$(sbatch "${sbatch_args[@]}")
     printf '%s\n' "${job}" > "${CONTROLLER_DIR}/job_id.txt"
     write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" tail_FAR="${FAR_FIT_BOUNDARY}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
     log "submitted Slurm job=${job} workers=${WORKER_COUNT} banks_per_worker=${BANKS_PER_WORKER} gps=${START_GPS}-${END_GPS}"

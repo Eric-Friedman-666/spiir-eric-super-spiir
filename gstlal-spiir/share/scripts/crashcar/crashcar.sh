@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+SOURCE_ROOT_DEFAULT=$(cd "${SCRIPT_DIR}/../../../.." && pwd)
 CONFIG_FILE=${CRASHCAR_CONFIG_FILE:-"${SCRIPT_DIR}/crashcar.env"}
 
 usage() {
@@ -33,10 +34,11 @@ set -a
 source "${CONFIG_FILE}"
 set +a
 
-RUN_PARENT=${run_parent:-${RUN_PARENT:-$(cd "${SCRIPT_DIR}/.." && pwd)}}
+RUN_PARENT=${run_parent:-${RUN_PARENT:-"${SOURCE_ROOT_DEFAULT}/runs"}}
 RUN_ID=${run_id:-${RUN_ID:-${run_slug:-${RUN_SLUG:-crashcar}}}}
 RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
 RUN_ROOT=${run_root:-${RUN_ROOT:-"${RUN_PARENT}/${RUN_ID}/${RUN_TIMESTAMP}"}}
+SOURCE_ROOT_VALUE=${source_root:-${SOURCE_ROOT:-"${SOURCE_ROOT_DEFAULT}"}}
 
 if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}}" != "1" ]; then
     printf 'crashcar: run root already exists: %s\n' "${RUN_ROOT}" >&2
@@ -61,11 +63,11 @@ Run id:
   ${RUN_ID}
 
 Start command:
-  cd $(cd "${SCRIPT_DIR}/.." && pwd)
+  cd ${SOURCE_ROOT_VALUE}
   bash scripts/crashcar.sh
 
 Controller command used inside this staged run:
-  CRASHCAR_CONFIG_FILE=${RUN_ROOT}/scripts/crashcar.env bash ${RUN_ROOT}/scripts/crashcar_controller.sh
+  SOURCE_ROOT=${SOURCE_ROOT_VALUE} CRASHCAR_CONFIG_FILE=${RUN_ROOT}/scripts/crashcar.env bash ${RUN_ROOT}/scripts/crashcar_controller.sh
 
 Config snapshot:
   ${RUN_ROOT}/scripts/crashcar.env
@@ -77,11 +79,13 @@ printf 'crashcar: config snapshot %s\n' "${RUN_ROOT}/scripts/crashcar.env"
 if [ "${crashcar_dry_run:-${CRASHCAR_DRY_RUN:-0}}" = "1" ]; then
     printf 'crashcar: dry run requested; not starting controller or submitting Slurm\n'
     printf 'crashcar: controller command would be:\n'
-    printf '  CRASHCAR_CONFIG_FILE=%q bash %q\n' \
+    printf '  SOURCE_ROOT=%q CRASHCAR_CONFIG_FILE=%q bash %q\n' \
+        "${SOURCE_ROOT_VALUE}" \
         "${RUN_ROOT}/scripts/crashcar.env" \
         "${RUN_ROOT}/scripts/crashcar_controller.sh"
     exit 0
 fi
 
-CRASHCAR_CONFIG_FILE="${RUN_ROOT}/scripts/crashcar.env" \
+SOURCE_ROOT="${SOURCE_ROOT_VALUE}" \
+    CRASHCAR_CONFIG_FILE="${RUN_ROOT}/scripts/crashcar.env" \
     bash "${RUN_ROOT}/scripts/crashcar_controller.sh"
