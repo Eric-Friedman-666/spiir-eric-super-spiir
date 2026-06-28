@@ -31,6 +31,8 @@ fi
 far_factor=${WGUO_O3A_FAR_FACTOR:-25}
 gracedb_far_thresh=${WGUO_O3A_GRACEDB_FAR_THRESH:-0}
 need_online=${WGUO_O3A_FINALSINK_NEED_ONLINE_PERFORM:-0}
+injection_mode=${WGUO_O3A_INJECTION_MODE:-none}
+injection_file=${WGUO_O3A_INJECTION_FILE:-}
 
 export DATA_START_TIME="${macrostart}"
 export MAX_DATA_DURATION_SECONDS=$((macroend - macrostart))
@@ -135,6 +137,22 @@ cmd+=(
   --psd-fft-length 4
   --finalsink-fapupdater-output-fname "${macrolocfapoutput}"
 )
+
+if [ "${injection_mode}" != "none" ]; then
+  if [ -z "${injection_file}" ]; then
+    printf 'crashcar_pipeline: WGUO_O3A_INJECTION_MODE=%s but WGUO_O3A_INJECTION_FILE is empty\n' \
+      "${injection_mode}" >&2
+    exit 2
+  fi
+  [ -f "${injection_file}" ] || { echo "missing injection file ${injection_file}" >&2; exit 2; }
+  cmd+=(--blind-injections "${injection_file}")
+  {
+    printf 'This crashcar run includes blind injections.\n'
+    printf 'Do not use local accumulated backgrounds from this injection foreground as clean background.\n'
+    printf 'Injection file: %s\n' "${injection_file}"
+    printf 'External multi/coherent FAR input: %s\n' "${macrofarinput}"
+  } > DO_NOT_USE_AS_BACKGROUND_INJECTION_STATS.txt
+fi
 
 {
   printf 'RUN_ROOT=%s\n' "$PWD"
