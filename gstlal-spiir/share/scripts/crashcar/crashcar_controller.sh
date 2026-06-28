@@ -125,7 +125,7 @@ PY
 fi
 CRASHCAR_CODE_VERSION=${crashcar_code_version:-${CRASHCAR_CODE_VERSION:-"spiir-crashcar-${GITHUB_BRANCH}"}}
 SLURM_JOB_NAME=${slurm_job_name:-${SLURM_JOB_NAME:-crashcar}}
-SLURM_TIME=${slurm_time:-${SLURM_TIME:-}}
+SLURM_TIME=${slurm_time:-${SLURM_TIME:-7-00:00:00}}
 SLURM_MEM=${slurm_mem:-${SLURM_MEM:-64g}}
 SLURM_CPUS_PER_TASK=${slurm_cpus_per_task:-${SLURM_CPUS_PER_TASK:-4}}
 SLURM_GRES=${slurm_gres:-${SLURM_GRES:-gpu:1}}
