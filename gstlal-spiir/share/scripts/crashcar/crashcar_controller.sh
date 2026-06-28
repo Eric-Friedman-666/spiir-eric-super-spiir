@@ -486,7 +486,7 @@ submit_job() {
         --chdir="${RUN_DIR}" \
         "${SCRIPT_DIR}/crashcar_sbatch.sh")
     printf '%s\n' "${job}" > "${CONTROLLER_DIR}/job_id.txt"
-    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
+    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" tail_FAR="${FAR_FIT_BOUNDARY}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
     log "submitted Slurm job=${job} workers=${WORKER_COUNT} banks_per_worker=${BANKS_PER_WORKER} gps=${START_GPS}-${END_GPS}"
 }
 
@@ -701,6 +701,7 @@ EOF
         duration="${DURATION}" \
         background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" \
         background_update_seconds="${BACKGROUND_UPDATE}" \
+        tail_FAR="${FAR_FIT_BOUNDARY}" \
         injection_mode="${INJECTION_MODE}" \
         injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" \
         injection_bg_start_gps="${INJECTION_BG_START_GPS}" \
