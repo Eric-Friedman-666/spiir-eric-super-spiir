@@ -2027,6 +2027,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
 
             gboolean write_all_details =
               element->log10_far_threshold >= 90.0;
+            gboolean write_all_snr_series =
+              element->snr_series_log10_far_threshold >= 90.0;
             float far_multi = crashcar_best_multi_far(table);
             gboolean hit_single_far =
               crashcar_hits_threshold(far_sngl,
@@ -2048,7 +2050,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                                       assignment_gps,
                                       far_sngl, autocorr_power, dof);
             }
-            if (snr_series_hit_single_far || snr_series_hit_multi_far) {
+            if (write_all_snr_series || snr_series_hit_single_far ||
+                snr_series_hit_multi_far) {
                 crashcar_write_snr_series_dump(
                   element, table, ifo_id, llr, direct_far, bg_livetime,
                   bg_start, bg_end, feature_gps, assignment_gps,

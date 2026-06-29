@@ -134,6 +134,7 @@ TMUX_SESSION=${tmux_session:-${TMUX_SESSION:-codex1}}
 CRASHCAR_LOG10_FAR_THRESHOLD=${crashcar_log10_far_threshold:-${CRASHCAR_LOG10_FAR_THRESHOLD:-90}}
 CRASHCAR_PRESERVE_TABLE_SINGLE_FAR=${crashcar_preserve_table_single_far:-${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}}
 CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP=${crashcar_require_template_shape_map:-${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}}
+CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE=${crashcar_single_ledger_final_update:-${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE:-0}}
 
 INJECTION_MODE_RAW=${injection_mode:-${INJECTION_MODE:-False}}
 case "$(printf '%s' "${INJECTION_MODE_RAW}" | tr '[:upper:]' '[:lower:]')" in
@@ -163,6 +164,37 @@ if [ "${INJECTION_MODE}" = "True" ]; then
     INJECTION_BG_DURATION_SECONDS=$((INJECTION_BG_DURATION_HOUR * 3600))
     INJECTION_BG_END_GPS=$((INJECTION_BG_START_GPS + INJECTION_BG_DURATION_SECONDS))
     INJECTION_PIPELINE_MODE=blind
+fi
+
+SINGLE_BACKGROUND_MODE_VALUE=${single_background_mode:-${SINGLE_BACKGROUND_MODE:-rolling}}
+SINGLE_FROZEN_BACKGROUND_JSON_VALUE=${single_frozen_background_json:-${SINGLE_FROZEN_BACKGROUND_JSON:-}}
+SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE=${single_frozen_background_run_dir:-${SINGLE_FROZEN_BACKGROUND_RUN_DIR:-}}
+SINGLE_FROZEN_BACKGROUND_ID_VALUE=${single_frozen_background_id:-${SINGLE_FROZEN_BACKGROUND_ID:-BG-FROZEN}}
+SINGLE_FROZEN_BACKGROUND_SOURCE_VALUE=${single_frozen_background_source:-${SINGLE_FROZEN_BACKGROUND_SOURCE:-}}
+SINGLE_INPUT_KIND_VALUE=${single_input_kind:-${SINGLE_INPUT_KIND:-crashcarcsv}}
+FINAL_SINGLE_INPUT_KIND_VALUE=${final_single_input_kind:-${FINAL_SINGLE_INPUT_KIND:-crashcarcsv}}
+PATCH_ZEROLAG_SINGLE_FAR_VALUE=${patch_zerolag_single_far:-${PATCH_ZEROLAG_SINGLE_FAR:-1}}
+PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE=${patch_zerolag_single_far_column:-${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-direct_far}}
+PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE=${patch_zerolag_single_snr_series:-${PATCH_ZEROLAG_SINGLE_SNR_SERIES:-1}}
+CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE=${crashcar_background_required_seconds:-${CRASHCAR_BACKGROUND_REQUIRED_SECONDS:-${BACKGROUND_ACCUMULATION}}}
+if [ -n "${crashcar_build_last_bg_artifacts:-${CRASHCAR_BUILD_LAST_BG_ARTIFACTS:-}}" ]; then
+    CRASHCAR_BUILD_LAST_BG_ARTIFACTS=${crashcar_build_last_bg_artifacts:-${CRASHCAR_BUILD_LAST_BG_ARTIFACTS:-}}
+elif [ "${INJECTION_MODE}" = "True" ]; then
+    CRASHCAR_BUILD_LAST_BG_ARTIFACTS=0
+else
+    CRASHCAR_BUILD_LAST_BG_ARTIFACTS=1
+fi
+case "${SINGLE_BACKGROUND_MODE_VALUE}" in
+    rolling|frozen) ;;
+    *)
+        printf 'crashcar_controller: invalid single_background_mode=%s; expected rolling or frozen\n' \
+            "${SINGLE_BACKGROUND_MODE_VALUE}" >&2
+        exit 2
+        ;;
+esac
+if [ "${INJECTION_MODE}" = "True" ] && [ "${SINGLE_BACKGROUND_MODE_VALUE}" != "frozen" ]; then
+    printf 'crashcar_controller: injection_mode=True requires single_background_mode=frozen\n' >&2
+    exit 2
 fi
 
 H_ONLY_SECONDS=${h_only_seconds:-${H_ONLY_SECONDS:-0}}
@@ -431,6 +463,25 @@ validate_inputs() {
             done
         done
     done
+    if [ "${SINGLE_BACKGROUND_MODE_VALUE}" = "frozen" ]; then
+        if [ -n "${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" ]; then
+            [ -f "${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" ] || {
+                log "ERROR missing frozen single background ${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
+                write_status phase=failed reason=missing_frozen_single_background single_frozen_background_json="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
+                exit 2
+            }
+        elif [ -n "${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" ]; then
+            [ -d "${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" ] || {
+                log "ERROR missing frozen single background run dir ${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}"
+                write_status phase=failed reason=missing_frozen_single_background_run_dir single_frozen_background_run_dir="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}"
+                exit 2
+            }
+        else
+            log "ERROR single_background_mode=frozen requires single_frozen_background_json or single_frozen_background_run_dir"
+            write_status phase=failed reason=frozen_single_background_not_configured
+            exit 2
+        fi
+    fi
     python3 "${CRASH_SCRIPT_DIR}/dump_segment_livetime_csv.py" \
         "${SEGMENT_XML}" \
         --output "${LIVETIME_CSV}" \
@@ -482,6 +533,12 @@ write_final_report() {
         TAIL_LOG_FAR="${TAIL_LOG_FAR}" FAR_FIT_BOUNDARY="${FAR_FIT_BOUNDARY}" \
         CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}" \
         CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}" \
+        SINGLE_BACKGROUND_MODE_VALUE="${SINGLE_BACKGROUND_MODE_VALUE}" \
+        SINGLE_FROZEN_BACKGROUND_JSON_VALUE="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
+        SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" \
+        CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE="${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE}" \
+        CRASHCAR_BUILD_LAST_BG_ARTIFACTS="${CRASHCAR_BUILD_LAST_BG_ARTIFACTS}" \
+        CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}" \
         python3 - "${phase}" "${job}" "${sacct_text}" "${raw_json}" "${detail_json}" <<'PY'
 import json
 import os
@@ -526,6 +583,13 @@ payload = {
     "first3_hl_none_seconds": float(os.environ["FIRST3_HL_NONE_SECONDS"] or 0.0),
     "crashcar_log10_far_threshold": float(os.environ["CRASHCAR_LOG10_FAR_THRESHOLD"]),
     "crashcar_preserve_table_single_far": int(os.environ["CRASHCAR_PRESERVE_TABLE_SINGLE_FAR"]),
+    "crashcar_background_required_seconds": float(os.environ["CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE"]),
+    "crashcar_single_ledger_final_update": os.environ["CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE"],
+    "crashcar_build_last_bg_artifacts": os.environ["CRASHCAR_BUILD_LAST_BG_ARTIFACTS"],
+    "single_background_mode": os.environ["SINGLE_BACKGROUND_MODE_VALUE"],
+    "single_frozen_background_json": os.environ["SINGLE_FROZEN_BACKGROUND_JSON_VALUE"] or None,
+    "single_frozen_background_run_dir": os.environ["SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE"] or None,
+    "single_ledger_patch_summary": str(Path(os.environ["RUN_DIR"]) / "monitor" / "patch_zerolag_single_far_summary.json"),
     "sacct": sacct_text,
     "raw_stream": json.loads(raw_json),
     "detail": json.loads(detail_json),
@@ -634,7 +698,7 @@ submit_job() {
         --cpus-per-task="${SLURM_CPUS_PER_TASK}"
         --gres="${SLURM_GRES}"
         --array="0-$((WORKER_COUNT - 1))"
-        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${SNAPSHOT_INTERVAL}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${BACKGROUND_ACCUMULATION}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${SNAPSHOT_INTERVAL}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
+        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${SNAPSHOT_INTERVAL}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${SNAPSHOT_INTERVAL}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
         --chdir="${RUN_DIR}"
     )
     if [ -n "${SLURM_TIME}" ]; then
@@ -797,6 +861,91 @@ summary = {
 PY
 }
 
+run_single_ledger_final_update() {
+    [ "${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE}" = "1" ] || return 0
+
+    local worker worker_log final_status=0
+    log "running final single ledger update mode=${SINGLE_BACKGROUND_MODE_VALUE} input=${FINAL_SINGLE_INPUT_KIND_VALUE}"
+
+    rm -f \
+        "${RUN_DIR}/single_branch/single_final_far_all.csv" \
+        "${RUN_DIR}/single_branch/single_final_far_latest_candidates.csv" \
+        "${RUN_DIR}/monitor/latest_single_background_status.json" \
+        "${RUN_DIR}/monitor/patch_zerolag_single_far_summary.json"
+
+    for worker in $(seq 0 $((WORKER_COUNT - 1))); do
+        worker_log="${RUN_DIR}/logs/final_single_ledger_worker_${worker}.log"
+        SCRIPT_DIR="${CRASH_SCRIPT_DIR}" \
+        RUN_DIR="${RUN_DIR}" \
+        SINGLE_INPUT_KIND="${FINAL_SINGLE_INPUT_KIND_VALUE}" \
+        SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}" \
+        SINGLE_FROZEN_BACKGROUND_JSON="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
+        SINGLE_FROZEN_BACKGROUND_RUN_DIR="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" \
+        SINGLE_FROZEN_BACKGROUND_ID="${SINGLE_FROZEN_BACKGROUND_ID_VALUE}" \
+        SINGLE_FROZEN_BACKGROUND_SOURCE="${SINGLE_FROZEN_BACKGROUND_SOURCE_VALUE}" \
+        SINGLE_WORKER_ID="${worker}" \
+        SINGLE_WORKER_GROUP="${worker}" \
+        SINGLE_WORKER_COUNT="${WORKER_COUNT}" \
+        MAX_GROUP=$((WORKER_COUNT - 1)) \
+        BANKS_PER_GROUP="${BANKS_PER_WORKER}" \
+        BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
+        FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
+        BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}" \
+        CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}" \
+        WGUO_BANK_STATS_DIR="${WGUO_BANK_STATS_DIR}" \
+        NOISE_BETA="${NOISE_BETA}" \
+        RANK_OFFSET="${RANK_OFFSET}" \
+        DEFAULT_SHAPE_DOF="${DEFAULT_SHAPE_DOF}" \
+        TAIL_LOG10_FAR="${TAIL_LOG_FAR}" \
+        FAR_FIT_BOUNDARY="${FAR_FIT_BOUNDARY}" \
+        ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN="${assignment_max_new_windows_per_run:-${ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN:-99}}" \
+            bash "${CRASH_SCRIPT_DIR}/update_single_background_once.sh" "${RUN_DIR}" \
+            > "${worker_log}" 2>&1 || final_status=$?
+    done
+
+    python3 "${CRASH_SCRIPT_DIR}/merge_worker_far_ledgers.py" \
+        --run-dir "${RUN_DIR}" \
+        --worker-count "${WORKER_COUNT}" \
+        --output single_branch/single_final_far_all.csv \
+        --candidate-output single_branch/single_final_far_latest_candidates.csv \
+        --summary monitor/latest_single_background_status.json \
+        --plot-summary monitor/latest_single_plot_summary.json \
+        > "${RUN_DIR}/logs/final_single_ledger_merge.log" \
+        2> "${RUN_DIR}/logs/final_single_ledger_merge.err" || final_status=$?
+
+    if [ "${PATCH_ZEROLAG_SINGLE_FAR_VALUE}" = "1" ]; then
+        local patch_args=(
+            --run-dir "${RUN_DIR}"
+            --ledger single_branch/single_final_far_all.csv
+            --far-column "${PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE}"
+            --summary monitor/patch_zerolag_single_far_summary.json
+            --single-output-mode single-only
+            --clear-existing
+        )
+        if [ "${PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE}" = "1" ]; then
+            patch_args+=(
+                --embed-snr-series
+                --snr-series-manifest "${RUN_DIR}/crashcar_snr_series/manifest.csv"
+            )
+        fi
+        # shellcheck source=/dev/null
+        source /fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/bash_helper_functions.sh
+        PYTHONPATH="${CRASH_RUNTIME_ROOT}/install/lib/python3.10/site-packages:${PYTHONPATH:-}" \
+            run_spiir_py3 wguo-single-det-py3 python3 \
+            "${CRASH_SCRIPT_DIR}/patch_zerolag_single_far_from_ledger.py" \
+            "${patch_args[@]}" \
+            > "${RUN_DIR}/logs/final_single_patch_zerolag.out" \
+            2> "${RUN_DIR}/logs/final_single_patch_zerolag.err" || final_status=$?
+    fi
+
+    if [ "${final_status}" -ne 0 ]; then
+        log "ERROR final single ledger update failed; see ${RUN_DIR}/logs/final_single_ledger_worker_*.log"
+    else
+        log "final single ledger update completed"
+    fi
+    return "${final_status}"
+}
+
 monitor_job() {
     local job=$1
     while true; do
@@ -823,22 +972,37 @@ monitor_job() {
                 write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
                 exit 4
             fi
-            write_status phase=postprocessing_last_bg3h job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}"
-            log "slurm completed; building final last-3h background artifacts"
-            if postprocess_last_bg3h; then
+            write_status phase=postprocessing_single_ledger job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}"
+            if ! run_single_ledger_final_update; then
                 raw=$(run_summary_json)
                 detail=$(detail_summary_json)
-                write_status phase=completed job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}" last_bg3h_background="${ARTIFACTS}/crashcar_day1_last_bg3h_full_background.json" last_bg3h_plot="${ARTIFACTS}/crashcar_day1_last_bg3h_background.png" run_summary="${ARTIFACTS}/crashcar_run_summary.json" snr_series_archive="${ARTIFACTS}/crashcar_snr_series.tar.gz" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
-                write_final_report completed "${job}" "${sacct_state}" "${raw}" "${detail}"
-                log "completed; report=${REPORT}"
-                exit 0
-            else
-                raw=$(run_summary_json)
-                detail=$(detail_summary_json)
-                write_status phase=failed_postprocess job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}"
+                write_status phase=failed_postprocess job_id="${job}" reason=single_ledger_final_update_failed sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}"
                 write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
                 exit 4
             fi
+            if [ "${CRASHCAR_BUILD_LAST_BG_ARTIFACTS}" = "1" ]; then
+                write_status phase=postprocessing_last_bg3h job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}"
+                log "slurm completed; building final last-3h background artifacts"
+                if ! postprocess_last_bg3h; then
+                    raw=$(run_summary_json)
+                    detail=$(detail_summary_json)
+                    write_status phase=failed_postprocess job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}"
+                    write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
+                    exit 4
+                fi
+            else
+                log "skipping local background artifact build for this stage"
+            fi
+            raw=$(run_summary_json)
+            detail=$(detail_summary_json)
+            if [ "${CRASHCAR_BUILD_LAST_BG_ARTIFACTS}" = "1" ]; then
+                write_status phase=completed job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}" last_bg3h_background="${ARTIFACTS}/crashcar_day1_last_bg3h_full_background.json" last_bg3h_plot="${ARTIFACTS}/crashcar_day1_last_bg3h_background.png" run_summary="${ARTIFACTS}/crashcar_run_summary.json" snr_series_archive="${ARTIFACTS}/crashcar_snr_series.tar.gz" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json" single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}" patch_zerolag_summary="${RUN_DIR}/monitor/patch_zerolag_single_far_summary.json"
+            else
+                write_status phase=completed job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}" snr_series_archive="${ARTIFACTS}/crashcar_snr_series.tar.gz" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json" single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}" patch_zerolag_summary="${RUN_DIR}/monitor/patch_zerolag_single_far_summary.json"
+            fi
+            write_final_report completed "${job}" "${sacct_state}" "${raw}" "${detail}"
+            log "completed; report=${REPORT}"
+            exit 0
         fi
         sleep 300
     done
@@ -868,6 +1032,12 @@ EOF
         tail_FAR="${FAR_FIT_BOUNDARY}" \
         injection_mode="${INJECTION_MODE}" \
         injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" \
+        single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}" \
+        single_frozen_background_json="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
+        single_frozen_background_run_dir="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" \
+        crashcar_single_ledger_final_update="${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE}" \
+        crashcar_build_last_bg_artifacts="${CRASHCAR_BUILD_LAST_BG_ARTIFACTS}" \
+        crashcar_background_required_seconds="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}" \
         injection_bg_start_gps="${INJECTION_BG_START_GPS}" \
         injection_bg_end_gps="${INJECTION_BG_END_GPS}" \
         injection_bg_duration_seconds="${INJECTION_BG_DURATION_SECONDS}" \

@@ -15,6 +15,8 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1]
+CRASHCAR_SCRIPT_DIR = SCRIPT_DIR.parents[1] / "share" / "scripts" / "crashcar"
+CRASHCAR_SINGLEFAR_C = SCRIPT_DIR.parents[1] / "gst" / "cuda" / "cohfar" / "crashcar_singlefar.c"
 
 
 class EngineeringFlowContractTests(unittest.TestCase):
@@ -43,6 +45,55 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("--cohfar-assignfar-input-fname", source)
         self.assertIn("--finalsink-fapupdater-output-fname", source)
         self.assertIn("DO_NOT_USE_AS_BACKGROUND_INJECTION_STATS.txt", source)
+
+    def test_crashcar_launcher_routes_injection_to_frozen_workflow(self) -> None:
+        source = (CRASHCAR_SCRIPT_DIR / "crashcar.sh").read_text()
+        self.assertIn("crashcar.sh \\", source)
+        self.assertIn("crashcar_frozen_injection_workflow.sh", source)
+        self.assertIn("INJECTION_MODE_NORMALIZED", source)
+        self.assertIn('INTERNAL_STAGE=${crashcar_internal_stage:-${CRASHCAR_INTERNAL_STAGE:-0}}', source)
+        self.assertIn('CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh"', source)
+        self.assertIn('CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_controller.sh"', source)
+
+    def test_crashcar_frozen_injection_workflow_uses_lower_data_contract(self) -> None:
+        source = (CRASHCAR_SCRIPT_DIR / "crashcar_frozen_injection_workflow.sh").read_text()
+        for required in [
+            "require_var injection_data_file",
+            "require_var injection_detector_response_file",
+            "require_var injection_start_gps",
+            "require_var injection_duration_hour",
+            "require_var injection_segment_xml",
+            "require_var injection_bg_data_file",
+            "require_var injection_bg_detector_response_file",
+            "require_var injection_bg_start_gps",
+            "require_var injection_bg_duration_hour",
+            "require_var injection_bg_segment_xml",
+        ]:
+            self.assertIn(required, source)
+        self.assertIn("data_file=${injection_bg_data_file}", source)
+        self.assertIn("data_file=${injection_data_file}", source)
+        self.assertIn("detector_response_file=${injection_detector_response_file}", source)
+        self.assertIn("filter_injection_chunk", source)
+        self.assertIn("noninj_stats_loc=${FROZEN_MULTI_DIR}", source)
+        self.assertIn("single_background_mode=frozen", source)
+        self.assertIn("single_frozen_background_json=${SINGLE_BG_JSON}", source)
+        self.assertIn("crashcar_build_last_bg_artifacts=0", source)
+        self.assertIn("INJ_SNR_LOG_FAR=${injection_snr_series_logFAR_threshold:-${INJECTION_SNR_SERIES_LOGFAR_THRESHOLD:-90}}", source)
+        self.assertIn("crashcar_preserve_table_single_far=1", source)
+
+    def test_crashcar_controller_forbids_unfrozen_injection_backgrounds(self) -> None:
+        source = (CRASHCAR_SCRIPT_DIR / "crashcar_controller.sh").read_text()
+        self.assertIn('injection_mode=True requires single_background_mode=frozen', source)
+        self.assertIn("single_background_mode=frozen requires", source)
+        self.assertIn("run_single_ledger_final_update", source)
+        self.assertIn("PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE", source)
+        self.assertIn("skipping local background artifact build for this stage", source)
+
+    def test_crashcar_can_export_full_snr_series_evidence_surface(self) -> None:
+        source = CRASHCAR_SINGLEFAR_C.read_text()
+        self.assertIn("write_all_snr_series", source)
+        self.assertIn("element->snr_series_log10_far_threshold >= 90.0", source)
+        self.assertIn("write_all_snr_series || snr_series_hit_single_far", source)
 
     def test_worker_owns_exactly_one_bank_group(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

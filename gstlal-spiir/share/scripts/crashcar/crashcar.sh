@@ -49,18 +49,42 @@ fi
 
 mkdir -p "${RUN_ROOT}/scripts"
 for script in \
+    crashcar.sh \
     crashcar_controller.sh \
+    crashcar_frozen_injection_workflow.sh \
     crashcar_sbatch.sh \
     crashcar_pipeline.sh \
+    filter_injection_xml_by_gps.py \
     materialize_snr_autocorrelation.py; do
     cp "${SCRIPT_DIR}/${script}" "${RUN_ROOT}/scripts/${script}"
 done
 cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.env"
 chmod +x \
+    "${RUN_ROOT}/scripts/crashcar.sh" \
     "${RUN_ROOT}/scripts/crashcar_controller.sh" \
+    "${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh" \
     "${RUN_ROOT}/scripts/crashcar_sbatch.sh" \
     "${RUN_ROOT}/scripts/crashcar_pipeline.sh" \
+    "${RUN_ROOT}/scripts/filter_injection_xml_by_gps.py" \
     "${RUN_ROOT}/scripts/materialize_snr_autocorrelation.py"
+
+INJECTION_MODE_RAW=${injection_mode:-${INJECTION_MODE:-False}}
+case "$(printf '%s' "${INJECTION_MODE_RAW}" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes|on) INJECTION_MODE_NORMALIZED=True ;;
+    false|0|no|off|"") INJECTION_MODE_NORMALIZED=False ;;
+    *)
+        printf 'crashcar: invalid injection_mode=%s; expected True or False\n' "${INJECTION_MODE_RAW}" >&2
+        exit 2
+        ;;
+esac
+INTERNAL_STAGE=${crashcar_internal_stage:-${CRASHCAR_INTERNAL_STAGE:-0}}
+if [ "${INJECTION_MODE_NORMALIZED}" = "True" ] && [ "${INTERNAL_STAGE}" != "1" ]; then
+    CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh"
+    CONTROLLER_NAME="frozen injection workflow"
+else
+    CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_controller.sh"
+    CONTROLLER_NAME="single-stage controller"
+fi
 
 cat > "${RUN_ROOT}/README.crashcar_launch.txt" <<EOF
 Crashcar launch root
@@ -73,7 +97,10 @@ Start command:
   bash scripts/crashcar.sh
 
 Controller command used inside this staged run:
-  SOURCE_ROOT=${SOURCE_ROOT_VALUE} CRASHCAR_CONFIG_FILE=${RUN_ROOT}/scripts/crashcar.env bash ${RUN_ROOT}/scripts/crashcar_controller.sh
+  SOURCE_ROOT=${SOURCE_ROOT_VALUE} CRASHCAR_CONFIG_FILE=${RUN_ROOT}/scripts/crashcar.env bash ${CONTROLLER_SCRIPT}
+
+Controller type:
+  ${CONTROLLER_NAME}
 
 Config snapshot:
   ${RUN_ROOT}/scripts/crashcar.env
@@ -88,11 +115,11 @@ if [ "${crashcar_dry_run:-${CRASHCAR_DRY_RUN:-0}}" = "1" ]; then
     printf '  SOURCE_ROOT=%q CRASHCAR_CONFIG_FILE=%q bash %q\n' \
         "${SOURCE_ROOT_VALUE}" \
         "${RUN_ROOT}/scripts/crashcar.env" \
-        "${RUN_ROOT}/scripts/crashcar_controller.sh"
+        "${CONTROLLER_SCRIPT}"
     exit 0
 fi
 
 SOURCE_ROOT="${SOURCE_ROOT_VALUE}" \
     CRASHCAR_SOURCE_CONFIG_FILE="${CONFIG_FILE}" \
     CRASHCAR_CONFIG_FILE="${RUN_ROOT}/scripts/crashcar.env" \
-    bash "${RUN_ROOT}/scripts/crashcar_controller.sh"
+    bash "${CONTROLLER_SCRIPT}"
