@@ -19,4 +19,4 @@ if [ -f "${CONFIG_FILE}" ]; then
 fi
 
 ROOT_VALUE=${root:-${ROOT:-${source_root:-${SOURCE_ROOT:-"${REPO_ROOT}"}}}}
-SOURCE_ROOT="${ROOT_VALUE}" exec "${LAUNCHER}" "${CONFIG_FILE}"
+ROOT="${ROOT_VALUE}" exec "${LAUNCHER}" "${CONFIG_FILE}"

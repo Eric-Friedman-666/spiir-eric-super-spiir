@@ -69,7 +69,6 @@ class EngineeringFlowContractTests(unittest.TestCase):
             config.write_text(
                 "\n".join([
                     f"root={SCRIPT_DIR.parents[1]}",
-                    f"source_root={SCRIPT_DIR.parents[1]}",
                     f"run_root={run_root}",
                     "crashcar_dry_run=1",
                     "injection_mode=False",
@@ -96,6 +95,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
             self.assertNotIn("crashcar_frozen_injection_workflow.sh", result.stdout)
             self.assertIn("data_file=/normal/o3/frame.cache", staged_config)
             self.assertIn("detector_response_file=/normal/o3/detrsp.xml", staged_config)
+            self.assertNotIn("source_root=", staged_config)
 
     def test_crashcar_frozen_injection_workflow_uses_lower_data_contract(self) -> None:
         source = (CRASHCAR_SCRIPT_DIR / "crashcar_frozen_injection_workflow.sh").read_text()
@@ -121,6 +121,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("SLURM_PARTITION_VALUE=", source)
         self.assertIn("slurm_partition=${SLURM_PARTITION_VALUE}", source)
         self.assertIn("slurm_time=${SLURM_TIME_VALUE}", source)
+        self.assertNotIn('"source_root=${SOURCE_ROOT_VALUE}"', source)
         self.assertIn("duration=${BG_DURATION_SECONDS}", source)
         self.assertIn("background_accumulation=${BG_ACCUM_SECONDS}", source)
         self.assertIn("filter_injection_chunk", source)

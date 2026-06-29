@@ -21,9 +21,9 @@ set -a
 source "${CONFIG_FILE}"
 set +a
 
-SOURCE_ROOT=${source_root:-${SOURCE_ROOT:-${root:-${ROOT:-}}}}
+SOURCE_ROOT=${root:-${ROOT:-${source_root:-${SOURCE_ROOT:-}}}}
 if [ -z "${SOURCE_ROOT}" ]; then
-    printf 'crashcar_controller: source_root was not provided by launcher or config\n' >&2
+    printf 'crashcar_controller: root was not provided by launcher or config\n' >&2
     exit 2
 fi
 CRASH_RUNTIME_ROOT=${crash_runtime_root:-${CRASH_RUNTIME_ROOT:-"${ROOT}/crashcar_runtime"}}
@@ -430,7 +430,7 @@ check_source() {
         printf 'github_remote=%s\n' "$(git -C "${SOURCE_ROOT}" remote get-url "${GITHUB_REMOTE}")"
         printf 'github_branch=%s\n' "${GITHUB_BRANCH}"
         printf 'github_head=%s\n' "${remote_head}"
-        printf 'source_root=%s\n' "${SOURCE_ROOT}"
+        printf 'root=%s\n' "${SOURCE_ROOT}"
         printf 'source_head=%s\n' "${source_head}"
         printf 'runtime_install_symlink=%s/install\n' "${CRASH_RUNTIME_ROOT}"
     } > "${ROOT}/provenance/source_and_runtime.env"

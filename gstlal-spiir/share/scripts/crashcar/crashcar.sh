@@ -39,7 +39,7 @@ RUN_PARENT=${run_parent:-${RUN_PARENT:-"${ROOT_VALUE}/runs"}}
 RUN_ID=${run_id:-${RUN_ID:-${run_slug:-${RUN_SLUG:-crashcar}}}}
 RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
 RUN_ROOT=${run_root:-${RUN_ROOT:-"${RUN_PARENT}/${RUN_ID}/${RUN_TIMESTAMP}"}}
-SOURCE_ROOT_VALUE=${source_root:-${SOURCE_ROOT:-"${ROOT_VALUE}"}}
+SOURCE_ROOT_VALUE=${ROOT_VALUE}
 
 if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}}" != "1" ]; then
     printf 'crashcar: run root already exists: %s\n' "${RUN_ROOT}" >&2
@@ -97,7 +97,7 @@ Start command:
   bash scripts/crashcar.sh
 
 Controller command used inside this staged run:
-  SOURCE_ROOT=${SOURCE_ROOT_VALUE} CRASHCAR_CONFIG_FILE=${RUN_ROOT}/scripts/crashcar.env bash ${CONTROLLER_SCRIPT}
+  ROOT=${SOURCE_ROOT_VALUE} CRASHCAR_CONFIG_FILE=${RUN_ROOT}/scripts/crashcar.env bash ${CONTROLLER_SCRIPT}
 
 Controller type:
   ${CONTROLLER_NAME}
@@ -112,14 +112,14 @@ printf 'crashcar: config snapshot %s\n' "${RUN_ROOT}/scripts/crashcar.env"
 if [ "${crashcar_dry_run:-${CRASHCAR_DRY_RUN:-0}}" = "1" ]; then
     printf 'crashcar: dry run requested; not starting controller or submitting Slurm\n'
     printf 'crashcar: controller command would be:\n'
-    printf '  SOURCE_ROOT=%q CRASHCAR_CONFIG_FILE=%q bash %q\n' \
+    printf '  ROOT=%q CRASHCAR_CONFIG_FILE=%q bash %q\n' \
         "${SOURCE_ROOT_VALUE}" \
         "${RUN_ROOT}/scripts/crashcar.env" \
         "${CONTROLLER_SCRIPT}"
     exit 0
 fi
 
-SOURCE_ROOT="${SOURCE_ROOT_VALUE}" \
+ROOT="${SOURCE_ROOT_VALUE}" \
     CRASHCAR_SOURCE_CONFIG_FILE="${CONFIG_FILE}" \
     CRASHCAR_CONFIG_FILE="${RUN_ROOT}/scripts/crashcar.env" \
     bash "${CONTROLLER_SCRIPT}"

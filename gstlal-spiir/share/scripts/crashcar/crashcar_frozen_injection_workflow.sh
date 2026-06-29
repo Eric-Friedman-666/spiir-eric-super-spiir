@@ -108,7 +108,7 @@ run_stage() {
     local config=$1
     local label=$2
     log "starting ${label} with config ${config}"
-    SOURCE_ROOT="${SOURCE_ROOT_VALUE}" bash "${SCRIPT_DIR}/crashcar.sh" "${config}"
+    ROOT="${SOURCE_ROOT_VALUE}" bash "${SCRIPT_DIR}/crashcar.sh" "${config}"
     local stage_root
     stage_root=$(awk -F= '$1=="run_root"{print $2}' "${config}" | tail -n 1)
     local phase
@@ -163,9 +163,9 @@ set -a
 source "${CONFIG_FILE}"
 set +a
 
-SOURCE_ROOT_VALUE=${source_root:-${SOURCE_ROOT:-${root:-}}}
+SOURCE_ROOT_VALUE=${root:-${ROOT:-${source_root:-${SOURCE_ROOT:-}}}}
 if [ -z "${SOURCE_ROOT_VALUE}" ]; then
-    printf 'crashcar_frozen_injection_workflow: root/source_root required\n' >&2
+    printf 'crashcar_frozen_injection_workflow: root required\n' >&2
     exit 2
 fi
 
@@ -253,7 +253,6 @@ write_status \
 
 write_env_file "${BG_CONFIG}" \
     "root=${SOURCE_ROOT_VALUE}" \
-    "source_root=${SOURCE_ROOT_VALUE}" \
     "run_root=${BG_RUN_ROOT}" \
     "run_id=${RUN_ID}_bg_noinj" \
     "crashcar_internal_stage=1" \
@@ -323,7 +322,6 @@ while [ "${chunk_start}" -lt "${INJ_END}" ]; do
 
     write_env_file "${chunk_config}" \
         "root=${SOURCE_ROOT_VALUE}" \
-        "source_root=${SOURCE_ROOT_VALUE}" \
         "run_root=${chunk_root}" \
         "run_id=${RUN_ID}_${chunk_tag}" \
         "crashcar_internal_stage=1" \
