@@ -1387,7 +1387,26 @@ static void crashcar_single_output_policy_init(void) {
     const char *schedule = g_getenv("CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE");
     if (!schedule || !schedule[0]) schedule = g_getenv("SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE");
     if (!schedule || !schedule[0]) schedule = g_getenv("SINGLE_OUTPUT_DETECTOR_SCHEDULE");
-    if (!schedule || !schedule[0]) return;
+    gchar *schedule_from_file = NULL;
+    if (!schedule || !schedule[0]) {
+        const char *schedule_file =
+          g_getenv("CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE");
+        if (!schedule_file || !schedule_file[0]) {
+            schedule_file = g_getenv("SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE");
+        }
+        if (schedule_file && schedule_file[0]) {
+            gsize length = 0;
+            if (g_file_get_contents(schedule_file, &schedule_from_file,
+                                    &length, NULL)) {
+                g_strstrip(schedule_from_file);
+                if (schedule_from_file[0]) schedule = schedule_from_file;
+            }
+        }
+    }
+    if (!schedule || !schedule[0]) {
+        g_free(schedule_from_file);
+        return;
+    }
 
     crashcar_single_output_windows =
       g_array_new(FALSE, FALSE, sizeof(CrashcarSingleOutputWindow));
@@ -1428,6 +1447,7 @@ static void crashcar_single_output_policy_init(void) {
     }
     g_strfreev(items);
     g_free(copy);
+    g_free(schedule_from_file);
 }
 
 static gboolean crashcar_single_output_mode_is(const char *value) {
