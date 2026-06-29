@@ -544,7 +544,7 @@ def active_at(midpoint):
             if seg_start <= midpoint < seg_end:
                 out.append(ifo[0])
                 break
-    return "".join(out)
+    return "+".join(out)
 
 def fmt(value):
     if abs(value - round(value)) < 1.0e-6:
@@ -560,7 +560,7 @@ for left, right in zip(points, points[1:]):
         windows[-1] = (windows[-1][0], right, mask)
     else:
         windows.append((left, right, mask))
-print(",".join(f"{fmt(left)}:{fmt(right)}:{mask}" for left, right, mask in windows))
+print(";".join(f"{fmt(left)}:{fmt(right)}:{mask}" for left, right, mask in windows))
 PY
 )
     fi

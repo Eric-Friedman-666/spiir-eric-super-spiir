@@ -156,6 +156,8 @@ def _parse_ifo_mask(text: object) -> set[str]:
         tokens = [item.strip() for item in raw.split(",") if item.strip()]
     elif raw in ("HL", "LH"):
         tokens = list(raw)
+    elif raw and all(ch in "HLVK" for ch in raw):
+        tokens = list(raw)
     else:
         tokens = [raw]
 
