@@ -202,6 +202,9 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn('export GST_DEBUG="${GST_DEBUG:-}"', source)
         self.assertIn('sbatch_args+=(--partition="${SLURM_PARTITION}")', source)
         self.assertIn("skipping local background artifact build for this stage", source)
+        self.assertIn('mkdir -p "${ROOT}/bin"', source)
+        self.assertIn('cp "${SOURCE_ROOT}/gstlal-spiir/bin/gstlal_inspiral_postcohspiir_online"', source)
+        self.assertIn('chmod +x "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"', source)
 
     def test_crashcar_pipeline_marks_injection_stats_as_non_background(self) -> None:
         source = (CRASHCAR_SCRIPT_DIR / "crashcar_pipeline.sh").read_text()

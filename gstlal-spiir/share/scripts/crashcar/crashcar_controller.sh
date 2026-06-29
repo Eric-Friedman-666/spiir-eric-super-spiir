@@ -424,6 +424,10 @@ check_source() {
         exit 2
     fi
     printf '%s\n' "${remote_head}" > "${ROOT}/provenance/github_${GITHUB_BRANCH}_head.txt"
+    mkdir -p "${ROOT}/bin"
+    cp "${SOURCE_ROOT}/gstlal-spiir/bin/gstlal_inspiral_postcohspiir_online" \
+        "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"
+    chmod +x "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"
     rm -f "${CRASH_RUNTIME_ROOT}/install"
     ln -s "${SOURCE_ROOT}/install_local" "${CRASH_RUNTIME_ROOT}/install"
     {
