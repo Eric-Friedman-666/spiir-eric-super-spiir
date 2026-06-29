@@ -23,7 +23,10 @@ map=${WGUO_O3A_DETRSP_MAP:-/fred/oz016/wguo/odds_ratio/O3a/chunk14/multi_det-BNS
 cache=${WGUO_O3A_FRAME_CACHE:-/fred/oz016/sunil/run_utils/frames_chache/frame_O3a.cache}
 start=${WGUO_O3A_START_BANK:-0}
 bpj=${WGUO_O3A_BANKS_PER_GROUP:-8}
-snapshot_interval=${WGUO_O3A_SNAPSHOT_INTERVAL:-3600}
+zerolag_snapshot_interval=${ZEROLAG_SNAPSHOT_INTERVAL_SECONDS:-${WGUO_O3A_SNAPSHOT_INTERVAL:-3600}}
+background_update_interval=${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS:-${BACKGROUND_UPDATE_TRIGGER_SECONDS:-${CRASHCAR_SNAPSHOT_INTERVAL_SECONDS:-${zerolag_snapshot_interval}}}}
+assignfar_refresh_interval=${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS:-${background_update_interval}}
+fapupdater_interval=${FINALSINK_FAPUPDATER_INTERVAL_SECONDS:-${background_update_interval}}
 collect_walltime=${WGUO_O3A_COLLECT_WALLTIME:-10800,10800,10800}
 if [[ "${collect_walltime}" != *,* ]]; then
     collect_walltime="${BACKGROUND_ACCUMULATION_SECONDS:-10800},${BACKGROUND_ACCUMULATION_SECONDS:-10800},${BACKGROUND_ACCUMULATION_SECONDS:-10800}"
@@ -56,8 +59,8 @@ export CRASHCAR_MIN_SNR=${CRASHCAR_MIN_SNR:-4.0}
 export BACKGROUND_ACCUMULATION_SECONDS=${BACKGROUND_ACCUMULATION_SECONDS:-10800}
 export FORMAL_BACKGROUND_ACCUMULATION_SECONDS=${FORMAL_BACKGROUND_ACCUMULATION_SECONDS:-10800}
 export CRASHCAR_BACKGROUND_REQUIRED_SECONDS=${CRASHCAR_BACKGROUND_REQUIRED_SECONDS:-10800}
-export BACKGROUND_UPDATE_TRIGGER_SECONDS=${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}
-export CRASHCAR_SNAPSHOT_INTERVAL_SECONDS=${CRASHCAR_SNAPSHOT_INTERVAL_SECONDS:-3600}
+export BACKGROUND_UPDATE_TRIGGER_SECONDS=${BACKGROUND_UPDATE_TRIGGER_SECONDS:-${background_update_interval}}
+export CRASHCAR_SNAPSHOT_INTERVAL_SECONDS=${CRASHCAR_SNAPSHOT_INTERVAL_SECONDS:-${zerolag_snapshot_interval}}
 export CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME=${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME:-}
 
 macrofarinput=${noninj_stats_loc}/${jobno}/${jobno}_marginalized_stats_2w.xml.gz,${noninj_stats_loc}/${jobno}/${jobno}_marginalized_stats_1d.xml.gz,${noninj_stats_loc}/${jobno}/${jobno}_marginalized_stats_2h.xml.gz
@@ -108,8 +111,8 @@ cmd+=(
   --check-time-stamp
   --finalsink-output-prefix "${jobno}/${jobno}_zerolag"
   --finalsink-single-trigger-stream "${jobno}/${jobno}_single_triggers.csv"
-  --finalsink-snapshot-interval "${snapshot_interval}"
-  --cohfar-accumbackground-snapshot-interval "${snapshot_interval}"
+  --finalsink-snapshot-interval "${zerolag_snapshot_interval}"
+  --cohfar-accumbackground-snapshot-interval "${background_update_interval}"
 )
 
 for bank in $(seq -f "%04g" $((start + bpj * i)) $((start + bpj * (i + 1) - 1))); do
@@ -119,8 +122,8 @@ done
 cmd+=(
   --cohfar-assignfar-input-fname "${macrofarinput}"
   --cohfar-assignfar-silent-time 0
-  --cohfar-assignfar-refresh-interval "${snapshot_interval}"
-  --finalsink-fapupdater-interval "${snapshot_interval}"
+  --cohfar-assignfar-refresh-interval "${assignfar_refresh_interval}"
+  --finalsink-fapupdater-interval "${fapupdater_interval}"
   --finalsink-cluster-window 1
   --finalsink-fapupdater-collect-walltime "${collect_walltime}"
   --finalsink-far-factor "${far_factor}"
