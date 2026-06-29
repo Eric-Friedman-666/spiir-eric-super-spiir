@@ -930,6 +930,15 @@ run_single_ledger_final_update() {
                 --snr-series-manifest "${RUN_DIR}/crashcar_snr_series/manifest.csv"
             )
         fi
+        export GST_DEBUG="${GST_DEBUG:-}"
+        export X509_USER_PROXY="${X509_USER_PROXY:-}"
+        export X509_USER_KEY="${X509_USER_KEY:-}"
+        export X509_USER_CERT="${X509_USER_CERT:-}"
+        export KRB5_KTNAME="${KRB5_KTNAME:-}"
+        export PYTHONPATH="${PYTHONPATH:-}"
+        export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}"
+        export GST_PLUGIN_PATH="${GST_PLUGIN_PATH:-}"
+        export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
         # shellcheck source=/dev/null
         source /fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/bash_helper_functions.sh
         PYTHONPATH="${CRASH_RUNTIME_ROOT}/install/lib/python3.10/site-packages:${PYTHONPATH:-}" \

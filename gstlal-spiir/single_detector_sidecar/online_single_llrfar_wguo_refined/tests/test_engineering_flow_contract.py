@@ -91,6 +91,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("single_background_mode=frozen requires", source)
         self.assertIn("run_single_ledger_final_update", source)
         self.assertIn("PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE", source)
+        self.assertIn('export GST_DEBUG="${GST_DEBUG:-}"', source)
         self.assertIn("skipping local background artifact build for this stage", source)
 
     def test_crashcar_can_export_full_snr_series_evidence_surface(self) -> None:
