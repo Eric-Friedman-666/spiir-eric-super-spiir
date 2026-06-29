@@ -69,14 +69,25 @@ class EngineeringFlowContractTests(unittest.TestCase):
         inject_pos = source.index("#inject")
         self.assertLess(common_pos, noninject_pos)
         self.assertLess(noninject_pos, inject_pos)
-        self.assertIn("data_file=", source[:common_pos])
-        self.assertIn("detector_response_file=", source[:common_pos])
         self.assertIn("bank_file=", source[:common_pos])
-        self.assertIn("injection_bg_start_gps=", source[noninject_pos:inject_pos])
-        self.assertIn("injection_bg_accumulation_hour=", source[noninject_pos:inject_pos])
-        self.assertIn("injection_file=", source[inject_pos:])
-        self.assertIn("injection_chunk_hour=", source[inject_pos:])
+        noninject_block = source[noninject_pos:inject_pos]
+        inject_block = source[inject_pos:]
+        self.assertIn("data_file=", noninject_block)
+        self.assertIn("detector_response_file=", noninject_block)
+        self.assertIn("start_gps=", noninject_block)
+        self.assertIn("duration_hour=", noninject_block)
+        self.assertNotIn("injection_bg_", noninject_block)
+        self.assertIn("injection_bg_start_gps=", inject_block)
+        self.assertIn("injection_bg_accumulation_hour=", inject_block)
+        self.assertIn("injection_file=", inject_block)
+        self.assertIn("injection_chunk_hour=", inject_block)
         self.assertNotIn("Sentinels", source)
+        for line in source.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            self.assertNotEqual(value, "", f"{key} must have an explicit default")
 
     def test_crashcar_launcher_keeps_normal_o3_path_when_injection_mode_false(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
