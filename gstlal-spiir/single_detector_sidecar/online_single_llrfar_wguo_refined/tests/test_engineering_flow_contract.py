@@ -61,18 +61,21 @@ class EngineeringFlowContractTests(unittest.TestCase):
             "require_var injection_data_file",
             "require_var injection_detector_response_file",
             "require_var injection_start_gps",
-            "require_var injection_duration_hour",
             "require_var injection_segment_xml",
             "require_var injection_bg_data_file",
             "require_var injection_bg_detector_response_file",
             "require_var injection_bg_start_gps",
-            "require_var injection_bg_duration_hour",
             "require_var injection_bg_segment_xml",
         ]:
             self.assertIn(required, source)
+        self.assertIn("duration_seconds_from injection_bg_duration_seconds injection_bg_duration_hour", source)
+        self.assertIn("duration_seconds_from injection_duration_seconds injection_duration_hour", source)
+        self.assertIn("INJ_CHUNK_SECONDS=${injection_chunk_seconds", source)
         self.assertIn("data_file=${injection_bg_data_file}", source)
         self.assertIn("data_file=${injection_data_file}", source)
         self.assertIn("detector_response_file=${injection_detector_response_file}", source)
+        self.assertIn("duration=${BG_DURATION_SECONDS}", source)
+        self.assertIn("background_accumulation=${BG_ACCUM_SECONDS}", source)
         self.assertIn("filter_injection_chunk", source)
         self.assertIn("noninj_stats_loc=${FROZEN_MULTI_DIR}", source)
         self.assertIn("single_background_mode=frozen", source)
@@ -84,6 +87,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
     def test_crashcar_controller_forbids_unfrozen_injection_backgrounds(self) -> None:
         source = (CRASHCAR_SCRIPT_DIR / "crashcar_controller.sh").read_text()
         self.assertIn('injection_mode=True requires single_background_mode=frozen', source)
+        self.assertIn('injection_bg_duration_seconds or injection_bg_duration_hour required when injection_mode=True', source)
         self.assertIn("single_background_mode=frozen requires", source)
         self.assertIn("run_single_ledger_final_update", source)
         self.assertIn("PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE", source)

@@ -64,6 +64,25 @@ bool_true() {
     esac
 }
 
+duration_seconds_from() {
+    local seconds_name=$1
+    local hours_name=$2
+    local label=$3
+    local seconds=${!seconds_name-}
+    local hours=${!hours_name-}
+    if [ -n "${seconds}" ]; then
+        printf '%s\n' "${seconds}"
+        return 0
+    fi
+    if [ -n "${hours}" ]; then
+        printf '%s\n' "$((hours * 3600))"
+        return 0
+    fi
+    log "ERROR ${label} requires ${seconds_name} or ${hours_name}"
+    write_status phase=failed reason="missing_${label}"
+    exit 2
+}
+
 write_env_file() {
     local output=$1
     shift
@@ -159,12 +178,10 @@ require_var injection_file
 require_var injection_data_file
 require_var injection_detector_response_file
 require_var injection_start_gps
-require_var injection_duration_hour
 require_var injection_segment_xml
 require_var injection_bg_data_file
 require_var injection_bg_detector_response_file
 require_var injection_bg_start_gps
-require_var injection_bg_duration_hour
 require_var injection_bg_segment_xml
 
 require_file "${injection_file}" "injection_file"
@@ -181,9 +198,32 @@ BG_WORKERS=${injection_bg_worker_number:-${INJECTION_BG_WORKER_NUMBER:-1}}
 BG_BANKS_PER_WORKER=${injection_bg_bank_per_worker:-${INJECTION_BG_BANK_PER_WORKER:-${bank_per_worker:-8}}}
 INJ_WORKERS=${injection_worker_number:-${INJECTION_WORKER_NUMBER:-${worker_number:-2}}}
 INJ_BANKS_PER_WORKER=${injection_bank_per_worker:-${INJECTION_BANK_PER_WORKER:-${bank_per_worker:-8}}}
-INJ_CHUNK_HOUR=${injection_chunk_hour:-${INJECTION_CHUNK_HOUR:-1}}
-BG_ACCUM_HOUR=${injection_bg_accumulation_hour:-${BG_accumulation_hour:-${background_accumulation_hour:-${BACKGROUND_ACCUMULATION_HOUR:-${injection_bg_duration_hour}}}}}
-ZL_UPDATE_HOUR=${zerolag_update_hour:-${BG_update_hour:-1}}
+BG_DURATION_SECONDS=$(duration_seconds_from injection_bg_duration_seconds injection_bg_duration_hour injection_bg_duration)
+INJ_TOTAL_SECONDS=$(duration_seconds_from injection_duration_seconds injection_duration_hour injection_duration)
+if [ -n "${injection_chunk_seconds:-${INJECTION_CHUNK_SECONDS:-}}" ]; then
+    INJ_CHUNK_SECONDS=${injection_chunk_seconds:-${INJECTION_CHUNK_SECONDS:-}}
+else
+    INJ_CHUNK_HOUR=${injection_chunk_hour:-${INJECTION_CHUNK_HOUR:-1}}
+    if [ "${INJ_CHUNK_HOUR}" -le 0 ]; then
+        INJ_CHUNK_SECONDS=${INJ_TOTAL_SECONDS}
+    else
+        INJ_CHUNK_SECONDS=$((INJ_CHUNK_HOUR * 3600))
+    fi
+fi
+BG_ACCUM_SECONDS=${injection_bg_accumulation_seconds:-${background_accumulation_seconds:-${BACKGROUND_ACCUMULATION_SECONDS:-}}}
+if [ -z "${BG_ACCUM_SECONDS}" ]; then
+    BG_ACCUM_HOUR=${injection_bg_accumulation_hour:-${BG_accumulation_hour:-${background_accumulation_hour:-${BACKGROUND_ACCUMULATION_HOUR:-}}}}
+    if [ -n "${BG_ACCUM_HOUR}" ]; then
+        BG_ACCUM_SECONDS=$((BG_ACCUM_HOUR * 3600))
+    else
+        BG_ACCUM_SECONDS=${BG_DURATION_SECONDS}
+    fi
+fi
+ZL_UPDATE_SECONDS=${zerolag_update_seconds:-${background_update_seconds:-${BACKGROUND_UPDATE_SECONDS:-}}}
+if [ -z "${ZL_UPDATE_SECONDS}" ]; then
+    ZL_UPDATE_HOUR=${zerolag_update_hour:-${BG_update_hour:-1}}
+    ZL_UPDATE_SECONDS=$((ZL_UPDATE_HOUR * 3600))
+fi
 TAIL_LOG_FAR=${tail_log_FAR:-${TAIL_LOG_FAR:--2.5}}
 SNR_LOG_FAR=${SNR_series_logFAR_threshold:-${snr_series_logFAR_threshold:-${SNR_SERIES_LOG_FAR_THRESHOLD:--4}}}
 INJ_SNR_LOG_FAR=${injection_snr_series_logFAR_threshold:-${INJECTION_SNR_SERIES_LOGFAR_THRESHOLD:-90}}
@@ -216,13 +256,13 @@ write_env_file "${BG_CONFIG}" \
     "data_file=${injection_bg_data_file}" \
     "detector_response_file=${injection_bg_detector_response_file}" \
     "start_gps=${injection_bg_start_gps}" \
-    "duration_hour=${injection_bg_duration_hour}" \
+    "duration=${BG_DURATION_SECONDS}" \
     "segment_xml=${injection_bg_segment_xml}" \
     "worker_number=${BG_WORKERS}" \
     "bank_per_worker=${BG_BANKS_PER_WORKER}" \
     "bank_file=${O3_BANK_DIR}" \
-    "BG_accumulation_hour=${BG_ACCUM_HOUR}" \
-    "zerolag_update_hour=${ZL_UPDATE_HOUR}" \
+    "background_accumulation=${BG_ACCUM_SECONDS}" \
+    "background_update=${ZL_UPDATE_SECONDS}" \
     "tail_log_FAR=${TAIL_LOG_FAR}" \
     "SNR_series_logFAR_threshold=${SNR_LOG_FAR}" \
     "injection_mode=False" \
@@ -251,14 +291,8 @@ write_status \
     frozen_multi_stats_dir="${FROZEN_MULTI_DIR}" \
     injection_workers="${INJ_WORKERS}"
 
-INJ_TOTAL_SECONDS=$((injection_duration_hour * 3600))
 INJ_START=${injection_start_gps}
 INJ_END=$((INJ_START + INJ_TOTAL_SECONDS))
-if [ "${INJ_CHUNK_HOUR}" -le 0 ]; then
-    INJ_CHUNK_SECONDS=${INJ_TOTAL_SECONDS}
-else
-    INJ_CHUNK_SECONDS=$((INJ_CHUNK_HOUR * 3600))
-fi
 mkdir -p "${INJ_ROOT}/chunks"
 
 chunk_index=0
@@ -292,8 +326,8 @@ while [ "${chunk_start}" -lt "${INJ_END}" ]; do
         "worker_number=${INJ_WORKERS}" \
         "bank_per_worker=${INJ_BANKS_PER_WORKER}" \
         "bank_file=${O3_BANK_DIR}" \
-        "BG_accumulation_hour=${BG_ACCUM_HOUR}" \
-        "zerolag_update_hour=${ZL_UPDATE_HOUR}" \
+        "background_accumulation=${BG_ACCUM_SECONDS}" \
+        "background_update=${ZL_UPDATE_SECONDS}" \
         "tail_log_FAR=${TAIL_LOG_FAR}" \
         "SNR_series_logFAR_threshold=${INJ_SNR_LOG_FAR}" \
         "injection_mode=True" \
@@ -301,7 +335,7 @@ while [ "${chunk_start}" -lt "${INJ_END}" ]; do
         "injection_bg_data_file=${injection_bg_data_file}" \
         "injection_bg_detector_response_file=${injection_bg_detector_response_file}" \
         "injection_bg_start_gps=${injection_bg_start_gps}" \
-        "injection_bg_duration_hour=${injection_bg_duration_hour}" \
+        "injection_bg_duration_seconds=${BG_DURATION_SECONDS}" \
         "injection_bg_segment_xml=${injection_bg_segment_xml}" \
         "noninj_stats_loc=${FROZEN_MULTI_DIR}" \
         "single_background_mode=frozen" \

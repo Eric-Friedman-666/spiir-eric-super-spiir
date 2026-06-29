@@ -150,8 +150,8 @@ INJECTION_BG_DATA_FILE=${injection_bg_data_file:-}
 INJECTION_BG_DETRSP_MAP=${injection_bg_detector_response_file:-}
 INJECTION_BG_START_GPS=${injection_bg_start_gps:-}
 INJECTION_BG_DURATION_HOUR=${injection_bg_duration_hour:-}
+INJECTION_BG_DURATION_SECONDS=${injection_bg_duration_seconds:-}
 INJECTION_BG_SEGMENT_XML=${injection_bg_segment_xml:-}
-INJECTION_BG_DURATION_SECONDS=
 INJECTION_BG_END_GPS=
 INJECTION_PIPELINE_MODE=none
 if [ "${INJECTION_MODE}" = "True" ]; then
@@ -159,9 +159,11 @@ if [ "${INJECTION_MODE}" = "True" ]; then
     : "${INJECTION_BG_DATA_FILE:?injection_bg_data_file required when injection_mode=True}"
     : "${INJECTION_BG_DETRSP_MAP:?injection_bg_detector_response_file required when injection_mode=True}"
     : "${INJECTION_BG_START_GPS:?injection_bg_start_gps required when injection_mode=True}"
-    : "${INJECTION_BG_DURATION_HOUR:?injection_bg_duration_hour required when injection_mode=True}"
     : "${INJECTION_BG_SEGMENT_XML:?injection_bg_segment_xml required when injection_mode=True}"
-    INJECTION_BG_DURATION_SECONDS=$((INJECTION_BG_DURATION_HOUR * 3600))
+    if [ -z "${INJECTION_BG_DURATION_SECONDS}" ]; then
+        : "${INJECTION_BG_DURATION_HOUR:?injection_bg_duration_seconds or injection_bg_duration_hour required when injection_mode=True}"
+        INJECTION_BG_DURATION_SECONDS=$((INJECTION_BG_DURATION_HOUR * 3600))
+    fi
     INJECTION_BG_END_GPS=$((INJECTION_BG_START_GPS + INJECTION_BG_DURATION_SECONDS))
     INJECTION_PIPELINE_MODE=blind
 fi
