@@ -1005,6 +1005,7 @@ run_single_ledger_final_update() {
             --far-column "${PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE}"
             --summary monitor/patch_zerolag_single_far_summary.json
             --single-output-mode single-only
+            --active-ifo-schedule "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}"
             --clear-existing
         )
         if [ "${PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE}" = "1" ]; then
