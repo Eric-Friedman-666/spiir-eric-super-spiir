@@ -534,6 +534,8 @@ def parse_command_line():
         " set the online data option for online data service to be activated.")
 
     options, filenames = parser.parse_args()
+    if not hasattr(options, "injections"):
+        options.injections = None
 
     if options.reference_psd is None and not options.track_psd:
         raise ValueError(

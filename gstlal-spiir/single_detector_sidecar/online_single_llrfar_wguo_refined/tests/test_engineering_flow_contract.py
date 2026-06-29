@@ -17,6 +17,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parents[1]
 CRASHCAR_SCRIPT_DIR = SCRIPT_DIR.parents[1] / "share" / "scripts" / "crashcar"
 CRASHCAR_SINGLEFAR_C = SCRIPT_DIR.parents[1] / "gst" / "cuda" / "cohfar" / "crashcar_singlefar.c"
+POSTCOHSPIIR_ONLINE = SCRIPT_DIR.parents[1] / "bin" / "gstlal_inspiral_postcohspiir_online"
 
 
 class EngineeringFlowContractTests(unittest.TestCase):
@@ -43,8 +44,13 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("O3A_BNS_PIPELINE_ERROR missing external multi background stats", source)
         self.assertIn("external multi background points inside current run", source)
         self.assertIn("--cohfar-assignfar-input-fname", source)
+
+    def test_postcohspiir_blind_injections_parser_has_py3_guard(self) -> None:
+        source = POSTCOHSPIIR_ONLINE.read_text()
+        self.assertIn('"--blind-injections"', source)
+        self.assertIn('if not hasattr(options, "injections"):', source)
+        self.assertIn("options.injections = None", source)
         self.assertIn("--finalsink-fapupdater-output-fname", source)
-        self.assertIn("DO_NOT_USE_AS_BACKGROUND_INJECTION_STATS.txt", source)
 
     def test_crashcar_launcher_routes_injection_to_frozen_workflow(self) -> None:
         source = (CRASHCAR_SCRIPT_DIR / "crashcar.sh").read_text()
@@ -54,6 +60,42 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn('INTERNAL_STAGE=${crashcar_internal_stage:-${CRASHCAR_INTERNAL_STAGE:-0}}', source)
         self.assertIn('CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh"', source)
         self.assertIn('CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_controller.sh"', source)
+
+    def test_crashcar_launcher_keeps_normal_o3_path_when_injection_mode_false(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            run_root = tmp_path / "normal_o3_run"
+            config = tmp_path / "normal_o3.env"
+            config.write_text(
+                "\n".join([
+                    f"root={SCRIPT_DIR.parents[1]}",
+                    f"source_root={SCRIPT_DIR.parents[1]}",
+                    f"run_root={run_root}",
+                    "crashcar_dry_run=1",
+                    "injection_mode=False",
+                    "data_file=/normal/o3/frame.cache",
+                    "detector_response_file=/normal/o3/detrsp.xml",
+                    "start_gps=1246886767",
+                    "duration=3600",
+                    "segment_xml=/normal/o3/segments.xml",
+                    "injection_data_file=/must/not/control/normal/mode.cache",
+                    "injection_detector_response_file=/must/not/control/normal/mode_detrsp.xml",
+                ]) + "\n"
+            )
+            result = subprocess.run(
+                ["bash", str(CRASHCAR_SCRIPT_DIR / "crashcar.sh"), str(config)],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            readme = (run_root / "README.crashcar_launch.txt").read_text()
+            staged_config = (run_root / "scripts" / "crashcar.env").read_text()
+            self.assertIn("single-stage controller", readme)
+            self.assertIn("crashcar_controller.sh", result.stdout)
+            self.assertNotIn("crashcar_frozen_injection_workflow.sh", result.stdout)
+            self.assertIn("data_file=/normal/o3/frame.cache", staged_config)
+            self.assertIn("detector_response_file=/normal/o3/detrsp.xml", staged_config)
 
     def test_crashcar_frozen_injection_workflow_uses_lower_data_contract(self) -> None:
         source = (CRASHCAR_SCRIPT_DIR / "crashcar_frozen_injection_workflow.sh").read_text()
@@ -74,6 +116,8 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("data_file=${injection_bg_data_file}", source)
         self.assertIn("data_file=${injection_data_file}", source)
         self.assertIn("detector_response_file=${injection_detector_response_file}", source)
+        self.assertNotIn("data_file=${data_file", source)
+        self.assertNotIn("detector_response_file=${detector_response_file", source)
         self.assertIn("duration=${BG_DURATION_SECONDS}", source)
         self.assertIn("background_accumulation=${BG_ACCUM_SECONDS}", source)
         self.assertIn("filter_injection_chunk", source)
@@ -94,6 +138,11 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn('export GST_DEBUG="${GST_DEBUG:-}"', source)
         self.assertIn('sbatch_args+=(--partition="${SLURM_PARTITION}")', source)
         self.assertIn("skipping local background artifact build for this stage", source)
+
+    def test_crashcar_pipeline_marks_injection_stats_as_non_background(self) -> None:
+        source = (CRASHCAR_SCRIPT_DIR / "crashcar_pipeline.sh").read_text()
+        self.assertIn("DO_NOT_USE_AS_BACKGROUND_INJECTION_STATS.txt", source)
+        self.assertIn("Do not use local accumulated backgrounds from this injection foreground", source)
 
     def test_crashcar_can_export_full_snr_series_evidence_surface(self) -> None:
         source = CRASHCAR_SINGLEFAR_C.read_text()
