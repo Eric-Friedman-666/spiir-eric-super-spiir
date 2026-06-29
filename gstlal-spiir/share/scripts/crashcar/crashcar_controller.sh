@@ -222,6 +222,8 @@ FIRST3_H_ONLY_SECONDS=${first3_h_only_seconds:-${FIRST3_H_ONLY_SECONDS:-0}}
 FIRST3_L_ONLY_SECONDS=${first3_l_only_seconds:-${FIRST3_L_ONLY_SECONDS:-0}}
 FIRST3_HL_SECONDS=${first3_hl_seconds:-${FIRST3_HL_SECONDS:-0}}
 FIRST3_HL_NONE_SECONDS=${first3_hl_none_seconds:-${FIRST3_HL_NONE_SECONDS:-0}}
+SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE=${single_output_active_ifo_schedule:-${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE:-}}
+SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE=${single_output_active_ifo_schedule_file:-${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE:-"${ARTIFACTS}/single_output_active_ifo_schedule.txt"}}
 
 mkdir -p "${RUN_DIR}/logs" "${RUN_DIR}/monitor" "${CONTROLLER_DIR}" "${ARTIFACTS}" "${CRASH_RUNTIME_ROOT}" "${ROOT}/provenance"
 
@@ -506,9 +508,69 @@ validate_inputs() {
         > "${CONTROLLER_DIR}/dump_segment_livetime_csv.log" \
         2>&1
     [ -s "${LIVETIME_CSV}" ] || { log "ERROR livetime CSV not created"; write_status phase=failed reason=livetime_csv_missing; exit 2; }
+    if [ -z "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}" ]; then
+        SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE=$(python3 - "${LIVETIME_CSV}" "${START_GPS}" "${END_GPS}" <<'PY'
+import csv
+import sys
+
+livetime_csv, start_text, end_text = sys.argv[1:4]
+start = float(start_text)
+end = float(end_text)
+segments = {"H1": [], "L1": [], "V1": [], "K1": []}
+with open(livetime_csv, newline="") as handle:
+    for row in csv.DictReader(handle):
+        ifo = (row.get("ifo") or "").strip()
+        if ifo not in segments:
+            continue
+        try:
+            seg_start = max(start, float(row["start"]))
+            seg_end = min(end, float(row["end"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if seg_end > seg_start:
+            segments[ifo].append((seg_start, seg_end))
+
+breaks = {start, end}
+for spans in segments.values():
+    for seg_start, seg_end in spans:
+        breaks.add(seg_start)
+        breaks.add(seg_end)
+points = sorted(value for value in breaks if start <= value <= end)
+
+def active_at(midpoint):
+    out = []
+    for ifo in ("H1", "L1", "V1", "K1"):
+        for seg_start, seg_end in segments[ifo]:
+            if seg_start <= midpoint < seg_end:
+                out.append(ifo[0])
+                break
+    return "".join(out)
+
+def fmt(value):
+    if abs(value - round(value)) < 1.0e-6:
+        return str(int(round(value)))
+    return ("%.9f" % value).rstrip("0").rstrip(".")
+
+windows = []
+for left, right in zip(points, points[1:]):
+    if right <= left:
+        continue
+    mask = active_at((left + right) / 2.0)
+    if windows and windows[-1][2] == mask and abs(windows[-1][1] - left) < 1.0e-6:
+        windows[-1] = (windows[-1][0], right, mask)
+    else:
+        windows.append((left, right, mask))
+print(",".join(f"{fmt(left)}:{fmt(right)}:{mask}" for left, right, mask in windows))
+PY
+)
+    fi
+    printf '%s
+' "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}" > "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}"
+    export SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE
+    export SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE
     bash -n "${SCRIPT_DIR}/crashcar_pipeline.sh"
     bash -n "${SCRIPT_DIR}/crashcar_sbatch.sh"
-    write_status phase=inputs_validated segment_xml="${SEGMENT_XML}" crashcar_segment_livetime_csv="${LIVETIME_CSV}"
+    write_status phase=inputs_validated segment_xml="${SEGMENT_XML}" crashcar_segment_livetime_csv="${LIVETIME_CSV}" single_output_active_ifo_schedule_file="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}" single_output_active_ifo_schedule_length="${#SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}"
 }
 
 export_template_map() {
@@ -718,7 +780,7 @@ submit_job() {
         --cpus-per-task="${SLURM_CPUS_PER_TASK}"
         --gres="${SLURM_GRES}"
         --array="0-$((WORKER_COUNT - 1))"
-        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
+        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}",CRASHCAR_SINGLE_OUTPUT_MODE="single-only",SINGLE_OUTPUT_MODE="single-only",CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}",SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}"
         --chdir="${RUN_DIR}"
     )
     if [ -n "${SLURM_PARTITION}" ]; then
