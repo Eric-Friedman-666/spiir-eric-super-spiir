@@ -228,6 +228,11 @@ TAIL_LOG_FAR=${tail_log_FAR:-${TAIL_LOG_FAR:--2.5}}
 SNR_LOG_FAR=${SNR_series_logFAR_threshold:-${snr_series_logFAR_threshold:-${SNR_SERIES_LOG_FAR_THRESHOLD:--4}}}
 INJ_SNR_LOG_FAR=${injection_snr_series_logFAR_threshold:-${INJECTION_SNR_SERIES_LOGFAR_THRESHOLD:-90}}
 RUN_ID=${run_id:-${RUN_ID:-crashcar_frozen_injection}}
+SLURM_PARTITION_VALUE=${slurm_partition:-${SLURM_PARTITION:-}}
+SLURM_TIME_VALUE=${slurm_time:-${SLURM_TIME:-}}
+SLURM_MEM_VALUE=${slurm_mem:-${SLURM_MEM:-}}
+SLURM_GRES_VALUE=${slurm_gres:-${SLURM_GRES:-}}
+SLURM_CPUS_PER_TASK_VALUE=${slurm_cpus_per_task:-${SLURM_CPUS_PER_TASK:-}}
 
 BG_RUN_ROOT="${ROOT}/bg_noinj"
 INJ_ROOT="${ROOT}/inj_bns"
@@ -253,6 +258,11 @@ write_env_file "${BG_CONFIG}" \
     "run_id=${RUN_ID}_bg_noinj" \
     "crashcar_internal_stage=1" \
     "crashcar_allow_existing_run_root=1" \
+    "slurm_partition=${SLURM_PARTITION_VALUE}" \
+    "slurm_time=${SLURM_TIME_VALUE}" \
+    "slurm_mem=${SLURM_MEM_VALUE}" \
+    "slurm_gres=${SLURM_GRES_VALUE}" \
+    "slurm_cpus_per_task=${SLURM_CPUS_PER_TASK_VALUE}" \
     "data_file=${injection_bg_data_file}" \
     "detector_response_file=${injection_bg_detector_response_file}" \
     "start_gps=${injection_bg_start_gps}" \
@@ -318,6 +328,11 @@ while [ "${chunk_start}" -lt "${INJ_END}" ]; do
         "run_id=${RUN_ID}_${chunk_tag}" \
         "crashcar_internal_stage=1" \
         "crashcar_allow_existing_run_root=1" \
+        "slurm_partition=${SLURM_PARTITION_VALUE}" \
+        "slurm_time=${SLURM_TIME_VALUE}" \
+        "slurm_mem=${SLURM_MEM_VALUE}" \
+        "slurm_gres=${SLURM_GRES_VALUE}" \
+        "slurm_cpus_per_task=${SLURM_CPUS_PER_TASK_VALUE}" \
         "data_file=${injection_data_file}" \
         "detector_response_file=${injection_detector_response_file}" \
         "start_gps=${chunk_start}" \
