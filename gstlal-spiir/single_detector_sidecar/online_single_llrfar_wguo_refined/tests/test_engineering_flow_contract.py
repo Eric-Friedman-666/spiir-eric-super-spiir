@@ -64,12 +64,15 @@ class EngineeringFlowContractTests(unittest.TestCase):
     def test_crashcar_launcher_keeps_normal_o3_path_when_injection_mode_false(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            run_root = tmp_path / "normal_o3_run"
+            save_dir = tmp_path / "saved_runs"
+            run_root = save_dir / "normal_o3" / "20260629T000000Z"
             config = tmp_path / "normal_o3.env"
             config.write_text(
                 "\n".join([
                     f"root={SCRIPT_DIR.parents[1]}",
-                    f"run_root={run_root}",
+                    f"save_dir={save_dir}",
+                    "run_id=normal_o3",
+                    "run_timestamp=20260629T000000Z",
                     "crashcar_dry_run=1",
                     "injection_mode=False",
                     "data_file=/normal/o3/frame.cache",
@@ -91,8 +94,10 @@ class EngineeringFlowContractTests(unittest.TestCase):
             readme = (run_root / "README.crashcar_launch.txt").read_text()
             staged_config = (run_root / "scripts" / "crashcar.env").read_text()
             self.assertIn("single-stage controller", readme)
+            self.assertIn(str(run_root), result.stdout)
             self.assertIn("crashcar_controller.sh", result.stdout)
             self.assertNotIn("crashcar_frozen_injection_workflow.sh", result.stdout)
+            self.assertIn(f"save_dir={save_dir}", staged_config)
             self.assertIn("data_file=/normal/o3/frame.cache", staged_config)
             self.assertIn("detector_response_file=/normal/o3/detrsp.xml", staged_config)
             self.assertNotIn("source_root=", staged_config)

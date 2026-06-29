@@ -11,7 +11,7 @@ Usage:
   bash scripts/crashcar.sh [path/to/crashcar.env]
 
 The config defaults to scripts/crashcar.env.  The launcher creates a fresh
-run root under run_parent/run_id/<UTC timestamp>, copies the fixed crashcar
+run root under save_dir/run_id/<UTC timestamp>, copies the fixed crashcar
 scripts into that root, snapshots the config, then runs
 scripts/crashcar_controller.sh there.
 EOF
@@ -35,10 +35,10 @@ source "${CONFIG_FILE}"
 set +a
 
 ROOT_VALUE=${root:-${ROOT:-${source_root:-${SOURCE_ROOT:-"${SOURCE_ROOT_DEFAULT}"}}}}
-RUN_PARENT=${run_parent:-${RUN_PARENT:-"${ROOT_VALUE}/runs"}}
+SAVE_DIR=${save_dir:-${SAVE_DIR:-${run_parent:-${RUN_PARENT:-"${ROOT_VALUE}/runs"}}}}
 RUN_ID=${run_id:-${RUN_ID:-${run_slug:-${RUN_SLUG:-crashcar}}}}
 RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
-RUN_ROOT=${run_root:-${RUN_ROOT:-"${RUN_PARENT}/${RUN_ID}/${RUN_TIMESTAMP}"}}
+RUN_ROOT=${run_root:-${RUN_ROOT:-"${SAVE_DIR}/${RUN_ID}/${RUN_TIMESTAMP}"}}
 SOURCE_ROOT_VALUE=${ROOT_VALUE}
 
 if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}}" != "1" ]; then
