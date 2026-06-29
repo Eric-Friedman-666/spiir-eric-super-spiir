@@ -348,10 +348,31 @@ count_stats() {
 check_source() {
     log "fetch GitHub ${GITHUB_REMOTE}/${GITHUB_BRANCH}"
     git -C "${SOURCE_ROOT}" fetch "${GITHUB_REMOTE}" "${GITHUB_BRANCH}"
-    local remote_head source_head dirty
+    local remote_head source_head dirty config_relpaths config_path config_relpath
     remote_head=$(git -C "${SOURCE_ROOT}" rev-parse FETCH_HEAD)
     source_head=$(git -C "${SOURCE_ROOT}" rev-parse HEAD)
     dirty=$(git -C "${SOURCE_ROOT}" status --porcelain --untracked-files=no)
+    config_relpaths=
+    for config_path in "${CRASHCAR_SOURCE_CONFIG_FILE:-}" "${CONFIG_FILE}" "${SOURCE_ROOT}/scripts/crashcar.env"; do
+        [ -n "${config_path}" ] || continue
+        config_relpath=$(realpath --relative-to="${SOURCE_ROOT}" "${config_path}" 2>/dev/null || true)
+        if [ -n "${config_relpath}" ]; then
+            config_relpaths="${config_relpaths}${config_relpath}"$'\n'
+        fi
+    done
+    if [ -n "${config_relpaths}" ]; then
+        dirty=$(printf '%s\n' "${dirty}" | awk -v configs="${config_relpaths}" '
+            BEGIN {
+                split(configs, items, "\n")
+                for (idx in items) {
+                    if (items[idx] != "") {
+                        allow[items[idx]] = 1
+                    }
+                }
+            }
+            NF && !allow[substr($0, 4)]
+        ')
+    fi
     if [ "${source_head}" != "${remote_head}" ]; then
         log "ERROR source head ${source_head} != GitHub latest ${remote_head}"
         write_status phase=failed reason=source_not_github_latest source_head="${source_head}" github_head="${remote_head}"

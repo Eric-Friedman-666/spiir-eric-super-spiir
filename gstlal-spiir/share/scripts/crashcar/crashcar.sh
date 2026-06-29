@@ -93,5 +93,6 @@ if [ "${crashcar_dry_run:-${CRASHCAR_DRY_RUN:-0}}" = "1" ]; then
 fi
 
 SOURCE_ROOT="${SOURCE_ROOT_VALUE}" \
+    CRASHCAR_SOURCE_CONFIG_FILE="${CONFIG_FILE}" \
     CRASHCAR_CONFIG_FILE="${RUN_ROOT}/scripts/crashcar.env" \
     bash "${RUN_ROOT}/scripts/crashcar_controller.sh"
