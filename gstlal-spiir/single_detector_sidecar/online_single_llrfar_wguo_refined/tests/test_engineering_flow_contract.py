@@ -70,6 +70,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertLess(common_pos, noninject_pos)
         self.assertLess(noninject_pos, inject_pos)
         self.assertIn("bank_file=", source[:common_pos])
+        self.assertNotIn("slurm_partition=", source)
         noninject_block = source[noninject_pos:inject_pos]
         inject_block = source[inject_pos:]
         self.assertIn("data_file=", noninject_block)
