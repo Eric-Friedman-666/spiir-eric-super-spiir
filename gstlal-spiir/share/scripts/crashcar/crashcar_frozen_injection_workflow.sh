@@ -126,7 +126,8 @@ materialize_frozen_multi_stats() {
     local worker_count=$2
     local bg_worker_count=$3
     local output_dir=$4
-    local worker jobno src_worker src_jobno suffix src dst
+    local fallback_dir=${5:-}
+    local worker jobno src_worker src_jobno suffix src fallback_src dst
 
     mkdir -p "${output_dir}"
     for worker in $(seq 0 $((worker_count - 1))); do
@@ -137,6 +138,12 @@ materialize_frozen_multi_stats() {
         for suffix in 2w 1d 2h; do
             src="${bg_run_dir}/${src_jobno}/${src_jobno}_marginalized_stats_${suffix}.xml.gz"
             dst="${output_dir}/${jobno}/${jobno}_marginalized_stats_${suffix}.xml.gz"
+            if [ ! -f "${src}" ] && [ -n "${fallback_dir}" ]; then
+                fallback_src="${fallback_dir}/${src_jobno}/${src_jobno}_marginalized_stats_${suffix}.xml.gz"
+                if [ -f "${fallback_src}" ]; then
+                    src="${fallback_src}"
+                fi
+            fi
             require_file "${src}" "frozen_multi_stats_${src_jobno}_${suffix}"
             ln -sfn "${src}" "${dst}"
         done
@@ -274,6 +281,7 @@ BG_RUN_ROOT="${ROOT}/bg_noinj"
 INJ_ROOT="${ROOT}/inj_bns"
 FROZEN_MULTI_DIR="${ROOT}/frozen_multi_stats"
 BG_CONFIG="${CONTROLLER_DIR}/bg_noinj.env"
+FROZEN_MULTI_FALLBACK_DIR=${injection_bg_seed_noninj_stats_loc:-${noninj_stats_loc:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}}
 
 write_status \
     phase=starting \
@@ -327,7 +335,7 @@ if [ ! -f "${SINGLE_BG_JSON}" ]; then
     SINGLE_BG_JSON="${BG_RUN_ROOT}/artifacts/crashcar_day1_last_bg3h_full_background.json"
 fi
 require_file "${SINGLE_BG_JSON}" "frozen_single_background_json"
-materialize_frozen_multi_stats "${BG_RUN_ROOT}/run" "${INJ_WORKERS}" "${BG_WORKERS}" "${FROZEN_MULTI_DIR}"
+materialize_frozen_multi_stats "${BG_RUN_ROOT}/run" "${INJ_WORKERS}" "${BG_WORKERS}" "${FROZEN_MULTI_DIR}" "${FROZEN_MULTI_FALLBACK_DIR}"
 
 write_status \
     phase=background_frozen \
