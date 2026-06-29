@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1]
+USER_CRASHCAR_ENV = SCRIPT_DIR.parents[2] / "scripts" / "crashcar.env"
 CRASHCAR_SCRIPT_DIR = SCRIPT_DIR.parents[1] / "share" / "scripts" / "crashcar"
 CRASHCAR_SINGLEFAR_C = SCRIPT_DIR.parents[1] / "gst" / "cuda" / "cohfar" / "crashcar_singlefar.c"
 POSTCOHSPIIR_ONLINE = SCRIPT_DIR.parents[1] / "bin" / "gstlal_inspiral_postcohspiir_online"
@@ -60,6 +61,22 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn('INTERNAL_STAGE=${crashcar_internal_stage:-${CRASHCAR_INTERNAL_STAGE:-0}}', source)
         self.assertIn('CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh"', source)
         self.assertIn('CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_controller.sh"', source)
+
+    def test_crashcar_env_uses_common_noninject_inject_sections(self) -> None:
+        source = USER_CRASHCAR_ENV.read_text()
+        common_pos = source.index("injection_mode=")
+        noninject_pos = source.index("#non-inject")
+        inject_pos = source.index("#inject")
+        self.assertLess(common_pos, noninject_pos)
+        self.assertLess(noninject_pos, inject_pos)
+        self.assertIn("data_file=", source[:common_pos])
+        self.assertIn("detector_response_file=", source[:common_pos])
+        self.assertIn("bank_file=", source[:common_pos])
+        self.assertIn("injection_bg_start_gps=", source[noninject_pos:inject_pos])
+        self.assertIn("injection_bg_accumulation_hour=", source[noninject_pos:inject_pos])
+        self.assertIn("injection_file=", source[inject_pos:])
+        self.assertIn("injection_chunk_hour=", source[inject_pos:])
+        self.assertNotIn("Sentinels", source)
 
     def test_crashcar_launcher_keeps_normal_o3_path_when_injection_mode_false(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -118,11 +135,19 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("duration_seconds_from injection_bg_duration_seconds injection_bg_duration_hour", source)
         self.assertIn("duration_seconds_from injection_duration_seconds injection_duration_hour", source)
         self.assertIn("INJ_CHUNK_SECONDS=${injection_chunk_seconds", source)
+        self.assertIn("COMMON_DATA_FILE=", source)
+        self.assertIn("COMMON_DETECTOR_RESPONSE_FILE=", source)
+        self.assertIn("COMMON_SEGMENT_XML=", source)
+        self.assertIn("injection_data_file=${injection_data_file:-${COMMON_DATA_FILE}}", source)
+        self.assertIn("injection_bg_data_file=${injection_bg_data_file:-${COMMON_DATA_FILE}}", source)
+        self.assertIn("injection_start_gps=${injection_start_gps:-${start_gps", source)
+        self.assertIn("injection_bg_start_gps=${injection_bg_start_gps:-${start_gps", source)
+        self.assertIn('BG_WORKERS=${injection_bg_worker_number:-${INJECTION_BG_WORKER_NUMBER:-${worker_number:-1}}}', source)
         self.assertIn("data_file=${injection_bg_data_file}", source)
         self.assertIn("data_file=${injection_data_file}", source)
         self.assertIn("detector_response_file=${injection_detector_response_file}", source)
-        self.assertNotIn("data_file=${data_file", source)
-        self.assertNotIn("detector_response_file=${detector_response_file", source)
+        self.assertNotIn('"data_file=${data_file', source)
+        self.assertNotIn('"detector_response_file=${detector_response_file', source)
         self.assertIn("SLURM_PARTITION_VALUE=", source)
         self.assertIn("slurm_partition=${SLURM_PARTITION_VALUE}", source)
         self.assertIn("slurm_time=${SLURM_TIME_VALUE}", source)

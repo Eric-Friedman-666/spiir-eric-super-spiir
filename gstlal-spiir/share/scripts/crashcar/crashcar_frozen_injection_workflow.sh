@@ -174,6 +174,24 @@ if ! bool_true "${injection_mode:-${INJECTION_MODE:-False}}"; then
     exit 2
 fi
 
+COMMON_DATA_FILE=${data_file:-${frame_cache:-${FRAME_CACHE:-}}}
+COMMON_DETECTOR_RESPONSE_FILE=${detector_response_file:-${detrsp_map:-${DETRSP_MAP:-}}}
+COMMON_SEGMENT_XML=${segment_xml:-${SEGMENT_XML:-}}
+
+injection_data_file=${injection_data_file:-${COMMON_DATA_FILE}}
+injection_detector_response_file=${injection_detector_response_file:-${COMMON_DETECTOR_RESPONSE_FILE}}
+injection_segment_xml=${injection_segment_xml:-${COMMON_SEGMENT_XML}}
+injection_start_gps=${injection_start_gps:-${start_gps:-${START_GPS:-}}}
+injection_duration_seconds=${injection_duration_seconds:-${duration_seconds:-${DURATION_SECONDS:-}}}
+injection_duration_hour=${injection_duration_hour:-${duration_hour:-${DURATION_HOUR:-}}}
+
+injection_bg_data_file=${injection_bg_data_file:-${COMMON_DATA_FILE}}
+injection_bg_detector_response_file=${injection_bg_detector_response_file:-${COMMON_DETECTOR_RESPONSE_FILE}}
+injection_bg_segment_xml=${injection_bg_segment_xml:-${COMMON_SEGMENT_XML}}
+injection_bg_start_gps=${injection_bg_start_gps:-${start_gps:-${START_GPS:-}}}
+injection_bg_duration_seconds=${injection_bg_duration_seconds:-${duration_seconds:-${DURATION_SECONDS:-}}}
+injection_bg_duration_hour=${injection_bg_duration_hour:-${duration_hour:-${DURATION_HOUR:-}}}
+
 require_var injection_file
 require_var injection_data_file
 require_var injection_detector_response_file
@@ -194,7 +212,7 @@ require_file "${injection_bg_segment_xml}" "injection_bg_segment_xml"
 
 O3_BANK_DIR=${bank_file:-${o3_bank_dir:-${O3_BANK_DIR:-}}}
 require_var O3_BANK_DIR
-BG_WORKERS=${injection_bg_worker_number:-${INJECTION_BG_WORKER_NUMBER:-1}}
+BG_WORKERS=${injection_bg_worker_number:-${INJECTION_BG_WORKER_NUMBER:-${worker_number:-1}}}
 BG_BANKS_PER_WORKER=${injection_bg_bank_per_worker:-${INJECTION_BG_BANK_PER_WORKER:-${bank_per_worker:-8}}}
 INJ_WORKERS=${injection_worker_number:-${INJECTION_WORKER_NUMBER:-${worker_number:-2}}}
 INJ_BANKS_PER_WORKER=${injection_bank_per_worker:-${INJECTION_BANK_PER_WORKER:-${bank_per_worker:-8}}}
