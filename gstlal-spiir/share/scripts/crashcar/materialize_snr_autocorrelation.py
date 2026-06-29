@@ -199,8 +199,11 @@ def main() -> int:
             fieldnames.append(field)
 
     cache: Dict[Tuple[str, int], Tuple[int, int, List[float], List[float]]] = {}
+    template_files: Dict[Tuple[str, int, int], str] = {}
+    xml_templates: Dict[Tuple[str, str, int, int], str] = {}
     xml_shards: Dict[str, List[str]] = {}
     materialized = 0
+    xml_materialized = 0
     errors = 0
 
     for row in rows:
@@ -213,25 +216,33 @@ def main() -> int:
             ifo = row["ifo"]
             bankid = int(row["bankid"])
             tmplt_idx = int(row["tmplt_idx"])
-            series_rows = template_series(cache, bank_dir, ifo, bankid, tmplt_idx)
-            stem = (
-                Path(row.get("series_file") or "").stem
-                or f"event{row.get('event_id', 'unknown')}_{ifo}_bank{bankid}_tmpl{tmplt_idx}_snr"
-            )
-            out_name = f"{stem}_template_autocorrelation.csv"
-            write_template_csv(snr_dir / out_name, series_rows)
+            template_key = (ifo, bankid, tmplt_idx)
+            if template_key not in template_files:
+                series_rows = template_series(cache, bank_dir, ifo, bankid, tmplt_idx)
+                out_name = (
+                    f"template_autocorrelation_{ifo}_bank{bankid:04d}_tmpl{tmplt_idx}.csv"
+                )
+                write_template_csv(snr_dir / out_name, series_rows)
+                template_files[template_key] = out_name
+                materialized += 1
+            else:
+                out_name = template_files[template_key]
             xml_file = (row.get("xml_file") or "crashcar_snr_series_worker000.xml")
             template_xml = xml_file.replace(
                 "crashcar_snr_series", "crashcar_template_autocorrelation"
             )
             if template_xml == xml_file:
                 template_xml = "crashcar_template_autocorrelation.xml"
-            xml_shards.setdefault(template_xml, []).append(
-                build_xml_element(row, series_rows)
-            )
+            xml_key = (template_xml, ifo, bankid, tmplt_idx)
+            if xml_key not in xml_templates:
+                series_rows = template_series(cache, bank_dir, ifo, bankid, tmplt_idx)
+                xml_shards.setdefault(template_xml, []).append(
+                    build_xml_element(row, series_rows)
+                )
+                xml_templates[xml_key] = template_xml
+                xml_materialized += 1
             row["template_autocorrelation_file"] = out_name
             row["template_autocorrelation_xml_file"] = template_xml
-            materialized += 1
         except Exception as exc:  # Keep manifest usable even if one template fails.
             row["template_autocorrelation_error"] = str(exc)
             errors += 1
@@ -252,6 +263,8 @@ def main() -> int:
                 "manifest": str(manifest),
                 "rows": len(rows),
                 "template_autocorrelation_files": materialized,
+                "template_autocorrelation_unique_templates": len(template_files),
+                "template_autocorrelation_xml_elements": xml_materialized,
                 "template_autocorrelation_xml_shards": sorted(xml_shards),
             },
             indent=2,
