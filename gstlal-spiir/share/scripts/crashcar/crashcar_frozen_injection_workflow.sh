@@ -244,9 +244,9 @@ if [ -z "${BG_ACCUM_SECONDS}" ]; then
         BG_ACCUM_SECONDS=${BG_DURATION_SECONDS}
     fi
 fi
-BG_ZL_UPDATE_SECONDS=${injection_bg_zerolag_update_seconds:-${zerolag_update_seconds:-${background_update_seconds:-${BACKGROUND_UPDATE_SECONDS:-}}}}
+BG_ZL_UPDATE_SECONDS=${injection_bg_BG_update_seconds:-${injection_bg_zerolag_update_seconds:-${BG_update_seconds:-${zerolag_update_seconds:-${background_update_seconds:-${BACKGROUND_UPDATE_SECONDS:-}}}}}}
 if [ -z "${BG_ZL_UPDATE_SECONDS}" ]; then
-    BG_ZL_UPDATE_HOUR=${injection_bg_zerolag_update_hour:-${zerolag_update_hour:-${BG_update_hour:-1}}}
+    BG_ZL_UPDATE_HOUR=${injection_bg_BG_update_hour:-${injection_bg_zerolag_update_hour:-${BG_update_hour:-${zerolag_update_hour:-1}}}}
     BG_ZL_UPDATE_SECONDS=$((BG_ZL_UPDATE_HOUR * 3600))
 fi
 INJ_ACCUM_SECONDS=${injection_BG_accumulation_seconds:-${injection_accumulation_seconds:-}}
@@ -258,9 +258,9 @@ if [ -z "${INJ_ACCUM_SECONDS}" ]; then
         INJ_ACCUM_SECONDS=${BG_ACCUM_SECONDS}
     fi
 fi
-INJ_ZL_UPDATE_SECONDS=${injection_zerolag_update_seconds:-}
+INJ_ZL_UPDATE_SECONDS=${injection_BG_update_seconds:-${injection_zerolag_update_seconds:-}}
 if [ -z "${INJ_ZL_UPDATE_SECONDS}" ]; then
-    INJ_ZL_UPDATE_HOUR=${injection_zerolag_update_hour:-}
+    INJ_ZL_UPDATE_HOUR=${injection_BG_update_hour:-${injection_zerolag_update_hour:-}}
     if [ -n "${INJ_ZL_UPDATE_HOUR}" ]; then
         INJ_ZL_UPDATE_SECONDS=$((INJ_ZL_UPDATE_HOUR * 3600))
     else

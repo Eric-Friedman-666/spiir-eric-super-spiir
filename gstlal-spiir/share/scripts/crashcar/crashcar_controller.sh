@@ -49,10 +49,10 @@ if [ -n "${BG_accumulation_hour:-}" ]; then
 else
     BACKGROUND_ACCUMULATION=${background_accumulation:-${BACKGROUND_ACCUMULATION:-${background_accumulation_seconds:-${BACKGROUND_ACCUMULATION_SECONDS:-10800}}}}
 fi
-if [ -n "${zerolag_update_hour:-}" ]; then
-    BACKGROUND_UPDATE=$((zerolag_update_hour * 3600))
-elif [ -n "${BG_update_hour:-}" ]; then
+if [ -n "${BG_update_hour:-}" ]; then
     BACKGROUND_UPDATE=$((BG_update_hour * 3600))
+elif [ -n "${zerolag_update_hour:-}" ]; then
+    BACKGROUND_UPDATE=$((zerolag_update_hour * 3600))
 else
     BACKGROUND_UPDATE=${background_update:-${BACKGROUND_UPDATE:-${background_update_trigger_seconds:-${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}}}}
 fi
