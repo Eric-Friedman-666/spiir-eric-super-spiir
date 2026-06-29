@@ -83,10 +83,22 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("injection_bg_BG_accumulation_hour=", inject_block)
         self.assertIn("injection_bg_BG_update_hour=", inject_block)
         self.assertIn("injection_file=", inject_block)
-        self.assertIn("injection_BG_accumulation_hour=", inject_block)
-        self.assertIn("injection_BG_update_hour=", inject_block)
-        self.assertIn("injection_chunk_hour=", inject_block)
-        self.assertIn("injection_SNR_series_logFAR_threshold=", inject_block)
+        foreground_block = inject_block[inject_block.index("injection_file="):]
+        for required in [
+            "injection_file=",
+            "injection_data_file=",
+            "injection_detector_response_file=",
+            "injection_segment_xml=",
+            "injection_start_gps=",
+            "injection_duration_hour=",
+            "injection_worker_number=",
+            "injection_bank_per_worker=",
+        ]:
+            self.assertIn(required, foreground_block)
+        self.assertNotIn("injection_BG_accumulation_hour=", foreground_block)
+        self.assertNotIn("injection_BG_update_hour=", foreground_block)
+        self.assertNotIn("injection_chunk_hour=", foreground_block)
+        self.assertNotIn("injection_SNR_series_logFAR_threshold=", foreground_block)
         self.assertNotIn("injection_bg_seed_noninj_stats_loc=", inject_block)
         self.assertNotIn("injection_bg_accumulation_hour=", inject_block)
         self.assertNotIn("injection_snr_series_logFAR_threshold=", inject_block)

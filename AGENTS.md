@@ -59,6 +59,11 @@ fix is moved into the package and verified.
   but injection/background data selection must come from the `#inject` block:
   `injection_bg_*` for frozen no-injection background accumulation and
   `injection_*` for the injection run.
+- The foreground `injection_*` run block should mirror the normal O3 data block
+  shape, plus the required `injection_file`. Do not expose foreground
+  background-accumulation, background-update, chunking, or SNR-threshold knobs
+  in the user-facing env; those are internal defaults unless the user explicitly
+  asks to surface them.
 - In injection mode, first run a no-injection BG stage. Then freeze the single
   BG JSON and the multi/coherent BG stats. The injection stage must read those
   frozen BG products and must not accumulate a new background from injection
