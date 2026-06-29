@@ -228,23 +228,41 @@ else
         INJ_CHUNK_SECONDS=$((INJ_CHUNK_HOUR * 3600))
     fi
 fi
-BG_ACCUM_SECONDS=${injection_bg_accumulation_seconds:-${background_accumulation_seconds:-${BACKGROUND_ACCUMULATION_SECONDS:-}}}
+BG_ACCUM_SECONDS=${injection_bg_BG_accumulation_seconds:-${injection_bg_accumulation_seconds:-${background_accumulation_seconds:-${BACKGROUND_ACCUMULATION_SECONDS:-}}}}
 if [ -z "${BG_ACCUM_SECONDS}" ]; then
-    BG_ACCUM_HOUR=${injection_bg_accumulation_hour:-${BG_accumulation_hour:-${background_accumulation_hour:-${BACKGROUND_ACCUMULATION_HOUR:-}}}}
+    BG_ACCUM_HOUR=${injection_bg_BG_accumulation_hour:-${injection_bg_accumulation_hour:-${BG_accumulation_hour:-${background_accumulation_hour:-${BACKGROUND_ACCUMULATION_HOUR:-}}}}}
     if [ -n "${BG_ACCUM_HOUR}" ]; then
         BG_ACCUM_SECONDS=$((BG_ACCUM_HOUR * 3600))
     else
         BG_ACCUM_SECONDS=${BG_DURATION_SECONDS}
     fi
 fi
-ZL_UPDATE_SECONDS=${zerolag_update_seconds:-${background_update_seconds:-${BACKGROUND_UPDATE_SECONDS:-}}}
-if [ -z "${ZL_UPDATE_SECONDS}" ]; then
-    ZL_UPDATE_HOUR=${zerolag_update_hour:-${BG_update_hour:-1}}
-    ZL_UPDATE_SECONDS=$((ZL_UPDATE_HOUR * 3600))
+BG_ZL_UPDATE_SECONDS=${injection_bg_zerolag_update_seconds:-${zerolag_update_seconds:-${background_update_seconds:-${BACKGROUND_UPDATE_SECONDS:-}}}}
+if [ -z "${BG_ZL_UPDATE_SECONDS}" ]; then
+    BG_ZL_UPDATE_HOUR=${injection_bg_zerolag_update_hour:-${zerolag_update_hour:-${BG_update_hour:-1}}}
+    BG_ZL_UPDATE_SECONDS=$((BG_ZL_UPDATE_HOUR * 3600))
+fi
+INJ_ACCUM_SECONDS=${injection_BG_accumulation_seconds:-${injection_accumulation_seconds:-}}
+if [ -z "${INJ_ACCUM_SECONDS}" ]; then
+    INJ_ACCUM_HOUR=${injection_BG_accumulation_hour:-${injection_accumulation_hour:-}}
+    if [ -n "${INJ_ACCUM_HOUR}" ]; then
+        INJ_ACCUM_SECONDS=$((INJ_ACCUM_HOUR * 3600))
+    else
+        INJ_ACCUM_SECONDS=${BG_ACCUM_SECONDS}
+    fi
+fi
+INJ_ZL_UPDATE_SECONDS=${injection_zerolag_update_seconds:-}
+if [ -z "${INJ_ZL_UPDATE_SECONDS}" ]; then
+    INJ_ZL_UPDATE_HOUR=${injection_zerolag_update_hour:-}
+    if [ -n "${INJ_ZL_UPDATE_HOUR}" ]; then
+        INJ_ZL_UPDATE_SECONDS=$((INJ_ZL_UPDATE_HOUR * 3600))
+    else
+        INJ_ZL_UPDATE_SECONDS=${BG_ZL_UPDATE_SECONDS}
+    fi
 fi
 TAIL_LOG_FAR=${tail_log_FAR:-${TAIL_LOG_FAR:--2.5}}
 SNR_LOG_FAR=${SNR_series_logFAR_threshold:-${snr_series_logFAR_threshold:-${SNR_SERIES_LOG_FAR_THRESHOLD:--4}}}
-INJ_SNR_LOG_FAR=${injection_snr_series_logFAR_threshold:-${INJECTION_SNR_SERIES_LOGFAR_THRESHOLD:-90}}
+INJ_SNR_LOG_FAR=${injection_SNR_series_logFAR_threshold:-${injection_snr_series_logFAR_threshold:-${INJECTION_SNR_SERIES_LOGFAR_THRESHOLD:-90}}}
 RUN_ID=${run_id:-${RUN_ID:-crashcar_frozen_injection}}
 SLURM_PARTITION_VALUE=${slurm_partition:-${SLURM_PARTITION:-}}
 SLURM_TIME_VALUE=${slurm_time:-${SLURM_TIME:-}}
@@ -289,7 +307,7 @@ write_env_file "${BG_CONFIG}" \
     "bank_per_worker=${BG_BANKS_PER_WORKER}" \
     "bank_file=${O3_BANK_DIR}" \
     "background_accumulation=${BG_ACCUM_SECONDS}" \
-    "background_update=${ZL_UPDATE_SECONDS}" \
+    "background_update=${BG_ZL_UPDATE_SECONDS}" \
     "tail_log_FAR=${TAIL_LOG_FAR}" \
     "SNR_series_logFAR_threshold=${SNR_LOG_FAR}" \
     "injection_mode=False" \
@@ -357,8 +375,8 @@ while [ "${chunk_start}" -lt "${INJ_END}" ]; do
         "worker_number=${INJ_WORKERS}" \
         "bank_per_worker=${INJ_BANKS_PER_WORKER}" \
         "bank_file=${O3_BANK_DIR}" \
-        "background_accumulation=${BG_ACCUM_SECONDS}" \
-        "background_update=${ZL_UPDATE_SECONDS}" \
+        "background_accumulation=${INJ_ACCUM_SECONDS}" \
+        "background_update=${INJ_ZL_UPDATE_SECONDS}" \
         "tail_log_FAR=${TAIL_LOG_FAR}" \
         "SNR_series_logFAR_threshold=${INJ_SNR_LOG_FAR}" \
         "injection_mode=True" \
