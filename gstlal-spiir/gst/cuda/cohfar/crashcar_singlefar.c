@@ -47,7 +47,7 @@
 #define GST_CAT_DEFAULT crashcar_singlefar_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-#define CRASHCAR_CODE_VERSION "single_stream_support_v19_snr_threshold_autocorr"
+#define CRASHCAR_CODE_VERSION "single_stream_support_v24_completed_timestamp_watermark"
 #define CRASHCAR_CLUSTER_WINDOW_SECONDS 1.0
 
 /* Multiple crashcar elements can live in one worker process and append to the
@@ -97,6 +97,10 @@ static double crashcar_cluster_boundary = NAN;
 static double crashcar_cluster_max_seen = NAN;
 static double crashcar_cluster_current_timestamp = NAN;
 static guint crashcar_cluster_num_current_buffers = 0;
+static GHashTable *crashcar_cluster_timestamp_counts = NULL;
+static GHashTable *crashcar_cluster_completed_timestamps = NULL;
+static gboolean crashcar_cluster_have_next_timestamp = FALSE;
+static gint64 crashcar_cluster_next_timestamp_ns = 0;
 static gboolean crashcar_cluster_is_first_event = TRUE;
 static FILE *crashcar_support_debug_file = NULL;
 static gboolean crashcar_support_debug_header_written = FALSE;
@@ -946,14 +950,35 @@ static void crashcar_write_detector_support_debug(const PostcohInspiralTable *ta
     if (file) {
         if (!crashcar_support_debug_header_written) {
             fprintf(file,
-                    "code_version,ifo_id,event_end_gps,bankid,tmplt_idx,cohsnr,llr,feature_gps\n");
+                    "code_version,source,ifo_id,event_end_gps,bankid,tmplt_idx,cohsnr,llr,feature_gps\n");
             crashcar_support_debug_header_written = TRUE;
         }
         const double event_end_gps = crashcar_gps_to_seconds(&table->end_time);
-        fprintf(file, "%s,%d,%.17g,%d,%d,%.9g,%.17g,%.17g\n",
+        fprintf(file, "%s,candidate,%d,%.17g,%d,%d,%.9g,%.17g,%.17g\n",
                 CRASHCAR_CODE_VERSION, ifo_id, event_end_gps,
                 table->bankid, table->tmplt_idx, table->cohsnr,
                 llr, feature_gps);
+        fflush(file);
+    }
+    g_mutex_unlock(&crashcar_support_debug_file_mutex);
+}
+
+static void crashcar_write_selected_support_debug(const CrashcarClusterEvent *event,
+                                                  int ifo_id) {
+    if (!event || ifo_id < 0 || ifo_id >= MAX_NIFO ||
+        !event->has_ifo[ifo_id]) return;
+    g_mutex_lock(&crashcar_support_debug_file_mutex);
+    FILE *file = crashcar_open_support_debug_locked();
+    if (file) {
+        if (!crashcar_support_debug_header_written) {
+            fprintf(file,
+                    "code_version,source,ifo_id,event_end_gps,bankid,tmplt_idx,cohsnr,llr,feature_gps\n");
+            crashcar_support_debug_header_written = TRUE;
+        }
+        fprintf(file, "%s,selected,%d,%.17g,%d,%d,%.9g,%.17g,%.17g\n",
+                CRASHCAR_CODE_VERSION, ifo_id, event->end_gps,
+                event->bankid, event->tmplt_idx, event->cohsnr,
+                event->llr[ifo_id], event->gps[ifo_id]);
         fflush(file);
     }
     g_mutex_unlock(&crashcar_support_debug_file_mutex);
@@ -1056,8 +1081,14 @@ static void crashcar_write_cluster_debug(
 
 static void crashcar_add_cluster_selected_support(CrashcarSinglefar *element,
                                                   const CrashcarClusterEvent *event) {
-    (void)element;
-    (void)event;
+    if (!element || !event) return;
+    for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+        if (!event->has_ifo[ifo_id]) continue;
+        crashcar_write_selected_support_debug(event, ifo_id);
+        crashcar_add_foreground_support(element, ifo_id,
+                                        event->llr[ifo_id],
+                                        event->gps[ifo_id]);
+    }
 }
 
 static void crashcar_cluster_append_or_update_array(GArray *events,
@@ -1087,6 +1118,23 @@ static void crashcar_cluster_append_or_update_array(GArray *events,
 static void crashcar_cluster_append_or_update_locked(const CrashcarClusterEvent *candidate) {
     crashcar_cluster_append_or_update_array(crashcar_cluster_events_locked(),
                                             candidate);
+}
+
+
+static void crashcar_buffer_events_add_row(GArray *events,
+                                           const PostcohInspiralTable *table) {
+    if (!events || !table) return;
+    const double event_gps = crashcar_gps_to_seconds(&table->end_time);
+    if (!isfinite(event_gps)) return;
+
+    CrashcarClusterEvent candidate;
+    memset(&candidate, 0, sizeof(candidate));
+    candidate.end_gps = event_gps;
+    candidate.cohsnr = table->cohsnr;
+    candidate.bankid = table->bankid;
+    candidate.tmplt_idx = table->tmplt_idx;
+
+    crashcar_cluster_append_or_update_array(events, &candidate);
 }
 
 static void crashcar_buffer_events_add_detector(GArray *events,
@@ -1129,6 +1177,75 @@ static guint crashcar_expected_buffers_per_timestamp(void) {
     return crashcar_env_uint("CRASHCAR_EXPECTED_BUFFERS_PER_TIMESTAMP", 0);
 }
 
+static gint64 crashcar_seconds_to_ns(double seconds) {
+    if (!isfinite(seconds)) return G_MININT64;
+    return (gint64)llround(seconds * (double)GST_SECOND);
+}
+
+static double crashcar_ns_to_seconds(gint64 ns) {
+    return (double)ns / (double)GST_SECOND;
+}
+
+static GHashTable *crashcar_cluster_timestamp_count_table_locked(void) {
+    if (!crashcar_cluster_timestamp_counts) {
+        crashcar_cluster_timestamp_counts =
+          g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
+    }
+    return crashcar_cluster_timestamp_counts;
+}
+
+static GHashTable *crashcar_cluster_completed_table_locked(void) {
+    if (!crashcar_cluster_completed_timestamps) {
+        crashcar_cluster_completed_timestamps =
+          g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
+    }
+    return crashcar_cluster_completed_timestamps;
+}
+
+static guint crashcar_cluster_increment_timestamp_count_locked(gint64 ts_ns) {
+    GHashTable *counts = crashcar_cluster_timestamp_count_table_locked();
+    gpointer current = g_hash_table_lookup(counts, &ts_ns);
+    guint count = current ? GPOINTER_TO_UINT(current) : 0;
+    ++count;
+    gint64 *key = g_new(gint64, 1);
+    *key = ts_ns;
+    g_hash_table_replace(counts, key, GUINT_TO_POINTER(count));
+    return count;
+}
+
+static gboolean crashcar_cluster_timestamp_completed_locked(gint64 ts_ns) {
+    GHashTable *completed = crashcar_cluster_completed_table_locked();
+    return g_hash_table_contains(completed, &ts_ns);
+}
+
+static void crashcar_cluster_mark_timestamp_completed_locked(gint64 ts_ns) {
+    GHashTable *completed = crashcar_cluster_completed_table_locked();
+    if (g_hash_table_contains(completed, &ts_ns)) return;
+    gint64 *key = g_new(gint64, 1);
+    *key = ts_ns;
+    g_hash_table_add(completed, key);
+}
+
+static gboolean crashcar_cluster_advance_completed_watermark_locked(
+  gint64 step_ns, double *watermark_end) {
+    if (!watermark_end) return FALSE;
+    *watermark_end = NAN;
+    if (!crashcar_cluster_have_next_timestamp || step_ns <= 0) return FALSE;
+
+    gboolean advanced = FALSE;
+    gint64 latest_complete_end_ns = 0;
+    while (crashcar_cluster_timestamp_completed_locked(
+             crashcar_cluster_next_timestamp_ns)) {
+        latest_complete_end_ns = crashcar_cluster_next_timestamp_ns + step_ns;
+        crashcar_cluster_next_timestamp_ns += step_ns;
+        advanced = TRUE;
+    }
+    if (advanced) {
+        *watermark_end = crashcar_ns_to_seconds(latest_complete_end_ns);
+    }
+    return advanced;
+}
+
 static void crashcar_cluster_flush(CrashcarSinglefar *element);
 
 static void crashcar_cluster_append_events_locked(GArray *new_events) {
@@ -1162,25 +1279,50 @@ static CrashcarBufferClusterState crashcar_cluster_begin_buffer(
 
     g_mutex_lock(&crashcar_cluster_mutex);
     if (isfinite(buf_timestamp)) {
-        if (!isfinite(crashcar_cluster_current_timestamp) ||
-            buf_timestamp > crashcar_cluster_current_timestamp) {
-            crashcar_cluster_current_timestamp = buf_timestamp;
-            crashcar_cluster_num_current_buffers = 0;
+        if (expected_buffers > 0) {
+            const gint64 ts_ns = crashcar_seconds_to_ns(buf_timestamp);
+            gint64 step_ns = crashcar_seconds_to_ns(duration);
+            if (step_ns <= 0) step_ns = GST_SECOND;
+
+            if (!crashcar_cluster_have_next_timestamp ||
+                ts_ns < crashcar_cluster_next_timestamp_ns) {
+                crashcar_cluster_next_timestamp_ns = ts_ns;
+                crashcar_cluster_have_next_timestamp = TRUE;
+            }
+
+            state.num_current_buffers =
+              crashcar_cluster_increment_timestamp_count_locked(ts_ns);
+            if (state.num_current_buffers >= expected_buffers) {
+                crashcar_cluster_mark_timestamp_completed_locked(ts_ns);
+            }
+
+            double watermark_end = NAN;
+            if (crashcar_cluster_advance_completed_watermark_locked(
+                  step_ns, &watermark_end)) {
+                state.have_latest_buffers = TRUE;
+                state.max_cluster_boundary = watermark_end;
+            } else {
+                state.have_latest_buffers = FALSE;
+                state.max_cluster_boundary = NAN;
+            }
+        } else {
+            if (!isfinite(crashcar_cluster_current_timestamp) ||
+                buf_timestamp > crashcar_cluster_current_timestamp) {
+                crashcar_cluster_current_timestamp = buf_timestamp;
+                crashcar_cluster_num_current_buffers = 0;
+            }
+            if (fabs(buf_timestamp - crashcar_cluster_current_timestamp) < 1.0e-9) {
+                ++crashcar_cluster_num_current_buffers;
+            }
+            state.num_current_buffers = crashcar_cluster_num_current_buffers;
+            state.have_latest_buffers = FALSE;
+            state.max_cluster_boundary = buf_timestamp;
         }
-        if (fabs(buf_timestamp - crashcar_cluster_current_timestamp) < 1.0e-9) {
-            ++crashcar_cluster_num_current_buffers;
-        }
-        state.num_current_buffers = crashcar_cluster_num_current_buffers;
-        state.have_latest_buffers =
-          expected_buffers > 0 &&
-          crashcar_cluster_num_current_buffers == expected_buffers;
-        state.max_cluster_boundary =
-          state.have_latest_buffers ? (buf_timestamp + duration) : buf_timestamp;
     } else {
         state.have_latest_buffers = FALSE;
     }
 
-    if (!state.have_latest_buffers && isfinite(state.max_cluster_boundary)) {
+    if (expected_buffers == 0 && isfinite(state.max_cluster_boundary)) {
         crashcar_cluster_max_seen = state.max_cluster_boundary;
     }
     crashcar_write_cluster_debug(
@@ -1192,7 +1334,7 @@ static CrashcarBufferClusterState crashcar_cluster_begin_buffer(
       NULL, crashcar_cluster_boundary, NAN, crashcar_cluster_boundary);
     g_mutex_unlock(&crashcar_cluster_mutex);
 
-    if (!state.have_latest_buffers) {
+    if (state.expected_buffers == 0 && !state.have_latest_buffers) {
         crashcar_cluster_flush(element);
     }
     return state;
@@ -1209,7 +1351,7 @@ static void crashcar_cluster_finish_buffer(CrashcarSinglefar *element,
         crashcar_cluster_append_events_locked(new_events);
     }
     if (crashcar_cluster_is_first_event &&
-        new_events && new_events->len > 0 &&
+        crashcar_cluster_events && crashcar_cluster_events->len > 0 &&
         state && isfinite(state->max_cluster_boundary)) {
         crashcar_cluster_boundary = state->max_cluster_boundary + cluster_window;
         crashcar_cluster_is_first_event = FALSE;
@@ -1531,29 +1673,13 @@ static float crashcar_best_single_far(const PostcohInspiralTable *table,
 }
 
 static float crashcar_best_multi_far(const PostcohInspiralTable *table) {
-    const float fars[] = { table->far_2h, table->far_1d, table->far_1w };
-    const int nevents[] = { table->nevent_2h, table->nevent_1d,
-                            table->nevent_1w };
-    const char *combine_mode = g_getenv("CRASHCAR_MULTI_FAR_COMBINE_MODE");
-    const gboolean use_min =
-      combine_mode != NULL && g_ascii_strcasecmp(combine_mode, "min") == 0;
-    const double nevent_threshold = crashcar_env_double(
-      "CRASHCAR_MULTI_BEST_FAR_NEVENT_THRESHOLD", 0.0);
-    const double far_factor = crashcar_env_double("CRASHCAR_MULTI_FAR_FACTOR",
-                                                  94.0);
-    float best = 0.0f;
+    const float candidates[] = { table->far_1w, table->far_1d,
+                                 table->far_2h };
 
-    for (guint i = 0; i < G_N_ELEMENTS(fars); ++i) {
-        if (!crashcar_far_is_valid(fars[i])) continue;
-        if ((double)nevents[i] <= nevent_threshold) continue;
-        if (!crashcar_far_is_valid(best) ||
-            (use_min ? fars[i] < best : fars[i] > best)) {
-            best = fars[i];
-        }
+    for (guint i = 0; i < G_N_ELEMENTS(candidates); ++i) {
+        if (crashcar_far_is_valid(candidates[i])) return candidates[i];
     }
-    if (!crashcar_far_is_valid(best)) return 0.0f;
-    const double scaled = (double)best * far_factor;
-    return isfinite(scaled) && scaled > 0.0 ? (float)scaled : 0.0f;
+    return 0.0f;
 }
 
 static gboolean crashcar_hits_threshold(float far, double log10_far_threshold) {
@@ -1902,6 +2028,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                 continue;
             }
 
+            crashcar_buffer_events_add_row(buffer_events, table);
+
             for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
                 if (!crashcar_row_has_ifo(element, table, ifo_id)) continue;
                 if (table->snglsnr[ifo_id] < element->min_snr) continue;
@@ -1923,8 +2051,6 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                 const double feature_gps = crashcar_gps_to_seconds(detail_time);
                 crashcar_write_detector_support_debug(table, ifo_id, llr,
                                                       feature_gps);
-                crashcar_add_foreground_support(element, ifo_id, llr,
-                                                feature_gps);
                 crashcar_buffer_events_add_detector(buffer_events, table,
                                                     ifo_id, llr, feature_gps);
             }

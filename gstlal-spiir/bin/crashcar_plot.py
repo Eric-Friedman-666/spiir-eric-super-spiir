@@ -3,7 +3,7 @@
 
 The plotting contract follows Eric-bless-crashcar.pdf Section 4.1:
 
-* Figure 1 panels (b)-(d) read the run-local FinalSink zerolag XML files.
+* Figure 1 panels (b)-(d) read every run-local FinalSink zerolag XML in the selected glob and aggregate the full history of triggers that have assigned FAR.
 * Figure 1 panel (a) reconstructs the selected worker's native single-detector
   BG support from the run-local raw single-trigger stream and the crashcar
   template shape map. The older crashcar C detail/direct-FAR rows are only used
@@ -112,6 +112,10 @@ def first_positive_field(row: dict, keys: Iterable[str]) -> tuple[float | None, 
         if number is not None:
             return number, key
     return None, None
+
+
+def row_contains_ifo(row: dict, ifo: str) -> bool:
+    return ifo in str(row.get("ifos", ""))
 
 
 def parse_csv_list(value: str) -> tuple[str, ...]:
@@ -855,11 +859,11 @@ def min_bin_grid(xs, ys, values, xedges, yedges):
 def build_single_points(zerolag_rows: list[dict], single_far_bases: tuple[str, ...]) -> list[dict]:
     points: list[dict] = []
     for row in zerolag_rows:
-        for ifo in ("H1", "L1"):
+        for ifo in ("H1", "L1", "V1", "K1"):
             snr = finite_positive(row.get(f"snglsnr_{ifo}"))
             chisq = finite_positive(row.get(f"chisq_{ifo}"))
             far, far_source = first_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
-            if snr is None or chisq is None or far is None:
+            if not row_contains_ifo(row, ifo) or snr is None or chisq is None or far is None:
                 continue
             points.append(
                 {
@@ -880,12 +884,15 @@ def build_single_points(zerolag_rows: list[dict], single_far_bases: tuple[str, .
     return points
 
 
-def build_multi_points(zerolag_rows: list[dict], coherent_far_bases: tuple[str, ...]) -> list[dict]:
+def build_multi_points(
+    zerolag_rows: list[dict],
+    coherent_far_bases: tuple[str, ...],
+) -> list[dict]:
     points: list[dict] = []
     for row in zerolag_rows:
         ifos = str(row.get("ifos", ""))
         detectors = {token for token in ("H1", "L1", "V1", "K1") if token in ifos}
-        if not {"H1", "L1"}.issubset(detectors) or not detectors.issubset({"H1", "L1"}):
+        if len(detectors) < 2:
             continue
         snr = finite_positive(row.get("cohsnr"))
         chisq = finite_positive(row.get("cmbchisq"))
@@ -895,7 +902,7 @@ def build_multi_points(zerolag_rows: list[dict], coherent_far_bases: tuple[str, 
         points.append(
             {
                 "kind": "multi",
-                "ifo": "HL",
+                "ifo": "+".join(sorted(detectors)),
                 "snr": snr,
                 "chisq": chisq,
                 "far": far,
@@ -1127,7 +1134,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         norm,
         "single-detector SNR",
         "chisq",
-        "Panel (b): all-worker/all-bank single total",
+        "Panel (b): historical assigned-FAR single total",
     )
 
     ax = axes[1, 0]
@@ -1138,7 +1145,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         norm,
         "coherent SNR",
         "cmbchisq",
-        "Panel (c): all-worker/all-bank H/L multi total",
+        "Panel (c): historical assigned-FAR multi total",
     )
 
     ax = axes[1, 1]
@@ -1150,7 +1157,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         norm,
         "SNR (single or coherent)",
         "chisq / cmbchisq",
-        "Panel (d): single + multi combination",
+        "Panel (d): historical assigned-FAR combination",
     )
 
     add_discrete_colorbar(fig, axes, artist_d)
@@ -1164,6 +1171,8 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "zerolag_file_count": payload["zerolag"]["file_count"],
         "zerolag_rows": len(zerolag_rows),
         "zerolag_rows_by_ifos": payload["zerolag"]["rows_by_ifos"],
+        "historical_single_points": len(single_points),
+        "historical_multi_points": len(multi_points),
         "h_l_single_points": len(single_points),
         "h_l_multi_points": len(multi_points),
         "single_points_in_view": len(single_view),
@@ -1204,7 +1213,8 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "panel_a_background_online_summary": panel_a_online_summary,
         "global_latest_background_online_summary": global_online_summary,
         "panel_a_source": panel_a.get("files", []),
-        "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} {panel_a_source_label} with bg_policy={panel_a_policy}; each Panel (a) online fraction is computed from that curve's own 3h BG window. Panels b-d aggregate all workers and all bank IDs present in the zerolag XML glob.",
+        "panel_scope": "Panel (a) is the selected current BG support only; Panels (b)-(d) are historical totals over every trigger with assigned FAR in the zerolag XML glob.",
+        "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} {panel_a_source_label} with bg_policy={panel_a_policy}; each Panel (a) online fraction is computed from that curve's own 3h BG window. Panels b-d aggregate all workers, all bank IDs, and all detector combinations with assigned FAR present in the zerolag XML glob.",
     }
 
 
@@ -1232,10 +1242,14 @@ def row_far(row: dict, far_field: str, log_field: str) -> float | None:
     return None
 
 
+def is_truthy(value) -> bool:
+    return str(value).strip() in ("1", "1.0", "true", "True", "yes", "YES")
+
+
 def select_min_row(rows: list[dict], ifo: str, hit_field: str, far_field: str, log_field: str) -> dict | None:
     candidates = []
     for row in rows:
-        if row.get("ifo") != ifo or str(row.get(hit_field, "0")) not in ("1", "1.0", "true", "True"):
+        if row.get("ifo") != ifo or not is_truthy(row.get(hit_field, "0")):
             continue
         far = row_far(row, far_field, log_field)
         if far is not None:
@@ -1245,36 +1259,233 @@ def select_min_row(rows: list[dict], ifo: str, hit_field: str, far_field: str, l
     return min(candidates, key=lambda item: item[0])[1]
 
 
-def select_snr_rows(manifest_rows: list[dict]) -> dict[str, dict | None]:
-    selected: dict[str, dict | None] = {
-        "h1_single_min_far": select_min_row(manifest_rows, "H1", "hit_single", "far_sngl", "log10_far_sngl"),
-        "l1_single_min_far": select_min_row(manifest_rows, "L1", "hit_single", "far_sngl", "log10_far_sngl"),
-        "hl_multi_min_far_h1_component": None,
-        "hl_multi_min_far_l1_component": None,
+def normalized_key_value(value) -> str:
+    text = str(value if value is not None else "").strip()
+    if text == "":
+        return ""
+    try:
+        number = float(text)
+    except Exception:
+        return text
+    if math.isfinite(number) and number.is_integer():
+        return str(int(number))
+    return text
+
+
+def component_time(row: dict, ifo: str) -> tuple[str, str]:
+    end_time = row.get(f"end_time_sngl_{ifo}") or row.get("end_time") or ""
+    end_time_ns = row.get(f"end_time_ns_sngl_{ifo}") or row.get("end_time_ns") or ""
+    return normalized_key_value(end_time), normalized_key_value(end_time_ns)
+
+
+def compact_snr_row(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    keys = (
+        "event_id", "ifo", "bankid", "tmplt_idx", "end_time", "end_time_ns",
+        "snglsnr", "chisq", "far_sngl", "log10_far_sngl", "far_multi",
+        "log10_far_multi", "series_file", "xml_file", "_selection_source",
+        "_selection_kind", "_zerolag_source", "_zerolag_worker", "_zerolag_ifos",
+        "_zerolag_event_id", "_selection_note",
+    )
+    return {key: row.get(key) for key in keys if row.get(key) not in (None, "")}
+
+
+def make_zerolag_snr_candidate(
+    row: dict,
+    ifo: str,
+    kind: str,
+    far: float,
+    far_source: str | None,
+    *,
+    coherent_far_bases: tuple[str, ...] = DEFAULT_COHERENT_FAR_BASES,
+) -> dict:
+    end_time, end_time_ns = component_time(row, ifo)
+    candidate = {
+        "event_id": row.get("event_id", ""),
+        "ifo": ifo,
+        "bankid": normalized_key_value(row.get("bankid", "")),
+        "tmplt_idx": normalized_key_value(row.get("tmplt_idx", "")),
+        "end_time": end_time,
+        "end_time_ns": end_time_ns,
+        "snglsnr": row.get(f"snglsnr_{ifo}", ""),
+        "chisq": row.get(f"chisq_{ifo}", row.get("cmbchisq", "")),
+        "hit_single": "1" if kind == "single" else "0",
+        "hit_multi": "1" if kind == "multi" else "0",
+        "_selection_source": "zerolag_history",
+        "_selection_kind": kind,
+        "_zerolag_source": row.get("_source", ""),
+        "_zerolag_worker": row.get("_worker", ""),
+        "_zerolag_ifos": row.get("ifos", ""),
+        "_zerolag_event_id": row.get("event_id", ""),
+        "_selection_far_source": far_source or "",
     }
-    multi_candidates = []
-    for row in manifest_rows:
-        if row.get("ifo") not in ("H1", "L1") or str(row.get("hit_multi", "0")) not in ("1", "1.0", "true", "True"):
+    if kind == "single":
+        candidate["far_sngl"] = f"{far:.17g}"
+        candidate["log10_far_sngl"] = f"{math.log10(far):.12g}"
+        multi_far, _multi_source = first_positive_field(row, coherent_far_bases)
+        if multi_far is not None:
+            candidate["far_multi"] = f"{multi_far:.17g}"
+            candidate["log10_far_multi"] = f"{math.log10(multi_far):.12g}"
+    else:
+        candidate["far_multi"] = f"{far:.17g}"
+        candidate["log10_far_multi"] = f"{math.log10(far):.12g}"
+        single_far, _single_source = first_positive_field(row, [f"{base}_{ifo}" for base in DEFAULT_SINGLE_FAR_BASES])
+        if single_far is not None:
+            candidate["far_sngl"] = f"{single_far:.17g}"
+            candidate["log10_far_sngl"] = f"{math.log10(single_far):.12g}"
+    return candidate
+
+
+def manifest_row_matches_candidate(row: dict, candidate: dict, hit_field: str) -> bool:
+    if row.get("ifo") != candidate.get("ifo"):
+        return False
+    if hit_field and not is_truthy(row.get(hit_field, "0")):
+        return False
+    for field in ("bankid", "tmplt_idx", "end_time", "end_time_ns"):
+        if normalized_key_value(row.get(field, "")) != normalized_key_value(candidate.get(field, "")):
+            return False
+    return True
+
+
+def attach_manifest_series(
+    candidate: dict | None,
+    manifest_rows: list[dict],
+    hit_field: str,
+    snr_series_logfar_threshold: float,
+) -> dict | None:
+    if candidate is None:
+        return None
+    matches = [row for row in manifest_rows if manifest_row_matches_candidate(row, candidate, hit_field)]
+    if not matches:
+        candidate = dict(candidate)
+        far_field = "far_sngl" if hit_field == "hit_single" else "far_multi"
+        log_field = "log10_far_sngl" if hit_field == "hit_single" else "log10_far_multi"
+        far = row_far(candidate, far_field, log_field)
+        snr = finite_positive(candidate.get("snglsnr"))
+        if snr is not None and snr < SNR_XMIN:
+            candidate["_selection_note"] = (
+                f"historical minimum selected, but component SNR={snr:.3g} is below "
+                f"the crashcar min-SNR gate {SNR_XMIN:g}; no SNR series is expected"
+            )
+        elif far is not None and math.log10(far) > snr_series_logfar_threshold:
+            candidate["_selection_note"] = (
+                f"historical minimum selected, but log10 FAR={math.log10(far):.2f} is above "
+                f"SNR-series threshold {snr_series_logfar_threshold:.2f}; no retained SNR series is expected"
+            )
+        else:
+            candidate["_selection_note"] = (
+                "historical minimum selected and appears to pass the SNR-series gate, "
+                "but no matching retained SNR-series manifest row exists"
+            )
+        return candidate
+    far_field = "far_sngl" if hit_field == "hit_single" else "far_multi"
+    log_field = "log10_far_sngl" if hit_field == "hit_single" else "log10_far_multi"
+    best_manifest = min(matches, key=lambda row: row_far(row, far_field, log_field) or math.inf)
+    merged = dict(candidate)
+    merged.update(best_manifest)
+    merged["_selection_source"] = "zerolag_history+manifest"
+    merged["_selection_kind"] = candidate.get("_selection_kind", "")
+    merged["_zerolag_source"] = candidate.get("_zerolag_source", "")
+    merged["_zerolag_worker"] = candidate.get("_zerolag_worker", "")
+    merged["_zerolag_ifos"] = candidate.get("_zerolag_ifos", "")
+    merged["_zerolag_event_id"] = candidate.get("_zerolag_event_id", "")
+    merged["_selection_far_source"] = candidate.get("_selection_far_source", "")
+    return merged
+
+
+def select_history_single_candidate(
+    zerolag_rows: list[dict],
+    ifo: str,
+    single_far_bases: tuple[str, ...],
+    coherent_far_bases: tuple[str, ...],
+) -> dict | None:
+    candidates = []
+    for row in zerolag_rows:
+        far, far_source = first_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
+        if far is None:
             continue
-        far = row_far(row, "far_multi", "log10_far_multi")
-        if far is not None:
-            multi_candidates.append((far, row))
-    if multi_candidates:
-        best = min(multi_candidates, key=lambda item: item[0])[1]
-        key_fields = ("event_id", "bankid", "tmplt_idx")
-        for ifo in ("H1", "L1"):
-            matches = [
-                row
-                for row in manifest_rows
-                if row.get("ifo") == ifo
-                and str(row.get("hit_multi", "0")) in ("1", "1.0", "true", "True")
-                and all(str(row.get(field, "")) == str(best.get(field, "")) for field in key_fields)
-            ]
-            if matches:
-                selected[f"hl_multi_min_far_{ifo.lower()}_component"] = min(
-                    matches,
-                    key=lambda row: row_far(row, "far_multi", "log10_far_multi") or math.inf,
-                )
+        if not row_contains_ifo(row, ifo):
+            continue
+        snr = finite_positive(row.get(f"snglsnr_{ifo}"))
+        if snr is None or snr < SNR_XMIN:
+            continue
+        candidates.append((
+            far,
+            make_zerolag_snr_candidate(
+                row,
+                ifo,
+                "single",
+                far,
+                far_source,
+                coherent_far_bases=coherent_far_bases,
+            ),
+        ))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+def select_history_multi_components(
+    zerolag_rows: list[dict],
+    coherent_far_bases: tuple[str, ...],
+) -> dict[str, dict | None]:
+    candidates = []
+    for row in zerolag_rows:
+        ifos = str(row.get("ifos", ""))
+        detectors = {token for token in ("H1", "L1", "V1", "K1") if token in ifos}
+        if not {"H1", "L1"}.issubset(detectors):
+            continue
+        far, far_source = first_positive_field(row, coherent_far_bases)
+        if far is None:
+            continue
+        candidates.append((far, row, far_source))
+    if not candidates:
+        return {"H1": None, "L1": None}
+    far, best_row, far_source = min(candidates, key=lambda item: item[0])
+    return {
+        ifo: make_zerolag_snr_candidate(
+            best_row,
+            ifo,
+            "multi",
+            far,
+            far_source,
+            coherent_far_bases=coherent_far_bases,
+        )
+        for ifo in ("H1", "L1")
+    }
+
+
+def select_snr_rows(
+    zerolag_rows: list[dict],
+    manifest_rows: list[dict],
+    single_far_bases: tuple[str, ...],
+    coherent_far_bases: tuple[str, ...],
+    *,
+    snr_series_logfar_threshold: float,
+) -> dict[str, dict | None]:
+    h1_single = select_history_single_candidate(
+        zerolag_rows,
+        "H1",
+        single_far_bases,
+        coherent_far_bases,
+    )
+    l1_single = select_history_single_candidate(
+        zerolag_rows,
+        "L1",
+        single_far_bases,
+        coherent_far_bases,
+    )
+    multi_components = select_history_multi_components(
+        zerolag_rows,
+        coherent_far_bases,
+    )
+    selected: dict[str, dict | None] = {
+        "h1_single_min_far": attach_manifest_series(h1_single, manifest_rows, "hit_single", snr_series_logfar_threshold),
+        "l1_single_min_far": attach_manifest_series(l1_single, manifest_rows, "hit_single", snr_series_logfar_threshold),
+        "hl_multi_min_far_h1_component": attach_manifest_series(multi_components.get("H1"), manifest_rows, "hit_multi", snr_series_logfar_threshold),
+        "hl_multi_min_far_l1_component": attach_manifest_series(multi_components.get("L1"), manifest_rows, "hit_multi", snr_series_logfar_threshold),
+    }
     return selected
 
 
@@ -1297,6 +1508,34 @@ def read_snr_csv(path: Path) -> dict | None:
                 t.append(time)
                 y.append(amp)
     return {"t": t, "abs_snr": y, "source": str(path), "kind": "csv"} if t and y else None
+
+
+def read_template_autocorr_csv(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    rel_idx: list[float] = []
+    y: list[float] = []
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            idx = as_float(row.get("relative_index", row.get("sample_index")))
+            amp = as_float(row.get("abs", row.get("abs_snr")))
+            if not math.isfinite(amp):
+                real = as_float(row.get("real"))
+                imag = as_float(row.get("imag"))
+                if math.isfinite(real) and math.isfinite(imag):
+                    amp = math.hypot(real, imag)
+            if math.isfinite(idx) and math.isfinite(amp):
+                rel_idx.append(idx)
+                y.append(amp)
+    if not rel_idx or not y:
+        return None
+    return {
+        "relative_index": rel_idx,
+        "abs_autocorr": y,
+        "source": str(path),
+        "kind": "template_autocorrelation_csv",
+    }
 
 
 def parse_selected_xml_series(path: Path, ifo: str, event_id: str) -> dict | None:
@@ -1367,6 +1606,19 @@ def load_series_for_row(snr_dir: Path, row: dict | None) -> dict | None:
     return None
 
 
+def load_template_for_row(snr_dir: Path, row: dict | None) -> dict | None:
+    if not row:
+        return None
+    for key in ("template_autocorrelation_file", "template_autocorrelation_csv"):
+        template_file = row.get(key)
+        if not template_file:
+            continue
+        result = read_template_autocorr_csv(snr_dir / template_file)
+        if result:
+            return result
+    return None
+
+
 def load_template_curves(path: Path | None) -> dict[str, dict]:
     if path is None or not path.exists():
         return {}
@@ -1402,15 +1654,65 @@ def scaled_template_curve(panel_key: str, row: dict, curves: dict[str, dict], da
     return times.tolist(), (amps / np.nanmax(amps) * scale).tolist()
 
 
-def plot_series_panel(ax, panel_key: str, title: str, row: dict | None, series: dict | None, template_curves: dict[str, dict]) -> dict:
+def scaled_template_autocorr_from_manifest(
+    row: dict,
+    template_series: dict | None,
+    data_t: np.ndarray,
+    data_y: np.ndarray,
+) -> tuple[list[float], list[float]] | None:
+    if not template_series:
+        return None
+    rel_idx = np.asarray(template_series.get("relative_index", []), dtype=float)
+    amps = np.asarray(template_series.get("abs_autocorr", []), dtype=float)
+    mask = np.isfinite(rel_idx) & np.isfinite(amps) & (amps >= 0)
+    rel_idx = rel_idx[mask]
+    amps = amps[mask]
+    if rel_idx.size == 0 or amps.size == 0 or np.nanmax(amps) <= 0:
+        return None
+    dt = None
+    if data_t.size >= 2:
+        diffs = np.diff(np.sort(data_t))
+        diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+        if diffs.size:
+            dt = float(np.nanmedian(diffs))
+    if dt is None or not math.isfinite(dt) or dt <= 0:
+        dt = 1.0
+    scale = finite_positive(row.get("snglsnr"))
+    if scale is None and data_y.size:
+        scale = float(np.nanmax(data_y))
+    if scale is None or scale <= 0:
+        return None
+    return (rel_idx * dt).tolist(), (amps / np.nanmax(amps) * scale).tolist()
+
+
+def plot_series_panel(
+    ax,
+    panel_key: str,
+    title: str,
+    row: dict | None,
+    series: dict | None,
+    template_curves: dict[str, dict],
+    template_series: dict | None,
+) -> dict:
     if not row or not series:
         ax.set_facecolor("white")
-        ax.text(0.5, 0.54, "SNR-series manifest/XML shard not available yet", ha="center", va="center", transform=ax.transAxes, fontsize=11)
-        ax.text(0.5, 0.44, "No replacement curve synthesized", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="0.4")
+        ax.text(0.5, 0.58, "retained SNR series not available", ha="center", va="center", transform=ax.transAxes, fontsize=11)
+        if row:
+            bits = []
+            for label, key in (("single", "log10_far_sngl"), ("multi", "log10_far_multi")):
+                value = as_float(row.get(key))
+                if math.isfinite(value):
+                    bits.append(f"{label} log10 FAR={value:.2f}")
+            note = row.get("_selection_note") or "historical FAR event selected, but no curve file was found"
+            detail = ", ".join(bits) if bits else note
+            ax.text(0.5, 0.47, detail, ha="center", va="center", transform=ax.transAxes, fontsize=9, color="0.25", wrap=True)
+            ax.text(0.5, 0.38, note, ha="center", va="center", transform=ax.transAxes, fontsize=8, color="0.45", wrap=True)
+        else:
+            ax.text(0.5, 0.46, "No historical assigned FAR candidate found", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="0.4")
         ax.set_title(title, fontweight="bold")
         ax.set_xticks([])
         ax.set_yticks([])
-        return {"available": False, "reason": "missing selected manifest row or series file"}
+        return {"available": False, "reason": "missing selected manifest row or series file", "selected_row": compact_snr_row(row)}
 
     t = np.asarray(series["t"], dtype=float)
     y = np.asarray(series["abs_snr"], dtype=float)
@@ -1425,7 +1727,14 @@ def plot_series_panel(ax, panel_key: str, title: str, row: dict | None, series: 
         t = t[window]
         y = y[window]
     snr_ymax = float(np.nanmax(y)) if y.size else SNR_XMIN
-    template = scaled_template_curve(panel_key, row, template_curves, y.tolist())
+    template_source = None
+    template = scaled_template_autocorr_from_manifest(row, template_series, t, y)
+    if template is not None and template_series:
+        template_source = template_series.get("source")
+    if template is None:
+        template = scaled_template_curve(panel_key, row, template_curves, y.tolist())
+        if template is not None:
+            template_source = "template_autocorr_json"
     if template is not None:
         tx = np.asarray(template[0], dtype=float)
         ty = np.asarray(template[1], dtype=float)
@@ -1449,7 +1758,7 @@ def plot_series_panel(ax, panel_key: str, title: str, row: dict | None, series: 
     ax.set_title(title + ("\n" + ", ".join(far_bits) if far_bits else ""), fontweight="bold", fontsize=10)
     ax.set_xlabel("time from local |SNR| peak (s)")
     ax.set_ylabel("|SNR|")
-    ax.set_ylim(SNR_XMIN, max(SNR_XMIN + 1.0, snr_ymax * 1.06))
+    ax.set_ylim(0.0, max(1.0, snr_ymax * 1.06))
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best", fontsize=8)
     return {
@@ -1460,30 +1769,43 @@ def plot_series_panel(ax, panel_key: str, title: str, row: dict | None, series: 
         "series_kind": series.get("kind"),
         "samples": int(t.size),
         "template_autocorr": autocorr,
+        "template_autocorr_source": template_source,
     }
 
 
-def plot_second_2x2(run_root: Path, output: Path, title: str, template_autocorr: Path | None) -> dict:
+def plot_second_2x2(
+    run_root: Path,
+    output: Path,
+    title: str,
+    template_autocorr: Path | None,
+    zerolag_rows: list[dict],
+    single_far_bases: tuple[str, ...],
+    coherent_far_bases: tuple[str, ...],
+    *,
+    snr_series_logfar_threshold: float,
+) -> dict:
     snr_dir = run_root / "run" / "crashcar_snr_series"
     if not snr_dir.exists():
         snr_dir = run_root / "crashcar_snr_series"
     manifest = read_manifest(snr_dir)
-    selections = select_snr_rows(manifest["rows"]) if manifest["exists"] else {
-        "h1_single_min_far": None,
-        "l1_single_min_far": None,
-        "hl_multi_min_far_h1_component": None,
-        "hl_multi_min_far_l1_component": None,
-    }
+    selections = select_snr_rows(
+        zerolag_rows,
+        manifest["rows"] if manifest["exists"] else [],
+        single_far_bases,
+        coherent_far_bases,
+        snr_series_logfar_threshold=snr_series_logfar_threshold,
+    )
     series = {key: load_series_for_row(snr_dir, row) for key, row in selections.items()}
+    template_series = {key: load_template_for_row(snr_dir, row) for key, row in selections.items()}
     template_curves = load_template_curves(template_autocorr)
 
     fig, axes = plt.subplots(2, 2, figsize=(16.5, 11.5), constrained_layout=True)
     fig.suptitle(f"{title}: retained SNR series", fontsize=17, fontweight="bold")
     panels = {
-        "a": plot_series_panel(axes[0, 0], "single_H1", "Panel (a): H1 single-detector selection", selections.get("h1_single_min_far"), series.get("h1_single_min_far"), template_curves),
-        "b": plot_series_panel(axes[0, 1], "single_L1", "Panel (b): L1 single-detector selection", selections.get("l1_single_min_far"), series.get("l1_single_min_far"), template_curves),
-        "c": plot_series_panel(axes[1, 0], "multi_H1", "Panel (c): H1 component of H/L multi selection", selections.get("hl_multi_min_far_h1_component"), series.get("hl_multi_min_far_h1_component"), template_curves),
-        "d": plot_series_panel(axes[1, 1], "multi_L1", "Panel (d): L1 component of H/L multi selection", selections.get("hl_multi_min_far_l1_component"), series.get("hl_multi_min_far_l1_component"), template_curves),
+        "a": plot_series_panel(axes[0, 0], "single_H1", "Panel (a): H1 single-detector selection", selections.get("h1_single_min_far"), series.get("h1_single_min_far"), template_curves, template_series.get("h1_single_min_far")),
+        "b": plot_series_panel(axes[0, 1], "single_L1", "Panel (b): L1 single-detector selection", selections.get("l1_single_min_far"), series.get("l1_single_min_far"), template_curves, template_series.get("l1_single_min_far")),
+        "c": plot_series_panel(axes[1, 0], "multi_H1", "Panel (c): H1 component of H/L multi selection", selections.get("hl_multi_min_far_h1_component"), series.get("hl_multi_min_far_h1_component"), template_curves, template_series.get("hl_multi_min_far_h1_component")),
+        "d": plot_series_panel(axes[1, 1], "multi_L1", "Panel (d): L1 component of H/L multi selection", selections.get("hl_multi_min_far_l1_component"), series.get("hl_multi_min_far_l1_component"), template_curves, template_series.get("hl_multi_min_far_l1_component")),
     }
     if not manifest["exists"]:
         fig.text(0.01, 0.01, "Current snapshot from crashcar_snr_series; manifest.csv is not present.", fontsize=9, color="0.35")
@@ -1497,7 +1819,10 @@ def plot_second_2x2(run_root: Path, output: Path, title: str, template_autocorr:
         "manifest_rows": manifest["row_count"],
         "manifest_ifo_counts": manifest["ifo_counts"],
         "panels": panels,
-        "caveat": "Missing retained SNR-series panels are left blank; no replacement curve is synthesized.",
+        "selection_policy": "Each SNR-series panel scans historical zerolag assigned FAR values and selects the minimum raw FAR event; multi FAR uses the normal SPIIR raw assigned FAR.",
+        "template_autocorr_sources": {key: (value.get("source") if value else None) for key, value in template_series.items()},
+        "selected_rows": {key: compact_snr_row(row) for key, row in selections.items()},
+        "caveat": "Missing retained SNR-series panels are left blank, but their historical FAR-selected row is reported when available; no replacement curve is synthesized.",
     }
 
 
@@ -1516,6 +1841,7 @@ def main() -> None:
     parser.add_argument("--ifo-id-map", default="0:H1,1:L1,2:V1,3:K1")
     parser.add_argument("--single-far-priority", default=",".join(DEFAULT_SINGLE_FAR_BASES))
     parser.add_argument("--coherent-far-priority", default=",".join(DEFAULT_COHERENT_FAR_BASES))
+    parser.add_argument("--snr-series-logfar-threshold", type=float, default=-4.0, help="Threshold used to decide whether a selected historical FAR event is expected to have retained SNR series.")
     parser.add_argument("--background-accumulation-seconds", type=float, default=10800.0, help="BG accumulation window used for panel (a) H/L online fractions.")
     parser.add_argument("--tail-boundary-log10-far", type=float, default=TAIL_BOUNDARY_LOG10_FAR, help=argparse.SUPPRESS)
     parser.add_argument("--max-panel-a-points", type=int, default=0, help="0 means plot all worker detail support points.")
@@ -1572,7 +1898,16 @@ def main() -> None:
     first_plot = output_dir / f"{safe_label}_first_2x2_zerolag_current_{stamp}.png"
     second_plot = output_dir / f"{safe_label}_second_2x2_snr_current_{stamp}.png"
     first = plot_first_2x2(first_payload, first_plot, label, TAIL_BOUNDARY_LOG10_FAR)
-    second = plot_second_2x2(run_root, second_plot, label, args.template_autocorr_json)
+    second = plot_second_2x2(
+        run_root,
+        second_plot,
+        label,
+        args.template_autocorr_json,
+        zerolag["rows"],
+        single_far_bases,
+        coherent_far_bases,
+        snr_series_logfar_threshold=args.snr_series_logfar_threshold,
+    )
 
     meta = {
         "created_utc": stamp,
@@ -1589,6 +1924,7 @@ def main() -> None:
             "ifo_id_map": ifo_id_map,
             "single_far_priority": single_far_bases,
             "coherent_far_priority": coherent_far_bases,
+            "snr_series_logfar_threshold": args.snr_series_logfar_threshold,
             "background_accumulation_seconds": args.background_accumulation_seconds,
             "tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
             "tail_boundary_source": "fixed_code_constant",
