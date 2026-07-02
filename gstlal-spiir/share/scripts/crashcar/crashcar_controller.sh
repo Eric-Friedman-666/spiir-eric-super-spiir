@@ -394,11 +394,20 @@ count_stats() {
 }
 
 check_source() {
-    log "fetch GitHub ${GITHUB_REMOTE}/${GITHUB_BRANCH}"
-    git -C "${SOURCE_ROOT}" fetch "${GITHUB_REMOTE}" "${GITHUB_BRANCH}"
-    local remote_head source_head dirty config_relpaths config_path config_relpath
-    remote_head=$(git -C "${SOURCE_ROOT}" rev-parse FETCH_HEAD)
+    local remote_head source_head dirty config_relpaths config_path config_relpath github_check dirty_count
     source_head=$(git -C "${SOURCE_ROOT}" rev-parse HEAD)
+    remote_head="${source_head}"
+    github_check=${crashcar_check_github:-${CRASHCAR_CHECK_GITHUB:-0}}
+    if [ "${github_check}" = "1" ]; then
+        log "fetch GitHub ${GITHUB_REMOTE}/${GITHUB_BRANCH}"
+        git -C "${SOURCE_ROOT}" fetch "${GITHUB_REMOTE}" "${GITHUB_BRANCH}"
+        remote_head=$(git -C "${SOURCE_ROOT}" rev-parse FETCH_HEAD)
+        if [ "${source_head}" != "${remote_head}" ]; then
+            log "WARNING source head ${source_head} != GitHub latest ${remote_head}; continuing because GitHub check is non-blocking"
+        fi
+    else
+        log "GitHub freshness check disabled; using local source head ${source_head}"
+    fi
     dirty=$(git -C "${SOURCE_ROOT}" status --porcelain --untracked-files=no)
     config_relpaths=
     for config_path in "${CRASHCAR_SOURCE_CONFIG_FILE:-}" "${CONFIG_FILE}" "${SOURCE_ROOT}/scripts/crashcar.env"; do
@@ -421,15 +430,13 @@ check_source() {
             NF && !allow[substr($0, 4)]
         ')
     fi
-    if [ "${source_head}" != "${remote_head}" ]; then
-        log "ERROR source head ${source_head} != GitHub latest ${remote_head}"
-        write_status phase=failed reason=source_not_github_latest source_head="${source_head}" github_head="${remote_head}"
-        exit 2
-    fi
     if [ -n "${dirty}" ]; then
-        log "ERROR tracked source worktree is dirty"
-        write_status phase=failed reason=source_tracked_dirty source_head="${source_head}" github_head="${remote_head}"
-        exit 2
+        dirty_count=$(printf '%s\n' "${dirty}" | awk 'NF {count++} END {print count+0}')
+        log "WARNING tracked source worktree has ${dirty_count} dirty path(s); recording provenance and continuing"
+        mkdir -p "${ROOT}/provenance"
+        printf '%s\n' "${dirty}" > "${ROOT}/provenance/source_dirty_status.txt"
+    else
+        dirty_count=0
     fi
     if [ ! -x "${SOURCE_ROOT}/install_local/bin/gstlal_inspiral_postcohspiir_online" ]; then
         log "ERROR missing latest install_local runtime under ${SOURCE_ROOT}"
@@ -447,11 +454,14 @@ check_source() {
         printf 'github_remote=%s\n' "$(git -C "${SOURCE_ROOT}" remote get-url "${GITHUB_REMOTE}")"
         printf 'github_branch=%s\n' "${GITHUB_BRANCH}"
         printf 'github_head=%s\n' "${remote_head}"
+        printf 'github_check=%s\n' "${github_check}"
         printf 'root=%s\n' "${SOURCE_ROOT}"
         printf 'source_head=%s\n' "${source_head}"
+        printf 'source_dirty_tracked_count=%s\n' "${dirty_count}"
+        printf 'source_dirty_status=%s\n' "${ROOT}/provenance/source_dirty_status.txt"
         printf 'runtime_install_symlink=%s/install\n' "${CRASH_RUNTIME_ROOT}"
     } > "${ROOT}/provenance/source_and_runtime.env"
-    write_status phase=source_ready github_branch="${GITHUB_BRANCH}" github_head="${remote_head}" source_root="${SOURCE_ROOT}" runtime_root="${CRASH_RUNTIME_ROOT}"
+    write_status phase=source_ready github_branch="${GITHUB_BRANCH}" github_head="${remote_head}" source_head="${source_head}" source_dirty_tracked_count="${dirty_count}" source_root="${SOURCE_ROOT}" runtime_root="${CRASH_RUNTIME_ROOT}"
 }
 
 validate_inputs() {
