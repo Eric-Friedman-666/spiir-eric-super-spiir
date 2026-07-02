@@ -99,6 +99,13 @@ def finite_positive(value) -> float | None:
     return None
 
 
+def finite_int_or_none(value) -> int | None:
+    number = as_float(value)
+    if math.isfinite(number):
+        return int(number)
+    return None
+
+
 def log10_positive(value) -> float | None:
     number = finite_positive(value)
     if number is None:
@@ -787,12 +794,12 @@ def build_panel_a_raw_background(
         "counts_ready_selected": dict(Counter(point["ifo"] for point in points)),
         "bg_policy": "latest",
         "latest_total_window_count_by_ifo": {ifo: len(entries) for ifo, entries in by_ifo.items()},
-        "latest_bg_end_by_ifo": {ifo: int(info.get("end", 0)) for ifo, info in windows.items()},
+        "latest_bg_end_by_ifo": {ifo: finite_int_or_none(info.get("end")) for ifo, info in windows.items()},
         "ready_windows": [
             {
                 "ifo": ifo,
-                "bg_start": int(info.get("start", 0)),
-                "bg_end": int(info.get("end", 0)),
+                "bg_start": finite_int_or_none(info.get("start")),
+                "bg_end": finite_int_or_none(info.get("end")),
                 "window_count": counts_ready.get(ifo, 0),
                 "total_window_count": sum(counts_ready.values()),
                 "rows": counts_ready.get(ifo, 0),

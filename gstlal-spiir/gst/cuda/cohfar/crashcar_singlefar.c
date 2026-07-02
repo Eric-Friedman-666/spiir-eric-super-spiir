@@ -47,7 +47,7 @@
 #define GST_CAT_DEFAULT crashcar_singlefar_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-#define CRASHCAR_CODE_VERSION "single_stream_support_v24_completed_timestamp_watermark"
+#define CRASHCAR_CODE_VERSION "single_stream_support_v25_multi_component_snr_series"
 #define CRASHCAR_CLUSTER_WINDOW_SECONDS 1.0
 
 /* Multiple crashcar elements can live in one worker process and append to the
@@ -2075,9 +2075,23 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
 
         for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
             if (!crashcar_row_has_ifo(element, table, ifo_id)) continue;
-            if (table->snglsnr[ifo_id] < element->min_snr) continue;
             if (!(table->chisq[ifo_id] > 0.0f) ||
                 !isfinite(table->chisq[ifo_id])) {
+                continue;
+            }
+            const gboolean single_component_eligible =
+              table->snglsnr[ifo_id] >= element->min_snr;
+            const gboolean write_all_snr_series_for_component =
+              element->snr_series_log10_far_threshold >= 90.0;
+            const float far_multi_for_component =
+              crashcar_best_multi_far(table);
+            const gboolean snr_series_hit_multi_for_component =
+              crashcar_hits_threshold(
+                far_multi_for_component,
+                element->snr_series_log10_far_threshold);
+            if (!single_component_eligible &&
+                !write_all_snr_series_for_component &&
+                !snr_series_hit_multi_for_component) {
                 continue;
             }
 
@@ -2131,8 +2145,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
              * back to the zerolag table; simultaneous-detector periods still
              * need finite direct FAR values for BG support and plotting.
              */
-            if (full_window_ready && bg_livetime > 0.0 &&
-                !preserve_table_single_far) {
+            if (single_component_eligible && full_window_ready &&
+                bg_livetime > 0.0 && !preserve_table_single_far) {
                 window_count = crashcar_collect_window_ranks(
                   element, ifo_id, bg_start, bg_end, &window_ranks,
                   &direct_far_count_ge, llr);
@@ -2150,7 +2164,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             }
 
             float far_sngl = crashcar_best_single_far(table, ifo_id);
-            if (full_window_ready && allow_single_output &&
+            if (single_component_eligible && full_window_ready &&
+                allow_single_output &&
                 !preserve_table_single_far) {
                 if (has_fitted_far && crashcar_far_double_is_valid(fitted_far)) {
                     far_sngl = (float)fitted_far;
@@ -2158,12 +2173,13 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                     far_sngl = (float)direct_far;
                 }
             }
-            if (allow_single_output && crashcar_far_is_valid(far_sngl)) {
+            if (single_component_eligible && allow_single_output &&
+                crashcar_far_is_valid(far_sngl)) {
                 table->far_sngl[ifo_id] = far_sngl;
                 table->far_1w_sngl[ifo_id] = far_sngl;
                 table->far_1d_sngl[ifo_id] = far_sngl;
                 table->far_2h_sngl[ifo_id] = far_sngl;
-            } else if (!allow_single_output) {
+            } else if (single_component_eligible && !allow_single_output) {
                 table->far_sngl[ifo_id] = 0.0f;
                 table->far_1w_sngl[ifo_id] = 0.0f;
                 table->far_1d_sngl[ifo_id] = 0.0f;
@@ -2177,18 +2193,21 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
               element->snr_series_log10_far_threshold >= 90.0;
             float far_multi = crashcar_best_multi_far(table);
             gboolean hit_single_far =
+              single_component_eligible &&
               crashcar_hits_threshold(far_sngl,
                                       element->log10_far_threshold);
             gboolean hit_multi_far =
               crashcar_hits_threshold(far_multi,
                                       element->log10_far_threshold);
             gboolean snr_series_hit_single_far =
+              single_component_eligible &&
               crashcar_hits_threshold(
                 far_sngl, element->snr_series_log10_far_threshold);
             gboolean snr_series_hit_multi_far =
               crashcar_hits_threshold(
                 far_multi, element->snr_series_log10_far_threshold);
-            if (write_all_details || hit_single_far || hit_multi_far) {
+            if (single_component_eligible &&
+                (write_all_details || hit_single_far || hit_multi_far)) {
                 crashcar_write_detail(element, table, ifo_id, llr, direct_far,
                                       direct_far_count_ge, bg_livetime,
                                       bg_start, bg_end, window_count,
