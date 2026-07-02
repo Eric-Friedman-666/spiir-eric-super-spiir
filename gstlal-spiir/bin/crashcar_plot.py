@@ -51,7 +51,7 @@ TAIL_BOUNDARY_LOG10_FAR = -2.5
 DEFAULT_SEGMENT_GLOB = "run/[0-9][0-9][0-9]/H1L1V1_SEGMENTS_*.xml.gz"
 DEFAULT_RAW_TRIGGER_GLOB = "run/[0-9][0-9][0-9]/*_single_triggers.csv"
 DEFAULT_TEMPLATE_SHAPE_MAP = "artifacts/crashcar_template_shape_map.csv"
-DEFAULT_SINGLE_FAR_BASES = ("far_1w_sngl", "far_1d_sngl", "far_2h_sngl", "far_sngl")
+DEFAULT_SINGLE_FAR_BASES = ("far_2h_sngl", "far_1d_sngl", "far_1w_sngl")
 DEFAULT_COHERENT_FAR_BASES = ("far_1w", "far_1d", "far_2h", "far")
 ZEROLAG_NAME_RE = re.compile(r"_zerolag_(\d+)_(\d+)\.xml(?:\.gz)?$")
 
@@ -119,6 +119,19 @@ def first_positive_field(row: dict, keys: Iterable[str]) -> tuple[float | None, 
         if number is not None:
             return number, key
     return None, None
+
+
+def min_positive_field(row: dict, keys: Iterable[str]) -> tuple[float | None, str | None]:
+    best: tuple[float, str] | None = None
+    for key in keys:
+        number = finite_positive(row.get(key))
+        if number is None:
+            continue
+        if best is None or number < best[0]:
+            best = (number, key)
+    if best is None:
+        return None, None
+    return best
 
 
 def row_contains_ifo(row: dict, ifo: str) -> bool:
@@ -869,7 +882,7 @@ def build_single_points(zerolag_rows: list[dict], single_far_bases: tuple[str, .
         for ifo in ("H1", "L1", "V1", "K1"):
             snr = finite_positive(row.get(f"snglsnr_{ifo}"))
             chisq = finite_positive(row.get(f"chisq_{ifo}"))
-            far, far_source = first_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
+            far, far_source = min_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
             if not row_contains_ifo(row, ifo) or snr is None or chisq is None or far is None:
                 continue
             points.append(
@@ -1337,7 +1350,7 @@ def make_zerolag_snr_candidate(
     else:
         candidate["far_multi"] = f"{far:.17g}"
         candidate["log10_far_multi"] = f"{math.log10(far):.12g}"
-        single_far, _single_source = first_positive_field(row, [f"{base}_{ifo}" for base in DEFAULT_SINGLE_FAR_BASES])
+        single_far, _single_source = min_positive_field(row, [f"{base}_{ifo}" for base in DEFAULT_SINGLE_FAR_BASES])
         if single_far is not None:
             candidate["far_sngl"] = f"{single_far:.17g}"
             candidate["log10_far_sngl"] = f"{math.log10(single_far):.12g}"
@@ -1409,7 +1422,7 @@ def select_history_single_candidate(
 ) -> dict | None:
     candidates = []
     for row in zerolag_rows:
-        far, far_source = first_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
+        far, far_source = min_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
         if far is None:
             continue
         if not row_contains_ifo(row, ifo):
@@ -1826,7 +1839,7 @@ def plot_second_2x2(
         "manifest_rows": manifest["row_count"],
         "manifest_ifo_counts": manifest["ifo_counts"],
         "panels": panels,
-        "selection_policy": "Each SNR-series panel scans historical zerolag assigned FAR values and selects the minimum raw FAR event; multi FAR uses the normal SPIIR raw assigned FAR.",
+        "selection_policy": "Each SNR-series panel scans historical zerolag assigned FAR values and selects the minimum event. Single panels use the numeric minimum across single FAR fields; multi panels use the normal SPIIR coherent FAR field priority.",
         "template_autocorr_sources": {key: (value.get("source") if value else None) for key, value in template_series.items()},
         "selected_rows": {key: compact_snr_row(row) for key, row in selections.items()},
         "caveat": "Missing retained SNR-series panels are left blank, but their historical FAR-selected row is reported when available; no replacement curve is synthesized.",
@@ -1846,8 +1859,16 @@ def main() -> None:
     parser.add_argument("--panel-a-worker", default="000")
     parser.add_argument("--panel-a-source", choices=("raw", "detail"), default="raw", help="Use raw reconstructed BG support for panel (a) by default; detail is a legacy diagnostic fallback.")
     parser.add_argument("--ifo-id-map", default="0:H1,1:L1,2:V1,3:K1")
-    parser.add_argument("--single-far-priority", default=",".join(DEFAULT_SINGLE_FAR_BASES))
-    parser.add_argument("--coherent-far-priority", default=",".join(DEFAULT_COHERENT_FAR_BASES))
+    parser.add_argument(
+        "--single-far-priority",
+        default=",".join(DEFAULT_SINGLE_FAR_BASES),
+        help="Comma-separated single-detector FAR fields; plotting uses the numeric minimum across these fields.",
+    )
+    parser.add_argument(
+        "--coherent-far-priority",
+        default=",".join(DEFAULT_COHERENT_FAR_BASES),
+        help="Comma-separated coherent FAR fields; plotting uses the first positive field in this priority order.",
+    )
     parser.add_argument("--snr-series-logfar-threshold", type=float, default=-4.0, help="Threshold used to decide whether a selected historical FAR event is expected to have retained SNR series.")
     parser.add_argument("--background-accumulation-seconds", type=float, default=10800.0, help="BG accumulation window used for panel (a) H/L online fractions.")
     parser.add_argument("--tail-boundary-log10-far", type=float, default=TAIL_BOUNDARY_LOG10_FAR, help=argparse.SUPPRESS)
