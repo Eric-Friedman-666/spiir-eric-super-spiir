@@ -24,6 +24,7 @@ import json
 import math
 import re
 import sys
+import textwrap
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1058,7 +1059,7 @@ def plot_far_points(ax, points: list[dict], cmap, norm, xlabel: str, ylabel: str
     ax.set_ylim(*CHISQ_VIEW)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(f"{title}\n{len(view)} points", fontweight="bold")
+    ax.set_title(f"{title}\n{len(view)} in view / {len(points)} total", fontweight="bold")
     ax.grid(True, which="both", alpha=0.18)
     return artist, view
 
@@ -1154,7 +1155,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         norm,
         "single-detector SNR",
         "chisq",
-        "Panel (b): historical assigned-FAR single total",
+        "Panel (b): historical assigned-FAR single total (all IFOs)",
     )
 
     ax = axes[1, 0]
@@ -1165,7 +1166,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         norm,
         "coherent SNR",
         "cmbchisq",
-        "Panel (c): historical assigned-FAR multi total",
+        "Panel (c): historical assigned-FAR multi total (all detector combos)",
     )
 
     ax = axes[1, 1]
@@ -1177,7 +1178,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         norm,
         "SNR (single or coherent)",
         "chisq / cmbchisq",
-        "Panel (d): historical assigned-FAR combination",
+        "Panel (d): historical assigned-FAR combination (single + multi)",
     )
 
     add_discrete_colorbar(fig, axes, artist_d)
@@ -1383,7 +1384,7 @@ def attach_manifest_series(
         log_field = "log10_far_sngl" if hit_field == "hit_single" else "log10_far_multi"
         far = row_far(candidate, far_field, log_field)
         snr = finite_positive(candidate.get("snglsnr"))
-        if snr is not None and snr < SNR_XMIN:
+        if hit_field == "hit_single" and snr is not None and snr < SNR_XMIN:
             candidate["_selection_note"] = (
                 f"historical minimum selected, but component SNR={snr:.3g} is below "
                 f"the crashcar min-SNR gate {SNR_XMIN:g}; no SNR series is expected"
@@ -1394,10 +1395,17 @@ def attach_manifest_series(
                 f"SNR-series threshold {snr_series_logfar_threshold:.2f}; no retained SNR series is expected"
             )
         else:
-            candidate["_selection_note"] = (
-                "historical minimum selected and appears to pass the SNR-series gate, "
-                "but no matching retained SNR-series manifest row exists"
-            )
+            if hit_field == "hit_multi":
+                candidate["_selection_note"] = (
+                    "historical multi-FAR minimum selected and should have retained component SNR series "
+                    "under the current crashcar runtime; no matching manifest row exists in this run "
+                    "(likely an older runtime product or missing artifact)"
+                )
+            else:
+                candidate["_selection_note"] = (
+                    "historical single-FAR minimum selected and appears to pass the SNR-series gate, "
+                    "but no matching retained SNR-series manifest row exists"
+                )
         return candidate
     far_field = "far_sngl" if hit_field == "hit_single" else "far_multi"
     log_field = "log10_far_sngl" if hit_field == "hit_single" else "log10_far_multi"
@@ -1705,6 +1713,33 @@ def scaled_template_autocorr_from_manifest(
     return (rel_idx * dt).tolist(), (amps / np.nanmax(amps) * scale).tolist()
 
 
+def panel_far_bits(panel_key: str, row: dict) -> list[str]:
+    if panel_key.startswith("single"):
+        value = as_float(row.get("log10_far_sngl"))
+        return [f"single={value:.2f}"] if math.isfinite(value) else []
+    if panel_key.startswith("multi"):
+        value = as_float(row.get("log10_far_multi"))
+        return [f"multi={value:.2f}"] if math.isfinite(value) else []
+    bits = []
+    for label, key in (("single", "log10_far_sngl"), ("multi", "log10_far_multi")):
+        value = as_float(row.get(key))
+        if math.isfinite(value):
+            bits.append(f"{label}={value:.2f}")
+    return bits
+
+
+def display_missing_series_note(note: str) -> str:
+    if "historical multi-FAR minimum selected" in note:
+        return (
+            "Selected multi-FAR minimum should retain both H/L component SNR series "
+            "in the current runtime; this run is missing this component, likely from "
+            "an older runtime product or missing artifact."
+        )
+    if "historical minimum selected" in note and "above SNR-series threshold" in note:
+        return "Selected historical minimum is above the SNR-series retention threshold."
+    return note
+
+
 def plot_series_panel(
     ax,
     panel_key: str,
@@ -1718,15 +1753,12 @@ def plot_series_panel(
         ax.set_facecolor("white")
         ax.text(0.5, 0.58, "retained SNR series not available", ha="center", va="center", transform=ax.transAxes, fontsize=11)
         if row:
-            bits = []
-            for label, key in (("single", "log10_far_sngl"), ("multi", "log10_far_multi")):
-                value = as_float(row.get(key))
-                if math.isfinite(value):
-                    bits.append(f"{label} log10 FAR={value:.2f}")
+            bits = panel_far_bits(panel_key, row)
             note = row.get("_selection_note") or "historical FAR event selected, but no curve file was found"
-            detail = ", ".join(bits) if bits else note
+            display_note = textwrap.fill(display_missing_series_note(note), width=78)
+            detail = ", ".join(bits) if bits else "selected historical FAR event"
             ax.text(0.5, 0.47, detail, ha="center", va="center", transform=ax.transAxes, fontsize=9, color="0.25", wrap=True)
-            ax.text(0.5, 0.38, note, ha="center", va="center", transform=ax.transAxes, fontsize=8, color="0.45", wrap=True)
+            ax.text(0.5, 0.36, display_note, ha="center", va="center", transform=ax.transAxes, fontsize=8, color="0.45", wrap=False)
         else:
             ax.text(0.5, 0.46, "No historical assigned FAR candidate found", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="0.4")
         ax.set_title(title, fontweight="bold")
@@ -1770,11 +1802,7 @@ def plot_series_panel(
         ax.text(0.03, 0.96, "template autocorr\nnot available", transform=ax.transAxes, ha="left", va="top", fontsize=8, bbox={"facecolor": "white", "edgecolor": "#cccccc", "alpha": 0.85, "pad": 2})
         autocorr = "missing"
     ax.plot(t, y, color="#1f77b4", linewidth=1.1, label="stored matched-filter |SNR|")
-    far_bits = []
-    for label, key in (("single", "log10_far_sngl"), ("multi", "log10_far_multi")):
-        value = as_float(row.get(key))
-        if math.isfinite(value):
-            far_bits.append(f"{label}={value:.2f}")
+    far_bits = panel_far_bits(panel_key, row)
     ax.set_title(title + ("\n" + ", ".join(far_bits) if far_bits else ""), fontweight="bold", fontsize=10)
     ax.set_xlabel("time from local |SNR| peak (s)")
     ax.set_ylabel("|SNR|")
