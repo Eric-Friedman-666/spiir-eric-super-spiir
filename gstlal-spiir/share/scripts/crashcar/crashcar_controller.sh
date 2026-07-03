@@ -145,6 +145,7 @@ SLURM_GRES=${slurm_gres:-${SLURM_GRES:-gpu:1}}
 TMUX_SESSION=${tmux_session:-${TMUX_SESSION:-codex1}}
 CRASHCAR_LOG10_FAR_THRESHOLD=${crashcar_log10_far_threshold:-${CRASHCAR_LOG10_FAR_THRESHOLD:-90}}
 CRASHCAR_PRESERVE_TABLE_SINGLE_FAR=${crashcar_preserve_table_single_far:-${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}}
+CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR=${crashcar_finalsink_preserve_table_single_far:-${CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR:-1}}
 CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP=${crashcar_require_template_shape_map:-${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}}
 CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE=${crashcar_single_ledger_final_update:-${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE:-0}}
 
@@ -448,6 +449,17 @@ check_source() {
     cp "${SOURCE_ROOT}/gstlal-spiir/bin/gstlal_inspiral_postcohspiir_online" \
         "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"
     chmod +x "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"
+    finalsink_src="${SOURCE_ROOT}/gstlal-spiir/python/pipemodules/postcoh_finalsink.py"
+    finalsink_dst="${SOURCE_ROOT}/install_local/lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcoh_finalsink.py"
+    if [ -f "${finalsink_src}" ]; then
+        mkdir -p "$(dirname "${finalsink_dst}")"
+        cp "${finalsink_src}" "${finalsink_dst}"
+        log "staged Python finalsink ${finalsink_dst}"
+    else
+        log "ERROR missing source Python finalsink ${finalsink_src}"
+        write_status phase=failed reason=missing_source_finalsink source_head="${source_head}" github_head="${remote_head}"
+        exit 2
+    fi
     rm -f "${CRASH_RUNTIME_ROOT}/install"
     ln -s "${SOURCE_ROOT}/install_local" "${CRASH_RUNTIME_ROOT}/install"
     {
@@ -624,6 +636,7 @@ write_final_report() {
         TAIL_LOG_FAR="${TAIL_LOG_FAR}" FAR_FIT_BOUNDARY="${FAR_FIT_BOUNDARY}" \
         CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}" \
         CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}" \
+        CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR:-1}" \
         SINGLE_BACKGROUND_MODE_VALUE="${SINGLE_BACKGROUND_MODE_VALUE}" \
         SINGLE_FROZEN_BACKGROUND_JSON_VALUE="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
         SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" \
@@ -728,6 +741,35 @@ Path(os.environ["MANIFEST"]).write_text(json.dumps({
 PY
         return 2
     fi
+    if [ ! -s "${snr_dir}/manifest.csv" ]; then
+        log "legacy crashcar_snr_series manifest is absent; skipping legacy SNR-series archive"
+        SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+root = Path(os.environ["SNR_DIR"])
+files = [p for p in root.rglob("*") if p.is_file()]
+payload = {
+    "archive": os.environ["ARCHIVE"],
+    "archive_bytes": 0,
+    "byte_count": sum(p.stat().st_size for p in files),
+    "data_series_files": 0,
+    "exists": True,
+    "file_count": len(files),
+    "legacy_archive_skipped": True,
+    "manifest_exists": (root / "manifest.csv").exists(),
+    "manifest_rows": 0,
+    "reason": "skipped_no_legacy_manifest",
+    "removed_csv_files": [],
+    "snr_series_dir": str(root),
+    "snr_series_log10_far_threshold": os.environ.get("SNR_SERIES_LOG_FAR_THRESHOLD"),
+    "template_autocorrelation_files": 0,
+}
+Path(os.environ["MANIFEST"]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+PY
+        return 0
+    fi
     python3 "${SCRIPT_DIR}/materialize_snr_autocorrelation.py" \
         --manifest "${snr_dir}/manifest.csv" \
         --snr-dir "${snr_dir}" \
@@ -745,6 +787,19 @@ from pathlib import Path
 
 root = Path(os.environ["SNR_DIR"])
 archive = Path(os.environ["ARCHIVE"])
+files_before = [p for p in root.rglob("*") if p.is_file()]
+byte_count_before = sum(p.stat().st_size for p in files_before)
+removed = []
+for path in files_before:
+    name = path.name
+    if (name.startswith("event") and name.endswith("_snr.csv")) or (
+        name.startswith("template_autocorrelation_") and name.endswith(".csv")
+    ):
+        try:
+            removed.append(str(path.relative_to(root)))
+            path.unlink()
+        except FileNotFoundError:
+            pass
 files = [p for p in root.rglob("*") if p.is_file()]
 manifest = root / "manifest.csv"
 manifest_rows = 0
@@ -764,10 +819,15 @@ payload = {
     "archive_bytes": archive.stat().st_size if archive.exists() else 0,
     "archive_exists": archive.exists(),
     "byte_count": sum(p.stat().st_size for p in files),
+    "byte_count_before_compaction": byte_count_before,
+    "compacted_after_archive": True,
     "data_series_files": data_series_files,
     "exists": root.is_dir(),
     "file_count": len(files),
+    "file_count_before_compaction": len(files_before),
     "manifest_rows": manifest_rows,
+    "removed_small_csv_count": len(removed),
+    "removed_small_csv_sample": removed[:20],
     "sample_files": [str(p.relative_to(root)) for p in sorted(files)[:20]],
     "snr_series_dir": str(root),
     "snr_series_logFAR_threshold": os.environ["SNR_SERIES_LOG_FAR_THRESHOLD"],
@@ -790,7 +850,7 @@ submit_job() {
         --cpus-per-task="${SLURM_CPUS_PER_TASK}"
         --gres="${SLURM_GRES}"
         --array="0-$((WORKER_COUNT - 1))"
-        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}",CRASHCAR_SINGLE_OUTPUT_MODE="single-only",SINGLE_OUTPUT_MODE="single-only",CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}",SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}"
+        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR:-1}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}",CRASHCAR_SINGLE_OUTPUT_MODE="single-only",SINGLE_OUTPUT_MODE="single-only",CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}",SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}"
         --chdir="${RUN_DIR}"
     )
     if [ -n "${SLURM_PARTITION}" ]; then

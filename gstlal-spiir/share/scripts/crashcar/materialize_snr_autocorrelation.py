@@ -10,8 +10,16 @@ import html
 import json
 import math
 import re
+import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"", "0", "false", "no", "off", "none"}
 
 
 def read_text_maybe_gzip(path: Path) -> str:
@@ -165,6 +173,15 @@ def main() -> int:
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--snr-dir", required=True)
     parser.add_argument("--bank-dir", required=True)
+    parser.add_argument(
+        "--write-template-csv",
+        action="store_true",
+        default=env_flag("CRASHCAR_TEMPLATE_AUTOCORR_WRITE_CSV", False),
+        help=(
+            "also write one template_autocorrelation_*.csv per unique template; "
+            "disabled by default to avoid large numbers of small files"
+        ),
+    )
     args = parser.parse_args()
 
     manifest = Path(args.manifest)
@@ -180,6 +197,7 @@ def main() -> int:
                     "manifest_exists": manifest.exists(),
                     "rows": 0,
                     "template_autocorrelation_files": 0,
+                    "template_autocorrelation_csv_enabled": args.write_template_csv,
                 },
                 indent=2,
                 sort_keys=True,
@@ -217,7 +235,8 @@ def main() -> int:
             bankid = int(row["bankid"])
             tmplt_idx = int(row["tmplt_idx"])
             template_key = (ifo, bankid, tmplt_idx)
-            if template_key not in template_files:
+            out_name = ""
+            if args.write_template_csv and template_key not in template_files:
                 series_rows = template_series(cache, bank_dir, ifo, bankid, tmplt_idx)
                 out_name = (
                     f"template_autocorrelation_{ifo}_bank{bankid:04d}_tmpl{tmplt_idx}.csv"
@@ -225,7 +244,7 @@ def main() -> int:
                 write_template_csv(snr_dir / out_name, series_rows)
                 template_files[template_key] = out_name
                 materialized += 1
-            else:
+            elif args.write_template_csv:
                 out_name = template_files[template_key]
             xml_file = (row.get("xml_file") or "crashcar_snr_series_worker000.xml")
             template_xml = xml_file.replace(
@@ -233,7 +252,7 @@ def main() -> int:
             )
             if template_xml == xml_file:
                 template_xml = "crashcar_template_autocorrelation.xml"
-            xml_key = (template_xml, ifo, bankid, tmplt_idx)
+            xml_key = (template_xml, str(row.get("event_id", "")), ifo, bankid, tmplt_idx)
             if xml_key not in xml_templates:
                 series_rows = template_series(cache, bank_dir, ifo, bankid, tmplt_idx)
                 xml_shards.setdefault(template_xml, []).append(
@@ -262,6 +281,7 @@ def main() -> int:
                 "errors": errors,
                 "manifest": str(manifest),
                 "rows": len(rows),
+                "template_autocorrelation_csv_enabled": args.write_template_csv,
                 "template_autocorrelation_files": materialized,
                 "template_autocorrelation_unique_templates": len(template_files),
                 "template_autocorrelation_xml_elements": xml_materialized,

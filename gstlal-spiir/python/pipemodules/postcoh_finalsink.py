@@ -857,6 +857,12 @@ class FinalSink(object):
             self.gracedb_client = GraceDb(gracedb_service_url,
                                           reload_certificate=True)
         self.threads_gracedb_upload = []
+        self.crashcar_snr_archive_dir = os.environ.get(
+            "CRASHCAR_EVENT_SNR_ARCHIVE_DIR",
+            os.path.join(path, "crashcar_candidate_events"))
+        self.crashcar_snr_archive_manifest = os.path.join(
+            self.crashcar_snr_archive_dir, "manifest.csv")
+        self.crashcar_snr_archive_seq = 0
 
         # keep a record of segments and is snapshotted
         # our segments is determined by if incoming buf is GAP
@@ -1043,6 +1049,7 @@ class FinalSink(object):
                and (max_cluster_boundary > self.cluster_boundary)):
             if self.try_get_cluster_candidate():
                 self.__set_far(self.candidate.postcoh_inspiral)
+                self.__maybe_archive_crashcar_snr_series(self.candidate)
                 if self.gracedb_far_threshold and self.__pass_test(
                         self.candidate.postcoh_inspiral):
                     self.__do_gracedb_alert(self.candidate,
@@ -1341,10 +1348,17 @@ class FinalSink(object):
     def __set_far(self, postcoh_inspiral):
         preserve_crashcar_single_far = (
             os.environ.get("CRASHCAR_ENABLE", "0") == "1"
-            and os.environ.get("CRASHCAR_PRESERVE_TABLE_SINGLE_FAR", "1") != "0")
+            and os.environ.get(
+                "CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR", "1") != "0")
         crashcar_single_far = None
+        crashcar_single_far_1w = None
+        crashcar_single_far_1d = None
+        crashcar_single_far_2h = None
         if preserve_crashcar_single_far:
             crashcar_single_far = list(postcoh_inspiral.far_sngl)
+            crashcar_single_far_1w = list(postcoh_inspiral.far_1w_sngl)
+            crashcar_single_far_1d = list(postcoh_inspiral.far_1d_sngl)
+            crashcar_single_far_2h = list(postcoh_inspiral.far_2h_sngl)
 
         if self.enable_feature_best_far:
             valid_combined_fars = self.__get_valid_combined_fars(
@@ -1365,12 +1379,108 @@ class FinalSink(object):
                                 far_1d_sngl, postcoh_inspiral.far_1w_sngl)
             ]
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
-            if (crashcar_single_far is not None
-                    and crashcar_single_far[ifo_id] > 0.0):
+            if crashcar_single_far is not None:
                 postcoh_inspiral.far_sngl[ifo_id] = crashcar_single_far[ifo_id]
+                postcoh_inspiral.far_1w_sngl[ifo_id] = (
+                    crashcar_single_far_1w[ifo_id])
+                postcoh_inspiral.far_1d_sngl[ifo_id] = (
+                    crashcar_single_far_1d[ifo_id])
+                postcoh_inspiral.far_2h_sngl[ifo_id] = (
+                    crashcar_single_far_2h[ifo_id])
             else:
                 postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
         self.__apply_sidecar_single_far(postcoh_inspiral)
+
+    def __crashcar_snr_series_threshold_far(self):
+        if os.environ.get("CRASHCAR_ENABLE", "0") != "1":
+            return None
+        if _env_truthy("CRASHCAR_DISABLE_EVENT_SNR_ARCHIVE", False):
+            return None
+        raw_threshold = os.environ.get(
+            "CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD", "")
+        if raw_threshold == "":
+            return None
+        try:
+            log10_far_threshold = float(raw_threshold)
+        except ValueError:
+            logger.warning("invalid CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD=%r",
+                           raw_threshold)
+            return None
+        return 10.0**log10_far_threshold
+
+    def __crashcar_snr_series_reasons(self, postcoh_inspiral):
+        far_threshold = self.__crashcar_snr_series_threshold_far()
+        if far_threshold is None:
+            return []
+
+        reasons = []
+        far = float(postcoh_inspiral.far)
+        if far > 0.0 and far <= far_threshold:
+            reasons.append("multi")
+        for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
+            single_far = float(postcoh_inspiral.far_sngl[ifo_id])
+            if single_far > 0.0 and single_far <= far_threshold:
+                reasons.append("%s_single" % ifo)
+        return reasons
+
+    def __append_crashcar_snr_archive_manifest(self, row):
+        os.makedirs(self.crashcar_snr_archive_dir, exist_ok=True)
+        write_header = (
+            not os.path.exists(self.crashcar_snr_archive_manifest)
+            or os.path.getsize(self.crashcar_snr_archive_manifest) == 0)
+        fields = [
+            "archive_seq", "filename", "reasons", "event_id", "ifos",
+            "end_time", "end_time_ns", "bankid", "tmplt_idx", "far",
+            "far_sngl_H1", "far_sngl_L1", "code_version"
+        ]
+        with open(self.crashcar_snr_archive_manifest, "a", newline="") as fout:
+            writer = csv.DictWriter(fout, fieldnames=fields)
+            if write_header:
+                writer.writeheader()
+            writer.writerow(dict((field, row.get(field, "")) for field in fields))
+
+    def __maybe_archive_crashcar_snr_series(self, trigger):
+        postcoh_inspiral = trigger.postcoh_inspiral
+        reasons = self.__crashcar_snr_series_reasons(postcoh_inspiral)
+        if not reasons:
+            return
+        os.makedirs(self.crashcar_snr_archive_dir, exist_ok=True)
+        self.crashcar_snr_archive_seq += 1
+        filename = os.path.join(
+            self.crashcar_snr_archive_dir,
+            "crashcar_snr_%06d_%s_%d_%d_%d_%d_%d.xml.gz" % (
+                self.crashcar_snr_archive_seq, postcoh_inspiral.ifos,
+                postcoh_inspiral.end_time, postcoh_inspiral.end_time_ns,
+                postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx,
+                postcoh_inspiral.event_id))
+
+        self.coincs_document.assemble_ligolw_xmldoc(trigger, psds=None)
+        logger.info("writing crashcar SNR-series candidate XML %s", filename)
+        ligolw_utils.write_filename(self.coincs_document.xmldoc,
+                                    filename,
+                                    trap_signals=None)
+        self.coincs_document.close()
+        self.coincs_document = CoincsDocFromPostcoh(self.path,
+                                                    self.process_params,
+                                                    self.channel_dict)
+
+        far_sngl = list(postcoh_inspiral.far_sngl)
+        row = {
+            "archive_seq": self.crashcar_snr_archive_seq,
+            "filename": filename,
+            "reasons": ";".join(reasons),
+            "event_id": postcoh_inspiral.event_id,
+            "ifos": postcoh_inspiral.ifos,
+            "end_time": postcoh_inspiral.end_time,
+            "end_time_ns": postcoh_inspiral.end_time_ns,
+            "bankid": postcoh_inspiral.bankid,
+            "tmplt_idx": postcoh_inspiral.tmplt_idx,
+            "far": postcoh_inspiral.far,
+            "far_sngl_H1": far_sngl[pipe_macro.get_ifo_id("H1")],
+            "far_sngl_L1": far_sngl[pipe_macro.get_ifo_id("L1")],
+            "code_version": os.environ.get("CRASHCAR_CODE_VERSION", ""),
+        }
+        self.__append_crashcar_snr_archive_manifest(row)
 
     def __apply_sidecar_single_far(self, postcoh_inspiral):
         if self.sidecar_single_far_lookup is None:
