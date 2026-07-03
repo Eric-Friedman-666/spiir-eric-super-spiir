@@ -55,7 +55,14 @@ for script in \
     crashcar_sbatch.sh \
     crashcar_pipeline.sh \
     filter_injection_xml_by_gps.py \
-    materialize_snr_autocorrelation.py; do
+    materialize_snr_autocorrelation.py \
+    single_detector_far.py \
+    dump_segment_livetime_csv.py \
+    plot_single_llr_far.py \
+    export_template_shape_map.py \
+    update_single_background_once.sh \
+    merge_worker_far_ledgers.py \
+    patch_zerolag_single_far_from_ledger.py; do
     cp "${SCRIPT_DIR}/${script}" "${RUN_ROOT}/scripts/${script}"
 done
 cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.env"
@@ -66,7 +73,14 @@ chmod +x \
     "${RUN_ROOT}/scripts/crashcar_sbatch.sh" \
     "${RUN_ROOT}/scripts/crashcar_pipeline.sh" \
     "${RUN_ROOT}/scripts/filter_injection_xml_by_gps.py" \
-    "${RUN_ROOT}/scripts/materialize_snr_autocorrelation.py"
+    "${RUN_ROOT}/scripts/materialize_snr_autocorrelation.py" \
+    "${RUN_ROOT}/scripts/single_detector_far.py" \
+    "${RUN_ROOT}/scripts/dump_segment_livetime_csv.py" \
+    "${RUN_ROOT}/scripts/plot_single_llr_far.py" \
+    "${RUN_ROOT}/scripts/export_template_shape_map.py" \
+    "${RUN_ROOT}/scripts/update_single_background_once.sh" \
+    "${RUN_ROOT}/scripts/merge_worker_far_ledgers.py" \
+    "${RUN_ROOT}/scripts/patch_zerolag_single_far_from_ledger.py"
 
 INJECTION_MODE_RAW=${injection_mode:-${INJECTION_MODE:-False}}
 case "$(printf '%s' "${INJECTION_MODE_RAW}" | tr '[:upper:]' '[:lower:]')" in

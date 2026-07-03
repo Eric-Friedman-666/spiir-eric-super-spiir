@@ -27,7 +27,7 @@ if [ -z "${SOURCE_ROOT}" ]; then
     exit 2
 fi
 CRASH_RUNTIME_ROOT=${crash_runtime_root:-${CRASH_RUNTIME_ROOT:-"${ROOT}/crashcar_runtime"}}
-CRASH_SCRIPT_DIR="${SOURCE_ROOT}/gstlal-spiir/single_detector_sidecar/online_single_llrfar_wguo_refined"
+CRASH_SCRIPT_DIR="${SCRIPT_DIR}"
 GITHUB_REMOTE=${github_remote:-${GITHUB_REMOTE:-github}}
 GITHUB_BRANCH=${github_branch:-${GITHUB_BRANCH:-Eric-bless-spiir-crashcar}}
 GITHUB_REF="refs/heads/${GITHUB_BRANCH}"
