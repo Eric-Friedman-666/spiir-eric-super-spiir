@@ -17,6 +17,7 @@ import os
 import shlex
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -53,12 +54,62 @@ def latest_run_root(root: Path, run_id: str) -> Path:
     ]
     if not candidates:
         raise SystemExit(f"No timestamped run roots found below: {run_parent}")
-    return sorted(candidates, key=lambda path: path.name)[-1]
+    candidates = sorted(candidates, key=lambda path: path.name)
+    if len(candidates) == 1:
+        return candidates[0]
+
+    completed_noinj = []
+    descriptions = []
+    for path in candidates:
+        status = read_json(path / "controller" / "status.json")
+        workflow_status = read_json(path / "controller" / "workflow_status.json")
+        injection = is_injection_workflow(path)
+        phase = (
+            workflow_status.get("phase")
+            or workflow_status.get("status")
+            or status.get("phase")
+            or status.get("status")
+            or "unknown"
+        )
+        mode = "injection-workflow" if injection else "no-injection"
+        descriptions.append(f"  {path} [{mode}, phase={phase}]")
+        if not injection and str(phase).lower() == "completed":
+            completed_noinj.append(path)
+
+    if len(completed_noinj) == 1:
+        sys.stderr.write(
+            "crashcar_plot.py: multiple timestamped roots found; "
+            f"using the only completed no-injection root {completed_noinj[0]}\n"
+        )
+        return completed_noinj[0]
+
+    raise SystemExit(
+        "Multiple timestamped run roots found for this run_id; please pass --run-root explicitly:\n"
+        + "\n".join(descriptions)
+    )
 
 
 def infer_background_seconds(root: Path, run_root: Path, fallback: float) -> float:
+    status = read_json(run_root / "controller" / "status.json")
+    for key in ("background_accumulation_seconds", "crashcar_background_required_seconds"):
+        raw = status.get(key)
+        if raw:
+            try:
+                value = float(raw)
+            except ValueError:
+                continue
+            if value > 0:
+                return value
     for env_path in (run_root / "scripts" / "crashcar.env", root / "scripts" / "crashcar.env"):
         values = read_env(env_path)
+        seconds = values.get("background_accumulation")
+        if seconds:
+            try:
+                value = float(seconds)
+            except ValueError:
+                value = 0.0
+            if value > 0:
+                return value
         hours = values.get("BG_accumulation_hour")
         if hours:
             try:
@@ -69,6 +120,13 @@ def infer_background_seconds(root: Path, run_root: Path, fallback: float) -> flo
 
 
 def infer_float_env(root: Path, run_root: Path, key: str, fallback: float) -> float:
+    status = read_json(run_root / "controller" / "status.json")
+    raw = status.get(key)
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
     for env_path in (run_root / "scripts" / "crashcar.env", root / "scripts" / "crashcar.env"):
         values = read_env(env_path)
         raw = values.get(key)
@@ -89,8 +147,44 @@ def infer_env_value(root: Path, run_root: Path, key: str) -> str | None:
     return None
 
 
-def materialize_template_autocorr(root: Path, run_root: Path) -> None:
-    snr_dir = run_root / "run" / "crashcar_snr_series"
+def read_json(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(errors="replace"))
+    except Exception:
+        return {}
+
+
+def is_truthy(value) -> bool:
+    return str(value).strip().lower() in ("1", "1.0", "true", "yes", "y", "on")
+
+
+def is_injection_workflow(run_root: Path) -> bool:
+    workflow_status = read_json(run_root / "controller" / "workflow_status.json")
+    if workflow_status.get("workflow") == "frozen_background_then_injection":
+        return True
+    env = read_env(run_root / "scripts" / "crashcar.env")
+    return is_truthy(env.get("injection_mode")) and (run_root / "bg_noinj").exists()
+
+
+def stage_root_from_status(run_root: Path, key: str, fallback: str) -> Path:
+    workflow_status = read_json(run_root / "controller" / "workflow_status.json")
+    raw = workflow_status.get(key)
+    return Path(raw).resolve() if raw else (run_root / fallback).resolve()
+
+
+def current_or_first_chunk_root(run_root: Path) -> Path | None:
+    workflow_status = read_json(run_root / "controller" / "workflow_status.json")
+    raw = workflow_status.get("current_chunk_root")
+    if raw and Path(raw).exists():
+        return Path(raw).resolve()
+    chunks = sorted((run_root / "inj_bns" / "chunks").glob("chunk_*"))
+    return chunks[0].resolve() if chunks else None
+
+
+def materialize_template_autocorr(root: Path, run_root: Path, snr_dir: Path | None = None) -> None:
+    snr_dir = snr_dir or run_root / "run" / "crashcar_snr_series"
     manifest = snr_dir / "manifest.csv"
     script = next(
         (
@@ -133,6 +227,76 @@ def materialize_template_autocorr(root: Path, run_root: Path) -> None:
         )
 
 
+def run_plot_impl(
+    *,
+    root: Path,
+    impl: Path,
+    run_root: Path,
+    output_dir: Path,
+    run_label: str,
+    panel_a_worker: str,
+    background_seconds: float,
+    snr_series_threshold: float,
+    stamp: str | None,
+    no_module_load: bool,
+    passthrough: list[str],
+    extra_args: list[str] | None = None,
+) -> dict:
+    impl_args = [
+        str(impl),
+        "--run-root",
+        str(run_root),
+        "--output-dir",
+        str(output_dir),
+        "--run-label",
+        run_label,
+        "--panel-a-worker",
+        panel_a_worker,
+        "--background-accumulation-seconds",
+        f"{background_seconds:g}",
+        "--snr-series-logfar-threshold",
+        f"{snr_series_threshold:g}",
+    ]
+    if stamp:
+        impl_args.extend(["--stamp", stamp])
+    impl_args.extend(extra_args or [])
+    impl_args.extend(passthrough)
+
+    command_parts = []
+    if not no_module_load:
+        command_parts.append("module load gcc/13.3.0 scipy-bundle/2024.05 >/dev/null 2>&1 || true")
+    command_parts.append("exec python3 " + " ".join(shlex.quote(part) for part in impl_args))
+    proc = subprocess.run(
+        ["bash", "-lc", "; ".join(command_parts)],
+        cwd=str(root),
+        text=True,
+        capture_output=True,
+        env=os.environ.copy(),
+    )
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
+    stdout = proc.stdout.strip()
+    if proc.returncode != 0:
+        if stdout:
+            print(stdout)
+        raise SystemExit(proc.returncode)
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError:
+        return {"raw_stdout": stdout}
+    return payload
+
+
+def print_plot_payload(prefix: str, payload: dict) -> None:
+    if payload.get("raw_stdout"):
+        print(payload["raw_stdout"])
+        return
+    print(f"{prefix}_first_2x2={payload.get('first', '')}")
+    print(f"{prefix}_second_2x2={payload.get('second', '')}")
+    if payload.get("meta"):
+        print(f"{prefix}_metadata={payload['meta']}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run_id", "--run-id", nargs="+", required=True, help="Run id under ROOT/runs, e.g. 20260629_2300. Forms like '--run_id = 20260629_2300' are accepted.")
@@ -155,66 +319,132 @@ def main() -> int:
     if not impl.exists():
         raise SystemExit(f"Plot implementation not found: {impl}")
 
+    print(f"run_root={run_root}")
+    if not is_injection_workflow(run_root):
+        bg_seconds = args.background_accumulation_seconds
+        if bg_seconds is None:
+            bg_seconds = infer_background_seconds(root, run_root, 10800.0)
+        snr_series_threshold = args.snr_series_logfar_threshold
+        if snr_series_threshold is None:
+            snr_series_threshold = infer_float_env(root, run_root, "SNR_series_logFAR_threshold", -4.0)
+
+        if not args.skip_template_autocorr:
+            materialize_template_autocorr(root, run_root)
+        payload = run_plot_impl(
+            root=root,
+            impl=impl,
+            run_root=run_root,
+            output_dir=output_dir,
+            run_label=f"crashcar_{run_id}",
+            panel_a_worker=args.panel_a_worker,
+            background_seconds=bg_seconds,
+            snr_series_threshold=snr_series_threshold,
+            stamp=args.stamp,
+            no_module_load=args.no_module_load,
+            passthrough=passthrough,
+        )
+        if payload.get("raw_stdout"):
+            print(payload["raw_stdout"])
+            return 0
+        print(f"first_2x2={payload.get('first', '')}")
+        print(f"second_2x2={payload.get('second', '')}")
+        if payload.get("meta"):
+            print(f"metadata={payload['meta']}")
+        return 0
+
+    bg_root = stage_root_from_status(run_root, "bg_run_root", "bg_noinj")
+    inj_root = stage_root_from_status(run_root, "injection_root", "inj_bns")
+    workflow_status = read_json(run_root / "controller" / "workflow_status.json")
+    print("plot_mode=injection")
+    print(f"bg_run_root={bg_root}")
+    print(f"injection_root={inj_root}")
+    print(f"frozen_single_background_json={workflow_status.get('frozen_single_background_json', '')}")
+    print(f"frozen_multi_stats_dir={workflow_status.get('frozen_multi_stats_dir', '')}")
+
     bg_seconds = args.background_accumulation_seconds
     if bg_seconds is None:
-        bg_seconds = infer_background_seconds(root, run_root, 10800.0)
-    snr_series_threshold = args.snr_series_logfar_threshold
-    if snr_series_threshold is None:
-        snr_series_threshold = infer_float_env(root, run_root, "SNR_series_logFAR_threshold", -4.0)
-
+        bg_seconds = infer_background_seconds(root, bg_root, 10800.0)
+    bg_threshold = args.snr_series_logfar_threshold
+    if bg_threshold is None:
+        bg_threshold = infer_float_env(root, bg_root, "SNR_series_logFAR_threshold", -4.0)
     if not args.skip_template_autocorr:
-        materialize_template_autocorr(root, run_root)
-
-    impl_args = [
-        str(impl),
-        "--run-root",
-        str(run_root),
-        "--output-dir",
-        str(output_dir),
-        "--run-label",
-        f"crashcar_{run_id}",
-        "--panel-a-worker",
-        args.panel_a_worker,
-        "--background-accumulation-seconds",
-        f"{bg_seconds:g}",
-        "--snr-series-logfar-threshold",
-        f"{snr_series_threshold:g}",
-    ]
-    if args.stamp:
-        impl_args.extend(["--stamp", args.stamp])
-    impl_args.extend(passthrough)
-
-    command_parts = []
-    if not args.no_module_load:
-        command_parts.append("module load gcc/13.3.0 scipy-bundle/2024.05 >/dev/null 2>&1 || true")
-    command_parts.append("exec python3 " + " ".join(shlex.quote(part) for part in impl_args))
-    command = "; ".join(command_parts)
-
-    proc = subprocess.run(
-        ["bash", "-lc", command],
-        cwd=str(root),
-        text=True,
-        capture_output=True,
-        env=os.environ.copy(),
+        materialize_template_autocorr(root, bg_root)
+    bg_payload = run_plot_impl(
+        root=root,
+        impl=impl,
+        run_root=bg_root,
+        output_dir=output_dir,
+        run_label=f"crashcar_{run_id}_bg_noinj",
+        panel_a_worker=args.panel_a_worker,
+        background_seconds=bg_seconds,
+        snr_series_threshold=bg_threshold,
+        stamp=args.stamp,
+        no_module_load=args.no_module_load,
+        passthrough=passthrough,
     )
-    if proc.stderr:
-        sys.stderr.write(proc.stderr)
-    stdout = proc.stdout.strip()
-    if proc.returncode != 0:
-        if stdout:
-            print(stdout)
-        return proc.returncode
+    print_plot_payload("bg", bg_payload)
 
-    print(f"run_root={run_root}")
-    try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError:
-        print(stdout)
-        return 0
-    print(f"first_2x2={payload.get('first', '')}")
-    print(f"second_2x2={payload.get('second', '')}")
-    if payload.get("meta"):
-        print(f"metadata={payload['meta']}")
+    chunk_root = current_or_first_chunk_root(run_root)
+    inj_threshold = args.snr_series_logfar_threshold
+    if inj_threshold is None:
+        inj_threshold = infer_float_env(root, chunk_root or run_root, "SNR_series_logFAR_threshold", bg_threshold)
+    if not args.skip_template_autocorr:
+        for snr_dir in sorted(run_root.glob("inj_bns/chunks/chunk_*/run/crashcar_snr_series")):
+            materialize_template_autocorr(root, snr_dir.parents[1], snr_dir=snr_dir)
+    inj_extra = [
+        "--zerolag-glob",
+        "inj_bns/chunks/chunk_*/run/[0-9][0-9][0-9]/*_zerolag_*.xml*",
+        "--detail-glob",
+        "bg_noinj/run/crashcar_singlefar_detail_worker*.csv",
+        "--raw-trigger-glob",
+        "bg_noinj/run/[0-9][0-9][0-9]/*_single_triggers.csv",
+        "--segment-glob",
+        "bg_noinj/run/[0-9][0-9][0-9]/H1L1V1_SEGMENTS_*.xml*",
+        "--shape-map",
+        "bg_noinj/artifacts/crashcar_template_shape_map.csv",
+        "--background-json",
+        "bg_noinj/artifacts/crashcar_day1_last_bg3h_full_background.json",
+        "--snr-dir-glob",
+        "inj_bns/chunks/chunk_*/run/crashcar_snr_series",
+    ]
+    inj_payload = run_plot_impl(
+        root=root,
+        impl=impl,
+        run_root=run_root,
+        output_dir=output_dir,
+        run_label=f"crashcar_{run_id}_injection",
+        panel_a_worker=args.panel_a_worker,
+        background_seconds=bg_seconds,
+        snr_series_threshold=inj_threshold,
+        stamp=args.stamp,
+        no_module_load=args.no_module_load,
+        passthrough=passthrough,
+        extra_args=inj_extra,
+    )
+    print_plot_payload("injection", inj_payload)
+    if not inj_payload.get("raw_stdout"):
+        print(f"first_2x2={inj_payload.get('first', '')}")
+        print(f"second_2x2={inj_payload.get('second', '')}")
+        if inj_payload.get("meta"):
+            print(f"metadata={inj_payload['meta']}")
+    meta_path = output_dir / f"crashcar_{run_id}_workflow_plot_{args.stamp or datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.write_text(
+        json.dumps(
+            {
+                "run_root": str(run_root),
+                "mode": "injection",
+                "bg": bg_payload,
+                "injection": inj_payload,
+                "frozen_single_background_json": workflow_status.get("frozen_single_background_json", ""),
+                "frozen_multi_stats_dir": workflow_status.get("frozen_multi_stats_dir", ""),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    print(f"workflow_metadata={meta_path}")
     return 0
 
 

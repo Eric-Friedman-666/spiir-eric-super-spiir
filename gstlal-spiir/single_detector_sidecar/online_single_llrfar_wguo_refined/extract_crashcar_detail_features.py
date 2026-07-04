@@ -231,6 +231,13 @@ def main() -> int:
     gps_start = min(gps_values) if gps_values else None
     gps_end = max(gps_values) if gps_values else None
     duration = max(0.0, gps_end - gps_start) if gps_start is not None and gps_end is not None else 0.0
+    background_start = (
+        args.min_snapshot_end_gps if args.min_snapshot_end_gps is not None else gps_start)
+    background_end = (
+        args.max_snapshot_end_gps if args.max_snapshot_end_gps is not None else gps_end)
+    background_duration = (
+        max(0.0, background_end - background_start)
+        if background_start is not None and background_end is not None else 0.0)
     latest_snapshot_end = gps_end
     summary = {
         "input_snapshot_kind": "crashcar_detail_csv",
@@ -259,6 +266,13 @@ def main() -> int:
         "duration_seconds": duration,
         "duration_hours": duration / 3600.0 if duration else 0.0,
         "duration_source": "crashcar_detail_feature_rows",
+        "background_start_gps": background_start,
+        "background_start_utc": gps_to_utc_label(background_start),
+        "background_end_gps": background_end,
+        "background_end_utc": gps_to_utc_label(background_end),
+        "background_duration_seconds": background_duration,
+        "background_duration_hours": background_duration / 3600.0 if background_duration else 0.0,
+        "background_duration_source": "configured_snapshot_window",
         "bank_groups": sorted(group for group in groups if group),
         "bank_ranges": [
             f"{int(group) * args.banks_per_group:04d}-"

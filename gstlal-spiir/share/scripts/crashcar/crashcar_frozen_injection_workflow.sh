@@ -228,38 +228,18 @@ else
         INJ_CHUNK_SECONDS=$((INJ_CHUNK_HOUR * 3600))
     fi
 fi
-BG_ACCUM_SECONDS=${injection_bg_BG_accumulation_seconds:-${injection_bg_accumulation_seconds:-${background_accumulation_seconds:-${BACKGROUND_ACCUMULATION_SECONDS:-}}}}
-if [ -z "${BG_ACCUM_SECONDS}" ]; then
-    BG_ACCUM_HOUR=${injection_bg_BG_accumulation_hour:-${injection_bg_accumulation_hour:-${BG_accumulation_hour:-${background_accumulation_hour:-${BACKGROUND_ACCUMULATION_HOUR:-}}}}}
-    if [ -n "${BG_ACCUM_HOUR}" ]; then
-        BG_ACCUM_SECONDS=$((BG_ACCUM_HOUR * 3600))
-    else
-        BG_ACCUM_SECONDS=${BG_DURATION_SECONDS}
-    fi
-fi
-BG_UPDATE_SECONDS=${injection_bg_BG_update_seconds:-${injection_bg_zerolag_update_seconds:-${BG_update_seconds:-${background_update_seconds:-${BACKGROUND_UPDATE_SECONDS:-}}}}}
-if [ -z "${BG_UPDATE_SECONDS}" ]; then
-    BG_UPDATE_HOUR=${injection_bg_BG_update_hour:-${injection_bg_zerolag_update_hour:-${BG_update_hour:-1}}}
-    BG_UPDATE_SECONDS=$((BG_UPDATE_HOUR * 3600))
-fi
-INJ_ACCUM_SECONDS=${injection_BG_accumulation_seconds:-${injection_accumulation_seconds:-}}
-if [ -z "${INJ_ACCUM_SECONDS}" ]; then
-    INJ_ACCUM_HOUR=${injection_BG_accumulation_hour:-${injection_accumulation_hour:-}}
-    if [ -n "${INJ_ACCUM_HOUR}" ]; then
-        INJ_ACCUM_SECONDS=$((INJ_ACCUM_HOUR * 3600))
-    else
-        INJ_ACCUM_SECONDS=${BG_ACCUM_SECONDS}
-    fi
-fi
-INJ_BG_UPDATE_SECONDS=${injection_BG_update_seconds:-${injection_zerolag_update_seconds:-}}
-if [ -z "${INJ_BG_UPDATE_SECONDS}" ]; then
-    INJ_BG_UPDATE_HOUR=${injection_BG_update_hour:-${injection_zerolag_update_hour:-}}
-    if [ -n "${INJ_BG_UPDATE_HOUR}" ]; then
-        INJ_BG_UPDATE_SECONDS=$((INJ_BG_UPDATE_HOUR * 3600))
-    else
-        INJ_BG_UPDATE_SECONDS=${BG_UPDATE_SECONDS}
-    fi
-fi
+# Injection workflows build one frozen no-injection background from the full
+# configured background segment.  There is no rolling BG cadence in this stage:
+# a 24 h injection/background segment yields a single 24 h frozen background.
+BG_ACCUM_SECONDS=${BG_DURATION_SECONDS}
+BG_UPDATE_SECONDS=${BG_DURATION_SECONDS}
+
+# The injection foreground never accumulates a new background; these values are
+# only passed through to satisfy the normal crashcar stage contract while
+# single_background_mode=frozen and crashcar_background_required_seconds=0 do the
+# actual assignment-only work.
+INJ_ACCUM_SECONDS=${BG_ACCUM_SECONDS}
+INJ_BG_UPDATE_SECONDS=${BG_UPDATE_SECONDS}
 ZEROLAG_UPDATE_SECONDS=${zerolag_update_seconds:-${ZEROLAG_UPDATE_SECONDS:-}}
 if [ -z "${ZEROLAG_UPDATE_SECONDS}" ]; then
     ZEROLAG_UPDATE_HOUR=${zerolag_update_hour:-1}

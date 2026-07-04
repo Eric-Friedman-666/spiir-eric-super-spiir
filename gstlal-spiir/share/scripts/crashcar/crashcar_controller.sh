@@ -719,6 +719,85 @@ Path(os.environ["REPORT"]).write_text(json.dumps(payload, indent=2, sort_keys=Tr
 PY
 }
 
+synthesize_candidate_snr_manifest() {
+    local snr_dir="${RUN_DIR}/crashcar_snr_series"
+    mkdir -p "${snr_dir}"
+    RUN_DIR="${RUN_DIR}" SNR_DIR="${snr_dir}" python3 - <<'PY'
+import csv
+import json
+import os
+from pathlib import Path
+
+run_dir = Path(os.environ["RUN_DIR"])
+snr_dir = Path(os.environ["SNR_DIR"])
+manifest = snr_dir / "manifest.csv"
+summary = snr_dir / "candidate_event_manifest_summary.json"
+input_manifests = sorted(
+    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/manifest.csv"))
+fieldnames = [
+    "archive_seq",
+    "filename",
+    "series_file",
+    "xml_file",
+    "candidate_xml_file",
+    "source_manifest",
+    "reasons",
+    "event_id",
+    "ifos",
+    "ifo",
+    "end_time",
+    "end_time_ns",
+    "bankid",
+    "tmplt_idx",
+    "far",
+    "far_sngl_H1",
+    "far_sngl_L1",
+    "code_version",
+]
+rows = []
+for input_manifest in input_manifests:
+    with input_manifest.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            xml_file = (row.get("filename") or row.get("xml_file") or "").strip()
+            if not xml_file:
+                continue
+            xml_path = Path(xml_file)
+            if xml_path.is_absolute():
+                try:
+                    xml_file = str(xml_path.relative_to(run_dir))
+                except ValueError:
+                    xml_file = str(xml_path)
+            ifos = (row.get("ifos") or "").replace(",", "")
+            active_ifos = [ifo for ifo in ("H1", "L1", "V1", "K1") if ifo in ifos]
+            for ifo in active_ifos:
+                out = {field: "" for field in fieldnames}
+                for field in row:
+                    if field in out:
+                        out[field] = row.get(field, "")
+                out["filename"] = xml_file
+                out["series_file"] = xml_file
+                out["xml_file"] = xml_file
+                out["candidate_xml_file"] = xml_file
+                out["source_manifest"] = str(input_manifest.relative_to(run_dir))
+                out["ifo"] = ifo
+                rows.append(out)
+
+if rows:
+    with manifest.open("w", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+summary.write_text(json.dumps({
+    "input_manifests": [str(path.relative_to(run_dir)) for path in input_manifests],
+    "manifest": str(manifest),
+    "rows": len(rows),
+    "unique_candidate_xml_files": len({row["candidate_xml_file"] for row in rows}),
+}, indent=2, sort_keys=True) + "\n")
+raise SystemExit(0 if rows else 1)
+PY
+}
+
 archive_snr_series() {
     local snr_dir="${RUN_DIR}/crashcar_snr_series"
     local archive="${ARTIFACTS}/crashcar_snr_series.tar.gz"
@@ -742,7 +821,12 @@ PY
         return 2
     fi
     if [ ! -s "${snr_dir}/manifest.csv" ]; then
-        log "legacy crashcar_snr_series manifest is absent; skipping legacy SNR-series archive"
+        if synthesize_candidate_snr_manifest; then
+            log "synthesized SNR-series manifest from crashcar_candidate_events"
+        fi
+    fi
+    if [ ! -s "${snr_dir}/manifest.csv" ]; then
+        log "legacy crashcar_snr_series and candidate-event manifests are absent; skipping SNR-series archive"
         SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
 import json
 import os
@@ -779,12 +863,19 @@ PY
             log "ERROR failed to materialize SNR template autocorrelation companions"
             return 1
         }
-    tar -C "${RUN_DIR}" -czf "${archive}" crashcar_snr_series
-    SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
+    local tar_paths=(crashcar_snr_series)
+    local candidate_dir rel_candidate_dir
+    while IFS= read -r candidate_dir; do
+        rel_candidate_dir="${candidate_dir#${RUN_DIR}/}"
+        tar_paths+=("${rel_candidate_dir}")
+    done < <(find "${RUN_DIR}" -mindepth 2 -maxdepth 2 -type d -name crashcar_candidate_events | sort)
+    tar -C "${RUN_DIR}" -czf "${archive}" "${tar_paths[@]}"
+    RUN_DIR="${RUN_DIR}" SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
 
+run_dir = Path(os.environ["RUN_DIR"])
 root = Path(os.environ["SNR_DIR"])
 archive = Path(os.environ["ARCHIVE"])
 files_before = [p for p in root.rglob("*") if p.is_file()]
@@ -805,6 +896,7 @@ manifest = root / "manifest.csv"
 manifest_rows = 0
 data_series_files = 0
 template_autocorrelation_files = 0
+template_autocorrelation_xml_files = 0
 if manifest.exists():
     import csv
     with manifest.open(newline="") as input_file:
@@ -814,6 +906,12 @@ if manifest.exists():
                 data_series_files += 1
             if row.get("template_autocorrelation_file"):
                 template_autocorrelation_files += 1
+            if row.get("template_autocorrelation_xml_file"):
+                template_autocorrelation_xml_files += 1
+candidate_xml_files = sorted(
+    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/*.xml.gz"))
+candidate_manifests = sorted(
+    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/manifest.csv"))
 payload = {
     "archive": str(archive),
     "archive_bytes": archive.stat().st_size if archive.exists() else 0,
@@ -826,12 +924,15 @@ payload = {
     "file_count": len(files),
     "file_count_before_compaction": len(files_before),
     "manifest_rows": manifest_rows,
+    "candidate_event_manifest_count": len(candidate_manifests),
+    "candidate_event_xml_files": len(candidate_xml_files),
     "removed_small_csv_count": len(removed),
     "removed_small_csv_sample": removed[:20],
     "sample_files": [str(p.relative_to(root)) for p in sorted(files)[:20]],
     "snr_series_dir": str(root),
     "snr_series_logFAR_threshold": os.environ["SNR_SERIES_LOG_FAR_THRESHOLD"],
     "template_autocorrelation_files": template_autocorrelation_files,
+    "template_autocorrelation_xml_files": template_autocorrelation_xml_files,
 }
 Path(os.environ["MANIFEST"]).write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -1043,6 +1144,10 @@ run_single_ledger_final_update() {
         SINGLE_WORKER_COUNT="${WORKER_COUNT}" \
         MAX_GROUP=$((WORKER_COUNT - 1)) \
         BANKS_PER_GROUP="${BANKS_PER_WORKER}" \
+        DATA_START_TIME="${START_GPS}" \
+        DATA_END_TIME="${END_GPS}" \
+        SINGLE_SEGMENT_XML="${SEGMENT_XML}" \
+        CRASHCAR_FINAL_POSTPROCESS=1 \
         BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
         FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
         BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}" \
@@ -1068,7 +1173,19 @@ run_single_ledger_final_update() {
         > "${RUN_DIR}/logs/final_single_ledger_merge.log" \
         2> "${RUN_DIR}/logs/final_single_ledger_merge.err" || final_status=$?
 
-    if [ "${PATCH_ZEROLAG_SINGLE_FAR_VALUE}" = "1" ]; then
+    local final_ledger_rows=0
+    final_ledger_rows=$(python3 - "${RUN_DIR}/single_branch/single_final_far_all.csv" <<'PY'
+import csv
+import sys
+try:
+    with open(sys.argv[1], newline="") as handle:
+        print(sum(1 for _ in csv.DictReader(handle)))
+except FileNotFoundError:
+    print(0)
+PY
+    )
+
+    if [ "${PATCH_ZEROLAG_SINGLE_FAR_VALUE}" = "1" ] && [ "${final_ledger_rows}" -gt 0 ]; then
         local patch_args=(
             --run-dir "${RUN_DIR}"
             --ledger single_branch/single_final_far_all.csv
@@ -1101,6 +1218,26 @@ run_single_ledger_final_update() {
             "${patch_args[@]}" \
             > "${RUN_DIR}/logs/final_single_patch_zerolag.out" \
             2> "${RUN_DIR}/logs/final_single_patch_zerolag.err" || final_status=$?
+    elif [ "${PATCH_ZEROLAG_SINGLE_FAR_VALUE}" = "1" ]; then
+        log "final single ledger has no assigned rows; skipping zerolag single-FAR patch"
+        RUN_DIR="${RUN_DIR}" FINAL_LEDGER_ROWS="${final_ledger_rows}" python3 - <<'PY'
+import json
+import os
+import pathlib
+import time
+
+summary = {
+    "patched_files": 0,
+    "patched_rows": 0,
+    "ledger_rows": int(os.environ.get("FINAL_LEDGER_ROWS") or 0),
+    "skipped": True,
+    "reason": "empty_single_far_ledger",
+    "updated_unix": time.time(),
+}
+path = pathlib.Path(os.environ["RUN_DIR"]) / "monitor" / "patch_zerolag_single_far_summary.json"
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+PY
     fi
 
     if [ "${final_status}" -ne 0 ]; then

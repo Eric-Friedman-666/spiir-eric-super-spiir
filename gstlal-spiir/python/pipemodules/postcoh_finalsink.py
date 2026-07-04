@@ -1600,7 +1600,8 @@ class CoincsDocFromPostcoh(object):
 
         self.assemble_coinc_map_table(postcoh_inspiral)
         self.assemble_time_slide_table(postcoh_inspiral)
-        self.assemble_ligolw_snr_series_arrays(trigger.snr_series_list)
+        self.assemble_ligolw_snr_series_arrays(postcoh_inspiral,
+                                               trigger.snr_series_list)
 
         if psds is not None:
             self.assemble_ligolw_psd_arrays(psds)
@@ -1747,7 +1748,8 @@ class CoincsDocFromPostcoh(object):
             ligolw_psds_container.appendChild(ligolw_psd_element)
         self.xmldoc.childNodes[-1].appendChild(ligolw_psds_container)
 
-    def assemble_ligolw_snr_series_arrays(self, snr_series_list):
+    def assemble_ligolw_snr_series_arrays(self, postcoh_inspiral,
+                                          snr_series_list):
         """Assembles LIGO_LW COMPLEX8TimeSeries arrays that
         contain the SNR series for each ifo at the time
         of the candidate trigger.
@@ -1763,6 +1765,8 @@ class CoincsDocFromPostcoh(object):
 
         Parameters
         ----------
+        postcoh_inspiral: PostcohInspiral
+            The clustered trigger that owns the SNR series.
         snr_series_list: SNRSeries[]
             The snr_series of each ifo.
         """
@@ -1789,6 +1793,25 @@ class CoincsDocFromPostcoh(object):
                 ligolw_snr_series_element.appendChild(
                     ligolw_param.Param.build(u"event_id", u"ilwd:char",
                                              event_id))
+                try:
+                    ifo = list(pipe_macro.IFO_MAP)[trigger_ifo_id]
+                except Exception:
+                    ifo = ""
+                ligolw_snr_series_element.appendChild(
+                    ligolw_param.Param.build(u"instrument", u"lstring", ifo))
+                ligolw_snr_series_element.appendChild(
+                    ligolw_param.Param.build(
+                        u"crashcar_event_id", u"int_8s",
+                        int(postcoh_inspiral.event_id)))
+                ligolw_snr_series_element.appendChild(
+                    ligolw_param.Param.build(u"bankid", u"int_4s",
+                                             int(postcoh_inspiral.bankid)))
+                ligolw_snr_series_element.appendChild(
+                    ligolw_param.Param.build(u"tmplt_idx", u"int_4s",
+                                             int(postcoh_inspiral.tmplt_idx)))
+                ligolw_snr_series_element.appendChild(
+                    ligolw_param.Param.build(u"series_kind", u"lstring",
+                                             "matched_filter_snr"))
                 self.xmldoc.childNodes[-1].appendChild(
                     ligolw_snr_series_element)
 

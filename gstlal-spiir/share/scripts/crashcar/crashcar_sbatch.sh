@@ -43,6 +43,8 @@ run_spiir_py3 \
 	  -e CRASH_ROOT="${CRASH_ROOT}" \
 	  -e TOP_RUN_ROOT="${TOP_RUN_ROOT}" \
 	  -e CRASHCAR_ENABLE="${CRASHCAR_ENABLE:-1}" \
+	  -e WGUO_O3A_INJECTION_MODE="${WGUO_O3A_INJECTION_MODE:-none}" \
+	  -e WGUO_O3A_INJECTION_FILE="${WGUO_O3A_INJECTION_FILE:-}" \
 	  -e WGUO_O3A_START_GPS="${WGUO_O3A_START_GPS:?}" \
   -e WGUO_O3A_END_GPS="${WGUO_O3A_END_GPS:?}" \
   -e WGUO_O3A_DETRSP_MAP="${WGUO_O3A_DETRSP_MAP:-/fred/oz016/wguo/odds_ratio/O3a/chunk14/multi_det-BNS-LVK_inj/H1L1V1_1248134334_detrsp_map.xml}" \

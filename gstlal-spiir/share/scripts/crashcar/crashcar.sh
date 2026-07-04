@@ -40,6 +40,25 @@ RUN_ID=${run_id:-${RUN_ID:-${run_slug:-${RUN_SLUG:-crashcar}}}}
 RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
 RUN_ROOT=${run_root:-${RUN_ROOT:-"${SAVE_DIR}/${RUN_ID}/${RUN_TIMESTAMP}"}}
 SOURCE_ROOT_VALUE=${ROOT_VALUE}
+if [ -d "${SOURCE_ROOT_VALUE}/single_detector_sidecar/online_single_llrfar_wguo_refined" ]; then
+    SIDECAR_HELPER_DIR="${SOURCE_ROOT_VALUE}/single_detector_sidecar/online_single_llrfar_wguo_refined"
+else
+    SIDECAR_HELPER_DIR="${SOURCE_ROOT_VALUE}/gstlal-spiir/single_detector_sidecar/online_single_llrfar_wguo_refined"
+fi
+
+copy_crashcar_script() {
+    local script=$1
+    local src="${SCRIPT_DIR}/${script}"
+    if [ ! -f "${src}" ] && [ -f "${SIDECAR_HELPER_DIR}/${script}" ]; then
+        src="${SIDECAR_HELPER_DIR}/${script}"
+    fi
+    if [ ! -f "${src}" ]; then
+        printf 'crashcar: missing staged helper %s; checked %s and %s\n' \
+            "${script}" "${SCRIPT_DIR}" "${SIDECAR_HELPER_DIR}" >&2
+        exit 2
+    fi
+    cp "${src}" "${RUN_ROOT}/scripts/${script}"
+}
 
 if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}}" != "1" ]; then
     printf 'crashcar: run root already exists: %s\n' "${RUN_ROOT}" >&2
@@ -61,9 +80,12 @@ for script in \
     plot_single_llr_far.py \
     export_template_shape_map.py \
     update_single_background_once.sh \
+    extract_crashcar_detail_features.py \
+    extract_zerolag_features.py \
+    assign_frozen_far_ledger.py \
     merge_worker_far_ledgers.py \
     patch_zerolag_single_far_from_ledger.py; do
-    cp "${SCRIPT_DIR}/${script}" "${RUN_ROOT}/scripts/${script}"
+    copy_crashcar_script "${script}"
 done
 cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.env"
 chmod +x \
@@ -79,6 +101,9 @@ chmod +x \
     "${RUN_ROOT}/scripts/plot_single_llr_far.py" \
     "${RUN_ROOT}/scripts/export_template_shape_map.py" \
     "${RUN_ROOT}/scripts/update_single_background_once.sh" \
+    "${RUN_ROOT}/scripts/extract_crashcar_detail_features.py" \
+    "${RUN_ROOT}/scripts/extract_zerolag_features.py" \
+    "${RUN_ROOT}/scripts/assign_frozen_far_ledger.py" \
     "${RUN_ROOT}/scripts/merge_worker_far_ledgers.py" \
     "${RUN_ROOT}/scripts/patch_zerolag_single_far_from_ledger.py"
 

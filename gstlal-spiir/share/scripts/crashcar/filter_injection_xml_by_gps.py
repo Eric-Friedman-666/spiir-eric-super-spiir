@@ -35,7 +35,7 @@ def main() -> None:
             output.append(line)
             continue
         if in_sim and "<Column Name=" in line:
-            match = re.search(r'Name="sim_inspiral:([^"]+)"', line)
+            match = re.search(r'Name="(?:sim_inspiral:)?([^"]+)"', line)
             if match:
                 columns.append(match.group(1))
                 if match.group(1) == "geocent_end_time":
