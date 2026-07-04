@@ -108,7 +108,29 @@ run_stage() {
     local config=$1
     local label=$2
     log "starting ${label} with config ${config}"
-    ROOT="${SOURCE_ROOT_VALUE}" bash "${SCRIPT_DIR}/crashcar.sh" "${config}"
+    (
+        unset \
+            root ROOT source_root SOURCE_ROOT save_dir SAVE_DIR run_parent RUN_PARENT \
+            run_id RUN_ID run_slug RUN_SLUG run_root RUN_ROOT run_timestamp RUN_TIMESTAMP \
+            data_file frame_cache FRAME_CACHE detector_response_file detrsp_map DETRSP_MAP \
+            segment_xml SEGMENT_XML start_gps START_GPS end_gps END_GPS duration DURATION \
+            duration_hour duration_seconds DURATION_HOUR DURATION_SECONDS \
+            worker_number worker_count WORKER_COUNT bank_per_worker banks_per_worker BANKS_PER_WORKER \
+            BG_accumulation_hour BG_update_hour background_accumulation BACKGROUND_ACCUMULATION \
+            background_accumulation_seconds BACKGROUND_ACCUMULATION_SECONDS background_update BACKGROUND_UPDATE \
+            background_update_trigger_seconds BACKGROUND_UPDATE_TRIGGER_SECONDS zerolag_update_hour \
+            zerolag_update_seconds ZEROLAG_UPDATE_SECONDS injection_mode INJECTION_MODE \
+            injection_file injection_data_file injection_detector_response_file injection_segment_xml \
+            injection_start_gps injection_duration_seconds injection_duration_hour injection_chunk_seconds \
+            injection_chunk_hour injection_bg_data_file injection_bg_detector_response_file \
+            injection_bg_segment_xml injection_bg_start_gps injection_bg_duration_seconds \
+            injection_bg_duration_hour injection_bg_worker_number injection_bg_bank_per_worker \
+            injection_worker_number injection_bank_per_worker noninj_stats_loc NONINJ_STATS_LOC \
+            single_background_mode SINGLE_BACKGROUND_MODE single_frozen_background_json \
+            SINGLE_FROZEN_BACKGROUND_JSON single_frozen_background_run_dir SINGLE_FROZEN_BACKGROUND_RUN_DIR \
+            crashcar_background_required_seconds CRASHCAR_BACKGROUND_REQUIRED_SECONDS
+        ROOT="${SOURCE_ROOT_VALUE}" CRASHCAR_CONFIG_FILE="${config}" bash "${SCRIPT_DIR}/crashcar.sh" "${config}"
+    )
     local stage_root
     stage_root=$(awk -F= '$1=="run_root"{print $2}' "${config}" | tail -n 1)
     local phase
@@ -119,6 +141,76 @@ run_stage() {
         exit 3
     fi
     log "${label} completed at ${stage_root}"
+}
+
+infer_ifos_from_segment() {
+    local segment=${1:-}
+    local base prefix
+    base=$(basename "${segment}")
+    prefix=${base%%_SEGMENTS_*}
+    if [ -n "${prefix}" ] && [ "${prefix}" != "${base}" ]; then
+        printf '%s\n' "${prefix}"
+    else
+        printf 'H1L1V1\n'
+    fi
+}
+
+run_cohfar_calc_fap() {
+    local input_csv=$1
+    local output=$2
+    local ifos=$3
+    local cmd=(
+        gstlal_cohfar_calc_fap
+        --input "${input_csv}"
+        --input-format stats
+        --output "${output}"
+        --ifos "${ifos}"
+    )
+    if command -v gstlal_cohfar_calc_fap >/dev/null 2>&1; then
+        "${cmd[@]}"
+        return
+    fi
+    local nounset_was_on=0
+    case $- in
+        *u*) nounset_was_on=1; set +u ;;
+    esac
+    export SLURM_CPUS_PER_TASK=${SLURM_CPUS_PER_TASK:-1}
+    export GST_DEBUG=${GST_DEBUG:-}
+    export X509_USER_PROXY=${X509_USER_PROXY:-}
+    export X509_USER_KEY=${X509_USER_KEY:-}
+    export X509_USER_CERT=${X509_USER_CERT:-}
+    export KRB5_KTNAME=${KRB5_KTNAME:-}
+    export PYTHONPATH=${PYTHONPATH:-}
+    export PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-}
+    export GST_PLUGIN_PATH=${GST_PLUGIN_PATH:-}
+    export LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}
+    # shellcheck disable=SC1091
+    source /fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/bash_helper_functions.sh
+    run_spiir_py3 wguo-single-det-py3 "${cmd[@]}"
+    local rc=$?
+    if [ "${nounset_was_on}" = "1" ]; then
+        set -u
+    fi
+    return "${rc}"
+}
+
+ensure_frozen_multi_stat() {
+    local bg_run_dir=$1
+    local src_jobno=$2
+    local suffix=$3
+    local output=$4
+    local worker_dir="${bg_run_dir}/${src_jobno}"
+    local inputs
+    if [ -f "${output}" ]; then
+        return
+    fi
+    inputs=$(find "${worker_dir}" -maxdepth 1 -type f -name 'bank*_stats_*.xml.gz' | sort | paste -sd, -)
+    if [ -z "${inputs}" ]; then
+        require_file "${output}" "frozen_multi_stats_${src_jobno}_${suffix}"
+    fi
+    log "synthesizing frozen_multi_stats_${src_jobno}_${suffix} from bank stats in ${worker_dir}"
+    run_cohfar_calc_fap "${inputs}" "${output}" "${FROZEN_MULTI_IFOS}"
+    require_file "${output}" "frozen_multi_stats_${src_jobno}_${suffix}"
 }
 
 materialize_frozen_multi_stats() {
@@ -137,7 +229,7 @@ materialize_frozen_multi_stats() {
         for suffix in 2w 1d 2h; do
             src="${bg_run_dir}/${src_jobno}/${src_jobno}_marginalized_stats_${suffix}.xml.gz"
             dst="${output_dir}/${jobno}/${jobno}_marginalized_stats_${suffix}.xml.gz"
-            require_file "${src}" "frozen_multi_stats_${src_jobno}_${suffix}"
+            ensure_frozen_multi_stat "${bg_run_dir}" "${src_jobno}" "${suffix}" "${src}"
             ln -sfn "${src}" "${dst}"
         done
     done
@@ -218,6 +310,11 @@ INJ_WORKERS=${injection_worker_number:-${INJECTION_WORKER_NUMBER:-${worker_numbe
 INJ_BANKS_PER_WORKER=${injection_bank_per_worker:-${INJECTION_BANK_PER_WORKER:-${bank_per_worker:-8}}}
 BG_DURATION_SECONDS=$(duration_seconds_from injection_bg_duration_seconds injection_bg_duration_hour injection_bg_duration)
 INJ_TOTAL_SECONDS=$(duration_seconds_from injection_duration_seconds injection_duration_hour injection_duration)
+REQUESTED_BG_DURATION_SECONDS=${BG_DURATION_SECONDS}
+if [ "${BG_DURATION_SECONDS}" -lt "${INJ_TOTAL_SECONDS}" ]; then
+    log "requested no-injection BG duration ${BG_DURATION_SECONDS}s is shorter than injection duration ${INJ_TOTAL_SECONDS}s; using ${INJ_TOTAL_SECONDS}s for frozen BG"
+    BG_DURATION_SECONDS=${INJ_TOTAL_SECONDS}
+fi
 if [ -n "${injection_chunk_seconds:-${INJECTION_CHUNK_SECONDS:-}}" ]; then
     INJ_CHUNK_SECONDS=${injection_chunk_seconds:-${INJECTION_CHUNK_SECONDS:-}}
 else
@@ -260,6 +357,10 @@ INJ_ROOT="${ROOT}/inj_bns"
 FROZEN_MULTI_DIR="${ROOT}/frozen_multi_stats"
 BG_CONFIG="${CONTROLLER_DIR}/bg_noinj.env"
 BG_INITIAL_MULTI_STATS=${noninj_stats_loc:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}
+FROZEN_MULTI_IFOS=${frozen_multi_ifos:-${FROZEN_MULTI_IFOS:-}}
+if [ -z "${FROZEN_MULTI_IFOS}" ]; then
+    FROZEN_MULTI_IFOS=$(infer_ifos_from_segment "${injection_bg_segment_xml}")
+fi
 
 write_status \
     phase=starting \
@@ -271,7 +372,10 @@ write_status \
     bg_workers="${BG_WORKERS}" \
     injection_workers="${INJ_WORKERS}" \
     injection_data_file="${injection_data_file}" \
-    injection_bg_data_file="${injection_bg_data_file}"
+    injection_bg_data_file="${injection_bg_data_file}" \
+    requested_bg_duration_seconds="${REQUESTED_BG_DURATION_SECONDS}" \
+    effective_bg_duration_seconds="${BG_DURATION_SECONDS}" \
+    frozen_multi_ifos="${FROZEN_MULTI_IFOS}"
 
 write_env_file "${BG_CONFIG}" \
     "root=${SOURCE_ROOT_VALUE}" \
