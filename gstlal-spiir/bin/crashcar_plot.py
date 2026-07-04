@@ -8,8 +8,9 @@ The plotting contract follows Eric-bless-crashcar.pdf Section 4.1:
   BG support from the run-local raw single-trigger stream and the crashcar
   template shape map. The older crashcar C detail/direct-FAR rows are only used
   as a fallback/debug data source and to infer the current per-IFO BG window.
-* Figure 2 reads crashcar_snr_series/manifest.csv and either per-event CSV
-  series files or XML shards. Missing SNR-series inputs are reported and left
+* Figure 2 reads the run-level crashcar_candidate_events_manifest.csv and the
+  retained candidate/coinc XML files. Legacy crashcar_snr_series manifests are
+  still accepted for old runs. Missing retained inputs are reported and left
   blank; no replacement curve is synthesized.
 """
 
@@ -1432,7 +1433,12 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
 
 
 def read_manifest(snr_dir: Path) -> dict:
-    path = snr_dir / "manifest.csv"
+    if snr_dir.is_file():
+        path = snr_dir
+        base_dir = snr_dir.parent
+    else:
+        path = snr_dir / "manifest.csv"
+        base_dir = snr_dir
     if not path.exists():
         return {"exists": False, "path": str(path), "rows": [], "row_count": 0, "ifo_counts": {}}
     rows: list[dict] = []
@@ -1440,7 +1446,7 @@ def read_manifest(snr_dir: Path) -> dict:
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
-            row["_snr_dir"] = str(snr_dir)
+            row["_snr_dir"] = str(base_dir)
             row["_manifest_path"] = str(path)
             rows.append(row)
             counts[row.get("ifo", "")] += 1
@@ -2152,13 +2158,19 @@ def plot_second_2x2(
     snr_dirs: list[Path] | None = None,
 ) -> dict:
     if snr_dirs is None:
-        snr_dir = run_root / "run" / "crashcar_snr_series"
-        if not snr_dir.exists():
-            snr_dir = run_root / "crashcar_snr_series"
-        snr_dirs = [snr_dir]
+        candidates = [
+            run_root / "run" / "crashcar_candidate_events_manifest.csv",
+            run_root / "crashcar_candidate_events_manifest.csv",
+            run_root / "run" / "crashcar_snr_series",
+            run_root / "crashcar_snr_series",
+        ]
+        snr_dirs = [path for path in candidates if path.exists()] or [candidates[0]]
     else:
         snr_dirs = [path.resolve() for path in snr_dirs]
-    default_snr_dir = snr_dirs[0] if snr_dirs else run_root / "run" / "crashcar_snr_series"
+    default_snr_dir = (
+        snr_dirs[0].parent if snr_dirs and snr_dirs[0].is_file()
+        else (snr_dirs[0] if snr_dirs else run_root / "run")
+    )
     manifest = read_manifests(snr_dirs)
     selections = select_snr_rows(
         zerolag_rows,
@@ -2180,7 +2192,7 @@ def plot_second_2x2(
         "d": plot_series_panel(axes[1, 1], "multi_L1", "Panel (d): L1 component of H/L multi selection", selections.get("hl_multi_min_far_l1_component"), series.get("hl_multi_min_far_l1_component"), template_curves, template_series.get("hl_multi_min_far_l1_component")),
     }
     if not manifest["exists"]:
-        fig.text(0.01, 0.01, "Current snapshot from crashcar_snr_series; manifest.csv is not present.", fontsize=9, color="0.35")
+        fig.text(0.01, 0.01, "Current snapshot has no retained candidate/coinc XML manifest.", fontsize=9, color="0.35")
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=170, bbox_inches="tight")
     plt.close(fig)
@@ -2231,8 +2243,8 @@ def main() -> None:
     parser.add_argument("--shape-map", default=DEFAULT_TEMPLATE_SHAPE_MAP, help="Crashcar template shape CSV with autocorr_power and dof for panel (a) raw BG reconstruction.")
     parser.add_argument("--background-json", type=Path, default=None, help="Crashcar frozen/background JSON for Panel (a); defaults to run artifacts when present.")
     parser.add_argument("--template-autocorr-json", type=Path, default=None)
-    parser.add_argument("--snr-dir", action="append", type=Path, default=[], help="Explicit crashcar_snr_series directory; may be repeated.")
-    parser.add_argument("--snr-dir-glob", action="append", default=[], help="Run-root-relative glob for crashcar_snr_series directories; may be repeated.")
+    parser.add_argument("--snr-dir", action="append", type=Path, default=[], help="Explicit candidate-event manifest or legacy crashcar_snr_series directory; may be repeated.")
+    parser.add_argument("--snr-dir-glob", action="append", default=[], help="Run-root-relative glob for candidate-event manifests or legacy crashcar_snr_series directories; may be repeated.")
     args = parser.parse_args()
 
     run_root = args.run_root.resolve()
@@ -2249,7 +2261,7 @@ def main() -> None:
     for path in args.snr_dir:
         snr_dirs.append(path if path.is_absolute() else run_root / path)
     for pattern in args.snr_dir_glob:
-        snr_dirs.extend(sorted(path for path in run_root.glob(pattern) if path.is_dir()))
+        snr_dirs.extend(sorted(path for path in run_root.glob(pattern) if path.is_dir() or path.is_file()))
 
     zerolag = load_zerolag(run_root, args.zerolag_glob)
     panel_a_detail = load_panel_a_detail(run_root, args.detail_glob, args.panel_a_worker, ifo_id_map, args.max_panel_a_points, args.panel_a_bg_policy)

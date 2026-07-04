@@ -565,12 +565,16 @@ class FinalSink(object):
             self.gracedb_client = GraceDb(gracedb_service_url,
                                           reload_certificate=True)
         self.threads_gracedb_upload = []
-        self.crashcar_snr_archive_dir = os.environ.get(
+        self.crashcar_candidate_event_dir = os.environ.get(
             "CRASHCAR_EVENT_SNR_ARCHIVE_DIR",
             os.path.join(path, "crashcar_candidate_events"))
-        self.crashcar_snr_archive_manifest = os.path.join(
-            self.crashcar_snr_archive_dir, "manifest.csv")
-        self.crashcar_snr_archive_seq = 0
+        self.crashcar_candidate_event_manifest = os.path.join(
+            self.crashcar_candidate_event_dir, "manifest.csv")
+        self.crashcar_candidate_event_seq = 0
+        # Backward-compatible names for older helper code and run summaries.
+        self.crashcar_snr_archive_dir = self.crashcar_candidate_event_dir
+        self.crashcar_snr_archive_manifest = self.crashcar_candidate_event_manifest
+        self.crashcar_snr_archive_seq = self.crashcar_candidate_event_seq
 
         # keep a record of segments and is snapshotted
         # our segments is determined by if incoming buf is GAP
@@ -757,7 +761,7 @@ class FinalSink(object):
                and (max_cluster_boundary > self.cluster_boundary)):
             if self.try_get_cluster_candidate():
                 self.__set_far(self.candidate.postcoh_inspiral)
-                self.__maybe_archive_crashcar_snr_series(self.candidate)
+                self.__maybe_retain_crashcar_candidate_event(self.candidate)
                 if self.gracedb_far_threshold and self.__pass_test(
                         self.candidate.postcoh_inspiral):
                     self.__do_gracedb_alert(self.candidate,
@@ -1130,51 +1134,73 @@ class FinalSink(object):
                 reasons.append("%s_single" % ifo)
         return reasons
 
-    def __append_crashcar_snr_archive_manifest(self, row):
-        os.makedirs(self.crashcar_snr_archive_dir, exist_ok=True)
+    def __write_candidate_coinc_xml(self,
+                                    trigger,
+                                    filename,
+                                    psds=None,
+                                    return_bytes=False,
+                                    log_label="candidate/coinc XML"):
+        self.coincs_document.assemble_ligolw_xmldoc(trigger, psds)
+        logger.info("writing %s %s", log_label, filename)
+        ligolw_utils.write_filename(self.coincs_document.xmldoc,
+                                    filename,
+                                    trap_signals=None)
+        payload = None
+        if return_bytes:
+            payload = BytesIO()
+            ligolw_utils.write_fileobj(self.coincs_document.xmldoc, payload)
+        self.coincs_document.close()
+        self.coincs_document = CoincsDocFromPostcoh(self.path,
+                                                    self.process_params,
+                                                    self.channel_dict)
+        return payload
+
+    def __append_crashcar_candidate_event_manifest(self, row):
+        os.makedirs(self.crashcar_candidate_event_dir, exist_ok=True)
         write_header = (
-            not os.path.exists(self.crashcar_snr_archive_manifest)
-            or os.path.getsize(self.crashcar_snr_archive_manifest) == 0)
+            not os.path.exists(self.crashcar_candidate_event_manifest)
+            or os.path.getsize(self.crashcar_candidate_event_manifest) == 0)
         fields = [
-            "archive_seq", "filename", "reasons", "event_id", "ifos",
-            "end_time", "end_time_ns", "bankid", "tmplt_idx", "far",
-            "far_sngl_H1", "far_sngl_L1", "code_version"
+            "archive_seq", "filename", "series_file", "xml_file",
+            "candidate_xml_file", "archive_kind", "candidate_schema",
+            "reasons", "event_id", "ifos", "end_time", "end_time_ns",
+            "bankid", "tmplt_idx", "far", "far_sngl_H1", "far_sngl_L1",
+            "code_version"
         ]
-        with open(self.crashcar_snr_archive_manifest, "a", newline="") as fout:
+        with open(self.crashcar_candidate_event_manifest, "a", newline="") as fout:
             writer = csv.DictWriter(fout, fieldnames=fields)
             if write_header:
                 writer.writeheader()
             writer.writerow(dict((field, row.get(field, "")) for field in fields))
 
-    def __maybe_archive_crashcar_snr_series(self, trigger):
+    def __maybe_retain_crashcar_candidate_event(self, trigger):
         postcoh_inspiral = trigger.postcoh_inspiral
         reasons = self.__crashcar_snr_series_reasons(postcoh_inspiral)
         if not reasons:
             return
-        os.makedirs(self.crashcar_snr_archive_dir, exist_ok=True)
-        self.crashcar_snr_archive_seq += 1
+        os.makedirs(self.crashcar_candidate_event_dir, exist_ok=True)
+        self.crashcar_candidate_event_seq += 1
+        self.crashcar_snr_archive_seq = self.crashcar_candidate_event_seq
         filename = os.path.join(
-            self.crashcar_snr_archive_dir,
+            self.crashcar_candidate_event_dir,
             "crashcar_snr_%06d_%s_%d_%d_%d_%d_%d.xml.gz" % (
-                self.crashcar_snr_archive_seq, postcoh_inspiral.ifos,
+                self.crashcar_candidate_event_seq, postcoh_inspiral.ifos,
                 postcoh_inspiral.end_time, postcoh_inspiral.end_time_ns,
                 postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx,
                 postcoh_inspiral.event_id))
 
-        self.coincs_document.assemble_ligolw_xmldoc(trigger, psds=None)
-        logger.info("writing crashcar SNR-series candidate XML %s", filename)
-        ligolw_utils.write_filename(self.coincs_document.xmldoc,
-                                    filename,
-                                    trap_signals=None)
-        self.coincs_document.close()
-        self.coincs_document = CoincsDocFromPostcoh(self.path,
-                                                    self.process_params,
-                                                    self.channel_dict)
+        self.__write_candidate_coinc_xml(
+            trigger, filename, psds=None, log_label="crashcar retained candidate/coinc XML")
 
         far_sngl = list(postcoh_inspiral.far_sngl)
         row = {
-            "archive_seq": self.crashcar_snr_archive_seq,
+            "archive_seq": self.crashcar_candidate_event_seq,
             "filename": filename,
+            "series_file": filename,
+            "xml_file": filename,
+            "candidate_xml_file": filename,
+            "archive_kind": "candidate_event_xml",
+            "candidate_schema": "ligolw_coinc",
             "reasons": ";".join(reasons),
             "event_id": postcoh_inspiral.event_id,
             "ifos": postcoh_inspiral.ifos,
@@ -1187,7 +1213,10 @@ class FinalSink(object):
             "far_sngl_L1": far_sngl[pipe_macro.get_ifo_id("L1")],
             "code_version": os.environ.get("CRASHCAR_CODE_VERSION", ""),
         }
-        self.__append_crashcar_snr_archive_manifest(row)
+        self.__append_crashcar_candidate_event_manifest(row)
+
+    def __maybe_archive_crashcar_snr_series(self, trigger):
+        self.__maybe_retain_crashcar_candidate_event(trigger)
 
     def __read_trigger_control(self):
         with open(self.trigger_control_doc, "r") as f:
@@ -1364,26 +1393,18 @@ class FinalSink(object):
         else:
             psds = None
 
-        self.coincs_document.assemble_ligolw_xmldoc(trigger, psds)
         filename = "%s_%s_%d_%d.xml" % (
             postcoh_inspiral.ifos, postcoh_inspiral.end_time,
             postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx)
 
-        logger.info(f"writing {filename} to disk ...")
-        ligolw_utils.write_filename(self.coincs_document.xmldoc,
-                                    filename,
-                                    trap_signals=None)
+        coinc_message = self.__write_candidate_coinc_xml(
+            trigger,
+            filename,
+            psds=psds,
+            return_bytes=self.gracedb_client is not None,
+            log_label="normal SPIIR candidate/coinc XML")
 
         if self.gracedb_client is not None:
-            # Construct message and send to gracedb.
-            # We go through the intermediate step of first writing the xmldoc
-            # into a string buffer incase there is some safety in doing so in
-            # the event of a malformed document; instead of writing directly
-            # into gracedb's  input pipe and crashing part way through.
-            coinc_message = BytesIO()
-            ligolw_utils.write_fileobj(self.coincs_document.xmldoc,
-                                       coinc_message)
-
             logger.info(f"sending '{filename}' to gracedb ...")
 
             log_message = f"Optimal ra and dec from this coherent pipeline: " \
@@ -1395,15 +1416,6 @@ class FinalSink(object):
                       log_message))
             gracedb_upload_thread.start()
             self.threads_gracedb_upload.append(gracedb_upload_thread)
-
-        # close the xmldoc for garbage collection and prepare a new empty one
-        self.coincs_document.close()
-
-        # NOTE: It may make more sense to create this doc earlier elsewhere
-        #   rather than at the end of this function (separation of concerns)
-        self.coincs_document = CoincsDocFromPostcoh(self.path,
-                                                    self.process_params,
-                                                    self.channel_dict)
 
     def get_output_filename(self, output_prefix, output_name, t_snapshot_start,
                             snapshot_duration):

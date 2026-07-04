@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add template-autocorrelation companions to crashcar SNR-series dumps."""
+"""Add template-autocorrelation companions to retained crashcar candidate XML."""
 
 from __future__ import annotations
 

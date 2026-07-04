@@ -184,8 +184,19 @@ def current_or_first_chunk_root(run_root: Path) -> Path | None:
 
 
 def materialize_template_autocorr(root: Path, run_root: Path, snr_dir: Path | None = None) -> None:
-    snr_dir = snr_dir or run_root / "run" / "crashcar_snr_series"
-    manifest = snr_dir / "manifest.csv"
+    if snr_dir is not None:
+        manifest_candidates = [
+            snr_dir if snr_dir.is_file() else snr_dir / "manifest.csv",
+        ]
+    else:
+        manifest_candidates = [
+            run_root / "run" / "crashcar_candidate_events_manifest.csv",
+            run_root / "crashcar_candidate_events_manifest.csv",
+            run_root / "run" / "crashcar_snr_series" / "manifest.csv",
+            run_root / "crashcar_snr_series" / "manifest.csv",
+        ]
+    manifest = next((path for path in manifest_candidates if path.exists()), manifest_candidates[0])
+    storage_dir = manifest.parent
     script = next(
         (
             path
@@ -207,7 +218,7 @@ def materialize_template_autocorr(root: Path, run_root: Path, snr_dir: Path | No
             "--manifest",
             str(manifest),
             "--snr-dir",
-            str(snr_dir),
+            str(storage_dir),
             "--bank-dir",
             bank_dir,
         ],
@@ -223,7 +234,7 @@ def materialize_template_autocorr(root: Path, run_root: Path, snr_dir: Path | No
     if proc.returncode != 0:
         raise SystemExit(
             "Failed to materialize template autocorrelation companions; "
-            f"summary may be at {snr_dir / 'autocorrelation_summary.json'}"
+            f"summary may be at {storage_dir / 'autocorrelation_summary.json'}"
         )
 
 
@@ -389,8 +400,8 @@ def main() -> int:
     if inj_threshold is None:
         inj_threshold = infer_float_env(root, chunk_root or run_root, "SNR_series_logFAR_threshold", bg_threshold)
     if not args.skip_template_autocorr:
-        for snr_dir in sorted(run_root.glob("inj_bns/chunks/chunk_*/run/crashcar_snr_series")):
-            materialize_template_autocorr(root, snr_dir.parents[1], snr_dir=snr_dir)
+        for chunk_run_dir in sorted(run_root.glob("inj_bns/chunks/chunk_*/run")):
+            materialize_template_autocorr(root, chunk_run_dir.parent)
     inj_extra = [
         "--zerolag-glob",
         "inj_bns/chunks/chunk_*/run/[0-9][0-9][0-9]/*_zerolag_*.xml*",
@@ -404,6 +415,8 @@ def main() -> int:
         "bg_noinj/artifacts/crashcar_template_shape_map.csv",
         "--background-json",
         "bg_noinj/artifacts/crashcar_day1_last_bg3h_full_background.json",
+        "--snr-dir-glob",
+        "inj_bns/chunks/chunk_*/run/crashcar_candidate_events_manifest.csv",
         "--snr-dir-glob",
         "inj_bns/chunks/chunk_*/run/crashcar_snr_series",
     ]

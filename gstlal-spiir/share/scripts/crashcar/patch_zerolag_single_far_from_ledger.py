@@ -648,7 +648,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--snr-series-manifest",
                         default=os.environ.get("PATCH_ZEROLAG_SINGLE_SNR_SERIES_MANIFEST")
                         or "",
-                        help="manifest.csv produced by crashcar_snr_series; relative paths are resolved under --run-dir")
+                        help="candidate/coinc XML manifest; relative paths are resolved under --run-dir")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -687,9 +687,13 @@ def main() -> int:
     if args.embed_snr_series:
         manifest = args.snr_series_manifest
         if not manifest:
-            manifest = str(Path(
-                os.environ.get("CRASHCAR_SNR_SERIES_OUTPUT_DIR")
-                or "crashcar_snr_series") / "manifest.csv")
+            candidate_manifest = run_dir / "crashcar_candidate_events_manifest.csv"
+            if candidate_manifest.exists():
+                manifest = str(candidate_manifest)
+            else:
+                manifest = str(Path(
+                    os.environ.get("CRASHCAR_SNR_SERIES_OUTPUT_DIR")
+                    or "crashcar_snr_series") / "manifest.csv")
         manifest_path = Path(manifest)
         if not manifest_path.is_absolute():
             manifest_path = run_dir / manifest_path

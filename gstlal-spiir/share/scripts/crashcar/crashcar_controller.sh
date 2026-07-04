@@ -719,19 +719,17 @@ Path(os.environ["REPORT"]).write_text(json.dumps(payload, indent=2, sort_keys=Tr
 PY
 }
 
-synthesize_candidate_snr_manifest() {
-    local snr_dir="${RUN_DIR}/crashcar_snr_series"
-    mkdir -p "${snr_dir}"
-    RUN_DIR="${RUN_DIR}" SNR_DIR="${snr_dir}" python3 - <<'PY'
+synthesize_candidate_event_manifest() {
+    local candidate_manifest="${RUN_DIR}/crashcar_candidate_events_manifest.csv"
+    RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" python3 - <<'PY'
 import csv
 import json
 import os
 from pathlib import Path
 
 run_dir = Path(os.environ["RUN_DIR"])
-snr_dir = Path(os.environ["SNR_DIR"])
-manifest = snr_dir / "manifest.csv"
-summary = snr_dir / "candidate_event_manifest_summary.json"
+manifest = Path(os.environ["CANDIDATE_MANIFEST"])
+summary = run_dir / "candidate_event_manifest_summary.json"
 input_manifests = sorted(
     run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/manifest.csv"))
 fieldnames = [
@@ -740,6 +738,8 @@ fieldnames = [
     "series_file",
     "xml_file",
     "candidate_xml_file",
+    "archive_kind",
+    "candidate_schema",
     "source_manifest",
     "reasons",
     "event_id",
@@ -778,15 +778,54 @@ for input_manifest in input_manifests:
                 out["series_file"] = xml_file
                 out["xml_file"] = xml_file
                 out["candidate_xml_file"] = xml_file
+                out["archive_kind"] = row.get("archive_kind") or "candidate_event_xml"
+                out["candidate_schema"] = row.get("candidate_schema") or "ligolw_coinc"
                 out["source_manifest"] = str(input_manifest.relative_to(run_dir))
                 out["ifo"] = ifo
                 rows.append(out)
 
+if not rows:
+    for xml_path in sorted(
+            run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/crashcar_snr_*.xml.gz")):
+        rel_xml = str(xml_path.relative_to(run_dir))
+        stem = xml_path.name[:-7]
+        parts = stem.split("_")
+        parsed = {}
+        if len(parts) >= 9 and parts[0] == "crashcar" and parts[1] == "snr":
+            parsed = {
+                "archive_seq": parts[2],
+                "ifos": parts[3],
+                "end_time": parts[4],
+                "end_time_ns": parts[5],
+                "bankid": parts[6],
+                "tmplt_idx": parts[7],
+                "event_id": parts[8],
+            }
+        ifos = parsed.get("ifos", "")
+        active_ifos = [ifo for ifo in ("H1", "L1", "V1", "K1") if ifo in ifos]
+        if not active_ifos:
+            active_ifos = [""]
+        for ifo in active_ifos:
+            out = {field: "" for field in fieldnames}
+            out.update(parsed)
+            out["filename"] = rel_xml
+            out["series_file"] = rel_xml
+            out["xml_file"] = rel_xml
+            out["candidate_xml_file"] = rel_xml
+            out["archive_kind"] = "candidate_event_xml"
+            out["candidate_schema"] = "ligolw_coinc"
+            out["source_manifest"] = ""
+            out["ifo"] = ifo
+            rows.append(out)
+
 if rows:
+    manifest.parent.mkdir(parents=True, exist_ok=True)
     with manifest.open("w", newline="") as output:
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+elif manifest.exists():
+    manifest.unlink()
 
 summary.write_text(json.dumps({
     "input_manifests": [str(path.relative_to(run_dir)) for path in input_manifests],
@@ -799,54 +838,40 @@ PY
 }
 
 archive_snr_series() {
-    local snr_dir="${RUN_DIR}/crashcar_snr_series"
+    local candidate_manifest="${RUN_DIR}/crashcar_candidate_events_manifest.csv"
     local archive="${ARTIFACTS}/crashcar_snr_series.tar.gz"
     local manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
-    if [ ! -d "${snr_dir}" ]; then
-        log "ERROR missing SNR series directory ${snr_dir}"
-        SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-Path(os.environ["MANIFEST"]).write_text(json.dumps({
-    "archive": os.environ["ARCHIVE"],
-    "byte_count": 0,
-    "error": "missing_snr_series_dir",
-    "exists": False,
-    "file_count": 0,
-    "snr_series_dir": os.environ["SNR_DIR"],
-}, indent=2, sort_keys=True) + "\n")
-PY
-        return 2
-    fi
-    if [ ! -s "${snr_dir}/manifest.csv" ]; then
-        if synthesize_candidate_snr_manifest; then
-            log "synthesized SNR-series manifest from crashcar_candidate_events"
+    if [ ! -s "${candidate_manifest}" ]; then
+        if synthesize_candidate_event_manifest; then
+            log "synthesized candidate-event manifest from worker crashcar_candidate_events"
         fi
     fi
-    if [ ! -s "${snr_dir}/manifest.csv" ]; then
-        log "legacy crashcar_snr_series and candidate-event manifests are absent; skipping SNR-series archive"
-        SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
+    if [ ! -s "${candidate_manifest}" ]; then
+        log "candidate-event manifest is absent; skipping retained candidate XML archive"
+        RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
 
-root = Path(os.environ["SNR_DIR"])
-files = [p for p in root.rglob("*") if p.is_file()]
+run_dir = Path(os.environ["RUN_DIR"])
+candidate_xml_files = sorted(
+    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/*.xml.gz"))
 payload = {
     "archive": os.environ["ARCHIVE"],
     "archive_bytes": 0,
-    "byte_count": sum(p.stat().st_size for p in files),
+    "archive_kind": "candidate_coinc_xml",
+    "byte_count": sum(p.stat().st_size for p in candidate_xml_files),
+    "candidate_event_manifest": os.environ["CANDIDATE_MANIFEST"],
+    "candidate_event_xml_files": len(candidate_xml_files),
     "data_series_files": 0,
-    "exists": True,
-    "file_count": len(files),
+    "exists": False,
+    "file_count": len(candidate_xml_files),
     "legacy_archive_skipped": True,
-    "manifest_exists": (root / "manifest.csv").exists(),
+    "manifest_exists": Path(os.environ["CANDIDATE_MANIFEST"]).exists(),
     "manifest_rows": 0,
-    "reason": "skipped_no_legacy_manifest",
+    "reason": "skipped_no_candidate_event_manifest",
     "removed_csv_files": [],
-    "snr_series_dir": str(root),
+    "snr_series_dir": "",
     "snr_series_log10_far_threshold": os.environ.get("SNR_SERIES_LOG_FAR_THRESHOLD"),
     "template_autocorrelation_files": 0,
 }
@@ -855,51 +880,58 @@ PY
         return 0
     fi
     python3 "${SCRIPT_DIR}/materialize_snr_autocorrelation.py" \
-        --manifest "${snr_dir}/manifest.csv" \
-        --snr-dir "${snr_dir}" \
+        --manifest "${candidate_manifest}" \
+        --snr-dir "${RUN_DIR}" \
         --bank-dir "${O3_BANK_DIR}" \
         > "${CONTROLLER_DIR}/materialize_snr_autocorrelation.log" \
         2>&1 || {
             log "ERROR failed to materialize SNR template autocorrelation companions"
             return 1
         }
-    local tar_paths=(crashcar_snr_series)
+    local tar_paths=(crashcar_candidate_events_manifest.csv)
+    if [ -f "${RUN_DIR}/candidate_event_manifest_summary.json" ]; then
+        tar_paths+=(candidate_event_manifest_summary.json)
+    fi
+    if [ -f "${RUN_DIR}/autocorrelation_summary.json" ]; then
+        tar_paths+=(autocorrelation_summary.json)
+    fi
+    if [ -f "${RUN_DIR}/crashcar_template_autocorrelation.xml" ]; then
+        tar_paths+=(crashcar_template_autocorrelation.xml)
+    fi
     local candidate_dir rel_candidate_dir
     while IFS= read -r candidate_dir; do
         rel_candidate_dir="${candidate_dir#${RUN_DIR}/}"
         tar_paths+=("${rel_candidate_dir}")
     done < <(find "${RUN_DIR}" -mindepth 2 -maxdepth 2 -type d -name crashcar_candidate_events | sort)
     tar -C "${RUN_DIR}" -czf "${archive}" "${tar_paths[@]}"
-    RUN_DIR="${RUN_DIR}" SNR_DIR="${snr_dir}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
+    RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
 
 run_dir = Path(os.environ["RUN_DIR"])
-root = Path(os.environ["SNR_DIR"])
 archive = Path(os.environ["ARCHIVE"])
-files_before = [p for p in root.rglob("*") if p.is_file()]
-byte_count_before = sum(p.stat().st_size for p in files_before)
-removed = []
-for path in files_before:
-    name = path.name
-    if (name.startswith("event") and name.endswith("_snr.csv")) or (
-        name.startswith("template_autocorrelation_") and name.endswith(".csv")
-    ):
-        try:
-            removed.append(str(path.relative_to(root)))
-            path.unlink()
-        except FileNotFoundError:
-            pass
-files = [p for p in root.rglob("*") if p.is_file()]
-manifest = root / "manifest.csv"
+candidate_manifest = Path(os.environ["CANDIDATE_MANIFEST"])
+candidate_dirs = sorted(
+    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events"))
+files = []
+for directory in candidate_dirs:
+    files.extend(p for p in directory.rglob("*") if p.is_file())
+for path in (
+    candidate_manifest,
+    run_dir / "candidate_event_manifest_summary.json",
+    run_dir / "autocorrelation_summary.json",
+    run_dir / "crashcar_template_autocorrelation.xml",
+):
+    if path.exists():
+        files.append(path)
 manifest_rows = 0
 data_series_files = 0
 template_autocorrelation_files = 0
 template_autocorrelation_xml_files = 0
-if manifest.exists():
+if candidate_manifest.exists():
     import csv
-    with manifest.open(newline="") as input_file:
+    with candidate_manifest.open(newline="") as input_file:
         for row in csv.DictReader(input_file):
             manifest_rows += 1
             if row.get("series_file"):
@@ -915,21 +947,23 @@ candidate_manifests = sorted(
 payload = {
     "archive": str(archive),
     "archive_bytes": archive.stat().st_size if archive.exists() else 0,
+    "archive_kind": "candidate_coinc_xml",
     "archive_exists": archive.exists(),
     "byte_count": sum(p.stat().st_size for p in files),
-    "byte_count_before_compaction": byte_count_before,
+    "byte_count_before_compaction": sum(p.stat().st_size for p in files),
+    "candidate_event_manifest": str(candidate_manifest),
     "compacted_after_archive": True,
     "data_series_files": data_series_files,
-    "exists": root.is_dir(),
+    "exists": candidate_manifest.exists(),
     "file_count": len(files),
-    "file_count_before_compaction": len(files_before),
+    "file_count_before_compaction": len(files),
     "manifest_rows": manifest_rows,
     "candidate_event_manifest_count": len(candidate_manifests),
     "candidate_event_xml_files": len(candidate_xml_files),
-    "removed_small_csv_count": len(removed),
-    "removed_small_csv_sample": removed[:20],
-    "sample_files": [str(p.relative_to(root)) for p in sorted(files)[:20]],
-    "snr_series_dir": str(root),
+    "removed_small_csv_count": 0,
+    "removed_small_csv_sample": [],
+    "sample_files": [str(p.relative_to(run_dir)) for p in sorted(files)[:20]],
+    "snr_series_dir": "",
     "snr_series_logFAR_threshold": os.environ["SNR_SERIES_LOG_FAR_THRESHOLD"],
     "template_autocorrelation_files": template_autocorrelation_files,
     "template_autocorrelation_xml_files": template_autocorrelation_xml_files,
@@ -937,7 +971,7 @@ payload = {
 Path(os.environ["MANIFEST"]).write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n")
 PY
-    log "archived SNR series ${archive}"
+    log "archived retained candidate/coinc XML ${archive}"
 }
 
 submit_job() {
@@ -1198,7 +1232,7 @@ PY
         if [ "${PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE}" = "1" ]; then
             patch_args+=(
                 --embed-snr-series
-                --snr-series-manifest "${RUN_DIR}/crashcar_snr_series/manifest.csv"
+                --snr-series-manifest "${RUN_DIR}/crashcar_candidate_events_manifest.csv"
             )
         fi
         export GST_DEBUG="${GST_DEBUG:-}"
