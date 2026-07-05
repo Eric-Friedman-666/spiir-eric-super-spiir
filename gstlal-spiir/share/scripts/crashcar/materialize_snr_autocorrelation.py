@@ -152,6 +152,53 @@ def build_xml_element(row: dict, rows: List[Tuple[int, int, float, float, float]
     return "\n".join(lines) + "\n"
 
 
+def resolve_manifest_path(snr_dir: Path, raw: str) -> Path:
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return snr_dir / path
+
+
+def xml_has_embedded_template_autocorr(path: Path, row: dict) -> bool:
+    if not path.exists():
+        return False
+    try:
+        text = read_text_maybe_gzip(path)
+    except Exception:
+        return False
+    if "template_autocorrelation" not in text:
+        return False
+    target_event = str(row.get("event_id", ""))
+    target_ifo = str(row.get("ifo", ""))
+    target_bank = str(row.get("bankid", ""))
+    target_template = str(row.get("tmplt_idx", ""))
+    block_re = re.compile(
+        r'<LIGO_LW Name="COMPLEX8TimeSeries">(.*?)</LIGO_LW>',
+        flags=re.DOTALL,
+    )
+    param_re = re.compile(r'<Param Name="([^"]+):param"[^>]*>(.*?)</Param>')
+    for match in block_re.finditer(text):
+        block = match.group(1)
+        params = dict(param_re.findall(block))
+        if params.get("series_kind") != "template_autocorrelation":
+            continue
+        event = params.get("crashcar_event_id") or params.get("event_id") or ""
+        if ":" in event:
+            event = event.rsplit(":", 1)[-1]
+        if (
+            str(event) == target_event
+            and str(params.get("instrument", "")) == target_ifo
+        ):
+            return True
+        if (
+            str(params.get("instrument", "")) == target_ifo
+            and str(params.get("bankid", "")) == target_bank
+            and str(params.get("tmplt_idx", "")) == target_template
+        ):
+            return True
+    return False
+
+
 def write_xml_shards(snr_dir: Path, shard_elements: Dict[str, List[str]]) -> None:
     for filename, elements in shard_elements.items():
         path = snr_dir / filename
@@ -231,6 +278,17 @@ def main() -> int:
         )
         row["template_autocorrelation_error"] = ""
         try:
+            embedded_xml = (
+                row.get("template_autocorrelation_xml_file")
+                or row.get("candidate_xml_file")
+                or row.get("xml_file")
+                or row.get("series_xml")
+            )
+            if embedded_xml and xml_has_embedded_template_autocorr(
+                resolve_manifest_path(snr_dir, embedded_xml), row
+            ):
+                row["template_autocorrelation_xml_file"] = embedded_xml
+                continue
             ifo = row["ifo"]
             bankid = int(row["bankid"])
             tmplt_idx = int(row["tmplt_idx"])

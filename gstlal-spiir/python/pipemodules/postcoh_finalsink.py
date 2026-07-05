@@ -17,6 +17,9 @@
 
 from collections import deque
 import csv
+import gzip
+import html
+import math
 import threading
 import sys
 from io import BytesIO
@@ -73,6 +76,71 @@ def _env_truthy(name, default=False):
     if value is None:
         return default
     return value.strip() in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
+
+
+_TEMPLATE_AUTOCORR_BANK_CACHE = {}
+
+
+def _read_text_maybe_gzip(path):
+    with open(path, "rb") as handle:
+        magic = handle.read(2)
+    if magic == b"\x1f\x8b":
+        with gzip.open(path, "rt", errors="ignore") as handle:
+            return handle.read()
+    with open(path, "rt", errors="ignore") as handle:
+        return handle.read()
+
+
+def _write_text_maybe_gzip(path, text):
+    if str(path).endswith(".gz"):
+        with gzip.open(path, "wt") as handle:
+            handle.write(text)
+        return
+    with open(path, "wt") as handle:
+        handle.write(text)
+
+
+def _parse_ligolw_array(text, name):
+    match = re.search(
+        r"<Array\b[^>]*Name=\"%s\"[^>]*>(.*?)</Array>" %
+        re.escape(name),
+        text,
+        flags=re.DOTALL)
+    if not match:
+        raise ValueError("array %s not found" % name)
+    block = match.group(1)
+    dims = [
+        int(value)
+        for value in re.findall(r"<Dim\b[^>]*>\s*(\d+)\s*</Dim>", block)
+    ]
+    if len(dims) < 2:
+        raise ValueError("array %s has fewer than two dimensions" % name)
+    stream = re.search(r"<Stream\b[^>]*>(.*?)</Stream>",
+                       block,
+                       flags=re.DOTALL)
+    if stream is None:
+        raise ValueError("array %s has no stream" % name)
+    values = [float(token) for token in stream.group(1).split()]
+    expected = dims[0] * dims[1]
+    if len(values) < expected:
+        raise ValueError("array %s has %d values but expected %d" %
+                         (name, len(values), expected))
+    return dims[0], dims[1], values
+
+
+def _load_template_autocorr_bank(path):
+    text = _read_text_maybe_gzip(path)
+    real_len, real_ntemplate, real_values = _parse_ligolw_array(
+        text, "autocorrelation_bank_real:array")
+    imag_len, imag_ntemplate, imag_values = _parse_ligolw_array(
+        text, "autocorrelation_bank_imag:array")
+    if real_len != imag_len or real_ntemplate != imag_ntemplate:
+        raise ValueError("real/imag autocorrelation dimensions differ")
+    return real_len, real_ntemplate, real_values, imag_values
+
+
+def _xml_text(value):
+    return html.escape("" if value is None else str(value), quote=False)
 
 
 #
@@ -565,16 +633,15 @@ class FinalSink(object):
             self.gracedb_client = GraceDb(gracedb_service_url,
                                           reload_certificate=True)
         self.threads_gracedb_upload = []
-        self.crashcar_candidate_event_dir = os.environ.get(
-            "CRASHCAR_EVENT_SNR_ARCHIVE_DIR",
-            os.path.join(path, "crashcar_candidate_events"))
-        self.crashcar_candidate_event_manifest = os.path.join(
-            self.crashcar_candidate_event_dir, "manifest.csv")
-        self.crashcar_candidate_event_seq = 0
-        # Backward-compatible names for older helper code and run summaries.
-        self.crashcar_snr_archive_dir = self.crashcar_candidate_event_dir
-        self.crashcar_snr_archive_manifest = self.crashcar_candidate_event_manifest
-        self.crashcar_snr_archive_seq = self.crashcar_candidate_event_seq
+        # Crashcar single-branch retention uses the same candidate/coinc XML
+        # container as normal SPIIR. Keep the storage path generic so single
+        # and multi selections are one candidate-event stream, not a second
+        # crashcar-specific SNR-series persistence system.
+        self.candidate_event_dir = os.environ.get(
+            "SPIIR_CANDIDATE_EVENT_DIR", os.path.join(path, "candidate_events"))
+        self.candidate_event_manifest = os.path.join(
+            self.candidate_event_dir, "manifest.csv")
+        self.candidate_event_seq = 0
 
         # keep a record of segments and is snapshotted
         # our segments is determined by if incoming buf is GAP
@@ -1134,17 +1201,69 @@ class FinalSink(object):
                 reasons.append("%s_single" % ifo)
         return reasons
 
+    def __candidate_retention_metadata(self, postcoh_inspiral, reasons, kind):
+        branches = []
+        for reason in reasons:
+            branch = "multi" if reason == "multi" else "single"
+            if branch not in branches:
+                branches.append(branch)
+        far_sngl = list(postcoh_inspiral.far_sngl)
+
+        def _single_far(ifo):
+            try:
+                return far_sngl[pipe_macro.get_ifo_id(ifo)]
+            except Exception:
+                return ""
+
+        return {
+            "retention_kind": kind,
+            "retention_reasons": ";".join(reasons),
+            "retention_branches": ";".join(branches),
+            "event_id": postcoh_inspiral.event_id,
+            "ifos": postcoh_inspiral.ifos,
+            "end_time": postcoh_inspiral.end_time,
+            "end_time_ns": postcoh_inspiral.end_time_ns,
+            "bankid": postcoh_inspiral.bankid,
+            "tmplt_idx": postcoh_inspiral.tmplt_idx,
+            "multi_far": postcoh_inspiral.far,
+            "single_far_h1": _single_far("H1"),
+            "single_far_l1": _single_far("L1"),
+            "code_version": os.environ.get("CRASHCAR_CODE_VERSION", ""),
+        }
+
     def __write_candidate_coinc_xml(self,
                                     trigger,
                                     filename,
                                     psds=None,
                                     return_bytes=False,
-                                    log_label="candidate/coinc XML"):
-        self.coincs_document.assemble_ligolw_xmldoc(trigger, psds)
+                                    log_label="candidate/coinc XML",
+                                    metadata=None):
+        self.coincs_document.assemble_ligolw_xmldoc(
+            trigger, psds, metadata=metadata)
         logger.info("writing %s %s", log_label, filename)
         ligolw_utils.write_filename(self.coincs_document.xmldoc,
                                     filename,
                                     trap_signals=None)
+        template_autocorr_elements = []
+        if metadata and metadata.get("retention_kind"):
+            template_autocorr_elements = (
+                self.coincs_document
+                .build_template_autocorrelation_xml_elements(
+                    trigger.postcoh_inspiral, metadata=metadata))
+        if template_autocorr_elements:
+            try:
+                text = _read_text_maybe_gzip(filename)
+                marker = "</LIGO_LW>"
+                insert_at = text.rfind(marker)
+                if insert_at < 0:
+                    raise ValueError("root LIGO_LW closing tag not found")
+                text = (text[:insert_at] +
+                        "".join(template_autocorr_elements) +
+                        text[insert_at:])
+                _write_text_maybe_gzip(filename, text)
+            except Exception as exc:
+                logger.warning("failed to embed template autocorrelation in %s: %s",
+                               filename, exc)
         payload = None
         if return_bytes:
             payload = BytesIO()
@@ -1155,19 +1274,20 @@ class FinalSink(object):
                                                     self.channel_dict)
         return payload
 
-    def __append_crashcar_candidate_event_manifest(self, row):
-        os.makedirs(self.crashcar_candidate_event_dir, exist_ok=True)
+    def __append_candidate_event_manifest(self, row):
+        os.makedirs(self.candidate_event_dir, exist_ok=True)
         write_header = (
-            not os.path.exists(self.crashcar_candidate_event_manifest)
-            or os.path.getsize(self.crashcar_candidate_event_manifest) == 0)
+            not os.path.exists(self.candidate_event_manifest)
+            or os.path.getsize(self.candidate_event_manifest) == 0)
         fields = [
             "archive_seq", "filename", "series_file", "xml_file",
-            "candidate_xml_file", "archive_kind", "candidate_schema",
-            "reasons", "event_id", "ifos", "end_time", "end_time_ns",
-            "bankid", "tmplt_idx", "far", "far_sngl_H1", "far_sngl_L1",
-            "code_version"
+            "candidate_xml_file", "template_autocorrelation_xml_file",
+            "archive_kind", "candidate_schema",
+            "retention_kind", "reasons", "branches", "event_id", "ifos",
+            "end_time", "end_time_ns", "bankid", "tmplt_idx", "far",
+            "far_sngl_H1", "far_sngl_L1", "code_version"
         ]
-        with open(self.crashcar_candidate_event_manifest, "a", newline="") as fout:
+        with open(self.candidate_event_manifest, "a", newline="") as fout:
             writer = csv.DictWriter(fout, fieldnames=fields)
             if write_header:
                 writer.writeheader()
@@ -1178,30 +1298,35 @@ class FinalSink(object):
         reasons = self.__crashcar_snr_series_reasons(postcoh_inspiral)
         if not reasons:
             return
-        os.makedirs(self.crashcar_candidate_event_dir, exist_ok=True)
-        self.crashcar_candidate_event_seq += 1
-        self.crashcar_snr_archive_seq = self.crashcar_candidate_event_seq
+        os.makedirs(self.candidate_event_dir, exist_ok=True)
+        self.candidate_event_seq += 1
         filename = os.path.join(
-            self.crashcar_candidate_event_dir,
-            "crashcar_snr_%06d_%s_%d_%d_%d_%d_%d.xml.gz" % (
-                self.crashcar_candidate_event_seq, postcoh_inspiral.ifos,
+            self.candidate_event_dir,
+            "candidate_%06d_%s_%d_%d_%d_%d_%d.xml.gz" % (
+                self.candidate_event_seq, postcoh_inspiral.ifos,
                 postcoh_inspiral.end_time, postcoh_inspiral.end_time_ns,
                 postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx,
                 postcoh_inspiral.event_id))
 
+        metadata = self.__candidate_retention_metadata(
+            postcoh_inspiral, reasons, "crashcar_threshold_candidate")
         self.__write_candidate_coinc_xml(
-            trigger, filename, psds=None, log_label="crashcar retained candidate/coinc XML")
+            trigger, filename, psds=None,
+            log_label="retained candidate/coinc XML", metadata=metadata)
 
         far_sngl = list(postcoh_inspiral.far_sngl)
         row = {
-            "archive_seq": self.crashcar_candidate_event_seq,
+            "archive_seq": self.candidate_event_seq,
             "filename": filename,
             "series_file": filename,
             "xml_file": filename,
             "candidate_xml_file": filename,
+            "template_autocorrelation_xml_file": filename,
             "archive_kind": "candidate_event_xml",
             "candidate_schema": "ligolw_coinc",
+            "retention_kind": metadata["retention_kind"],
             "reasons": ";".join(reasons),
+            "branches": metadata["retention_branches"],
             "event_id": postcoh_inspiral.event_id,
             "ifos": postcoh_inspiral.ifos,
             "end_time": postcoh_inspiral.end_time,
@@ -1213,10 +1338,7 @@ class FinalSink(object):
             "far_sngl_L1": far_sngl[pipe_macro.get_ifo_id("L1")],
             "code_version": os.environ.get("CRASHCAR_CODE_VERSION", ""),
         }
-        self.__append_crashcar_candidate_event_manifest(row)
-
-    def __maybe_archive_crashcar_snr_series(self, trigger):
-        self.__maybe_retain_crashcar_candidate_event(trigger)
+        self.__append_candidate_event_manifest(row)
 
     def __read_trigger_control(self):
         with open(self.trigger_control_doc, "r") as f:
@@ -1402,7 +1524,9 @@ class FinalSink(object):
             filename,
             psds=psds,
             return_bytes=self.gracedb_client is not None,
-            log_label="normal SPIIR candidate/coinc XML")
+            log_label="normal SPIIR candidate/coinc XML",
+            metadata=self.__candidate_retention_metadata(
+                postcoh_inspiral, ["multi"], "normal_gracedb_candidate"))
 
         if self.gracedb_client is not None:
             logger.info(f"sending '{filename}' to gracedb ...")
@@ -1541,6 +1665,9 @@ class CoincsDocFromPostcoh(object):
             process_params,
             comment=comment,
             instruments=channel_dict.keys())
+        (self._template_autocorr_bank_paths,
+         self._template_autocorr_bank_dirs) = self._parse_iir_bank_params(
+             process_params)
 
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(lsctables.SnglInspiralTable,
@@ -1561,7 +1688,130 @@ class CoincsDocFromPostcoh(object):
     def close(self):
         self.xmldoc.unlink()
 
-    def assemble_ligolw_xmldoc(self, trigger, psds=None):
+    @staticmethod
+    def _process_param_values(process_params, keys):
+        values = []
+        for key in keys:
+            if key not in process_params:
+                continue
+            value = process_params[key]
+            if isinstance(value, (list, tuple)):
+                values.extend(value)
+            else:
+                values.append(value)
+        return values
+
+    @classmethod
+    def _parse_iir_bank_params(cls, process_params):
+        paths = {}
+        dirs = {}
+        for value in cls._process_param_values(process_params,
+                                               ("iir_bank", "--iir-bank")):
+            if value is None:
+                continue
+            for part in str(value).split(","):
+                if ":" not in part:
+                    continue
+                ifo, bank_path = part.split(":", 1)
+                ifo = ifo.strip()
+                bank_path = bank_path.strip()
+                match = re.search(r"GSTLAL_SPLIT_BANK_(\d+)", bank_path)
+                if not ifo or not bank_path or match is None:
+                    continue
+                bankid = int(match.group(1))
+                paths[(ifo, bankid)] = bank_path
+                dirs[ifo] = os.path.dirname(bank_path)
+        return paths, dirs
+
+    def _template_autocorr_bank_path(self, ifo, bankid):
+        path = self._template_autocorr_bank_paths.get((ifo, bankid))
+        if path:
+            return path
+        bank_dir = self._template_autocorr_bank_dirs.get(ifo)
+        if not bank_dir:
+            return None
+        return os.path.join(
+            bank_dir,
+            "iir_%s-GSTLAL_SPLIT_BANK_%04d-a1-0-0.xml.gz" % (ifo, bankid))
+
+    def _template_autocorr_rows(self, ifo, bankid, tmplt_idx):
+        path = self._template_autocorr_bank_path(ifo, bankid)
+        if not path or not os.path.exists(path):
+            raise ValueError("template autocorrelation bank not found for %s bank %d" %
+                             (ifo, bankid))
+        key = (ifo, bankid, path)
+        if key not in _TEMPLATE_AUTOCORR_BANK_CACHE:
+            _TEMPLATE_AUTOCORR_BANK_CACHE[key] = _load_template_autocorr_bank(
+                path)
+        length, ntemplate, real_values, imag_values = _TEMPLATE_AUTOCORR_BANK_CACHE[key]
+        if tmplt_idx < 0 or tmplt_idx >= ntemplate:
+            raise ValueError("template index %d outside autocorrelation bank %s %d" %
+                             (tmplt_idx, ifo, bankid))
+        center = (length - 1) // 2
+        rows = []
+        for sample_index in range(length):
+            offset = sample_index * ntemplate + tmplt_idx
+            real = real_values[offset]
+            imag = imag_values[offset]
+            rows.append((sample_index - center, real, imag))
+        return rows
+
+    def build_template_autocorrelation_xml_elements(self,
+                                                    postcoh_inspiral,
+                                                    metadata=None):
+        elements = []
+        bankid = int(postcoh_inspiral.bankid)
+        tmplt_idx = int(postcoh_inspiral.tmplt_idx)
+        for trigger_ifo_id, ifo in enumerate(
+                re.findall('..', postcoh_inspiral.ifos)):
+            try:
+                rows = self._template_autocorr_rows(ifo, bankid, tmplt_idx)
+            except Exception as exc:
+                logger.warning(
+                    "template autocorrelation unavailable for event_id=%s ifo=%s bankid=%s tmplt_idx=%s: %s",
+                    postcoh_inspiral.event_id, ifo, bankid, tmplt_idx, exc)
+                continue
+            event_id = "sngl_inspiral:event_id:%d" % trigger_ifo_id
+            lines = [
+                '\t<LIGO_LW Name="COMPLEX8TimeSeries">',
+                '\t\t<Time Type="GPS" Name="epoch">0</Time>',
+                '\t\t<Param Name="f0:param" Type="real_8" Unit="s^-1">0</Param>',
+                '\t\t<Array Type="real_8" Name="template_autocorrelation:array" Unit="">',
+                '\t\t\t<Dim Name="Sample" Unit="" Start="%s" Scale="1">%d</Dim>' %
+                (rows[0][0] if rows else 0, len(rows)),
+                '\t\t\t<Dim Name="Sample,Real,Imaginary">3</Dim>',
+                '\t\t\t<Stream Type="Local" Delimiter=" ">',
+            ]
+            for relative_index, real, imag in rows:
+                lines.append("\t\t\t\t%d %.9g %.9g " %
+                             (relative_index, real, imag))
+            lines += [
+                "\t\t\t</Stream>",
+                "\t\t</Array>",
+                '\t\t<Param Name="event_id:param" Type="ilwd:char">%s</Param>' %
+                _xml_text(event_id),
+                '\t\t<Param Name="instrument:param" Type="lstring">%s</Param>' %
+                _xml_text(ifo),
+                '\t\t<Param Name="crashcar_event_id:param" Type="int_8s">%s</Param>' %
+                _xml_text(int(postcoh_inspiral.event_id)),
+                '\t\t<Param Name="bankid:param" Type="int_4s">%d</Param>' %
+                bankid,
+                '\t\t<Param Name="tmplt_idx:param" Type="int_4s">%d</Param>' %
+                tmplt_idx,
+                '\t\t<Param Name="series_kind:param" Type="lstring">template_autocorrelation</Param>',
+            ]
+            if metadata:
+                for key in ("retention_kind", "retention_reasons",
+                            "retention_branches"):
+                    if key in metadata:
+                        lines.append(
+                            '\t\t<Param Name="crashcar_%s:param" Type="lstring">%s</Param>' %
+                            (key, _xml_text(metadata.get(key) or "")))
+            lines.append("\t</LIGO_LW>")
+            elements.append("\n".join(lines) + "\n")
+        return elements
+
+    def assemble_ligolw_xmldoc(self, trigger, psds=None, metadata=None):
         postcoh_inspiral = trigger.postcoh_inspiral
         self.assemble_snglinspiral_table(postcoh_inspiral)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
@@ -1612,8 +1862,10 @@ class CoincsDocFromPostcoh(object):
 
         self.assemble_coinc_map_table(postcoh_inspiral)
         self.assemble_time_slide_table(postcoh_inspiral)
+        self.assemble_candidate_metadata_params(metadata)
         self.assemble_ligolw_snr_series_arrays(postcoh_inspiral,
-                                               trigger.snr_series_list)
+                                               trigger.snr_series_list,
+                                               metadata=metadata)
 
         if psds is not None:
             self.assemble_ligolw_psd_arrays(psds)
@@ -1736,6 +1988,17 @@ class CoincsDocFromPostcoh(object):
             row.event_id = trigger_ifo_id
             sngl_inspiral_table.append(row)
 
+    def assemble_candidate_metadata_params(self, metadata):
+        if not metadata:
+            return
+        for key in sorted(metadata):
+            value = metadata[key]
+            if value is None:
+                value = ""
+            self.xmldoc.childNodes[-1].appendChild(
+                ligolw_param.Param.build(
+                    u"crashcar_%s" % key, u"lstring", str(value)))
+
     def assemble_ligolw_psd_arrays(self, psds):
         """Assembles a LIGO_LW REAL8FrequencySeries Array from a
         dictionary where keys are ifo strings and values are a
@@ -1761,7 +2024,8 @@ class CoincsDocFromPostcoh(object):
         self.xmldoc.childNodes[-1].appendChild(ligolw_psds_container)
 
     def assemble_ligolw_snr_series_arrays(self, postcoh_inspiral,
-                                          snr_series_list):
+                                          snr_series_list,
+                                          metadata=None):
         """Assembles LIGO_LW COMPLEX8TimeSeries arrays that
         contain the SNR series for each ifo at the time
         of the candidate trigger.
@@ -1824,6 +2088,14 @@ class CoincsDocFromPostcoh(object):
                 ligolw_snr_series_element.appendChild(
                     ligolw_param.Param.build(u"series_kind", u"lstring",
                                              "matched_filter_snr"))
+                if metadata:
+                    for key in ("retention_kind", "retention_reasons",
+                                "retention_branches"):
+                        if key in metadata:
+                            ligolw_snr_series_element.appendChild(
+                                ligolw_param.Param.build(
+                                    u"crashcar_%s" % key, u"lstring",
+                                    str(metadata.get(key) or "")))
                 self.xmldoc.childNodes[-1].appendChild(
                     ligolw_snr_series_element)
 

@@ -8,10 +8,11 @@ The plotting contract follows Eric-bless-crashcar.pdf Section 4.1:
   BG support from the run-local raw single-trigger stream and the crashcar
   template shape map. The older crashcar C detail/direct-FAR rows are only used
   as a fallback/debug data source and to infer the current per-IFO BG window.
-* Figure 2 reads the run-level crashcar_candidate_events_manifest.csv and the
-  retained candidate/coinc XML files. Legacy crashcar_snr_series manifests are
-  still accepted for old runs. Missing retained inputs are reported and left
-  blank; no replacement curve is synthesized.
+* Figure 2 reads the run-level or worker-local candidate_events manifest and the
+  retained candidate/coinc XML files. Legacy crashcar_candidate_events/
+  crashcar_snr_series manifests are still accepted for old runs. Missing
+  retained inputs are reported and left blank; no replacement curve is
+  synthesized.
 """
 
 from __future__ import annotations
@@ -1446,11 +1447,48 @@ def read_manifest(snr_dir: Path) -> dict:
     with path.open(newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
-            row["_snr_dir"] = str(base_dir)
-            row["_manifest_path"] = str(path)
-            rows.append(row)
-            counts[row.get("ifo", "")] += 1
+            for expanded in expand_candidate_manifest_row(row):
+                expanded["_snr_dir"] = str(base_dir)
+                expanded["_manifest_path"] = str(path)
+                rows.append(expanded)
+                counts[expanded.get("ifo", "")] += 1
     return {"exists": True, "path": str(path), "rows": rows, "row_count": len(rows), "ifo_counts": dict(counts)}
+
+
+def split_manifest_ifos(value: str) -> list[str]:
+    parts = re.split(r"[;,\s]+", str(value or "").strip())
+    return [part for part in parts if part]
+
+
+def expand_candidate_manifest_row(row: dict) -> list[dict]:
+    """Return component-level rows for a retained candidate/coinc XML manifest row."""
+    if row.get("ifo"):
+        return [dict(row)]
+
+    reasons = set(part for part in str(row.get("reasons", "")).split(";") if part)
+    branches = set(part for part in str(row.get("branches", "")).split(";") if part)
+    ifos = split_manifest_ifos(row.get("ifos", ""))
+    for ifo in ("H1", "L1"):
+        if f"{ifo}_single" in reasons and ifo not in ifos:
+            ifos.append(ifo)
+    if not ifos and "multi" in reasons:
+        ifos = ["H1", "L1"]
+
+    expanded_rows = []
+    for ifo in ifos or [""]:
+        expanded = dict(row)
+        expanded["ifo"] = ifo
+        if "multi" in reasons or "multi" in branches or is_truthy(expanded.get("hit_multi", "0")):
+            expanded["hit_multi"] = "1"
+            expanded.setdefault("far_multi", row.get("far", ""))
+            if not expanded.get("far_multi"):
+                expanded["far_multi"] = row.get("far", "")
+        single_far = row.get(f"far_sngl_{ifo}", "")
+        if f"{ifo}_single" in reasons or (single_far and finite_positive(single_far) is not None):
+            expanded["hit_single"] = "1"
+            expanded["far_sngl"] = single_far
+        expanded_rows.append(expanded)
+    return expanded_rows
 
 
 def read_manifests(snr_dirs: list[Path]) -> dict:
@@ -1790,6 +1828,17 @@ def read_template_autocorr_csv(path: Path) -> dict | None:
     }
 
 
+def path_looks_xml(path: Path) -> bool:
+    suffixes = "".join(path.suffixes).lower()
+    return ".xml" in suffixes
+
+
+def open_text_maybe_gzip(path: Path):
+    if "".join(path.suffixes).lower().endswith(".gz"):
+        return gzip.open(path, "rt", errors="replace")
+    return path.open("rt", errors="replace")
+
+
 def parse_selected_xml_series(path: Path, ifo: str, event_id: str) -> dict | None:
     if not path.exists():
         return None
@@ -1800,7 +1849,7 @@ def parse_selected_xml_series(path: Path, ifo: str, event_id: str) -> dict | Non
     real: list[float] = []
     imag: list[float] = []
     params: dict[str, str] = {}
-    with path.open("rt", errors="replace") as handle:
+    with open_text_maybe_gzip(path) as handle:
         for line in handle:
             if '<LIGO_LW Name="COMPLEX8TimeSeries">' in line:
                 in_block = True
@@ -1868,7 +1917,7 @@ def parse_template_autocorr_xml(path: Path, row: dict) -> dict | None:
     imag: list[float] = []
     params: dict[str, str] = {}
     fallback: dict | None = None
-    with path.open("rt", errors="replace") as handle:
+    with open_text_maybe_gzip(path) as handle:
         for line in handle:
             if '<LIGO_LW Name="COMPLEX8TimeSeries">' in line:
                 in_block = True
@@ -1898,6 +1947,9 @@ def parse_template_autocorr_xml(path: Path, row: dict) -> dict | None:
                 params[match.group(1)] = match.group(2)
                 continue
             if "</LIGO_LW>" in line:
+                if params.get("series_kind") != "template_autocorrelation":
+                    in_block = False
+                    continue
                 block_event = normalize_xml_event_id(
                     params.get("crashcar_event_id") or params.get("event_id")
                 )
@@ -1938,7 +1990,13 @@ def load_series_for_row(snr_dir: Path, row: dict | None) -> dict | None:
         return None
     series_file = row.get("series_file") or row.get("snr_file")
     if series_file:
-        result = read_snr_csv(snr_path_for_row(snr_dir, row, "series_file" if row.get("series_file") else "snr_file"))
+        series_path = snr_path_for_row(snr_dir, row, "series_file" if row.get("series_file") else "snr_file")
+        if path_looks_xml(series_path):
+            result = parse_selected_xml_series(
+                series_path, row.get("ifo", ""), row.get("event_id", "")
+            )
+        else:
+            result = read_snr_csv(series_path)
         if result:
             return result
     xml_file = row.get("xml_file") or row.get("series_xml")
@@ -1964,6 +2022,13 @@ def load_template_for_row(snr_dir: Path, row: dict | None) -> dict | None:
     for key in ("template_autocorrelation_xml_file", "template_autocorrelation_xml"):
         template_xml = row.get(key)
         if not template_xml:
+            continue
+        result = parse_template_autocorr_xml(snr_path_for_row(snr_dir, row, key), row)
+        if result:
+            return result
+    for key in ("candidate_xml_file", "xml_file", "series_xml"):
+        candidate_xml = row.get(key)
+        if not candidate_xml:
             continue
         result = parse_template_autocorr_xml(snr_path_for_row(snr_dir, row, key), row)
         if result:
@@ -2159,8 +2224,13 @@ def plot_second_2x2(
 ) -> dict:
     if snr_dirs is None:
         candidates = [
+            run_root / "run" / "candidate_events_manifest.csv",
+            run_root / "candidate_events_manifest.csv",
+            *sorted((run_root / "run").glob("[0-9][0-9][0-9]/candidate_events/manifest.csv")),
             run_root / "run" / "crashcar_candidate_events_manifest.csv",
             run_root / "crashcar_candidate_events_manifest.csv",
+            run_root / "run" / "candidate_events",
+            run_root / "candidate_events",
             run_root / "run" / "crashcar_snr_series",
             run_root / "crashcar_snr_series",
         ]

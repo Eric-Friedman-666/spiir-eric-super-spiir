@@ -687,13 +687,17 @@ def main() -> int:
     if args.embed_snr_series:
         manifest = args.snr_series_manifest
         if not manifest:
-            candidate_manifest = run_dir / "crashcar_candidate_events_manifest.csv"
+            candidate_manifest = run_dir / "candidate_events_manifest.csv"
             if candidate_manifest.exists():
                 manifest = str(candidate_manifest)
             else:
-                manifest = str(Path(
-                    os.environ.get("CRASHCAR_SNR_SERIES_OUTPUT_DIR")
-                    or "crashcar_snr_series") / "manifest.csv")
+                legacy_candidate_manifest = run_dir / "crashcar_candidate_events_manifest.csv"
+                if legacy_candidate_manifest.exists():
+                    manifest = str(legacy_candidate_manifest)
+                else:
+                    manifest = str(Path(
+                        os.environ.get("CRASHCAR_SNR_SERIES_OUTPUT_DIR")
+                        or "crashcar_snr_series") / "manifest.csv")
         manifest_path = Path(manifest)
         if not manifest_path.is_absolute():
             manifest_path = run_dir / manifest_path

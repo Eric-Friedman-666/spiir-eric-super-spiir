@@ -190,8 +190,12 @@ def materialize_template_autocorr(root: Path, run_root: Path, snr_dir: Path | No
         ]
     else:
         manifest_candidates = [
+            run_root / "run" / "candidate_events_manifest.csv",
+            run_root / "candidate_events_manifest.csv",
             run_root / "run" / "crashcar_candidate_events_manifest.csv",
             run_root / "crashcar_candidate_events_manifest.csv",
+            run_root / "run" / "candidate_events" / "manifest.csv",
+            run_root / "candidate_events" / "manifest.csv",
             run_root / "run" / "crashcar_snr_series" / "manifest.csv",
             run_root / "crashcar_snr_series" / "manifest.csv",
         ]
@@ -415,6 +419,10 @@ def main() -> int:
         "bg_noinj/artifacts/crashcar_template_shape_map.csv",
         "--background-json",
         "bg_noinj/artifacts/crashcar_day1_last_bg3h_full_background.json",
+        "--snr-dir-glob",
+        "inj_bns/chunks/chunk_*/run/candidate_events_manifest.csv",
+        "--snr-dir-glob",
+        "inj_bns/chunks/chunk_*/run/candidate_events",
         "--snr-dir-glob",
         "inj_bns/chunks/chunk_*/run/crashcar_candidate_events_manifest.csv",
         "--snr-dir-glob",
