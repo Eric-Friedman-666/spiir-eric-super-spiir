@@ -224,9 +224,12 @@ static void crashcar_load_frozen_single_support(CrashcarSinglefar *element) {
 
     int ifo_col = 0;
     int rank_col = 1;
+    int far_col = -1;
     int livetime_col = 3;
+    int kind_col = -1;
     char line[4096];
-    guint loaded = 0;
+    guint loaded_support = 0;
+    guint loaded_fit = 0;
     guint skipped = 0;
 
     while (fgets(line, sizeof(line), file)) {
@@ -240,17 +243,22 @@ static void crashcar_load_frozen_single_support(CrashcarSinglefar *element) {
             continue;
         }
 
-        if (g_ascii_strcasecmp(g_strstrip(fields[0]), "ifo") == 0) {
-            int col = crashcar_csv_column(fields, "ifo");
+        if (crashcar_csv_column(fields, "ifo") >= 0) {
+            int col = crashcar_csv_column(fields, "kind");
+            if (col >= 0) kind_col = col;
+            col = crashcar_csv_column(fields, "ifo");
             if (col >= 0) ifo_col = col;
             col = crashcar_csv_column(fields, "rank");
             if (col >= 0) rank_col = col;
+            col = crashcar_csv_column(fields, "far");
+            if (col >= 0) far_col = col;
             col = crashcar_csv_column(fields, "livetime");
             if (col >= 0) livetime_col = col;
             g_strfreev(fields);
             continue;
         }
 
+        const char *kind = crashcar_csv_value(fields, kind_col);
         const int ifo_id =
           crashcar_ifo_id_from_label(crashcar_csv_value(fields, ifo_col));
         double rank = NAN;
@@ -261,7 +269,6 @@ static void crashcar_load_frozen_single_support(CrashcarSinglefar *element) {
             g_strfreev(fields);
             continue;
         }
-        g_array_append_val(element->frozen_ranks[ifo_id], rank);
 
         double livetime = NAN;
         if (crashcar_parse_double_field(crashcar_csv_value(fields, livetime_col),
@@ -269,7 +276,26 @@ static void crashcar_load_frozen_single_support(CrashcarSinglefar *element) {
             livetime > 0.0) {
             element->frozen_livetime[ifo_id] = livetime;
         }
-        ++loaded;
+
+        const gboolean is_fit =
+          kind && kind[0] && g_ascii_strcasecmp(kind, "fit") == 0;
+        if (is_fit) {
+            double far = NAN;
+            if (!crashcar_parse_double_field(crashcar_csv_value(fields, far_col),
+                                             &far) ||
+                far <= 0.0) {
+                ++skipped;
+                g_strfreev(fields);
+                continue;
+            }
+            const double log_far = log10(far);
+            g_array_append_val(element->frozen_fit_ranks[ifo_id], rank);
+            g_array_append_val(element->frozen_fit_log_fars[ifo_id], log_far);
+            ++loaded_fit;
+        } else {
+            g_array_append_val(element->frozen_ranks[ifo_id], rank);
+            ++loaded_support;
+        }
         g_strfreev(fields);
     }
     fclose(file);
@@ -282,8 +308,9 @@ static void crashcar_load_frozen_single_support(CrashcarSinglefar *element) {
             element->frozen_support_loaded = TRUE;
         }
     }
-    GST_INFO("loaded %u frozen single-FAR support ranks from %s (skipped=%u loaded=%d)",
-             loaded, fname, skipped, element->frozen_support_loaded ? 1 : 0);
+    GST_INFO("loaded frozen single-FAR support from %s (support=%u fit=%u skipped=%u loaded=%d)",
+             fname, loaded_support, loaded_fit, skipped,
+             element->frozen_support_loaded ? 1 : 0);
 }
 
 static GArray *crashcar_cluster_events_locked(void) {
@@ -864,6 +891,31 @@ static gboolean crashcar_fitted_far_from_ranks(const double *input_ranks,
     g_free(raw_xs);
     g_free(raw_log_fars);
     return isfinite(*far_out) && *far_out > 0.0;
+}
+
+static gboolean crashcar_frozen_fitted_far_from_points(
+    const CrashcarSinglefar *element,
+    int ifo_id,
+    double rank,
+    double *far_out) {
+    if (!far_out) return FALSE;
+    *far_out = NAN;
+    if (!element || ifo_id < 0 || ifo_id >= MAX_NIFO || !isfinite(rank)) {
+        return FALSE;
+    }
+
+    const GArray *xs = element->frozen_fit_ranks[ifo_id];
+    const GArray *ys = element->frozen_fit_log_fars[ifo_id];
+    if (!xs || !ys || xs->len == 0 || xs->len != ys->len) return FALSE;
+
+    const double log_far =
+      crashcar_interp_linear((const double *)xs->data,
+                             (const double *)ys->data,
+                             xs->len, rank);
+    if (!isfinite(log_far)) return FALSE;
+
+    *far_out = pow(10.0, log_far);
+    return crashcar_far_double_is_valid(*far_out);
 }
 
 static guint crashcar_collect_window_ranks(const CrashcarSinglefar *element,
@@ -2316,7 +2368,11 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                 direct_far = crashcar_window_direct_far(element,
                                                         direct_far_count_ge,
                                                         bg_livetime);
-                if (total_window_count > 30 && fit_ranks) {
+                if (frozen_single_background_active &&
+                    crashcar_frozen_fitted_far_from_points(element, ifo_id,
+                                                           llr, &fitted_far)) {
+                    has_fitted_far = TRUE;
+                } else if (total_window_count > 30 && fit_ranks) {
                     has_fitted_far = crashcar_fitted_far_from_ranks(
                       fit_ranks, window_count, bg_livetime,
                       element->far_floor_count, llr, &fitted_far);
@@ -2530,6 +2586,14 @@ static void crashcar_singlefar_dispose(GObject *object) {
             g_array_free(element->frozen_ranks[ifo_id], TRUE);
             element->frozen_ranks[ifo_id] = NULL;
         }
+        if (element->frozen_fit_ranks[ifo_id]) {
+            g_array_free(element->frozen_fit_ranks[ifo_id], TRUE);
+            element->frozen_fit_ranks[ifo_id] = NULL;
+        }
+        if (element->frozen_fit_log_fars[ifo_id]) {
+            g_array_free(element->frozen_fit_log_fars[ifo_id], TRUE);
+            element->frozen_fit_log_fars[ifo_id] = NULL;
+        }
     }
 
     G_OBJECT_CLASS(crashcar_singlefar_parent_class)->dispose(object);
@@ -2656,6 +2720,10 @@ static void crashcar_singlefar_init(CrashcarSinglefar *element) {
         element->livetime_segments[ifo_id] =
           g_array_new(FALSE, FALSE, sizeof(CrashcarLivetimeSegment));
         element->frozen_ranks[ifo_id] =
+          g_array_new(FALSE, FALSE, sizeof(double));
+        element->frozen_fit_ranks[ifo_id] =
+          g_array_new(FALSE, FALSE, sizeof(double));
+        element->frozen_fit_log_fars[ifo_id] =
           g_array_new(FALSE, FALSE, sizeof(double));
     }
     crashcar_load_livetime_segments(element);

@@ -44,9 +44,12 @@ def materialize(background: Path, output: Path, summary: Path | None) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     counts = {}
-    total = 0
+    total_support = 0
+    total_fit = 0
     with output.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["ifo", "rank", "gps", "livetime"])
+        writer = csv.DictWriter(
+            handle, fieldnames=["kind", "ifo", "rank", "far", "gps", "livetime"]
+        )
         writer.writeheader()
         for ifo, bg in sorted(backgrounds.items()):
             livetime = _as_float(bg.get("livetime")) or 0.0
@@ -60,18 +63,44 @@ def materialize(background: Path, output: Path, summary: Path | None) -> int:
                     continue
                 writer.writerow(
                     {
+                        "kind": "support",
                         "ifo": ifo,
                         "rank": "%.17g" % rank,
+                        "far": "",
                         "gps": _row_gps(row),
                         "livetime": "%.17g" % livetime,
                     }
                 )
                 count += 1
+            fit_count = 0
+            fit_rows = []
+            for row in bg.get("far_llr_points") or []:
+                if not isinstance(row, dict):
+                    continue
+                rank = _row_rank(row)
+                far = _as_float(row.get("far"))
+                if rank is None or far is None or far <= 0.0:
+                    continue
+                fit_rows.append((rank, far, _row_gps(row)))
+            for rank, far, gps in sorted(fit_rows, key=lambda item: item[0]):
+                writer.writerow(
+                    {
+                        "kind": "fit",
+                        "ifo": ifo,
+                        "rank": "%.17g" % rank,
+                        "far": "%.17g" % far,
+                        "gps": gps,
+                        "livetime": "%.17g" % livetime,
+                    }
+                )
+                fit_count += 1
             counts[ifo] = {
                 "livetime": livetime,
                 "support_rows": count,
+                "fit_rows": fit_count,
             }
-            total += count
+            total_support += count
+            total_fit += fit_count
 
     if summary:
         summary.write_text(
@@ -80,14 +109,16 @@ def materialize(background: Path, output: Path, summary: Path | None) -> int:
                     "background": str(background),
                     "output": str(output),
                     "ifos": counts,
-                    "rows": total,
+                    "support_rows": total_support,
+                    "fit_rows": total_fit,
+                    "rows": total_support + total_fit,
                 },
                 indent=2,
                 sort_keys=True,
             )
             + "\n"
         )
-    return 0 if total > 0 else 1
+    return 0 if total_support > 0 else 1
 
 
 def main() -> int:
