@@ -74,6 +74,7 @@ for script in \
     crashcar_sbatch.sh \
     crashcar_pipeline.sh \
     filter_injection_xml_by_gps.py \
+    materialize_frozen_single_support.py \
     materialize_snr_autocorrelation.py \
     single_detector_far.py \
     dump_segment_livetime_csv.py \
@@ -95,6 +96,7 @@ chmod +x \
     "${RUN_ROOT}/scripts/crashcar_sbatch.sh" \
     "${RUN_ROOT}/scripts/crashcar_pipeline.sh" \
     "${RUN_ROOT}/scripts/filter_injection_xml_by_gps.py" \
+    "${RUN_ROOT}/scripts/materialize_frozen_single_support.py" \
     "${RUN_ROOT}/scripts/materialize_snr_autocorrelation.py" \
     "${RUN_ROOT}/scripts/single_detector_far.py" \
     "${RUN_ROOT}/scripts/dump_segment_livetime_csv.py" \

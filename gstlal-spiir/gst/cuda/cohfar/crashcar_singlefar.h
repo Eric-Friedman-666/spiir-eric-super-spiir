@@ -91,6 +91,10 @@ typedef struct {
     GArray *ranks[MAX_NIFO];
     GArray *support_points[MAX_NIFO];
     GArray *livetime_segments[MAX_NIFO];
+    gboolean frozen_single_background;
+    gboolean frozen_support_loaded;
+    double frozen_livetime[MAX_NIFO];
+    GArray *frozen_ranks[MAX_NIFO];
 
     char *template_shape_map_fname;
     GHashTable *template_shape_map;

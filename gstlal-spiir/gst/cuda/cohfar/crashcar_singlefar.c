@@ -47,7 +47,7 @@
 #define GST_CAT_DEFAULT crashcar_singlefar_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-#define CRASHCAR_CODE_VERSION "single_stream_support_v25_multi_component_snr_series"
+#define CRASHCAR_CODE_VERSION "single_stream_support_v29_retained_calculated_far"
 #define CRASHCAR_CLUSTER_WINDOW_SECONDS 1.0
 
 /* Multiple crashcar elements can live in one worker process and append to the
@@ -140,6 +140,12 @@ static gboolean crashcar_parse_double_field(const char *text, double *out) {
     return TRUE;
 }
 
+static gboolean crashcar_single_background_mode_is_frozen(void) {
+    const char *mode = g_getenv("CRASHCAR_SINGLE_BACKGROUND_MODE");
+    if (!mode || !mode[0]) mode = g_getenv("SINGLE_BACKGROUND_MODE");
+    return mode && g_ascii_strcasecmp(mode, "frozen") == 0;
+}
+
 static void crashcar_load_livetime_segments(CrashcarSinglefar *element) {
     const char *fname = g_getenv("CRASHCAR_SEGMENT_LIVETIME_CSV");
     if (!fname || !fname[0]) return;
@@ -182,6 +188,102 @@ static void crashcar_load_livetime_segments(CrashcarSinglefar *element) {
     fclose(file);
     GST_INFO("loaded %u crashcar single-FAR livetime segments from %s",
              loaded, fname);
+}
+
+static int crashcar_csv_column(char **fields, const char *name) {
+    if (!fields || !name) return -1;
+    for (int i = 0; fields[i]; ++i) {
+        char *field = g_strstrip(fields[i]);
+        if (g_ascii_strcasecmp(field, name) == 0) return i;
+    }
+    return -1;
+}
+
+static const char *crashcar_csv_value(char **fields, int index) {
+    if (!fields || index < 0) return "";
+    for (int i = 0; i <= index; ++i) {
+        if (!fields[i]) return "";
+    }
+    return fields[index] ? fields[index] : "";
+}
+
+static void crashcar_load_frozen_single_support(CrashcarSinglefar *element) {
+    if (!element || !element->frozen_single_background) return;
+
+    const char *fname = g_getenv("CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV");
+    if (!fname || !fname[0]) {
+        GST_WARNING("single_background_mode=frozen but CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV is unset");
+        return;
+    }
+
+    FILE *file = fopen(fname, "r");
+    if (!file) {
+        GST_WARNING("unable to open CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV=%s", fname);
+        return;
+    }
+
+    int ifo_col = 0;
+    int rank_col = 1;
+    int livetime_col = 3;
+    char line[4096];
+    guint loaded = 0;
+    guint skipped = 0;
+
+    while (fgets(line, sizeof(line), file)) {
+        g_strchomp(line);
+        char *trimmed = g_strstrip(line);
+        if (!trimmed[0] || trimmed[0] == '#') continue;
+
+        char **fields = g_strsplit(trimmed, ",", 0);
+        if (!fields || !fields[0]) {
+            g_strfreev(fields);
+            continue;
+        }
+
+        if (g_ascii_strcasecmp(g_strstrip(fields[0]), "ifo") == 0) {
+            int col = crashcar_csv_column(fields, "ifo");
+            if (col >= 0) ifo_col = col;
+            col = crashcar_csv_column(fields, "rank");
+            if (col >= 0) rank_col = col;
+            col = crashcar_csv_column(fields, "livetime");
+            if (col >= 0) livetime_col = col;
+            g_strfreev(fields);
+            continue;
+        }
+
+        const int ifo_id =
+          crashcar_ifo_id_from_label(crashcar_csv_value(fields, ifo_col));
+        double rank = NAN;
+        if (ifo_id < 0 ||
+            !crashcar_parse_double_field(crashcar_csv_value(fields, rank_col),
+                                         &rank)) {
+            ++skipped;
+            g_strfreev(fields);
+            continue;
+        }
+        g_array_append_val(element->frozen_ranks[ifo_id], rank);
+
+        double livetime = NAN;
+        if (crashcar_parse_double_field(crashcar_csv_value(fields, livetime_col),
+                                        &livetime) &&
+            livetime > 0.0) {
+            element->frozen_livetime[ifo_id] = livetime;
+        }
+        ++loaded;
+        g_strfreev(fields);
+    }
+    fclose(file);
+
+    for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+        if (!ifo_set__contains(element->enabled_ifos, ifo_id)) continue;
+        if (element->frozen_ranks[ifo_id] &&
+            element->frozen_ranks[ifo_id]->len > 0 &&
+            element->frozen_livetime[ifo_id] > 0.0) {
+            element->frozen_support_loaded = TRUE;
+        }
+    }
+    GST_INFO("loaded %u frozen single-FAR support ranks from %s (skipped=%u loaded=%d)",
+             loaded, fname, skipped, element->frozen_support_loaded ? 1 : 0);
 }
 
 static GArray *crashcar_cluster_events_locked(void) {
@@ -855,6 +957,29 @@ static double crashcar_window_direct_far(const CrashcarSinglefar *element,
     if (livetime <= 0.0) return INFINITY;
     double effective_count = MAX((double)count_ge, element->far_floor_count);
     return effective_count / livetime;
+}
+
+static guint crashcar_count_ge_from_rank_array(const GArray *ranks,
+                                               double rank) {
+    if (!ranks || !isfinite(rank)) return 0;
+    guint count = 0;
+    for (guint i = 0; i < ranks->len; ++i) {
+        const double value = g_array_index((GArray *)ranks, double, i);
+        if (value >= rank) ++count;
+    }
+    return count;
+}
+
+static guint crashcar_total_frozen_support(const CrashcarSinglefar *element) {
+    if (!element) return 0;
+    guint total = 0;
+    for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+        if (!ifo_set__contains(element->enabled_ifos, ifo_id)) continue;
+        if (element->frozen_ranks[ifo_id]) {
+            total += element->frozen_ranks[ifo_id]->len;
+        }
+    }
+    return total;
 }
 
 static void crashcar_add_foreground_support(CrashcarSinglefar *element,
@@ -1710,15 +1835,9 @@ static gchar *crashcar_snr_series_output_dir(
     const char *configured = g_getenv("CRASHCAR_SNR_SERIES_OUTPUT_DIR");
     if (crashcar_env_value_is_disabled(configured)) return NULL;
     if (configured && configured[0]) return g_strdup(configured);
-
-    if (element->detail_output_fname && element->detail_output_fname[0]) {
-        gchar *detail_dir = g_path_get_dirname(element->detail_output_fname);
-        gchar *out_dir = g_build_filename(detail_dir, "crashcar_snr_series",
-                                          NULL);
-        g_free(detail_dir);
-        return out_dir;
-    }
-    return g_strdup("crashcar_snr_series");
+    const char *candidate_dir = g_getenv("SPIIR_CANDIDATE_EVENT_DIR");
+    if (crashcar_env_value_is_disabled(candidate_dir)) return NULL;
+    return (candidate_dir && candidate_dir[0]) ? g_strdup(candidate_dir) : NULL;
 }
 
 static gboolean crashcar_snr_series_write_csv_enabled(void) {
@@ -1728,7 +1847,7 @@ static gboolean crashcar_snr_series_write_csv_enabled(void) {
 }
 
 static gchar *crashcar_snr_series_xml_shard_basename(void) {
-    return g_strdup_printf("crashcar_snr_series_worker%03d.xml",
+    return g_strdup_printf("crashcar_single_candidate_events_worker%03d.xml",
                            crashcar_worker_id_from_env());
 }
 
@@ -1927,23 +2046,35 @@ static void crashcar_write_snr_series_dump(
     }
     if (fseek(manifest, 0, SEEK_END) == 0 && ftell(manifest) == 0) {
         fprintf(manifest,
-                "event_id,ifo_id,ifo,bankid,tmplt_idx,end_time,end_time_ns,"
+                "archive_seq,filename,series_file,xml_file,candidate_xml_file,"
+                "archive_kind,candidate_schema,retention_kind,reasons,branches,"
+                "event_id,ifos,ifo,ifo_id,bankid,tmplt_idx,end_time,end_time_ns,"
                 "snglsnr,chisq,llr,far_sngl,log10_far_sngl,far_multi,"
                 "log10_far_multi,hit_single,hit_multi,direct_far,"
                 "bg_livetime,bg_start,bg_end,feature_gps,assignment_gps,"
-                "autocorr_power,dof,series_file,xml_file,code_version\n");
+                "autocorr_power,dof,code_version\n");
     }
+    const char *reasons =
+      (hit_single && hit_multi) ? "single;multi" :
+      (hit_single ? "single" : (hit_multi ? "multi" : "threshold_forced"));
+    const char *branches =
+      (hit_single && hit_multi) ? "single;multi" :
+      (hit_single ? "single" : (hit_multi ? "multi" : "forced"));
+    const char *ifos = ifo;
     fprintf(manifest,
-            "%ld,%d,%s,%d,%d,%d,%d,%.9g,%.9g,%.17g,%.9g,%.9g,%.9g,"
+            "%ld,%s,%s,%s,%s,candidate_event_xml,ligolw_single_snr,"
+            "crashcar_single_threshold,%s,%s,%ld,%s,%s,%d,%d,%d,%d,%d,"
+            "%.9g,%.9g,%.17g,%.9g,%.9g,%.9g,"
             "%.9g,%d,%d,%.9g,%.9g,%.17g,%.17g,%.17g,%.17g,%.9g,%.9g,"
-            "%s,%s,%s\n",
-            table->event_id, ifo_id, ifo, table->bankid, table->tmplt_idx,
+            "%s\n",
+            table->event_id, xml_basename, write_csv ? series_basename : "",
+            xml_basename, xml_basename, reasons, branches, table->event_id,
+            ifos, ifo, ifo_id, table->bankid, table->tmplt_idx,
             detail_end_time->gpsSeconds, detail_end_time->gpsNanoSeconds,
             table->snglsnr[ifo_id], table->chisq[ifo_id], llr, far_sngl,
             log10_far_sngl, far_multi, log10_far_multi, hit_single ? 1 : 0,
             hit_multi ? 1 : 0, direct_far, bg_livetime, bg_start, bg_end,
             feature_gps, assignment_gps, autocorr_power, dof,
-            write_csv ? series_basename : "", xml_basename,
             CRASHCAR_CODE_VERSION);
     fclose(manifest);
 
@@ -2012,9 +2143,11 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
       (PostcohInspiralTable *)(mapInfo.data + mapInfo.size);
     const gboolean preserve_table_single_far =
       crashcar_env_truthy("CRASHCAR_PRESERVE_TABLE_SINGLE_FAR");
+    const gboolean frozen_single_background_active =
+      element->frozen_single_background && element->frozen_support_loaded;
     gboolean is_first_buffer_row = TRUE;
 
-    if (!preserve_table_single_far) {
+    if (!preserve_table_single_far && !element->frozen_single_background) {
         GArray *buffer_events =
           g_array_new(FALSE, FALSE, sizeof(CrashcarClusterEvent));
 
@@ -2110,19 +2243,19 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             if (!isfinite(assignment_gps)) {
                 assignment_gps = crashcar_gps_to_seconds(&table->end_time);
             }
-            const double bg_end = crashcar_assignment_window_end(element, assignment_gps);
+            double bg_end = crashcar_assignment_window_end(element, assignment_gps);
             double bg_start = bg_end - element->background_window_seconds;
             if (element->data_start_gps > 0.0 && bg_start < element->data_start_gps) {
                 bg_start = element->data_start_gps;
             }
-            const double bg_span = bg_end - bg_start;
-            const double bg_livetime =
+            double bg_span = bg_end - bg_start;
+            double bg_livetime =
               crashcar_window_ifo_livetime(element, ifo_id, bg_start, bg_end);
-            const gboolean required_window_ready =
+            gboolean required_window_ready =
               element->data_start_gps <= 0.0 ||
               bg_end >= element->data_start_gps +
                         element->background_required_seconds - 1.0e-6;
-            const gboolean full_window_ready =
+            gboolean full_window_ready =
               isfinite(feature_gps) && isfinite(assignment_gps) &&
               element->background_window_seconds > 0.0 &&
               bg_span >= element->background_window_seconds - 1.0e-6 &&
@@ -2133,6 +2266,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                                             feature_gps);
             guint direct_far_count_ge = 0;
             double *window_ranks = NULL;
+            const double *fit_ranks = NULL;
             guint window_count = 0;
             guint total_window_count = 0;
             double direct_far = INFINITY;
@@ -2145,32 +2279,62 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
              * back to the zerolag table; simultaneous-detector periods still
              * need finite direct FAR values for BG support and plotting.
              */
+            if (single_component_eligible && !preserve_table_single_far) {
+                if (frozen_single_background_active) {
+                    GArray *frozen_ranks = element->frozen_ranks[ifo_id];
+                    bg_livetime = element->frozen_livetime[ifo_id];
+                    window_count = frozen_ranks ? frozen_ranks->len : 0;
+                    total_window_count = crashcar_total_frozen_support(element);
+                    direct_far_count_ge =
+                      crashcar_count_ge_from_rank_array(frozen_ranks, llr);
+                    fit_ranks =
+                      (frozen_ranks && frozen_ranks->len > 0) ?
+                        (const double *)frozen_ranks->data : NULL;
+                    if (element->data_start_gps > 0.0 &&
+                        element->background_window_seconds > 0.0) {
+                        bg_start = element->data_start_gps;
+                        bg_end = bg_start + element->background_window_seconds;
+                        bg_span = bg_end - bg_start;
+                    }
+                    required_window_ready = TRUE;
+                    full_window_ready =
+                      isfinite(feature_gps) && isfinite(assignment_gps) &&
+                      bg_livetime > 0.0 && window_count > 0;
+                } else if (full_window_ready && bg_livetime > 0.0) {
+                    window_count = crashcar_collect_window_ranks(
+                      element, ifo_id, bg_start, bg_end, &window_ranks,
+                      &direct_far_count_ge, llr);
+                    total_window_count = crashcar_window_total_support(element,
+                                                                       bg_start,
+                                                                       bg_end);
+                    fit_ranks = window_ranks;
+                }
+            }
             if (single_component_eligible && full_window_ready &&
-                bg_livetime > 0.0 && !preserve_table_single_far) {
-                window_count = crashcar_collect_window_ranks(
-                  element, ifo_id, bg_start, bg_end, &window_ranks,
-                  &direct_far_count_ge, llr);
-                total_window_count = crashcar_window_total_support(element,
-                                                                   bg_start,
-                                                                   bg_end);
+                bg_livetime > 0.0 && !preserve_table_single_far &&
+                window_count > 0) {
                 direct_far = crashcar_window_direct_far(element,
                                                         direct_far_count_ge,
                                                         bg_livetime);
-                if (total_window_count > 30 && window_count > 0) {
+                if (total_window_count > 30 && fit_ranks) {
                     has_fitted_far = crashcar_fitted_far_from_ranks(
-                      window_ranks, window_count, bg_livetime,
+                      fit_ranks, window_count, bg_livetime,
                       element->far_floor_count, llr, &fitted_far);
                 }
             }
 
+            float calculated_far_sngl = 0.0f;
+            if (has_fitted_far && crashcar_far_double_is_valid(fitted_far)) {
+                calculated_far_sngl = (float)fitted_far;
+            } else if (crashcar_far_double_is_valid(direct_far)) {
+                calculated_far_sngl = (float)direct_far;
+            }
             float far_sngl = crashcar_best_single_far(table, ifo_id);
             if (single_component_eligible && full_window_ready &&
                 allow_single_output &&
                 !preserve_table_single_far) {
-                if (has_fitted_far && crashcar_far_double_is_valid(fitted_far)) {
-                    far_sngl = (float)fitted_far;
-                } else if (crashcar_far_double_is_valid(direct_far)) {
-                    far_sngl = (float)direct_far;
+                if (crashcar_far_is_valid(calculated_far_sngl)) {
+                    far_sngl = calculated_far_sngl;
                 }
             }
             if (single_component_eligible && allow_single_output &&
@@ -2190,7 +2354,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             gboolean write_all_details =
               element->log10_far_threshold >= 90.0;
             gboolean write_all_snr_series =
-              element->snr_series_log10_far_threshold >= 90.0;
+              element->snr_series_log10_far_threshold >= 90.0 ||
+              crashcar_env_truthy("CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL");
             float far_multi = crashcar_best_multi_far(table);
             gboolean hit_single_far =
               single_component_eligible &&
@@ -2202,7 +2367,9 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             gboolean snr_series_hit_single_far =
               single_component_eligible &&
               crashcar_hits_threshold(
-                far_sngl, element->snr_series_log10_far_threshold);
+                crashcar_far_is_valid(far_sngl) ?
+                  far_sngl : calculated_far_sngl,
+                element->snr_series_log10_far_threshold);
             gboolean snr_series_hit_multi_far =
               crashcar_hits_threshold(
                 far_multi, element->snr_series_log10_far_threshold);
@@ -2217,11 +2384,14 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
             }
             if (write_all_snr_series || snr_series_hit_single_far ||
                 snr_series_hit_multi_far) {
+                const float snr_series_far_sngl =
+                  crashcar_far_is_valid(far_sngl) ?
+                    far_sngl : calculated_far_sngl;
                 crashcar_write_snr_series_dump(
                   element, table, ifo_id, llr, direct_far, bg_livetime,
                   bg_start, bg_end, feature_gps, assignment_gps,
-                  far_sngl, autocorr_power, dof, snr_series_hit_single_far,
-                  snr_series_hit_multi_far);
+                  snr_series_far_sngl, autocorr_power, dof,
+                  snr_series_hit_single_far, snr_series_hit_multi_far);
             }
             g_free(window_ranks);
         }
@@ -2356,6 +2526,10 @@ static void crashcar_singlefar_dispose(GObject *object) {
             g_array_free(element->livetime_segments[ifo_id], TRUE);
             element->livetime_segments[ifo_id] = NULL;
         }
+        if (element->frozen_ranks[ifo_id]) {
+            g_array_free(element->frozen_ranks[ifo_id], TRUE);
+            element->frozen_ranks[ifo_id] = NULL;
+        }
     }
 
     G_OBJECT_CLASS(crashcar_singlefar_parent_class)->dispose(object);
@@ -2470,15 +2644,22 @@ static void crashcar_singlefar_init(CrashcarSinglefar *element) {
           crashcar_env_double("FINALSINK_SNAPSHOT_INTERVAL_SECONDS", 0.0)));
     element->data_start_gps = crashcar_env_double("DATA_START_TIME", 0.0);
     element->have_livetime_segments = FALSE;
+    element->frozen_single_background =
+      crashcar_single_background_mode_is_frozen();
+    element->frozen_support_loaded = FALSE;
     for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
         element->livetime[ifo_id] = 0.0;
+        element->frozen_livetime[ifo_id] = 0.0;
         element->ranks[ifo_id] = g_array_new(FALSE, FALSE, sizeof(double));
         element->support_points[ifo_id] =
           g_array_new(FALSE, FALSE, sizeof(CrashcarSupportPoint));
         element->livetime_segments[ifo_id] =
           g_array_new(FALSE, FALSE, sizeof(CrashcarLivetimeSegment));
+        element->frozen_ranks[ifo_id] =
+          g_array_new(FALSE, FALSE, sizeof(double));
     }
     crashcar_load_livetime_segments(element);
+    crashcar_load_frozen_single_support(element);
     element->template_shape_map_fname = NULL;
     element->template_shape_map = NULL;
     element->template_shape_map_loaded = FALSE;

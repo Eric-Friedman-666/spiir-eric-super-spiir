@@ -189,8 +189,12 @@ SINGLE_FROZEN_BACKGROUND_SOURCE_VALUE=${single_frozen_background_source:-${SINGL
 SINGLE_INPUT_KIND_VALUE=${single_input_kind:-${SINGLE_INPUT_KIND:-crashcarcsv}}
 FINAL_SINGLE_INPUT_KIND_VALUE=${final_single_input_kind:-${FINAL_SINGLE_INPUT_KIND:-crashcarcsv}}
 PATCH_ZEROLAG_SINGLE_FAR_VALUE=${patch_zerolag_single_far:-${PATCH_ZEROLAG_SINGLE_FAR:-1}}
-PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE=${patch_zerolag_single_far_column:-${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-direct_far}}
+PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE=${patch_zerolag_single_far_column:-${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-assigned_far}}
 PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE=${patch_zerolag_single_snr_series:-${PATCH_ZEROLAG_SINGLE_SNR_SERIES:-1}}
+CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL_VALUE=${crashcar_single_snr_series_preselect_all:-${CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL:-}}
+CRASHCAR_SNR_SERIES_OUTPUT_DIR_VALUE=${crashcar_snr_series_output_dir:-${CRASHCAR_SNR_SERIES_OUTPUT_DIR:-}}
+CRASHCAR_SNR_SERIES_WRITE_CSV_VALUE=${crashcar_snr_series_write_csv:-${CRASHCAR_SNR_SERIES_WRITE_CSV:-0}}
+CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE=${crashcar_frozen_single_support_csv:-${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV:-}}
 CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE=${crashcar_background_required_seconds:-${CRASHCAR_BACKGROUND_REQUIRED_SECONDS:-${BACKGROUND_ACCUMULATION}}}
 if [ -n "${crashcar_build_last_bg_artifacts:-${CRASHCAR_BUILD_LAST_BG_ARTIFACTS:-}}" ]; then
     CRASHCAR_BUILD_LAST_BG_ARTIFACTS=${crashcar_build_last_bg_artifacts:-${CRASHCAR_BUILD_LAST_BG_ARTIFACTS:-}}
@@ -211,7 +215,6 @@ if [ "${INJECTION_MODE}" = "True" ] && [ "${SINGLE_BACKGROUND_MODE_VALUE}" != "f
     printf 'crashcar_controller: injection_mode=True requires single_background_mode=frozen\n' >&2
     exit 2
 fi
-
 H_ONLY_SECONDS=${h_only_seconds:-${H_ONLY_SECONDS:-0}}
 L_ONLY_SECONDS=${l_only_seconds:-${L_ONLY_SECONDS:-0}}
 HL_SECONDS=${hl_seconds:-${HL_SECONDS:-0}}
@@ -486,6 +489,7 @@ validate_inputs() {
         "${CRASH_SCRIPT_DIR}/dump_segment_livetime_csv.py" \
         "${CRASH_SCRIPT_DIR}/plot_single_llr_far.py" \
         "${CRASH_SCRIPT_DIR}/export_template_shape_map.py" \
+        "${SCRIPT_DIR}/materialize_frozen_single_support.py" \
         "${SCRIPT_DIR}/materialize_snr_autocorrelation.py" \
         "${WGUO_BANK_STATS_DIR}"; do
         [ -e "${p}" ] || { log "ERROR missing input ${p}"; write_status phase=failed reason="missing ${p}"; exit 2; }
@@ -518,11 +522,35 @@ validate_inputs() {
                 write_status phase=failed reason=missing_frozen_single_background_run_dir single_frozen_background_run_dir="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}"
                 exit 2
             }
+            SINGLE_FROZEN_BACKGROUND_JSON_VALUE="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}/artifacts/crashcar_day1_last_bg3h_full_background.json"
+            [ -f "${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" ] || {
+                log "ERROR missing frozen single background ${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
+                write_status phase=failed reason=missing_frozen_single_background single_frozen_background_json="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
+                exit 2
+            }
         else
             log "ERROR single_background_mode=frozen requires single_frozen_background_json or single_frozen_background_run_dir"
             write_status phase=failed reason=frozen_single_background_not_configured
             exit 2
         fi
+        if [ -z "${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}" ]; then
+            CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE="${ARTIFACTS}/crashcar_frozen_single_support.csv"
+            python3 "${SCRIPT_DIR}/materialize_frozen_single_support.py" \
+                --background "${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
+                --output "${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}" \
+                --summary "${ARTIFACTS}/crashcar_frozen_single_support_summary.json" \
+                > "${CONTROLLER_DIR}/materialize_frozen_single_support.log" \
+                2>&1 || {
+                    log "ERROR failed to materialize frozen single support from ${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
+                    write_status phase=failed reason=frozen_single_support_missing single_frozen_background_json="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
+                    exit 2
+                }
+        fi
+        [ -s "${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}" ] || {
+            log "ERROR frozen single support CSV is empty ${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}"
+            write_status phase=failed reason=frozen_single_support_empty crashcar_frozen_single_support_csv="${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}"
+            exit 2
+        }
     fi
     python3 "${CRASH_SCRIPT_DIR}/dump_segment_livetime_csv.py" \
         "${SEGMENT_XML}" \
@@ -721,9 +749,10 @@ PY
 
 synthesize_candidate_event_manifest() {
     local candidate_manifest="${RUN_DIR}/candidate_events_manifest.csv"
-    RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" python3 - <<'PY'
+    RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" FINAL_SINGLE_LEDGER="${RUN_DIR}/single_branch/single_final_far_all.csv" python3 - <<'PY'
 import csv
 import json
+import math
 import os
 from pathlib import Path
 
@@ -736,6 +765,58 @@ legacy_input_manifests = sorted(
     run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/manifest.csv"))
 input_manifests.extend(path for path in legacy_input_manifests
                        if path not in input_manifests)
+preselect_input_manifests = []
+
+def norm_int(value):
+    text = "" if value is None else str(value).strip()
+    if text == "":
+        return ""
+    try:
+        return str(int(float(text)))
+    except Exception:
+        return text
+
+def norm_ifo(value):
+    text = "" if value is None else str(value).strip()
+    if text in ("H", "L", "V", "K"):
+        return text + "1"
+    return text
+
+def key_for(row, ifo):
+    return (
+        norm_ifo(ifo),
+        norm_int(row.get("end_time")),
+        norm_int(row.get("end_time_ns")),
+        norm_int(row.get("bankid")),
+        norm_int(row.get("tmplt_idx")),
+    )
+
+def positive_float(value):
+    try:
+        out = float(value)
+    except Exception:
+        return None
+    return out if math.isfinite(out) and out > 0.0 else None
+
+ledger = {}
+ledger_path = Path(os.environ.get("FINAL_SINGLE_LEDGER") or "")
+if ledger_path.exists() and ledger_path.stat().st_size > 0:
+    with ledger_path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            far = positive_float(row.get("direct_far") or row.get("far"))
+            if far is None:
+                continue
+            key = key_for(row, row.get("ifo"))
+            if "" in key:
+                continue
+            old = ledger.get(key)
+            if old is None or far < old:
+                ledger[key] = far
+
+try:
+    far_threshold = 10.0 ** float(os.environ.get("SNR_SERIES_LOG_FAR_THRESHOLD") or "")
+except Exception:
+    far_threshold = None
 fieldnames = [
             "archive_seq",
             "filename",
@@ -768,13 +849,18 @@ for input_manifest in input_manifests:
             if not xml_file:
                 continue
             xml_path = Path(xml_file)
-            if xml_path.is_absolute():
-                try:
-                    xml_file = str(xml_path.relative_to(run_dir))
-                except ValueError:
-                    xml_file = str(xml_path)
+            if not xml_path.is_absolute():
+                xml_path = input_manifest.parent / xml_path
+            try:
+                xml_file = str(xml_path.resolve().relative_to(run_dir.resolve()))
+            except ValueError:
+                xml_file = str(xml_path)
             ifos = (row.get("ifos") or "").replace(",", "")
-            active_ifos = [ifo for ifo in ("H1", "L1", "V1", "K1") if ifo in ifos]
+            row_ifo = norm_ifo(row.get("ifo"))
+            if row_ifo:
+                active_ifos = [row_ifo]
+            else:
+                active_ifos = [ifo for ifo in ("H1", "L1", "V1", "K1") if ifo in ifos]
             for ifo in active_ifos:
                 out = {field: "" for field in fieldnames}
                 for field in row:
@@ -784,8 +870,10 @@ for input_manifest in input_manifests:
                 out["series_file"] = xml_file
                 out["xml_file"] = xml_file
                 out["candidate_xml_file"] = xml_file
-                out["archive_kind"] = row.get("archive_kind") or "candidate_event_xml"
-                out["candidate_schema"] = row.get("candidate_schema") or "ligolw_coinc"
+                out["archive_kind"] = row.get("archive_kind") or (
+                    "candidate_event_xml")
+                out["candidate_schema"] = row.get("candidate_schema") or (
+                    "ligolw_coinc")
                 out["source_manifest"] = str(input_manifest.relative_to(run_dir))
                 out["ifo"] = ifo
                 rows.append(out)
@@ -850,6 +938,10 @@ elif manifest.exists():
 
 summary.write_text(json.dumps({
     "input_manifests": [str(path.relative_to(run_dir)) for path in input_manifests],
+    "preselect_input_manifests": [str(path.relative_to(run_dir)) for path in preselect_input_manifests],
+    "final_single_ledger": str(ledger_path) if ledger_path.exists() else "",
+    "final_single_ledger_keys": len(ledger),
+    "snr_series_far_threshold": far_threshold,
     "manifest": str(manifest),
     "rows": len(rows),
     "unique_candidate_xml_files": len({row["candidate_xml_file"] for row in rows}),
@@ -875,11 +967,16 @@ import os
 from pathlib import Path
 
 run_dir = Path(os.environ["RUN_DIR"])
-candidate_xml_files = sorted(
-    run_dir.glob("[0-9][0-9][0-9]/candidate_events/*.xml.gz"))
-candidate_xml_files.extend(path for path in sorted(
-    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/*.xml.gz"))
-    if path not in candidate_xml_files)
+candidate_xml_files = []
+for pattern in (
+    "[0-9][0-9][0-9]/candidate_events/*.xml",
+    "[0-9][0-9][0-9]/candidate_events/*.xml.gz",
+    "[0-9][0-9][0-9]/crashcar_candidate_events/*.xml",
+    "[0-9][0-9][0-9]/crashcar_candidate_events/*.xml.gz",
+):
+    for path in sorted(run_dir.glob(pattern)):
+        if path not in candidate_xml_files:
+            candidate_xml_files.append(path)
 payload = {
     "archive": os.environ["ARCHIVE"],
     "archive_bytes": 0,
@@ -967,11 +1064,16 @@ if candidate_manifest.exists():
                 template_autocorrelation_files += 1
             if row.get("template_autocorrelation_xml_file"):
                 template_autocorrelation_xml_files += 1
-candidate_xml_files = sorted(
-    run_dir.glob("[0-9][0-9][0-9]/candidate_events/*.xml.gz"))
-candidate_xml_files.extend(path for path in sorted(
-    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/*.xml.gz"))
-    if path not in candidate_xml_files)
+candidate_xml_files = []
+for pattern in (
+    "[0-9][0-9][0-9]/candidate_events/*.xml",
+    "[0-9][0-9][0-9]/candidate_events/*.xml.gz",
+    "[0-9][0-9][0-9]/crashcar_candidate_events/*.xml",
+    "[0-9][0-9][0-9]/crashcar_candidate_events/*.xml.gz",
+):
+    for path in sorted(run_dir.glob(pattern)):
+        if path not in candidate_xml_files:
+            candidate_xml_files.append(path)
 candidate_manifests = sorted(
     run_dir.glob("[0-9][0-9][0-9]/candidate_events/manifest.csv"))
 candidate_manifests.extend(path for path in sorted(
@@ -1018,7 +1120,7 @@ submit_job() {
         --cpus-per-task="${SLURM_CPUS_PER_TASK}"
         --gres="${SLURM_GRES}"
         --array="0-$((WORKER_COUNT - 1))"
-        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR:-1}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}",CRASHCAR_SINGLE_OUTPUT_MODE="single-only",SINGLE_OUTPUT_MODE="single-only",CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}",SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}"
+        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_SNR_SERIES_OUTPUT_DIR="${CRASHCAR_SNR_SERIES_OUTPUT_DIR_VALUE}",CRASHCAR_SNR_SERIES_WRITE_CSV="${CRASHCAR_SNR_SERIES_WRITE_CSV_VALUE}",CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL="${CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL_VALUE}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR:-1}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",CRASHCAR_SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",SINGLE_FROZEN_BACKGROUND_JSON="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}",CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV="${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}",CRASHCAR_SINGLE_OUTPUT_MODE="all",SINGLE_OUTPUT_MODE="all",CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}",SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}"
         --chdir="${RUN_DIR}"
     )
     if [ -n "${SLURM_PARTITION}" ]; then
@@ -1253,12 +1355,15 @@ PY
     )
 
     if [ "${PATCH_ZEROLAG_SINGLE_FAR_VALUE}" = "1" ] && [ "${final_ledger_rows}" -gt 0 ]; then
+        if [ "${PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE}" = "1" ]; then
+            synthesize_candidate_event_manifest || true
+        fi
         local patch_args=(
             --run-dir "${RUN_DIR}"
             --ledger single_branch/single_final_far_all.csv
             --far-column "${PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE}"
             --summary monitor/patch_zerolag_single_far_summary.json
-            --single-output-mode single-only
+            --single-output-mode all
             --active-ifo-schedule "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}"
             --clear-existing
         )
@@ -1336,16 +1441,18 @@ monitor_job() {
                 write_final_report "${phase}" "${job}" "${sacct_state}" "${raw}" "${detail}"
                 exit 3
             fi
-            if ! archive_snr_series; then
-                write_status phase=failed_postprocess job_id="${job}" reason=snr_series_archive_failed sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
-                write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
-                exit 4
-            fi
             write_status phase=postprocessing_single_ledger job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}"
             if ! run_single_ledger_final_update; then
                 raw=$(run_summary_json)
                 detail=$(detail_summary_json)
                 write_status phase=failed_postprocess job_id="${job}" reason=single_ledger_final_update_failed sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}"
+                write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
+                exit 4
+            fi
+            if ! archive_snr_series; then
+                raw=$(run_summary_json)
+                detail=$(detail_summary_json)
+                write_status phase=failed_postprocess job_id="${job}" reason=snr_series_archive_failed sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
                 write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
                 exit 4
             fi

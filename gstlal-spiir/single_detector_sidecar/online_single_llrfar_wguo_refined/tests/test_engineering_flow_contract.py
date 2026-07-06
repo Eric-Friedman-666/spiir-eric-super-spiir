@@ -192,7 +192,11 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn("filter_injection_chunk", source)
         self.assertIn("BG_INITIAL_MULTI_STATS=${noninj_stats_loc:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}", source)
         self.assertIn('materialize_frozen_multi_stats "${BG_RUN_ROOT}/run" "${INJ_WORKERS}" "${BG_WORKERS}" "${FROZEN_MULTI_DIR}"', source)
-        self.assertIn('require_file "${src}" "frozen_multi_stats_${src_jobno}_${suffix}"', source)
+        self.assertIn("ensure_frozen_multi_stat()", source)
+        self.assertIn('ensure_frozen_multi_stat "${bg_run_dir}" "${src_jobno}" "${suffix}" "${src}"', source)
+        self.assertIn('find "${worker_dir}" -maxdepth 1 -type f -name \'bank*_stats_*.xml.gz\'', source)
+        self.assertIn('run_cohfar_calc_fap "${inputs}" "${output}" "${FROZEN_MULTI_IFOS}"', source)
+        self.assertIn('require_file "${output}" "frozen_multi_stats_${src_jobno}_${suffix}"', source)
         self.assertNotIn("injection_bg_seed_noninj_stats_loc", source)
         self.assertNotIn("FROZEN_MULTI_FALLBACK_DIR", source)
         self.assertNotIn("fallback_src=", source)
@@ -211,7 +215,8 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertNotIn("INJ_BG_UPDATE_HOUR=${injection_BG_update_hour", source)
         self.assertIn("ZEROLAG_UPDATE_HOUR=${zerolag_update_hour:-1}", source)
         self.assertIn("INJ_SNR_LOG_FAR=${injection_SNR_series_logFAR_threshold", source)
-        self.assertIn("crashcar_preserve_table_single_far=1", source)
+        self.assertIn("crashcar_preserve_table_single_far=0", source)
+        self.assertIn("crashcar_finalsink_preserve_table_single_far=1", source)
 
     def test_crashcar_controller_forbids_unfrozen_injection_backgrounds(self) -> None:
         source = (CRASHCAR_SCRIPT_DIR / "crashcar_controller.sh").read_text()
@@ -226,6 +231,11 @@ class EngineeringFlowContractTests(unittest.TestCase):
         self.assertIn('mkdir -p "${ROOT}/bin"', source)
         self.assertIn('cp "${SOURCE_ROOT}/gstlal-spiir/bin/gstlal_inspiral_postcohspiir_online"', source)
         self.assertIn('chmod +x "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"', source)
+        self.assertIn('CRASHCAR_SINGLE_OUTPUT_MODE="all"', source)
+        self.assertIn('SINGLE_OUTPUT_MODE="all"', source)
+        self.assertIn("--single-output-mode all", source)
+        self.assertNotIn('CRASHCAR_SINGLE_OUTPUT_MODE="single-only"', source)
+        self.assertNotIn("--single-output-mode single-only", source)
 
     def test_crashcar_pipeline_marks_injection_stats_as_non_background(self) -> None:
         source = (CRASHCAR_SCRIPT_DIR / "crashcar_pipeline.sh").read_text()

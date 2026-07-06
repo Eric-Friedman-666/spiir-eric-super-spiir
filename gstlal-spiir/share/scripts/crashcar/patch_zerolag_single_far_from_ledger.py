@@ -623,7 +623,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--ledger", default="single_branch/single_final_far_all.csv")
-    parser.add_argument("--far-column", default="direct_far")
+    parser.add_argument("--far-column", default="assigned_far")
     parser.add_argument("--zerolag-glob", action="append",
                         default=["[0-9][0-9][0-9]/*_zerolag_*.xml.gz"])
     parser.add_argument("--summary", default="monitor/patch_zerolag_single_far_summary.json")
@@ -691,13 +691,13 @@ def main() -> int:
             if candidate_manifest.exists():
                 manifest = str(candidate_manifest)
             else:
-                legacy_candidate_manifest = run_dir / "crashcar_candidate_events_manifest.csv"
-                if legacy_candidate_manifest.exists():
-                    manifest = str(legacy_candidate_manifest)
+                legacy_manifest = run_dir / "crashcar_candidate_events_manifest.csv"
+                if legacy_manifest.exists():
+                    manifest = str(legacy_manifest)
                 else:
                     manifest = str(Path(
                         os.environ.get("CRASHCAR_SNR_SERIES_OUTPUT_DIR")
-                        or "crashcar_snr_series") / "manifest.csv")
+                        or "crashcar_candidate_events") / "manifest.csv")
         manifest_path = Path(manifest)
         if not manifest_path.is_absolute():
             manifest_path = run_dir / manifest_path

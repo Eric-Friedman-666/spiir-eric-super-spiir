@@ -12,7 +12,7 @@ import math
 import re
 import os
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Set, Tuple
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -159,49 +159,67 @@ def resolve_manifest_path(snr_dir: Path, raw: str) -> Path:
     return snr_dir / path
 
 
-def xml_has_embedded_template_autocorr(path: Path, row: dict) -> bool:
+def _normalise_event_id(value: object) -> str:
+    event = str(value or "")
+    if ":" in event:
+        event = event.rsplit(":", 1)[-1]
+    return event
+
+
+def _row_autocorr_keys(row: dict) -> Set[Tuple[str, str, str, str]]:
+    event = _normalise_event_id(row.get("event_id", ""))
+    ifo = str(row.get("ifo", ""))
+    bank = str(row.get("bankid", ""))
+    template = str(row.get("tmplt_idx", ""))
+    return {
+        (event, ifo, bank, template),
+        ("", ifo, bank, template),
+    }
+
+
+def load_embedded_template_autocorr_keys(path: Path) -> Set[Tuple[str, str, str, str]]:
     if not path.exists():
-        return False
+        return set()
     try:
         text = read_text_maybe_gzip(path)
     except Exception:
-        return False
+        return set()
     if "template_autocorrelation" not in text:
-        return False
-    target_event = str(row.get("event_id", ""))
-    target_ifo = str(row.get("ifo", ""))
-    target_bank = str(row.get("bankid", ""))
-    target_template = str(row.get("tmplt_idx", ""))
+        return set()
     block_re = re.compile(
         r'<LIGO_LW Name="COMPLEX8TimeSeries">(.*?)</LIGO_LW>',
         flags=re.DOTALL,
     )
     param_re = re.compile(r'<Param Name="([^"]+):param"[^>]*>(.*?)</Param>')
+    keys: Set[Tuple[str, str, str, str]] = set()
     for match in block_re.finditer(text):
         block = match.group(1)
         params = dict(param_re.findall(block))
         if params.get("series_kind") != "template_autocorrelation":
             continue
-        event = params.get("crashcar_event_id") or params.get("event_id") or ""
-        if ":" in event:
-            event = event.rsplit(":", 1)[-1]
-        if (
-            str(event) == target_event
-            and str(params.get("instrument", "")) == target_ifo
-        ):
-            return True
-        if (
-            str(params.get("instrument", "")) == target_ifo
-            and str(params.get("bankid", "")) == target_bank
-            and str(params.get("tmplt_idx", "")) == target_template
-        ):
-            return True
-    return False
+        event = _normalise_event_id(
+            params.get("crashcar_event_id") or params.get("event_id") or ""
+        )
+        ifo = str(params.get("instrument", ""))
+        bank = str(params.get("bankid", ""))
+        template = str(params.get("tmplt_idx", ""))
+        keys.add((event, ifo, bank, template))
+        keys.add(("", ifo, bank, template))
+    return keys
+
+
+def xml_has_embedded_template_autocorr(
+    path: Path, row: dict, cache: Dict[Path, Set[Tuple[str, str, str, str]]]
+) -> bool:
+    if path not in cache:
+        cache[path] = load_embedded_template_autocorr_keys(path)
+    return bool(cache[path].intersection(_row_autocorr_keys(row)))
 
 
 def write_xml_shards(snr_dir: Path, shard_elements: Dict[str, List[str]]) -> None:
     for filename, elements in shard_elements.items():
         path = snr_dir / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w") as output:
             output.write("<?xml version='1.0' encoding='utf-8'?>\n")
             output.write(
@@ -266,6 +284,7 @@ def main() -> int:
     cache: Dict[Tuple[str, int], Tuple[int, int, List[float], List[float]]] = {}
     template_files: Dict[Tuple[str, int, int], str] = {}
     xml_templates: Dict[Tuple[str, str, int, int], str] = {}
+    embedded_xml_cache: Dict[Path, Set[Tuple[str, str, str, str]]] = {}
     xml_shards: Dict[str, List[str]] = {}
     materialized = 0
     xml_materialized = 0
@@ -285,7 +304,7 @@ def main() -> int:
                 or row.get("series_xml")
             )
             if embedded_xml and xml_has_embedded_template_autocorr(
-                resolve_manifest_path(snr_dir, embedded_xml), row
+                resolve_manifest_path(snr_dir, embedded_xml), row, embedded_xml_cache
             ):
                 row["template_autocorrelation_xml_file"] = embedded_xml
                 continue

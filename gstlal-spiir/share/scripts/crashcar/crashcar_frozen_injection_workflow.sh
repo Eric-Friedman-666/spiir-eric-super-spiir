@@ -281,8 +281,10 @@ injection_bg_data_file=${injection_bg_data_file:-${COMMON_DATA_FILE}}
 injection_bg_detector_response_file=${injection_bg_detector_response_file:-${COMMON_DETECTOR_RESPONSE_FILE}}
 injection_bg_segment_xml=${injection_bg_segment_xml:-${COMMON_SEGMENT_XML}}
 injection_bg_start_gps=${injection_bg_start_gps:-${start_gps:-${START_GPS:-}}}
-injection_bg_duration_seconds=${injection_bg_duration_seconds:-${duration_seconds:-${DURATION_SECONDS:-}}}
-injection_bg_duration_hour=${injection_bg_duration_hour:-${duration_hour:-${DURATION_HOUR:-}}}
+if [ -z "${injection_bg_duration_seconds:-}" ] && [ -z "${injection_bg_duration_hour:-}" ]; then
+    injection_bg_duration_seconds=${duration_seconds:-${DURATION_SECONDS:-}}
+    injection_bg_duration_hour=${duration_hour:-${DURATION_HOUR:-}}
+fi
 
 require_var injection_file
 require_var injection_data_file
@@ -311,10 +313,6 @@ INJ_BANKS_PER_WORKER=${injection_bank_per_worker:-${INJECTION_BANK_PER_WORKER:-$
 BG_DURATION_SECONDS=$(duration_seconds_from injection_bg_duration_seconds injection_bg_duration_hour injection_bg_duration)
 INJ_TOTAL_SECONDS=$(duration_seconds_from injection_duration_seconds injection_duration_hour injection_duration)
 REQUESTED_BG_DURATION_SECONDS=${BG_DURATION_SECONDS}
-if [ "${BG_DURATION_SECONDS}" -lt "${INJ_TOTAL_SECONDS}" ]; then
-    log "requested no-injection BG duration ${BG_DURATION_SECONDS}s is shorter than injection duration ${INJ_TOTAL_SECONDS}s; using ${INJ_TOTAL_SECONDS}s for frozen BG"
-    BG_DURATION_SECONDS=${INJ_TOTAL_SECONDS}
-fi
 if [ -n "${injection_chunk_seconds:-${INJECTION_CHUNK_SECONDS:-}}" ]; then
     INJ_CHUNK_SECONDS=${injection_chunk_seconds:-${INJECTION_CHUNK_SECONDS:-}}
 else
@@ -325,9 +323,9 @@ else
         INJ_CHUNK_SECONDS=$((INJ_CHUNK_HOUR * 3600))
     fi
 fi
-# Injection workflows build one frozen no-injection background from the full
-# configured background segment.  There is no rolling BG cadence in this stage:
-# a 24 h injection/background segment yields a single 24 h frozen background.
+# Injection workflows build one frozen no-injection background from the explicit
+# injection_bg_* segment.  The foreground injection duration controls only the
+# chunked injection replay range; it must not silently lengthen the BG segment.
 BG_ACCUM_SECONDS=${BG_DURATION_SECONDS}
 BG_UPDATE_SECONDS=${BG_DURATION_SECONDS}
 
@@ -489,7 +487,8 @@ while [ "${chunk_start}" -lt "${INJ_END}" ]; do
         "final_single_input_kind=crashcarcsv" \
         "patch_zerolag_single_far=1" \
         "patch_zerolag_single_snr_series=1" \
-        "crashcar_preserve_table_single_far=1" \
+        "crashcar_preserve_table_single_far=0" \
+        "crashcar_finalsink_preserve_table_single_far=1" \
         "crashcar_background_required_seconds=0"
 
     write_status phase=injection_chunk_running current_chunk="${chunk_tag}" current_chunk_start="${chunk_start}" current_chunk_end="${chunk_end}" current_chunk_root="${chunk_root}" frozen_single_background_json="${SINGLE_BG_JSON}" frozen_multi_stats_dir="${FROZEN_MULTI_DIR}"
