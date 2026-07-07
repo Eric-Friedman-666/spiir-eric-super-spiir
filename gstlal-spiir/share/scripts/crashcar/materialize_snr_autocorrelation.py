@@ -166,6 +166,34 @@ def _normalise_event_id(value: object) -> str:
     return event
 
 
+def _split_semicolon(value: object) -> List[str]:
+    return [part.strip() for part in str(value or "").split(";") if part.strip()]
+
+
+def _normalise_manifest_ifo(row: dict) -> str:
+    ifo = str(row.get("ifo", "") or "").strip()
+    if ifo:
+        return ifo
+    ifos = str(row.get("ifos", "") or "").replace(",", "").strip()
+    if ifos in {"H1", "L1", "V1"}:
+        return ifos
+    single_ifos = []
+    for reason in _split_semicolon(row.get("reasons", "")):
+        if reason.endswith("_single") or reason.endswith("_single_preselect"):
+            single_ifos.append(reason.split("_", 1)[0])
+    single_ifos = sorted(set(ifo for ifo in single_ifos if ifo))
+    if len(single_ifos) == 1:
+        return single_ifos[0]
+    return ""
+
+
+def _is_single_only_non_hl(row: dict) -> bool:
+    branches = set(_split_semicolon(row.get("branches", "")))
+    if branches != {"single"}:
+        return False
+    return _normalise_manifest_ifo(row) not in {"H1", "L1"}
+
+
 def _row_autocorr_keys(row: dict) -> Set[Tuple[str, str, str, str]]:
     event = _normalise_event_id(row.get("event_id", ""))
     ifo = str(row.get("ifo", ""))
@@ -289,6 +317,8 @@ def main() -> int:
     materialized = 0
     xml_materialized = 0
     errors = 0
+    skipped_non_hl_single_ifos = 0
+    skipped_missing_ifos = 0
 
     for row in rows:
         row["template_autocorrelation_file"] = row.get("template_autocorrelation_file", "")
@@ -296,6 +326,15 @@ def main() -> int:
             "template_autocorrelation_xml_file", ""
         )
         row["template_autocorrelation_error"] = ""
+        row["ifo"] = _normalise_manifest_ifo(row)
+        if _is_single_only_non_hl(row):
+            row["template_autocorrelation_error"] = "skipped_non_hl_single_ifo"
+            skipped_non_hl_single_ifos += 1
+            continue
+        if not row.get("ifo"):
+            row["template_autocorrelation_error"] = "skipped_missing_ifo"
+            skipped_missing_ifos += 1
+            continue
         try:
             embedded_xml = (
                 row.get("template_autocorrelation_xml_file")
@@ -358,6 +397,8 @@ def main() -> int:
                 "errors": errors,
                 "manifest": str(manifest),
                 "rows": len(rows),
+                "skipped_missing_ifos": skipped_missing_ifos,
+                "skipped_non_hl_single_ifos": skipped_non_hl_single_ifos,
                 "template_autocorrelation_csv_enabled": args.write_template_csv,
                 "template_autocorrelation_files": materialized,
                 "template_autocorrelation_unique_templates": len(template_files),

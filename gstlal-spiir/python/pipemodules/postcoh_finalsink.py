@@ -1196,6 +1196,8 @@ class FinalSink(object):
         if far > 0.0 and far <= far_threshold:
             reasons.append("multi")
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
+            if ifo not in ("H1", "L1"):
+                continue
             single_far = float(postcoh_inspiral.far_sngl[ifo_id])
             if single_far > 0.0 and single_far <= far_threshold:
                 reasons.append("%s_single" % ifo)
