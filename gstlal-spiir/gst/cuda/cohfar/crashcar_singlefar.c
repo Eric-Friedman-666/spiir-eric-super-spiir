@@ -1885,11 +1885,15 @@ static gboolean crashcar_env_value_is_disabled(const char *value) {
 static gchar *crashcar_snr_series_output_dir(
     const CrashcarSinglefar *element) {
     const char *configured = g_getenv("CRASHCAR_SNR_SERIES_OUTPUT_DIR");
+    /*
+     * The preferred crashcar retention path is the normal finalsink
+     * candidate/coinc XML stream.  Keep this older per-worker shard writer
+     * opt-in only so it cannot silently create a second manifest or collide
+     * with SPIIR_CANDIDATE_EVENT_DIR.
+     */
+    if (!configured || !configured[0]) return NULL;
     if (crashcar_env_value_is_disabled(configured)) return NULL;
-    if (configured && configured[0]) return g_strdup(configured);
-    const char *candidate_dir = g_getenv("SPIIR_CANDIDATE_EVENT_DIR");
-    if (crashcar_env_value_is_disabled(candidate_dir)) return NULL;
-    return (candidate_dir && candidate_dir[0]) ? g_strdup(candidate_dir) : NULL;
+    return g_strdup(configured);
 }
 
 static gboolean crashcar_snr_series_write_csv_enabled(void) {

@@ -405,7 +405,6 @@ write_env_file "${BG_CONFIG}" \
     "crashcar_single_ledger_final_update=1" \
     "crashcar_build_last_bg_artifacts=1" \
     "single_input_kind=crashcarcsv" \
-    "final_single_input_kind=crashcarcsv" \
     "patch_zerolag_single_far=1" \
     "patch_zerolag_single_snr_series=1"
 
@@ -484,7 +483,6 @@ while [ "${chunk_start}" -lt "${INJ_END}" ]; do
         "crashcar_single_ledger_final_update=1" \
         "crashcar_build_last_bg_artifacts=0" \
         "single_input_kind=crashcarcsv" \
-        "final_single_input_kind=crashcarcsv" \
         "patch_zerolag_single_far=1" \
         "patch_zerolag_single_snr_series=1" \
         "crashcar_preserve_table_single_far=0" \

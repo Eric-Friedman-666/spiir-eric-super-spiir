@@ -16,6 +16,7 @@ import glob
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -28,6 +29,39 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 Key = Tuple[str, str, str, str, str]
 SNRIdentity = Tuple[str, str, str, str]
 IFO_ORDER = ("H1", "L1", "V1", "K1")
+CANDIDATE_MANIFEST_FIELDS = [
+    "archive_seq",
+    "filename",
+    "series_file",
+    "xml_file",
+    "candidate_xml_file",
+    "template_autocorrelation_xml_file",
+    "archive_kind",
+    "candidate_schema",
+    "source_manifest",
+    "retention_kind",
+    "reasons",
+    "branches",
+    "event_id",
+    "ifos",
+    "ifo",
+    "end_time",
+    "end_time_ns",
+    "bankid",
+    "tmplt_idx",
+    "far",
+    "far_sngl_H1",
+    "far_sngl_L1",
+    "end_time_sngl_H1",
+    "end_time_ns_sngl_H1",
+    "snglsnr_H1",
+    "chisq_H1",
+    "end_time_sngl_L1",
+    "end_time_ns_sngl_L1",
+    "snglsnr_L1",
+    "chisq_L1",
+    "code_version",
+]
 
 
 @dataclass(frozen=True)
@@ -301,8 +335,10 @@ def load_ledger(path: Path, far_column: str) -> Tuple[Dict[Key, float], dict]:
                 continue
             key = build_key(
                 row.get("ifo"),
-                row.get("end_time"),
-                row.get("end_time_ns"),
+                row.get(f"end_time_sngl_{_normalize_ifo(row.get('ifo'))}")
+                or row.get("end_time"),
+                row.get(f"end_time_ns_sngl_{_normalize_ifo(row.get('ifo'))}")
+                or row.get("end_time_ns"),
                 row.get("bankid"),
                 row.get("tmplt_idx"),
             )
@@ -342,10 +378,11 @@ def load_snr_manifest(path: Path) -> Tuple[Dict[Key, SNRSeriesRecord], dict]:
             if not xml_file:
                 missing_xml += 1
                 continue
+            ifo = _normalize_ifo(row.get("ifo"))
             key = build_key(
-                row.get("ifo"),
-                row.get("end_time"),
-                row.get("end_time_ns"),
+                ifo,
+                row.get(f"end_time_sngl_{ifo}") or row.get("end_time"),
+                row.get(f"end_time_ns_sngl_{ifo}") or row.get("end_time_ns"),
                 row.get("bankid"),
                 row.get("tmplt_idx"),
             )
@@ -376,6 +413,181 @@ def load_snr_manifest(path: Path) -> Tuple[Dict[Key, SNRSeriesRecord], dict]:
         "snr_series_manifest_missing_xml_rows": missing_xml,
         "snr_series_manifest_xml_shards": len(xml_paths),
     }
+
+
+def _split_manifest_tokens(value: object) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [item.strip() for item in re.split(r"[;,]", text) if item.strip()]
+
+
+def _manifest_path_to_run_relative(path_text: object, run_dir: Path,
+                                   manifest_path: Path) -> str:
+    text = str(path_text or "").strip()
+    if not text:
+        return ""
+    path = Path(text)
+    if not path.is_absolute():
+        path = manifest_path.parent / path
+    try:
+        return str(path.resolve().relative_to(run_dir.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _manifest_detector_key(row: dict, ifo: str) -> Key:
+    return build_key(
+        ifo,
+        row.get(f"end_time_sngl_{ifo}") or row.get("end_time"),
+        row.get(f"end_time_ns_sngl_{ifo}") or row.get("end_time_ns"),
+        row.get("bankid"),
+        row.get("tmplt_idx"),
+    )
+
+
+def _manifest_ifos_for_row(row: dict) -> list[str]:
+    explicit = _normalize_ifo(row.get("ifo"))
+    if explicit:
+        return [explicit]
+
+    reasons = _split_manifest_tokens(row.get("reasons"))
+    out: list[str] = []
+    for ifo in ("H1", "L1", "V1", "K1"):
+        if any(reason.startswith(f"{ifo}_single") for reason in reasons):
+            out.append(ifo)
+    if out:
+        return out
+
+    if "multi" in reasons:
+        ifos = str(row.get("ifos") or "")
+        return [ifo for ifo in IFO_ORDER if ifo in ifos]
+    return []
+
+
+def _manifest_is_multi_row(row: dict) -> bool:
+    return "multi" in _split_manifest_tokens(row.get("reasons"))
+
+
+def _manifest_is_single_row(row: dict, ifo: str) -> bool:
+    return any(
+        reason.startswith(f"{ifo}_single")
+        for reason in _split_manifest_tokens(row.get("reasons")))
+
+
+def _normalise_manifest_row(row: dict, fieldnames: list[str], run_dir: Path,
+                            manifest_path: Path) -> dict:
+    out = {field: "" for field in fieldnames}
+    for field, value in row.items():
+        if field in out:
+            out[field] = value
+    xml_file = (
+        row.get("candidate_xml_file")
+        or row.get("xml_file")
+        or row.get("series_file")
+        or row.get("filename")
+        or ""
+    )
+    rel_xml = _manifest_path_to_run_relative(xml_file, run_dir, manifest_path)
+    for field in ("filename", "series_file", "xml_file", "candidate_xml_file"):
+        out[field] = rel_xml
+    out["archive_kind"] = out.get("archive_kind") or "candidate_event_xml"
+    out["candidate_schema"] = out.get("candidate_schema") or "ligolw_coinc"
+    return out
+
+
+def filter_candidate_manifest(path: Path, run_dir: Path, ledger: Dict[Key, float],
+                              far_threshold: Optional[float]) -> dict:
+    summary = {
+        "candidate_manifest": str(path),
+        "candidate_manifest_exists_before_filter": path.exists(),
+        "candidate_manifest_rows_before_filter": 0,
+        "candidate_manifest_rows_after_filter": 0,
+        "candidate_manifest_multi_rows_kept": 0,
+        "candidate_manifest_single_rows_kept": 0,
+        "candidate_manifest_single_rows_rejected": 0,
+        "candidate_manifest_single_rows_missing_ledger": 0,
+        "candidate_manifest_unique_xml_files": 0,
+        "candidate_manifest_far_threshold": far_threshold,
+    }
+    if not path.exists() or path.stat().st_size <= 0:
+        return summary
+
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        input_fieldnames = list(reader.fieldnames or [])
+        input_rows = list(reader)
+    summary["candidate_manifest_rows_before_filter"] = len(input_rows)
+
+    fieldnames = list(CANDIDATE_MANIFEST_FIELDS)
+    for field in input_fieldnames:
+        if field not in fieldnames:
+            fieldnames.append(field)
+    retained: list[dict] = []
+    seen: set[tuple[str, str, str, str, str, str]] = set()
+
+    def append_retained(row: dict) -> None:
+            dedup_key = (
+                row.get("xml_file", ""),
+                row.get("ifo", ""),
+                row.get("event_id", ""),
+                row.get("bankid", ""),
+                row.get("tmplt_idx", ""),
+                row.get("reasons", ""),
+            )
+            if dedup_key in seen:
+                return
+            seen.add(dedup_key)
+            retained.append(row)
+
+    for input_row in input_rows:
+        base = _normalise_manifest_row(input_row, fieldnames, run_dir, path)
+        if _manifest_is_multi_row(input_row):
+            row = dict(base)
+            row["ifo"] = ""
+            row["reasons"] = "multi"
+            row["branches"] = "multi"
+            summary["candidate_manifest_multi_rows_kept"] += 1
+            append_retained(row)
+
+        for ifo in _manifest_ifos_for_row(input_row):
+            if not _manifest_is_single_row(input_row, ifo):
+                continue
+            row = dict(base)
+            row["ifo"] = ifo
+            key = _manifest_detector_key(input_row, ifo)
+            far = ledger.get(key)
+            if far is None:
+                summary["candidate_manifest_single_rows_missing_ledger"] += 1
+                continue
+            if far_threshold is not None and far > far_threshold:
+                summary["candidate_manifest_single_rows_rejected"] += 1
+                continue
+            row["retention_kind"] = "crashcar_single_far_candidate"
+            row["reasons"] = f"{ifo}_single"
+            row["branches"] = "single"
+            row["far"] = f"{far:.17g}"
+            row[f"far_sngl_{ifo}"] = f"{far:.17g}"
+            append_retained(row)
+            summary["candidate_manifest_single_rows_kept"] += 1
+
+    if retained:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(path.name + ".tmp")
+        with tmp_path.open("w", newline="") as output:
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(retained)
+        os.replace(tmp_path, path)
+    else:
+        path.unlink()
+    summary["candidate_manifest_rows_after_filter"] = len(retained)
+    summary["candidate_manifest_unique_xml_files"] = len({
+        row.get("candidate_xml_file") or row.get("xml_file") or ""
+        for row in retained
+        if row.get("candidate_xml_file") or row.get("xml_file")
+    })
+    return summary
 
 
 def _index_existing_snr_series(xmldoc: object) -> set[SNRIdentity]:
@@ -649,6 +861,15 @@ def parse_args() -> argparse.Namespace:
                         default=os.environ.get("PATCH_ZEROLAG_SINGLE_SNR_SERIES_MANIFEST")
                         or "",
                         help="candidate/coinc XML manifest; relative paths are resolved under --run-dir")
+    parser.add_argument("--candidate-manifest",
+                        default=os.environ.get("PATCH_ZEROLAG_SINGLE_CANDIDATE_MANIFEST")
+                        or "",
+                        help="manifest to filter to final retained candidate/coinc XML rows after single FAR patch")
+    parser.add_argument("--candidate-log10-far-threshold",
+                        default=os.environ.get("CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD")
+                        or os.environ.get("SNR_SERIES_LOG_FAR_THRESHOLD")
+                        or "",
+                        help="keep single preselected candidate/coinc rows with FAR <= 10^threshold")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -663,6 +884,9 @@ def main() -> int:
     summary_path = Path(args.summary)
     if not summary_path.is_absolute():
         summary_path = run_dir / summary_path
+    candidate_manifest_path = Path(args.candidate_manifest) if args.candidate_manifest else None
+    if candidate_manifest_path is not None and not candidate_manifest_path.is_absolute():
+        candidate_manifest_path = run_dir / candidate_manifest_path
 
     if not ledger_path.exists() or ledger_path.stat().st_size <= 0:
         raise SystemExit(f"ledger is missing or empty: {ledger_path}")
@@ -738,6 +962,22 @@ def main() -> int:
         for path in files
     ]
 
+    candidate_manifest_summary: dict = {}
+    if candidate_manifest_path is not None:
+        try:
+            candidate_far_threshold = 10.0 ** float(args.candidate_log10_far_threshold)
+        except (TypeError, ValueError):
+            candidate_far_threshold = None
+        if not args.dry_run:
+            candidate_manifest_summary = filter_candidate_manifest(
+                candidate_manifest_path, run_dir, ledger, candidate_far_threshold)
+        else:
+            candidate_manifest_summary = {
+                "candidate_manifest": str(candidate_manifest_path),
+                "candidate_manifest_dry_run": True,
+                "candidate_manifest_far_threshold": candidate_far_threshold,
+            }
+
     total = {
         "updated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "run_dir": str(run_dir),
@@ -748,6 +988,7 @@ def main() -> int:
         **output_policy.summary(),
         **ledger_summary,
         **snr_summary,
+        **candidate_manifest_summary,
         "postcoh_rows": sum(item["postcoh_rows"] for item in file_summaries),
         "matched_detector_rows": sum(item["matched_detector_rows"] for item in file_summaries),
         "single_output_allowed_detector_rows": sum(item["single_output_allowed_detector_rows"] for item in file_summaries),

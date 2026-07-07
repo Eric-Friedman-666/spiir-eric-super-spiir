@@ -1199,6 +1199,18 @@ class FinalSink(object):
             single_far = float(postcoh_inspiral.far_sngl[ifo_id])
             if single_far > 0.0 and single_far <= far_threshold:
                 reasons.append("%s_single" % ifo)
+        if _env_truthy("CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL", False):
+            for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
+                if ifo not in ("H1", "L1"):
+                    continue
+                try:
+                    snr = float(postcoh_inspiral.snglsnr[ifo_id])
+                    chisq = float(postcoh_inspiral.chisq[ifo_id])
+                except Exception:
+                    continue
+                reason = "%s_single_preselect" % ifo
+                if snr >= 4.0 and chisq > 0.0 and reason not in reasons:
+                    reasons.append(reason)
         return reasons
 
     def __candidate_retention_metadata(self, postcoh_inspiral, reasons, kind):
@@ -1283,10 +1295,17 @@ class FinalSink(object):
             "archive_seq", "filename", "series_file", "xml_file",
             "candidate_xml_file", "template_autocorrelation_xml_file",
             "archive_kind", "candidate_schema",
-            "retention_kind", "reasons", "branches", "event_id", "ifos",
+            "retention_kind", "reasons", "branches", "event_id", "ifos", "ifo",
             "end_time", "end_time_ns", "bankid", "tmplt_idx", "far",
             "far_sngl_H1", "far_sngl_L1", "code_version"
         ]
+        for ifo in ("H1", "L1"):
+            fields.extend([
+                "end_time_sngl_%s" % ifo,
+                "end_time_ns_sngl_%s" % ifo,
+                "snglsnr_%s" % ifo,
+                "chisq_%s" % ifo,
+            ])
         with open(self.candidate_event_manifest, "a", newline="") as fout:
             writer = csv.DictWriter(fout, fieldnames=fields)
             if write_header:
@@ -1308,8 +1327,11 @@ class FinalSink(object):
                 postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx,
                 postcoh_inspiral.event_id))
 
+        retention_kind = "crashcar_threshold_candidate"
+        if all(reason.endswith("_single_preselect") for reason in reasons):
+            retention_kind = "crashcar_single_candidate_preselect"
         metadata = self.__candidate_retention_metadata(
-            postcoh_inspiral, reasons, "crashcar_threshold_candidate")
+            postcoh_inspiral, reasons, retention_kind)
         self.__write_candidate_coinc_xml(
             trigger, filename, psds=None,
             log_label="retained candidate/coinc XML", metadata=metadata)
@@ -1338,6 +1360,16 @@ class FinalSink(object):
             "far_sngl_L1": far_sngl[pipe_macro.get_ifo_id("L1")],
             "code_version": os.environ.get("CRASHCAR_CODE_VERSION", ""),
         }
+        for ifo in ("H1", "L1"):
+            ifo_id = pipe_macro.get_ifo_id(ifo)
+            row.update({
+                "end_time_sngl_%s" % ifo: getattr(
+                    postcoh_inspiral, "end_time_sngl_%s" % ifo, ""),
+                "end_time_ns_sngl_%s" % ifo: getattr(
+                    postcoh_inspiral, "end_time_ns_sngl_%s" % ifo, ""),
+                "snglsnr_%s" % ifo: postcoh_inspiral.snglsnr[ifo_id],
+                "chisq_%s" % ifo: postcoh_inspiral.chisq[ifo_id],
+            })
         self.__append_candidate_event_manifest(row)
 
     def __read_trigger_control(self):

@@ -187,7 +187,7 @@ SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE=${single_frozen_background_run_dir:-${SIN
 SINGLE_FROZEN_BACKGROUND_ID_VALUE=${single_frozen_background_id:-${SINGLE_FROZEN_BACKGROUND_ID:-BG-FROZEN}}
 SINGLE_FROZEN_BACKGROUND_SOURCE_VALUE=${single_frozen_background_source:-${SINGLE_FROZEN_BACKGROUND_SOURCE:-}}
 SINGLE_INPUT_KIND_VALUE=${single_input_kind:-${SINGLE_INPUT_KIND:-crashcarcsv}}
-FINAL_SINGLE_INPUT_KIND_VALUE=${final_single_input_kind:-${FINAL_SINGLE_INPUT_KIND:-crashcarcsv}}
+FINAL_SINGLE_INPUT_KIND_VALUE=${final_single_input_kind:-${FINAL_SINGLE_INPUT_KIND:-singlecsv}}
 PATCH_ZEROLAG_SINGLE_FAR_VALUE=${patch_zerolag_single_far:-${PATCH_ZEROLAG_SINGLE_FAR:-1}}
 PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE=${patch_zerolag_single_far_column:-${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-assigned_far}}
 PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE=${patch_zerolag_single_snr_series:-${PATCH_ZEROLAG_SINGLE_SNR_SERIES:-1}}
@@ -783,13 +783,28 @@ def norm_ifo(value):
     return text
 
 def key_for(row, ifo):
+    ifo = norm_ifo(ifo)
     return (
-        norm_ifo(ifo),
-        norm_int(row.get("end_time")),
-        norm_int(row.get("end_time_ns")),
+        ifo,
+        norm_int(row.get(f"end_time_sngl_{ifo}") or row.get("end_time")),
+        norm_int(row.get(f"end_time_ns_sngl_{ifo}") or row.get("end_time_ns")),
         norm_int(row.get("bankid")),
         norm_int(row.get("tmplt_idx")),
     )
+
+def split_reasons(row):
+    text = str(row.get("reasons") or "").strip()
+    if not text:
+        return []
+    return [item.strip() for item in text.replace(",", ";").split(";")
+            if item.strip()]
+
+def single_ifos_from_reasons(reasons):
+    out = []
+    for ifo in ("H1", "L1", "V1", "K1"):
+        if any(reason.startswith(f"{ifo}_single") for reason in reasons):
+            out.append(ifo)
+    return out
 
 def positive_float(value):
     try:
@@ -839,6 +854,14 @@ fieldnames = [
     "far",
     "far_sngl_H1",
     "far_sngl_L1",
+    "end_time_sngl_H1",
+    "end_time_ns_sngl_H1",
+    "snglsnr_H1",
+    "chisq_H1",
+    "end_time_sngl_L1",
+    "end_time_ns_sngl_L1",
+    "snglsnr_L1",
+    "chisq_L1",
     "code_version",
 ]
 rows = []
@@ -857,11 +880,21 @@ for input_manifest in input_manifests:
                 xml_file = str(xml_path)
             ifos = (row.get("ifos") or "").replace(",", "")
             row_ifo = norm_ifo(row.get("ifo"))
-            if row_ifo:
-                active_ifos = [row_ifo]
-            else:
-                active_ifos = [ifo for ifo in ("H1", "L1", "V1", "K1") if ifo in ifos]
-            for ifo in active_ifos:
+            reasons = split_reasons(row)
+            has_multi = "multi" in reasons
+            single_ifos = single_ifos_from_reasons(reasons)
+            if row_ifo and row_ifo not in single_ifos and not has_multi:
+                single_ifos = [row_ifo]
+            if not reasons and not single_ifos:
+                single_ifos = [
+                    ifo for ifo in ("H1", "L1", "V1", "K1") if ifo in ifos]
+            emit_ifos = []
+            if has_multi:
+                emit_ifos.append("")
+            emit_ifos.extend(ifo for ifo in single_ifos if ifo not in emit_ifos)
+            if not emit_ifos:
+                emit_ifos = [""]
+            for ifo in emit_ifos:
                 out = {field: "" for field in fieldnames}
                 for field in row:
                     if field in out:
@@ -876,6 +909,9 @@ for input_manifest in input_manifests:
                     "ligolw_coinc")
                 out["source_manifest"] = str(input_manifest.relative_to(run_dir))
                 out["ifo"] = ifo
+                if ifo == "" and has_multi:
+                    out["reasons"] = "multi"
+                    out["branches"] = "multi"
                 rows.append(out)
 
 if not rows:
@@ -1019,28 +1055,61 @@ PY
     if [ -f "${RUN_DIR}/crashcar_template_autocorrelation.xml" ]; then
         tar_paths+=(crashcar_template_autocorrelation.xml)
     fi
-    local candidate_dir rel_candidate_dir
-    while IFS= read -r candidate_dir; do
-        rel_candidate_dir="${candidate_dir#${RUN_DIR}/}"
-        tar_paths+=("${rel_candidate_dir}")
-    done < <(find "${RUN_DIR}" -mindepth 2 -maxdepth 2 -type d \( -name candidate_events -o -name crashcar_candidate_events \) | sort)
+    local archive_path_list="${RUN_DIR}/monitor/candidate_archive_paths.txt"
+    RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" ARCHIVE_PATH_LIST="${archive_path_list}" python3 - <<'PY'
+import csv
+import os
+from pathlib import Path
+
+run_dir = Path(os.environ["RUN_DIR"]).resolve()
+manifest = Path(os.environ["CANDIDATE_MANIFEST"])
+output = Path(os.environ["ARCHIVE_PATH_LIST"])
+paths = []
+
+def add_path(value):
+    text = str(value or "").strip()
+    if not text:
+        return
+    path = Path(text)
+    if not path.is_absolute():
+        path = run_dir / path
+    try:
+        rel = path.resolve().relative_to(run_dir)
+    except ValueError:
+        return
+    if (run_dir / rel).exists():
+        rel_text = str(rel)
+        if rel_text not in paths:
+            paths.append(rel_text)
+
+with manifest.open(newline="") as handle:
+    for row in csv.DictReader(handle):
+        for field in (
+            "candidate_xml_file",
+            "xml_file",
+            "series_file",
+            "filename",
+            "template_autocorrelation_xml_file",
+        ):
+            add_path(row.get(field))
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text("\n".join(paths) + ("\n" if paths else ""))
+PY
+    local rel_candidate_file
+    while IFS= read -r rel_candidate_file; do
+        [ -n "${rel_candidate_file}" ] || continue
+        tar_paths+=("${rel_candidate_file}")
+    done < "${archive_path_list}"
     tar -C "${RUN_DIR}" -czf "${archive}" "${tar_paths[@]}"
     RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
 
-run_dir = Path(os.environ["RUN_DIR"])
+run_dir = Path(os.environ["RUN_DIR"]).resolve()
 archive = Path(os.environ["ARCHIVE"])
 candidate_manifest = Path(os.environ["CANDIDATE_MANIFEST"])
-candidate_dirs = sorted(
-    run_dir.glob("[0-9][0-9][0-9]/candidate_events"))
-candidate_dirs.extend(path for path in sorted(
-    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events"))
-    if path not in candidate_dirs)
 files = []
-for directory in candidate_dirs:
-    files.extend(p for p in directory.rglob("*") if p.is_file())
 for path in (
     candidate_manifest,
     run_dir / "candidate_event_manifest_summary.json",
@@ -1049,6 +1118,22 @@ for path in (
 ):
     if path.exists():
         files.append(path)
+referenced_xml_files = []
+def add_manifest_path(value):
+    text = str(value or "").strip()
+    if not text:
+        return
+    path = Path(text)
+    if not path.is_absolute():
+        path = run_dir / path
+    try:
+        rel = path.resolve().relative_to(run_dir)
+    except ValueError:
+        return
+    path = run_dir / rel
+    if path.exists() and path not in referenced_xml_files:
+        referenced_xml_files.append(path)
+
 manifest_rows = 0
 data_series_files = 0
 template_autocorrelation_files = 0
@@ -1064,16 +1149,17 @@ if candidate_manifest.exists():
                 template_autocorrelation_files += 1
             if row.get("template_autocorrelation_xml_file"):
                 template_autocorrelation_xml_files += 1
-candidate_xml_files = []
-for pattern in (
-    "[0-9][0-9][0-9]/candidate_events/*.xml",
-    "[0-9][0-9][0-9]/candidate_events/*.xml.gz",
-    "[0-9][0-9][0-9]/crashcar_candidate_events/*.xml",
-    "[0-9][0-9][0-9]/crashcar_candidate_events/*.xml.gz",
-):
-    for path in sorted(run_dir.glob(pattern)):
-        if path not in candidate_xml_files:
-            candidate_xml_files.append(path)
+            for field in (
+                "candidate_xml_file",
+                "xml_file",
+                "series_file",
+                "filename",
+                "template_autocorrelation_xml_file",
+            ):
+                add_manifest_path(row.get(field))
+for path in referenced_xml_files:
+    if path not in files:
+        files.append(path)
 candidate_manifests = sorted(
     run_dir.glob("[0-9][0-9][0-9]/candidate_events/manifest.csv"))
 candidate_manifests.extend(path for path in sorted(
@@ -1094,7 +1180,7 @@ payload = {
     "file_count_before_compaction": len(files),
     "manifest_rows": manifest_rows,
     "candidate_event_manifest_count": len(candidate_manifests),
-    "candidate_event_xml_files": len(candidate_xml_files),
+    "candidate_event_xml_files": len(referenced_xml_files),
     "removed_small_csv_count": 0,
     "removed_small_csv_sample": [],
     "sample_files": [str(p.relative_to(run_dir)) for p in sorted(files)[:20]],
@@ -1106,6 +1192,7 @@ payload = {
 Path(os.environ["MANIFEST"]).write_text(
     json.dumps(payload, indent=2, sort_keys=True) + "\n")
 PY
+    find "${RUN_DIR}" -mindepth 2 -maxdepth 2 -type d \( -name candidate_events -o -name crashcar_candidate_events \) -exec rm -rf {} + 2>/dev/null || true
     log "archived retained candidate/coinc XML ${archive}"
 }
 
@@ -1332,6 +1419,8 @@ run_single_ledger_final_update() {
             > "${worker_log}" 2>&1 || final_status=$?
     done
 
+    BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
+    FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
     python3 "${CRASH_SCRIPT_DIR}/merge_worker_far_ledgers.py" \
         --run-dir "${RUN_DIR}" \
         --worker-count "${WORKER_COUNT}" \
@@ -1371,6 +1460,8 @@ PY
             patch_args+=(
                 --embed-snr-series
                 --snr-series-manifest "${RUN_DIR}/candidate_events_manifest.csv"
+                --candidate-manifest "${RUN_DIR}/candidate_events_manifest.csv"
+                --candidate-log10-far-threshold "${SNR_SERIES_LOG_FAR_THRESHOLD}"
             )
         fi
         export GST_DEBUG="${GST_DEBUG:-}"

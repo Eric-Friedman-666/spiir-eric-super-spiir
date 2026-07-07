@@ -314,7 +314,7 @@ def print_plot_payload(prefix: str, payload: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run_id", "--run-id", nargs="+", required=True, help="Run id under ROOT/runs, e.g. 20260629_2300. Forms like '--run_id = 20260629_2300' are accepted.")
+    parser.add_argument("--run_id", "--run-id", nargs="+", default=None, help="Run id under ROOT/runs, e.g. 20260629_2300. Forms like '--run_id = 20260629_2300' are accepted.")
     parser.add_argument("--root", type=Path, default=None, help="Eric_bless_SPIIR root; default is this script's directory.")
     parser.add_argument("--run-root", type=Path, default=None, help="Override the resolved timestamped run root.")
     parser.add_argument("--output-dir", type=Path, default=None, help="Output directory; default is RUN_ROOT/artifacts.")
@@ -327,8 +327,10 @@ def main() -> int:
     args, passthrough = parser.parse_known_args()
 
     root = (args.root or Path(__file__).resolve().parent).resolve()
-    run_id = clean_run_id(args.run_id)
-    run_root = (args.run_root.resolve() if args.run_root else latest_run_root(root, run_id))
+    if args.run_id is None and args.run_root is None:
+        parser.error("one of --run_id/--run-id or --run-root is required")
+    run_root = args.run_root.resolve() if args.run_root else latest_run_root(root, clean_run_id(args.run_id))
+    run_id = clean_run_id(args.run_id) if args.run_id is not None else run_root.parent.name
     output_dir = (args.output_dir.resolve() if args.output_dir else run_root / "artifacts")
     impl = root / "gstlal-spiir" / "bin" / "crashcar_plot.py"
     if not impl.exists():
