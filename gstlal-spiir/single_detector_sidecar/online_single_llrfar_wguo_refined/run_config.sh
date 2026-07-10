@@ -143,6 +143,7 @@ fi
 export NONINJ_STATS_LOC=${NONINJ_STATS_LOC:-/fred/oz016/wguo/SSM/runs/O4a/chunk3/part2}
 export DETRSP_MAP=${DETRSP_MAP:-/fred/oz016/wguo/SSM/runs/O4a/chunk4/part1/H1L1_1372837467_detrsp_map.xml}
 export WGUO_BANK_STATS_DIR=${WGUO_BANK_STATS_DIR:-/fred/oz016/wguo/packages/spiir/src/spiir/search/bank_dofs}
+export DOF=${DOF:-120}
 
 export MAX_GROUP=${MAX_GROUP:-15}
 export NODES_AMOUNT=${NODES_AMOUNT:-$((MAX_GROUP + 1))}

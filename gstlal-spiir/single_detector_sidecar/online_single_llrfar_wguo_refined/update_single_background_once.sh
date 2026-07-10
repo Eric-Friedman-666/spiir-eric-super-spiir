@@ -111,7 +111,7 @@ PLOT_SUMMARY="${MONITOR_DIR}/latest_single_plot_summary.json"
 WGUO_BANK_STATS_DIR=${WGUO_BANK_STATS_DIR:-/fred/oz016/wguo/packages/spiir/src/spiir/search/bank_dofs}
 NOISE_BETA=${NOISE_BETA:--1.0}
 RANK_OFFSET=${RANK_OFFSET:-0.0}
-DEFAULT_SHAPE_DOF=${DEFAULT_SHAPE_DOF:-74.30962572260326}
+DOF=${DOF:-120}
 PLOT_LLR_MIN=${PLOT_LLR_MIN:--10}
 TAIL_LOG10_FAR=${TAIL_LOG10_FAR:--2.0}
 FAR_FIT_BOUNDARY=${FAR_FIT_BOUNDARY:-0.01}
@@ -461,12 +461,8 @@ PY
         --background-required-seconds "${BACKGROUND_ACCUMULATION_SECONDS:-10800}"
         --background-update-seconds "${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}"
         --initial-window-policy "${FAR_INITIAL_WINDOW_POLICY:-skip}"
-        --calibrate-noise-dof
-        --snr-bins 4,5,6,8,inf
-        --min-calibration-count 20
         --bank-stats-dir "${WGUO_BANK_STATS_DIR}"
-        --signal-dof "${DEFAULT_SHAPE_DOF}"
-        --noise-dof "${DEFAULT_SHAPE_DOF}"
+        --dof "${DOF}"
         --noise-beta "${NOISE_BETA}"
         --rank-offset "${RANK_OFFSET}"
         --fit-min-points 20
@@ -640,11 +636,8 @@ if [ "${SINGLE_BACKGROUND_MODE}" = "frozen" ]; then
         --background-required-seconds "${BACKGROUND_ACCUMULATION_SECONDS:-10800}"
         --background-update-seconds "${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}"
         --initial-window-policy "${FAR_INITIAL_WINDOW_POLICY:-skip}"
-        --snr-bins 4,5,6,8,inf
-        --min-calibration-count 20
         --bank-stats-dir "${WGUO_BANK_STATS_DIR}"
-        --signal-dof "${DEFAULT_SHAPE_DOF}"
-        --noise-dof "${DEFAULT_SHAPE_DOF}"
+        --dof "${DOF}"
         --noise-beta "${NOISE_BETA}"
         --rank-offset "${RANK_OFFSET}"
         --fit-min-points 20
@@ -925,12 +918,8 @@ python3 "${SCRIPT_DIR:-.}/single_detector_far.py" feature-csv \
     --bootstrap-background-from-foreground \
     --background-livetime "${background_duration}" \
     "${feature_far_segment_args[@]}" \
-    --calibrate-noise-dof \
-    --snr-bins 4,5,6,8,inf \
-    --min-calibration-count 20 \
     --bank-stats-dir "${WGUO_BANK_STATS_DIR}" \
-    --signal-dof "${DEFAULT_SHAPE_DOF}" \
-    --noise-dof "${DEFAULT_SHAPE_DOF}" \
+    --dof "${DOF}" \
     --noise-beta "${NOISE_BETA}" \
     --rank-offset "${RANK_OFFSET}" \
     --background-window-days 7 \
@@ -964,12 +953,8 @@ ledger_args=(
     --background-required-seconds "${BACKGROUND_ACCUMULATION_SECONDS:-10800}"
     --background-update-seconds "${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}"
     --initial-window-policy "${FAR_INITIAL_WINDOW_POLICY:-skip}"
-    --calibrate-noise-dof
-    --snr-bins 4,5,6,8,inf
-    --min-calibration-count 20
     --bank-stats-dir "${WGUO_BANK_STATS_DIR}"
-    --signal-dof "${DEFAULT_SHAPE_DOF}"
-    --noise-dof "${DEFAULT_SHAPE_DOF}"
+    --dof "${DOF}"
     --noise-beta "${NOISE_BETA}"
     --rank-offset "${RANK_OFFSET}"
     --fit-min-points 20
