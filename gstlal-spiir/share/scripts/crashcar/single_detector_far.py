@@ -42,6 +42,10 @@ FLAG_BACKGROUND = 1
 FLAG_EMPTY = 2
 
 LOG_ZERO = -1.0e300
+DEFAULT_EFFECTIVE_DOF = 120.0
+WGUO_BETA_MIN = 0.003
+WGUO_BETA_MAX = 0.03
+WGUO_BETA_GRID_SIZE = 10
 
 FAR_SOURCE_FIT_LOOKUP = "fit_lookup"
 FAR_SOURCE_BOOTSTRAP_DIRECT = "bootstrap_direct"
@@ -109,10 +113,11 @@ def add_single_analysis_arguments(single):
         "--snr-bins", default="",
         help="comma-separated SNR bin edges for nu_eff calibration, e.g. 4,6,8,12,inf")
     single.add_argument("--min-calibration-count", type=int, default=50)
-    single.add_argument("--noise-dof", type=float, default=2.0)
+    single.add_argument("--dof", type=float, default=DEFAULT_EFFECTIVE_DOF)
+    single.add_argument("--noise-dof", type=float, default=None)
     single.add_argument("--signal-dof", type=float, default=None)
-    single.add_argument("--beta-max", type=float, default=0.03)
-    single.add_argument("--beta-grid-size", type=int, default=31)
+    single.add_argument("--beta-max", type=float, default=WGUO_BETA_MAX)
+    single.add_argument("--beta-grid-size", type=int, default=WGUO_BETA_GRID_SIZE)
     single.add_argument("--default-autocorr-power", type=float, default=1.0)
     single.add_argument(
         "--noise-beta", type=float, default=-1.0,
@@ -189,10 +194,11 @@ def add_feature_csv_arguments(parser):
         "--snr-bins", default="",
         help="comma-separated SNR bin edges for nu_eff calibration, e.g. 4,6,8,12,inf")
     parser.add_argument("--min-calibration-count", type=int, default=50)
-    parser.add_argument("--noise-dof", type=float, default=2.0)
+    parser.add_argument("--dof", type=float, default=DEFAULT_EFFECTIVE_DOF)
+    parser.add_argument("--noise-dof", type=float, default=None)
     parser.add_argument("--signal-dof", type=float, default=None)
-    parser.add_argument("--beta-max", type=float, default=0.03)
-    parser.add_argument("--beta-grid-size", type=int, default=31)
+    parser.add_argument("--beta-max", type=float, default=WGUO_BETA_MAX)
+    parser.add_argument("--beta-grid-size", type=int, default=WGUO_BETA_GRID_SIZE)
     parser.add_argument("--default-autocorr-power", type=float, default=1.0)
     parser.add_argument(
         "--noise-beta", type=float, default=-1.0,
@@ -1146,10 +1152,10 @@ def load_wguo_bank_stats_map(directory, ifos=None):
                 entry = {}
                 if tmplt_idx < len(magnitudes) and is_finite_positive(
                         magnitudes[tmplt_idx]):
-                    # Wguo stores sqrt(sum_delta |C(delta)|^2).  The
-                    # noncentrality calculation needs sum_delta |C(delta)|^2.
+                    # WGuo's Gaussian model uses A_eff directly, where the
+                    # pickle magnitude is sqrt(sum_delta |C(delta)|^2).
                     magnitude = float(magnitudes[tmplt_idx])
-                    entry["autocorr_power"] = magnitude * magnitude
+                    entry["autocorr_power"] = magnitude
                 if tmplt_idx < len(dofs) and is_finite_positive(
                         dofs[tmplt_idx]):
                     entry["dof"] = float(dofs[tmplt_idx])
@@ -1418,9 +1424,10 @@ class SingleDetectorBranch(object):
     def llr_feature(self, feature, autocorr_power=None):
         if autocorr_power is None:
             autocorr_power = feature.autocorr_power
+        feature.dof = self.likelihood_model.dof
         return self.likelihood_model.rank(feature.rho, feature.chisq,
                                           autocorr_power, ifo=feature.ifo,
-                                          dof=feature.dof)
+                                          dof=self.likelihood_model.dof)
 
     def add_livetime(self, seconds, ifos=None, gps=None):
         for ifo in tuple(ifos or self.ifos):
@@ -1585,9 +1592,9 @@ class SingleDetectorBranch(object):
 
 def make_default_likelihood_model():
     return SingleDetectorLikelihoodModel(
-        signal_dof=2.0,
-        noise_dof=2.0,
-        beta_grid=uniform_beta_grid(0.03, 31),
+        signal_dof=DEFAULT_EFFECTIVE_DOF,
+        noise_dof=DEFAULT_EFFECTIVE_DOF,
+        beta_grid=uniform_beta_grid(WGUO_BETA_MAX, WGUO_BETA_GRID_SIZE),
         beta_weights=None,
         default_autocorr_power=1.0,
         snr_log_weight=0.5,
@@ -1596,12 +1603,14 @@ def make_default_likelihood_model():
 
 
 def make_likelihood_model_from_args(args):
-    signal_dof = args.signal_dof
-    if signal_dof is None:
-        signal_dof = args.noise_dof
+    fixed_dof = getattr(args, "dof", None)
+    if fixed_dof is None:
+        fixed_dof = args.signal_dof or args.noise_dof or DEFAULT_EFFECTIVE_DOF
+    if not is_finite_positive(fixed_dof):
+        raise ValueError("dof must be finite and positive")
     return SingleDetectorLikelihoodModel(
-        signal_dof=signal_dof,
-        noise_dof=args.noise_dof,
+        signal_dof=fixed_dof,
+        noise_dof=fixed_dof,
         beta_grid=uniform_beta_grid(args.beta_max, args.beta_grid_size),
         beta_weights=None,
         default_autocorr_power=args.default_autocorr_power,
@@ -1614,9 +1623,10 @@ def uniform_beta_grid(beta_max, grid_size):
     beta_max = float(beta_max)
     grid_size = max(1, int(grid_size))
     if grid_size == 1:
-        return [0.5 * beta_max]
-    step = beta_max / float(grid_size - 1)
-    return [i * step for i in range(grid_size)]
+        return [beta_max]
+    beta_min = beta_max / float(grid_size)
+    step = (beta_max - beta_min) / float(grid_size - 1)
+    return [beta_min + i * step for i in range(grid_size)]
 
 
 def parse_snr_bins(text):
@@ -1784,7 +1794,7 @@ class SingleFarLlrBackgroundFile(object):
 
 
 class SingleDetectorLikelihoodModel(object):
-    """Likelihood model used to map (rho_m, chisq) to a scalar rank.
+    """WGuo Gaussian likelihood model for detector-local ranking.
 
     The notation follows single_detector_notes.tex:
 
@@ -1794,11 +1804,10 @@ class SingleDetectorLikelihoodModel(object):
             - ln P(chi_r^2 | rho_m, H0)
             + 0.5 rho_m^2 + const.
 
-    The H1 term is a beta-mixture of noncentral chi-square distributions with
-    lambda = beta^2 rho_m^2 sum_delta |C_{j,m}(Delta)|^2.
-    The refined H0 term follows Wguo's convention and is also noncentral,
-    with a fixed high-mismatch noise beta.  Large chi-square therefore receives
-    a much stronger penalty in the likelihood ratio.
+    x = nu_eff * chi_r^2 is approximated as Gaussian under both hypotheses.
+    The H0 noncentrality is rho_m^2 A_eff and the H1 term marginalizes
+    beta^2 rho_m^2 A_eff over beta=0.003,...,0.03.  The supplied A_eff is
+    sqrt(sum_delta |C_{j,m}(Delta)|^2) and is not squared again.
     """
 
     def __init__(self,
@@ -1813,6 +1822,13 @@ class SingleDetectorLikelihoodModel(object):
                  ncx2_max_terms=200):
         self.signal_dof = float(signal_dof)
         self.noise_dof = float(noise_dof)
+        if (not is_finite_positive(self.signal_dof) or
+                not is_finite_positive(self.noise_dof)):
+            raise ValueError("dof must be finite and positive")
+        if abs(self.signal_dof - self.noise_dof) > (
+                1.0e-12 * max(1.0, self.signal_dof, self.noise_dof)):
+            raise ValueError("Gaussian single-detector LLR requires one fixed dof")
+        self.dof = self.signal_dof
         self.beta_grid = list(beta_grid or [0.0])
         if beta_weights is None:
             self.beta_weights = [1.0] * len(self.beta_grid)
@@ -1837,6 +1853,8 @@ class SingleDetectorLikelihoodModel(object):
 
     def to_dict(self):
         return {
+            "likelihood_model": "wguo_gaussian_v1",
+            "dof": self.dof,
             "signal_dof": self.signal_dof,
             "noise_dof": self.noise_dof,
             "beta_grid": self.beta_grid,
@@ -1854,10 +1872,14 @@ class SingleDetectorLikelihoodModel(object):
 
     @classmethod
     def from_dict(cls, data):
+        fixed_dof = data.get(
+            "dof", data.get("signal_dof", data.get(
+                "noise_dof", DEFAULT_EFFECTIVE_DOF)))
         model = cls(
-            signal_dof=data.get("signal_dof", 2.0),
-            noise_dof=data.get("noise_dof", 2.0),
-            beta_grid=data.get("beta_grid") or uniform_beta_grid(0.03, 31),
+            signal_dof=fixed_dof,
+            noise_dof=fixed_dof,
+            beta_grid=data.get("beta_grid") or uniform_beta_grid(
+                WGUO_BETA_MAX, WGUO_BETA_GRID_SIZE),
             beta_weights=data.get("beta_weights"),
             default_autocorr_power=data.get("default_autocorr_power", 1.0),
             snr_log_weight=data.get("snr_log_weight", 0.5),
@@ -1877,16 +1899,10 @@ class SingleDetectorLikelihoodModel(object):
         self.signal_dof_calibration = calibration or {}
 
     def noise_dof_for(self, rho, ifo=None, dof=None):
-        if is_finite_positive(dof):
-            return float(dof)
-        return self._dof_for(rho, ifo, self.noise_dof_calibration,
-                             self.noise_dof)
+        return self.noise_dof
 
     def signal_dof_for(self, rho, ifo=None, dof=None):
-        if is_finite_positive(dof):
-            return float(dof)
-        return self._dof_for(rho, ifo, self.signal_dof_calibration,
-                             self.signal_dof)
+        return self.signal_dof
 
     def _dof_for(self, rho, ifo, calibration, default):
         candidates = []
@@ -1905,35 +1921,36 @@ class SingleDetectorLikelihoodModel(object):
                 return float(entry.get("dof", default))
         return float(default)
 
-    def noncentrality(self, rho, beta, autocorr_power=None):
-        power = self.default_autocorr_power
+    def base_noncentrality(self, rho, autocorr_power=None):
+        scale = self.default_autocorr_power
         if autocorr_power is not None:
-            power = float(autocorr_power)
-        return float(beta) * float(beta) * float(rho) * float(rho) * power
+            scale = float(autocorr_power)
+        return float(rho) * float(rho) * scale
 
     def log_signal_shape_pdf(self, rho, chisq, autocorr_power=None, ifo=None,
                              dof=None):
         dof = self.signal_dof_for(rho, ifo, dof=dof)
         x = dof * float(chisq)
+        lambda0 = self.base_noncentrality(rho, autocorr_power)
         terms = []
         for beta, weight in zip(self.beta_grid, self.beta_weights):
             if weight <= 0.0:
                 continue
-            lam = self.noncentrality(rho, beta, autocorr_power)
-            terms.append(math.log(weight) + noncentral_chisq_logpdf(
-                x, dof, lam, max_terms=self.ncx2_max_terms))
-        return math.log(dof) + logsumexp(terms)
+            lambda1 = float(beta) * float(beta) * lambda0
+            mean1 = dof + lambda1
+            variance1 = 2.0 * (dof + 2.0 * lambda1)
+            terms.append(math.log(weight) + normal_logpdf(
+                x, mean1, variance1))
+        return logsumexp(terms)
 
     def log_noise_shape_pdf(self, rho, chisq, autocorr_power=None, ifo=None,
                             dof=None):
-        # Wguo's method uses a noncentral chi-square H0 shape model.  The
-        # noncentrality is intentionally large compared with the H1 beta-grid,
-        # which penalizes triggers whose local chi-square shape is too glitchy.
         dof = self.noise_dof_for(rho, ifo, dof=dof)
         x = dof * float(chisq)
-        lam = self.noncentrality(rho, self.noise_beta, autocorr_power)
-        return math.log(dof) + noncentral_chisq_logpdf(
-            x, dof, lam, max_terms=self.ncx2_max_terms)
+        lambda0 = self.base_noncentrality(rho, autocorr_power)
+        mean0 = dof + lambda0
+        variance0 = 2.0 * (dof + 2.0 * lambda0)
+        return normal_logpdf(x, mean0, variance0)
 
     def log_likelihood_ratio(self, rho, chisq, autocorr_power=None, ifo=None,
                              dof=None):
@@ -1972,6 +1989,13 @@ def calibration_from_json(calibration):
             copied["rho_max"] = json_load_float(copied.get("rho_max"))
             output[ifo].append(copied)
     return output
+
+
+def normal_logpdf(x, mean, variance):
+    variance = max(float(variance), 1.0e-300)
+    delta = float(x) - float(mean)
+    return -0.5 * (math.log(2.0 * math.pi * variance)
+                   + delta * delta / variance)
 
 
 def central_chisq_logpdf(x, dof):

@@ -47,7 +47,7 @@
 #define GST_CAT_DEFAULT crashcar_singlefar_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-#define CRASHCAR_CODE_VERSION "single_stream_support_v29_retained_calculated_far"
+#define CRASHCAR_CODE_VERSION "single_stream_support_v30_wguo_gaussian_fixed_dof"
 #define CRASHCAR_CLUSTER_WINDOW_SECONDS 1.0
 
 /* Multiple crashcar elements can live in one worker process and append to the
@@ -380,10 +380,9 @@ static double crashcar_assignment_window_end(const CrashcarSinglefar *element,
 }
 
 #define CRASHCAR_LOG_ZERO (-1.0e300)
-#define CRASHCAR_NCX2_MAX_TERMS 200
-#define CRASHCAR_NCX2_REL_TOL 1.0e-12
+#define CRASHCAR_BETA_MIN 0.003
 #define CRASHCAR_BETA_MAX 0.03
-#define CRASHCAR_BETA_GRID_SIZE 31
+#define CRASHCAR_BETA_GRID_SIZE 10
 #define CRASHCAR_FIT_MIN_POINTS 20
 #define CRASHCAR_FIT_BOUNDARY_FAR 1.0e-2
 #define CRASHCAR_FIT_PRETAIL_FAR 1.0e-1
@@ -401,6 +400,7 @@ enum property {
     PROP_0,
     PROP_IFOS,
     PROP_ENABLED,
+    PROP_DOF,
     PROP_DETAIL_OUTPUT_FNAME,
     PROP_TEMPLATE_SHAPE_MAP_FNAME,
     PROP_LOG10_FAR_THRESHOLD,
@@ -431,14 +431,6 @@ static double crashcar_logaddexp(double a, double b) {
     }
     return a + log1p(exp(b - a));
 }
-
-static double crashcar_central_chisq_logpdf(double x, double dof) {
-    if (x <= 0.0 || dof <= 0.0) return CRASHCAR_LOG_ZERO;
-    double half_dof = 0.5 * dof;
-    return ((half_dof - 1.0) * log(x) - 0.5 * x -
-            half_dof * log(2.0) - lgamma(half_dof));
-}
-
 
 static gchar *crashcar_template_shape_key(int ifo_id,
                                           int bankid,
@@ -544,11 +536,17 @@ static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
             shape->autocorr_power = autocorr_power;
             shape->has_autocorr_power = TRUE;
         }
-        if (dof > 0.0 && isfinite(dof)) {
-            shape->dof = dof;
-            shape->has_dof = TRUE;
+        if (dof > 0.0 && isfinite(dof) &&
+            fabs(dof - element->dof) > 1.0e-9 * MAX(1.0, element->dof)) {
+            g_free(shape);
+            fclose(input);
+            GST_ERROR_OBJECT(element,
+                             "template map dof %.17g does not match configured "
+                             "fixed dof %.17g",
+                             dof, element->dof);
+            g_error("crashcar template map dof does not match configured dof");
         }
-        if (!shape->has_autocorr_power && !shape->has_dof) {
+        if (!shape->has_autocorr_power) {
             g_free(shape);
             continue;
         }
@@ -577,7 +575,7 @@ static void crashcar_lookup_template_shape(const CrashcarSinglefar *element_cons
                                            double *dof) {
     CrashcarSinglefar *element = (CrashcarSinglefar *)element_const;
     *autocorr_power = 1.0;
-    *dof = 2.0;
+    *dof = element->dof;
     if (!element->template_shape_map_loaded) {
         crashcar_load_template_shape_map(element);
     }
@@ -589,114 +587,48 @@ static void crashcar_lookup_template_shape(const CrashcarSinglefar *element_cons
     g_free(key);
     if (!shape) return;
     if (shape->has_autocorr_power) *autocorr_power = shape->autocorr_power;
-    if (shape->has_dof) *dof = shape->dof;
 }
 
-static int crashcar_noncentral_chisq_term_mode_guess(double x,
-                                                     double dof,
-                                                     double noncentrality) {
-    double lam = noncentrality;
-    if (x <= 0.0 || dof <= 0.0 || lam <= 0.0) return 0;
-    double b = 2.0 * (dof + 2.0);
-    double c = 2.0 * dof - lam * x;
-    double disc = b * b - 16.0 * c;
-    if (disc <= 0.0) return 0;
-    int mode = (int)((-b + sqrt(disc)) / 8.0);
-    return mode > 0 ? mode : 0;
-}
-
-static double crashcar_poisson_logpmf(int n, double mean) {
-    if (n < 0) return CRASHCAR_LOG_ZERO;
-    if (mean <= 0.0) return n == 0 ? 0.0 : CRASHCAR_LOG_ZERO;
-    return -mean + (double)n * log(mean) - lgamma((double)n + 1.0);
-}
-
-static double crashcar_noncentral_chisq_logpdf(double x,
-                                              double dof,
-                                              double noncentrality) {
-    double lam = noncentrality;
-    if (lam <= 0.0) return crashcar_central_chisq_logpdf(x, dof);
-
-    double half_lam = 0.5 * lam;
-    int mode = crashcar_noncentral_chisq_term_mode_guess(x, dof, lam);
-    double mode_term =
-      crashcar_poisson_logpmf(mode, half_lam) +
-      crashcar_central_chisq_logpdf(x, dof + 2.0 * mode);
-
-    while (mode > 0) {
-        double previous =
-          crashcar_poisson_logpmf(mode - 1, half_lam) +
-          crashcar_central_chisq_logpdf(x, dof + 2.0 * (mode - 1));
-        if (previous <= mode_term) break;
-        mode -= 1;
-        mode_term = previous;
-    }
-    while (TRUE) {
-        double next = crashcar_poisson_logpmf(mode + 1, half_lam) +
-                      crashcar_central_chisq_logpdf(x, dof + 2.0 * (mode + 1));
-        if (next <= mode_term) break;
-        mode += 1;
-        mode_term = next;
-    }
-
-    double cutoff = mode_term + log(CRASHCAR_NCX2_REL_TOL);
-    int side_limit = MAX(CRASHCAR_NCX2_MAX_TERMS,
-                         (int)(12.0 * sqrt(MAX(1.0, half_lam))) + 50);
-    double total = mode_term;
-
-    int steps = 0;
-    for (int n = mode - 1; n >= 0 && steps < side_limit; --n, ++steps) {
-        double term = crashcar_poisson_logpmf(n, half_lam) +
-                      crashcar_central_chisq_logpdf(x, dof + 2.0 * n);
-        if (term < cutoff) break;
-        total = crashcar_logaddexp(total, term);
-    }
-
-    steps = 0;
-    for (int n = mode + 1; steps < side_limit; ++n, ++steps) {
-        double term = crashcar_poisson_logpmf(n, half_lam) +
-                      crashcar_central_chisq_logpdf(x, dof + 2.0 * n);
-        if (term < cutoff) break;
-        total = crashcar_logaddexp(total, term);
-    }
-
-    return total;
-}
-
-static double crashcar_noncentrality(double rho,
-                                     double beta,
-                                     double autocorr_power) {
-    return beta * beta * rho * rho * autocorr_power;
+static double crashcar_normal_logpdf(double x, double mean, double variance) {
+    variance = MAX(variance, 1.0e-300);
+    double delta = x - mean;
+    return -0.5 * (log(2.0 * G_PI * variance) +
+                   delta * delta / variance);
 }
 
 static double crashcar_log_signal_shape_pdf(double rho,
                                             double chisq,
-                                            double autocorr_power,
+                                            double autocorr_scale,
                                             double dof) {
     double x = dof * chisq;
+    double lambda0 = rho * rho * autocorr_scale;
     double weight_log = -log((double)CRASHCAR_BETA_GRID_SIZE);
     double total = CRASHCAR_LOG_ZERO;
     for (int i = 0; i < CRASHCAR_BETA_GRID_SIZE; ++i) {
         double beta = CRASHCAR_BETA_GRID_SIZE == 1
-                        ? 0.5 * CRASHCAR_BETA_MAX
-                        : CRASHCAR_BETA_MAX * (double)i /
-                            (double)(CRASHCAR_BETA_GRID_SIZE - 1);
-        double lam = crashcar_noncentrality(rho, beta, autocorr_power);
-        double term = weight_log +
-                      crashcar_noncentral_chisq_logpdf(x, dof, lam);
+                        ? CRASHCAR_BETA_MIN
+                        : CRASHCAR_BETA_MIN +
+                            (CRASHCAR_BETA_MAX - CRASHCAR_BETA_MIN) *
+                            (double)i / (double)(CRASHCAR_BETA_GRID_SIZE - 1);
+        double lambda1 = beta * beta * lambda0;
+        double mean1 = dof + lambda1;
+        double variance1 = 2.0 * (dof + 2.0 * lambda1);
+        double term = weight_log + crashcar_normal_logpdf(
+          x, mean1, variance1);
         total = crashcar_logaddexp(total, term);
     }
-    return log(dof) + total;
+    return total;
 }
 
 static double crashcar_log_noise_shape_pdf(double rho,
                                            double chisq,
-                                           double autocorr_power,
+                                           double autocorr_scale,
                                            double dof) {
     double x = dof * chisq;
-    double noise_beta = -1.0;
-    double lam = crashcar_noncentrality(rho, noise_beta, autocorr_power);
-    return log(dof) + crashcar_noncentral_chisq_logpdf(x, dof, lam);
+    double lambda0 = rho * rho * autocorr_scale;
+    double mean0 = dof + lambda0;
+    double variance0 = 2.0 * (dof + 2.0 * lambda0);
+    return crashcar_normal_logpdf(x, mean0, variance0);
 }
 
 static double crashcar_single_detector_llr(double rho,
@@ -2483,6 +2415,9 @@ static void crashcar_singlefar_set_property(GObject *object,
     case PROP_ENABLED:
         element->enabled = g_value_get_boolean(value);
         break;
+    case PROP_DOF:
+        element->dof = g_value_get_double(value);
+        break;
     case PROP_DETAIL_OUTPUT_FNAME:
         g_free(element->detail_output_fname);
         element->detail_output_fname = g_value_dup_string(value);
@@ -2527,6 +2462,9 @@ static void crashcar_singlefar_get_property(GObject *object,
         break;
     case PROP_ENABLED:
         g_value_set_boolean(value, element->enabled);
+        break;
+    case PROP_DOF:
+        g_value_set_double(value, element->dof);
         break;
     case PROP_DETAIL_OUTPUT_FNAME:
         g_value_set_string(value, element->detail_output_fname);
@@ -2625,6 +2563,13 @@ static void crashcar_singlefar_class_init(CrashcarSinglefarClass *klass) {
                            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
+      gobject_class, PROP_DOF,
+      g_param_spec_double("dof", "effective degrees of freedom",
+                          "fixed nu_eff used by the Gaussian single-detector LLR",
+                          1.0e-12, G_MAXDOUBLE, 120.0,
+                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
       gobject_class, PROP_DETAIL_OUTPUT_FNAME,
       g_param_spec_string("detail-output-fname", "detail output filename",
                           "CSV file for significant crashcar trigger details",
@@ -2634,7 +2579,8 @@ static void crashcar_singlefar_class_init(CrashcarSinglefarClass *klass) {
       gobject_class, PROP_TEMPLATE_SHAPE_MAP_FNAME,
       g_param_spec_string("template-shape-map-fname",
                           "template shape map filename",
-                          "CSV with ifo_id,bankid,tmplt_idx,autocorr_power,dof",
+                          "CSV with ifo_id,bankid,tmplt_idx,A_eff,dof; the legacy "
+                          "autocorr_power column stores A_eff directly",
                           NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
@@ -2692,6 +2638,7 @@ static void crashcar_singlefar_init(CrashcarSinglefar *element) {
     element->nifo = strlen(element->ifos) / IFO_LEN;
     element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);
     element->enabled = FALSE;
+    element->dof = 120.0;
     element->log10_far_threshold = -4.0;
     element->snr_series_log10_far_threshold =
       crashcar_env_double("CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD", -4.0);

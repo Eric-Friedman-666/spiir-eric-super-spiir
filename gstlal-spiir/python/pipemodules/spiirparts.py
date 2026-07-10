@@ -832,6 +832,7 @@ def mkPostcohSPIIROnline(pipeline,
                 postcoh,
                 ifos=ifos,
                 enabled=True,
+                dof=float(os.environ.get("CRASHCAR_DOF", "120.0")),
                 detail_output_fname=crashcar_detail_output_fname,
                 template_shape_map_fname=(
                     os.environ.get("CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME") or None

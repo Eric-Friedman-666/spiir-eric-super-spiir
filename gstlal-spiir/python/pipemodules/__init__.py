@@ -247,6 +247,7 @@ def mkcrashcar_singlefar(
     src,
     ifos="H1L1",
     enabled=True,
+    dof=120.0,
     detail_output_fname=None,
     template_shape_map_fname=None,
     log10_far_threshold=-4.0,
@@ -257,6 +258,7 @@ def mkcrashcar_singlefar(
     properties = {
         "ifos": ifos,
         "enabled": enabled,
+        "dof": dof,
         "log10_far_threshold": log10_far_threshold,
         "min_snr": min_snr,
         "far_floor_count": far_floor_count,

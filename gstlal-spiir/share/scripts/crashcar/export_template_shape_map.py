@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export WGuo per-template magnitude/dof stats for crashcar C lookup."""
+"""Export WGuo A_eff and the run-level fixed dof for crashcar C lookup."""
 
 from __future__ import print_function
 
@@ -37,7 +37,7 @@ def finite_positive(value):
     return math.isfinite(value) and value > 0.0
 
 
-def iter_rows(bank_stats_dir, ifos, start_bank, end_bank):
+def iter_rows(bank_stats_dir, ifos, start_bank, end_bank, dof):
     for ifo in ifos:
         ifo = ifo.strip()
         if not ifo:
@@ -54,21 +54,19 @@ def iter_rows(bank_stats_dir, ifos, start_bank, end_bank):
             if bankid < start_bank or bankid > end_bank:
                 continue
             magnitudes = column_values(bank, "magnitudes")
-            dofs = column_values(bank, "dofs")
-            ntemplate = max(len(magnitudes), len(dofs))
+            ntemplate = len(magnitudes)
             for tmplt_idx in range(ntemplate):
                 magnitude = magnitudes[tmplt_idx] if tmplt_idx < len(magnitudes) else None
-                dof = dofs[tmplt_idx] if tmplt_idx < len(dofs) else None
-                if not finite_positive(magnitude) and not finite_positive(dof):
+                if not finite_positive(magnitude):
                     continue
-                power = float(magnitude) * float(magnitude) if finite_positive(magnitude) else ""
-                dof_value = float(dof) if finite_positive(dof) else ""
                 yield {
                     "ifo_id": ifo_id,
                     "bankid": bankid,
                     "tmplt_idx": tmplt_idx,
-                    "autocorr_power": power,
-                    "dof": dof_value,
+                    # Keep the legacy column name for downstream CSV
+                    # compatibility; its value is A_eff and is not squared.
+                    "autocorr_power": float(magnitude),
+                    "dof": float(dof),
                     "ifo": ifo,
                 }
 
@@ -80,7 +78,11 @@ def main():
     parser.add_argument("--ifos", default="H1,L1")
     parser.add_argument("--start-bank", type=int, default=0)
     parser.add_argument("--end-bank", type=int, default=95)
+    parser.add_argument("--dof", type=float, required=True)
     args = parser.parse_args()
+
+    if not finite_positive(args.dof):
+        raise SystemExit("--dof must be finite and positive")
 
     ifos = [ifo.strip() for ifo in args.ifos.split(",") if ifo.strip()]
     outdir = os.path.dirname(os.path.abspath(args.output))
@@ -93,7 +95,9 @@ def main():
             "ifo_id", "bankid", "tmplt_idx", "autocorr_power", "dof", "ifo"
         ])
         writer.writeheader()
-        for row in iter_rows(args.bank_stats_dir, ifos, args.start_bank, args.end_bank):
+        for row in iter_rows(
+                args.bank_stats_dir, ifos, args.start_bank, args.end_bank,
+                args.dof):
             writer.writerow(row)
             count += 1
     os.replace(tmp, args.output)

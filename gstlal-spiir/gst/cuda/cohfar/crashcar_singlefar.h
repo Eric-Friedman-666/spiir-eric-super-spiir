@@ -53,9 +53,7 @@ typedef struct {
 
 typedef struct {
     double autocorr_power;
-    double dof;
     gboolean has_autocorr_power;
-    gboolean has_dof;
 } CrashcarTemplateShape;
 
 typedef struct {
@@ -76,6 +74,7 @@ typedef struct {
     ifo_set_type enabled_ifos;
 
     gboolean enabled;
+    double dof;
     double log10_far_threshold;
     double snr_series_log10_far_threshold;
     double min_snr;
