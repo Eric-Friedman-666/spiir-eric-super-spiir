@@ -4,29 +4,30 @@
 The plotting contract follows Eric-bless-crashcar.pdf Section 4.1:
 
 * Figure 1 panels (b)-(d) read every run-local FinalSink zerolag XML in the selected glob and aggregate the full history of triggers that have assigned FAR.
-* Figure 1 panel (a) reconstructs the selected worker's native single-detector
-  BG support from the run-local raw single-trigger stream and the crashcar
-  template shape map. The older crashcar C detail/direct-FAR rows are only used
-  as a fallback/debug data source and to infer the current per-IFO BG window.
-* Figure 2 reads the run-level or worker-local candidate_events manifest and the
-  retained candidate/coinc XML files. Legacy crashcar_candidate_events/
-  crashcar_snr_series manifests are still accepted for old runs. Missing
-  retained inputs are reported and left blank; no replacement curve is
-  synthesized.
+* Figure 1 panel (a) reads the selected worker's authoritative
+  single_background.json. Crashcar C detail rows are available only as an
+  explicit non-authoritative diagnostic source.
+* Figure 2 discovers normal CoincsDoc candidate XML directly below run/ and
+  joins each standard COMPLEX8 event_id through SnglInspiral/CoincMap. Missing,
+  duplicate, or inexact identities fail closed; no second event stream or
+  replacement curve is synthesized.
 """
 
 from __future__ import annotations
 
 import argparse
-import bisect
 import csv
 import gzip
+import hashlib
+import importlib.util
 import io
 import json
 import math
+import os
 import re
-import sys
+import stat
 import textwrap
+import xml.etree.ElementTree as ET
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,47 +45,84 @@ FAR_BIN_LABELS = ["< -5", "[-5,-4)", "[-4,-3)", "[-3,-2)", "[-2,-1)", "[-1,0)", 
 FAR_BIN_COLORS = ["#08306b", "#2166ac", "#4393c3", "#92c5de", "#fee08b", "#f46d43", "#a50026"]
 IFO_COLORS = {"H1": "#1f77b4", "L1": "#ff7f0e", "V1": "#2ca02c", "K1": "#9467bd"}
 CHISQ_VIEW = (0.5, 1.5)
-LLR_XMIN = -20.0
+LLR_XMIN = -10.0
 SNR_XMIN = 4.0
 FAR_POINT_SIZE = 16.0
 TAIL_POINT_SIZE = 26.0
 FIT_CURVE_MAX_POINTS = 700
 TAIL_FIT_COLOR = "#2ca02c"
-TAIL_BOUNDARY_LOG10_FAR = -2.5
 DEFAULT_SEGMENT_GLOB = "run/[0-9][0-9][0-9]/H1L1V1_SEGMENTS_*.xml.gz"
-DEFAULT_RAW_TRIGGER_GLOB = "run/[0-9][0-9][0-9]/*_single_triggers.csv"
-DEFAULT_TEMPLATE_SHAPE_MAP = "artifacts/crashcar_template_shape_map.csv"
-DEFAULT_SINGLE_FAR_BASES = ("far_2h_sngl", "far_1d_sngl", "far_1w_sngl")
+DEFAULT_SINGLE_FAR_BASES = ("far_sngl",)
 DEFAULT_COHERENT_FAR_BASES = ("far_1w", "far_1d", "far_2h", "far")
 ZEROLAG_NAME_RE = re.compile(r"_zerolag_(\d+)_(\d+)\.xml(?:\.gz)?$")
+COINCS_NAME_RE = re.compile(r"^(?P<ifos>[A-Za-z0-9]+)_(?P<end_time>\d+)_(?P<end_time_ns>\d{9})_(?P<bankid>\d+)_(?P<tmplt_idx>\d+)_(?P<event_id>\d+)\.xml(?:\.gz)?$")
 
 
-_SIDECAR_IMPORT_ERROR = None
-try:
-    _script_path = Path(__file__).resolve()
-    _sidecar_candidates = [
-        _script_path.parent.parent / "single_detector_sidecar" / "online_single_llrfar_wguo_refined",
-        _script_path.parent.parent.parent / "gstlal-spiir" / "single_detector_sidecar" / "online_single_llrfar_wguo_refined",
-    ]
-    for _candidate in _sidecar_candidates:
-        if (_candidate / "single_detector_far.py").exists():
-            sys.path.insert(0, str(_candidate))
-            break
-    from single_detector_far import (  # type: ignore
-        FLAG_FOREGROUND,
-        SingleDetectorFeature,
-        feature_gps_seconds,
-        features_from_feature_csv_row,
-        make_default_likelihood_model,
+def _load_crashcar_plot_support():
+    """Load the one crashcar-owned plot API at its invariant relative path."""
+    script_path = Path(__file__).resolve()
+    support_path = (
+        script_path.parent.parent
+        / "share"
+        / "scripts"
+        / "crashcar"
+        / "crashcar_plot_support.py"
     )
-except Exception as exc:  # pragma: no cover - recorded in plot metadata.
-    _SIDECAR_IMPORT_ERROR = repr(exc)
-    FLAG_FOREGROUND = 0
-    SingleDetectorFeature = None
-    feature_gps_seconds = None
-    features_from_feature_csv_row = None
-    make_default_likelihood_model = None
+    numeric_path = support_path.with_name("crashcar_numeric.py")
+    if not support_path.is_file() or not numeric_path.is_file():
+        raise ImportError(
+            "crashcar plot support unavailable; expected exact files "
+            f"{support_path} and {numeric_path}"
+        )
+    module_name = "_crashcar_plot_support_" + hashlib.sha256(
+        str(support_path).encode("utf-8")
+    ).hexdigest()[:16]
+    spec = importlib.util.spec_from_file_location(module_name, support_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot create import spec for crashcar plot support: {support_path}")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise ImportError(f"failed to load crashcar plot support {support_path}: {exc}") from exc
+    required_symbols = (
+        "FLAG_FOREGROUND",
+        "feature_gps_seconds",
+        "features_from_feature_csv_row",
+        "rank_feature",
+        "crashcar_numeric",
+    )
+    missing = [symbol for symbol in required_symbols if not hasattr(module, symbol)]
+    if missing:
+        raise ImportError(
+            f"crashcar plot support {support_path} is missing required symbols: {missing}"
+        )
+    loaded_support = Path(module.__file__).resolve()
+    loaded_numeric = Path(module._CRASHCAR_NUMERIC_PATH).resolve()
+    if loaded_support != support_path or loaded_numeric != numeric_path:
+        raise ImportError(
+            "crashcar plot support provenance mismatch: "
+            f"support={loaded_support}, numeric={loaded_numeric}"
+        )
+    return module, support_path, numeric_path
 
+
+(
+    _CRASHCAR_PLOT_SUPPORT,
+    _CRASHCAR_PLOT_SUPPORT_PATH,
+    _CRASHCAR_NUMERIC_PATH,
+) = _load_crashcar_plot_support()
+FLAG_FOREGROUND = _CRASHCAR_PLOT_SUPPORT.FLAG_FOREGROUND
+feature_gps_seconds = _CRASHCAR_PLOT_SUPPORT.feature_gps_seconds
+features_from_feature_csv_row = _CRASHCAR_PLOT_SUPPORT.features_from_feature_csv_row
+rank_feature = _CRASHCAR_PLOT_SUPPORT.rank_feature
+CRASHCAR_NUMERIC = _CRASHCAR_PLOT_SUPPORT.crashcar_numeric
+TAIL_BOUNDARY_LOG10_FAR = math.log10(CRASHCAR_NUMERIC.TAIL_FAR)
+if not math.isclose(TAIL_BOUNDARY_LOG10_FAR, -2.0, rel_tol=0.0, abs_tol=1.0e-12):
+    raise ImportError(
+        "crashcar numeric contract requires TAIL_FAR=1e-2 "
+        f"but loaded {CRASHCAR_NUMERIC.TAIL_FAR!r} from {_CRASHCAR_NUMERIC_PATH}"
+    )
 
 def as_float(value, default=float("nan")) -> float:
     try:
@@ -102,11 +140,10 @@ def finite_positive(value) -> float | None:
     return None
 
 
-def finite_int_or_none(value) -> int | None:
-    number = as_float(value)
-    if math.isfinite(number):
-        return int(number)
-    return None
+def canonical_nonnegative_decimal_int(value, label: str) -> int:
+    if type(value) is not str or re.fullmatch(r"(?:0|[1-9][0-9]*)", value) is None:
+        raise ValueError(f"{label} must be a canonical nonnegative decimal integer")
+    return int(value)
 
 
 def log10_positive(value) -> float | None:
@@ -122,19 +159,6 @@ def first_positive_field(row: dict, keys: Iterable[str]) -> tuple[float | None, 
         if number is not None:
             return number, key
     return None, None
-
-
-def min_positive_field(row: dict, keys: Iterable[str]) -> tuple[float | None, str | None]:
-    best: tuple[float, str] | None = None
-    for key in keys:
-        number = finite_positive(row.get(key))
-        if number is None:
-            continue
-        if best is None or number < best[0]:
-            best = (number, key)
-    if best is None:
-        return None, None
-    return best
 
 
 def row_contains_ifo(row: dict, ifo: str) -> bool:
@@ -158,39 +182,16 @@ def parse_ifo_id_map(value: str) -> dict[str, str]:
 
 
 def parse_postcoh_rows(path: Path) -> Iterable[dict[str, str]]:
-    columns: list[str] = []
-    in_stream = False
-    with gzip.open(path, "rt", errors="replace") as handle:
-        for line in handle:
-            match = re.search(r'<Column Name="([^"]+)"', line)
-            if match:
-                columns.append(match.group(1))
-                continue
-            if '<Stream Name="postcoh:table"' in line:
-                in_stream = True
-                continue
-            if not in_stream:
-                continue
-            if "</Stream>" in line:
-                break
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                values = next(csv.reader([stripped]))
-            except Exception:
-                continue
-            if len(values) == len(columns) + 1 and values[-1] == "":
-                values = values[:-1]
-            if len(values) == len(columns):
-                yield dict(zip(columns, values))
+    # CoincsDoc appends Postcoh after normal process/Sngl/Coinc tables, so the
+    # column registry must be scoped to the Postcoh table itself.
+    yield from parse_ligolw_table_rows(path, "postcoh:table")
 
 
 def parse_ligolw_table_rows(path: Path, table_name: str) -> Iterable[dict[str, str]]:
     columns: list[str] = []
     in_table = False
     in_stream = False
-    with gzip.open(path, "rt", errors="replace") as handle:
+    with open_text_maybe_gzip(path) as handle:
         for line in handle:
             if not in_table:
                 if f'<Table Name="{table_name}"' in line:
@@ -443,7 +444,14 @@ def load_panel_a_detail(
     worker_pattern = re.compile(rf"worker{re.escape(worker_id)}(?:\.csv)?$")
     candidates = sorted(path for path in run_root.glob(detail_glob) if worker_pattern.search(path.name))
     if not candidates:
-        return {"exists": False, "files": [], "points": [], "counts": {}, "reason": f"no file matching worker{worker_id}"}
+        return {
+            "exists": False,
+            "source_kind": "detail_calculated_far_diagnostic",
+            "files": [],
+            "points": [],
+            "counts": {},
+            "reason": f"no file matching worker{worker_id}",
+        }
 
     points: list[dict] = []
     counts_all: Counter[str] = Counter()
@@ -458,7 +466,9 @@ def load_panel_a_detail(
                 ifo_id = str(row.get("ifo_id", ""))
                 ifo = row.get("ifo") or ifo_id_map.get(ifo_id, f"IFO{ifo_id}")
                 counts_all[ifo] += 1
-                direct_far = finite_positive(row.get("direct_far"))
+                calculated_valid = (
+                    str(row.get("far_calculated_valid", "")).strip() == "1")
+                direct_far = finite_positive(row.get("far_calculated_exact")) if calculated_valid else None
                 window_count = finite_positive(row.get("window_count"))
                 total_window_count = finite_positive(row.get("total_window_count"))
                 bg_start = finite_positive(row.get("bg_start"))
@@ -510,6 +520,7 @@ def load_panel_a_detail(
 
     return {
         "exists": True,
+        "source_kind": "detail_calculated_far_diagnostic",
         "worker": worker_id,
         "files": [str(path) for path in candidates],
         "rows_seen": rows_seen,
@@ -539,297 +550,373 @@ def load_panel_a_detail(
     }
 
 
-def normalized_index_strings(value, width: int | None = None) -> list[str]:
-    if value in (None, ""):
-        return []
-    output: list[str] = []
-    text = str(value).strip()
-    if text:
-        output.append(text)
+def _schema4_exact_int(value, label: str, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    if type(value) is not int:
+        raise ValueError(f"{label} must be an exact integer")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{label} is below its minimum")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{label} exceeds its maximum")
+    return value
+
+
+def _schema4_ns(value, label: str, *, duration: bool = False) -> int:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a seconds/nanoseconds object")
+    require_exact_keys(value, ("seconds", "nanoseconds"), label)
+    seconds = _schema4_exact_int(value["seconds"], f"{label}.seconds")
+    nanoseconds = _schema4_exact_int(
+        value["nanoseconds"], f"{label}.nanoseconds",
+        minimum=0, maximum=999_999_999,
+    )
+    total = seconds * 1_000_000_000 + nanoseconds
+    if total < -(1 << 63) or total > (1 << 63) - 1:
+        raise ValueError(f"{label} exceeds signed int64 nanoseconds")
+    if duration and total < 0:
+        raise ValueError(f"{label} must be nonnegative")
+    return total
+
+
+def _schema4_binary64(value, label: str) -> float:
+    if type(value) is not str or re.fullmatch(
+        r"-?0x[01]\.[0-9a-f]{13}p[+-](?:0|[1-9][0-9]*)", value
+    ) is None:
+        raise ValueError(f"{label} must be a canonical binary64 hex string")
     try:
-        integer = int(float(text))
-    except Exception:
-        return output
-    output.append(str(integer))
-    if width:
-        output.append(str(integer).zfill(width))
-    deduped: list[str] = []
-    for item in output:
-        if item not in deduped:
-            deduped.append(item)
-    return deduped
+        number = float.fromhex(value)
+    except ValueError as exc:
+        raise ValueError(f"{label} is not a binary64 value") from exc
+    if not math.isfinite(number) or (number == 0.0 and value.startswith("-")):
+        raise ValueError(f"{label} must be finite and cannot be negative zero")
+    if number.hex() != value:
+        raise ValueError(f"{label} is not the unique canonical binary64 spelling")
+    return number
 
 
-def load_crashcar_template_shape_map(path: Path) -> dict:
-    """Load crashcar's exported template shape CSV, preserving power and dof."""
-    mapping: dict[str, dict[str, float]] = {}
-    if not path.exists():
-        return mapping
-    with path.open(newline="") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            power = finite_positive(row.get("autocorr_power"))
-            dof = finite_positive(row.get("dof"))
-            if power is None and dof is None:
-                continue
-            entry: dict[str, float] = {}
-            if power is not None:
-                entry["autocorr_power"] = power
-            if dof is not None:
-                entry["dof"] = dof
-            ifo_values = [row.get("ifo"), row.get("ifo_id")]
-            bank_values = normalized_index_strings(row.get("bankid"), width=4)
-            tmplt_values = normalized_index_strings(row.get("tmplt_idx"))
-            for ifo in ifo_values:
-                if ifo in (None, ""):
-                    continue
-                for bankid in bank_values:
-                    for tmplt_idx in tmplt_values:
-                        mapping[f"{ifo}:{bankid}:{tmplt_idx}"] = dict(entry)
-    return mapping
+def read_strict_schema4_background(
+    path: Path,
+    *,
+    expected_sha256: str | None = None,
+) -> tuple[dict, str]:
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError as exc:
+        raise ValueError(f"authoritative background JSON is missing: {path}") from exc
+    except OSError as exc:
+        raise ValueError(
+            f"cannot open authoritative background JSON with O_NOFOLLOW: {path}: {exc}"
+        ) from exc
+
+    close_error = None
+    try:
+        before = os.fstat(fd)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_IMODE(before.st_mode) != 0o444
+            or before.st_size <= 0
+            or before.st_size > 256 * 1024 * 1024
+        ):
+            raise ValueError(
+                "authoritative schema4 background must be a bounded "
+                "mode-0444 regular file"
+            )
+        remaining = before.st_size
+        chunks = []
+        while remaining:
+            block = os.read(fd, min(1024 * 1024, remaining))
+            if not block:
+                raise ValueError("authoritative schema4 background read was incomplete")
+            chunks.append(block)
+            remaining -= len(block)
+        after = os.fstat(fd)
+    finally:
+        try:
+            os.close(fd)
+        except OSError as exc:
+            close_error = exc
+    if close_error is not None:
+        raise ValueError(
+            f"authoritative schema4 background close failed: {close_error}"
+        ) from close_error
+    if (
+        before.st_dev != after.st_dev
+        or before.st_ino != after.st_ino
+        or before.st_size != after.st_size
+        or before.st_mode != after.st_mode
+    ):
+        raise ValueError("authoritative schema4 background changed during single-fd read")
+
+    raw = b"".join(chunks)
+    digest = hashlib.sha256(raw).hexdigest()
+    if expected_sha256 is not None:
+        if (
+            re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None
+            or digest != expected_sha256
+        ):
+            raise ValueError("authoritative schema4 background SHA256 mismatch")
+    if (
+        not raw.endswith(b"\n")
+        or b"\n" in raw[:-1]
+        or b"\r" in raw
+        or b"\x00" in raw
+    ):
+        raise ValueError(
+            "authoritative schema4 background must be one UTF-8 JSON line "
+            "with exactly one terminal LF"
+        )
+    try:
+        text = raw[:-1].decode("utf-8")
+        doc = json.loads(text, object_pairs_hook=strict_json_object)
+    except Exception as exc:
+        raise ValueError(
+            f"malformed authoritative schema4 background JSON: {path}: {exc}"
+        ) from exc
+    if not isinstance(doc, dict):
+        raise ValueError("authoritative schema4 background root is not an object")
+    return doc, digest
 
 
-def support_windows_from_detail(panel_a_detail: dict, background_accumulation_seconds: float) -> dict[str, dict]:
-    """Infer current per-IFO BG windows from detail rows without using them as points."""
-    windows: dict[str, dict] = {}
-    latest_by_ifo: dict[str, tuple[int, int]] = {}
-    for row in panel_a_detail.get("ready_windows", []):
-        ifo = row.get("ifo")
-        if ifo not in ("H1", "L1"):
-            continue
-        bg_start = int(row.get("bg_start", 0))
-        bg_end = int(row.get("bg_end", 0))
-        if bg_end <= bg_start:
-            continue
-        key = (bg_end, bg_start)
-        if key > latest_by_ifo.get(ifo, (-1, -1)):
-            latest_by_ifo[ifo] = key
-    for ifo, (bg_end, bg_start) in latest_by_ifo.items():
-        windows[ifo] = {
-            "start": float(bg_start),
-            "end": float(bg_end),
-            "duration": float(bg_end - bg_start),
-            "row_count": 0,
-            "distinct_window_count": 1,
-            "multiple_windows": False,
-            "source": "detail_window_metadata",
-        }
-    if windows:
-        return windows
-    return {
-        ifo: {
-            "start": float("nan"),
-            "end": float("nan"),
-            "duration": float(background_accumulation_seconds),
-            "row_count": 0,
-            "distinct_window_count": 0,
-            "multiple_windows": False,
-            "source": "unavailable",
-        }
-        for ifo in ("H1", "L1")
-    }
-
-
-def select_worker_raw_trigger_files(run_root: Path, raw_glob: str, panel_a_worker: str) -> list[Path]:
-    worker_id = normalize_worker_id(panel_a_worker)
-    files = []
-    for path in sorted(run_root.glob(raw_glob)):
-        if path.parent.name == worker_id or path.name.startswith(f"{worker_id}_"):
-            files.append(path)
-    return files
-
-
-def raw_support_features(
-    raw_files: list[Path],
-    shape_map: dict,
-    min_snr: float = SNR_XMIN,
-) -> tuple[list, dict]:
-    if features_from_feature_csv_row is None:
-        return [], {"sidecar_import_error": _SIDECAR_IMPORT_ERROR}
-    features = []
-    rows_seen = 0
-    for path in raw_files:
-        with path.open(newline="") as handle:
-            reader = csv.DictReader(handle)
-            for row_index, row in enumerate(reader, 1):
-                rows_seen += 1
-                row["_source_file"] = str(path)
-                row["_source_index"] = row_index
-                for feature in features_from_feature_csv_row(row, ("H1", "L1"), min_snr, shape_map, source_row_index=row_index):
-                    if int(float(feature.is_background if feature.is_background not in (None, "") else FLAG_FOREGROUND)) != FLAG_FOREGROUND:
-                        continue
-                    features.append(feature)
-    features.sort(key=lambda feature: (
-        feature_gps_seconds(feature) if feature_gps_seconds is not None and feature_gps_seconds(feature) is not None else -float("inf"),
-        feature.ifo,
-        str(feature.bankid),
-        str(feature.tmplt_idx),
-    ))
-    return features, {"rows_seen": rows_seen, "features_seen": len(features)}
-
-
-def build_panel_a_raw_background(
-    run_root: Path,
-    raw_glob: str,
-    panel_a_worker: str,
-    panel_a_detail: dict,
-    segment_glob: str,
-    background_accumulation_seconds: float,
-    max_points: int,
-    shape_map_path: Path,
+def validate_schema4_background_document(
+    doc: dict,
+    *,
+    expected_worker: str | int,
+    expected_worker_count: int,
+    expected_worker_bank_ids: Iterable[int],
+    expected_window_seconds: float,
 ) -> dict:
-    if make_default_likelihood_model is None or feature_gps_seconds is None:
-        return {
-            "exists": False,
-            "source_kind": "raw_background_support",
-            "files": [],
-            "points": [],
-            "counts_ready": {},
-            "counts_ready_selected": {},
-            "reason": f"sidecar helper import failed: {_SIDECAR_IMPORT_ERROR}",
-        }
+    provenance_keys = (
+        "run_namespace_sha256",
+        "source_manifest_sha256",
+        "runtime_manifest_sha256",
+        "config_sha256",
+        "segment_xml_sha256",
+        "segment_canonical_sha256",
+        "template_shape_map_sha256",
+    )
+    require_exact_keys(
+        doc,
+        (
+            "schema_version", "background_kind", *provenance_keys,
+            "worker_id", "worker_count", "worker_bank_ids",
+            "accepted_version", "epoch_gps", "window_start_gps",
+            "window_end_gps", "window_duration", "update_period",
+            "far_floor_count", "tail_log10_far", "backgrounds",
+        ),
+        "schema4 background",
+    )
+    schema_version = _schema4_exact_int(doc["schema_version"], "schema_version")
+    if schema_version != 4 or doc["background_kind"] != "no_injection":
+        raise ValueError("authoritative background schema/kind mismatch")
+    for key in provenance_keys:
+        if type(doc[key]) is not str or re.fullmatch(r"[0-9a-f]{64}", doc[key]) is None:
+            raise ValueError(f"authoritative background provenance is invalid: {key}")
 
-    worker_id = normalize_worker_id(panel_a_worker)
-    raw_files = select_worker_raw_trigger_files(run_root, raw_glob, worker_id)
-    if not raw_files:
-        return {
-            "exists": False,
-            "source_kind": "raw_background_support",
-            "worker": worker_id,
-            "files": [],
-            "points": [],
-            "counts_ready": {},
-            "counts_ready_selected": {},
-            "reason": f"no raw trigger file matching worker{worker_id}",
-        }
+    worker_id = _schema4_exact_int(doc["worker_id"], "worker_id", minimum=0)
+    worker_count = _schema4_exact_int(doc["worker_count"], "worker_count", minimum=1)
+    expected_worker_text = normalize_worker_id(str(expected_worker))
+    if not expected_worker_text.isdigit() or worker_id != int(expected_worker_text):
+        raise ValueError("authoritative background worker mismatch")
+    if worker_id >= worker_count:
+        raise ValueError("authoritative background worker is outside worker_count")
+    bank_ids = doc["worker_bank_ids"]
+    if (
+        not isinstance(bank_ids, list)
+        or not bank_ids
+        or any(type(bank) is not int or bank < 0 for bank in bank_ids)
+        or bank_ids != sorted(set(bank_ids))
+    ):
+        raise ValueError("authoritative background worker_bank_ids are noncanonical")
+    expected_bank_ids = list(expected_worker_bank_ids)
+    if (
+        type(expected_worker_count) is not int
+        or expected_worker_count < 1
+        or worker_count != expected_worker_count
+        or bank_ids != expected_bank_ids
+    ):
+        raise ValueError("authoritative background worker geometry/roster mismatch")
+    accepted_version = _schema4_exact_int(
+        doc["accepted_version"], "accepted_version", minimum=1, maximum=(1 << 63) - 1
+    )
 
-    shape_map = load_crashcar_template_shape_map(shape_map_path)
-    windows = support_windows_from_detail(panel_a_detail, background_accumulation_seconds)
-    window_panel = {
-        "points": [
-            {
-                "ifo": ifo,
-                "bg_start": int(info["start"]),
-                "bg_end": int(info["end"]),
-            }
-            for ifo, info in windows.items()
-            if math.isfinite(as_float(info.get("start"))) and math.isfinite(as_float(info.get("end")))
-        ]
-    }
-    online_summary = load_panel_a_online_summary(run_root, segment_glob, window_panel)
-    model = make_default_likelihood_model()
-    features, raw_summary = raw_support_features(raw_files, shape_map, SNR_XMIN)
+    epoch_ns = _schema4_ns(doc["epoch_gps"], "epoch_gps")
+    window_start_ns = _schema4_ns(doc["window_start_gps"], "window_start_gps")
+    window_end_ns = _schema4_ns(doc["window_end_gps"], "window_end_gps")
+    window_duration_ns = _schema4_ns(
+        doc["window_duration"], "window_duration", duration=True
+    )
+    update_period_ns = _schema4_ns(
+        doc["update_period"], "update_period", duration=True
+    )
+    if (
+        window_duration_ns <= 0
+        or update_period_ns <= 0
+        or window_start_ns >= window_end_ns
+        or window_end_ns - window_start_ns != window_duration_ns
+        or epoch_ns != window_end_ns
+    ):
+        raise ValueError("authoritative background window/epoch/update is invalid")
+    expected_window = float(expected_window_seconds)
+    if (
+        not math.isfinite(expected_window)
+        or expected_window <= 0.0
+        or expected_window != window_duration_ns / 1_000_000_000.0
+    ):
+        raise ValueError("authoritative background window differs from plot configuration")
+    far_floor_count = _schema4_exact_int(
+        doc["far_floor_count"], "far_floor_count"
+    )
+    tail_log10_far = _schema4_exact_int(
+        doc["tail_log10_far"], "tail_log10_far"
+    )
+    if far_floor_count != 1 or tail_log10_far != -2:
+        raise ValueError("authoritative background FAR floor/tail boundary mismatch")
 
-    by_ifo: dict[str, list[tuple[float, object, float]]] = {"H1": [], "L1": []}
-    for feature in features:
-        if feature.ifo not in by_ifo:
-            continue
-        gps = feature_gps_seconds(feature)
-        if gps is None or not math.isfinite(gps):
-            continue
-        window = windows.get(feature.ifo)
-        if not window:
-            continue
-        start = as_float(window.get("start"))
-        end = as_float(window.get("end"))
-        if not (math.isfinite(start) and math.isfinite(end) and start <= gps < end):
-            continue
-        llr = model.rank(feature.rho, feature.chisq, feature.autocorr_power, ifo=feature.ifo, dof=feature.dof)
-        if math.isfinite(llr):
-            by_ifo[feature.ifo].append((llr, feature, gps))
+    backgrounds = doc["backgrounds"]
+    if not isinstance(backgrounds, dict):
+        raise ValueError("authoritative backgrounds must be an H1/L1 object")
+    require_exact_keys(backgrounds, ("H1", "L1"), "schema4 backgrounds")
 
-    points: list[dict] = []
-    counts_ready: dict[str, int] = {}
-    min_far_by_ifo: dict[str, float] = {}
-    floor_far_by_ifo: dict[str, float] = {}
-    for ifo, entries in by_ifo.items():
-        entries.sort(key=lambda item: item[0])
-        ranks = [entry[0] for entry in entries]
-        counts_ready[ifo] = len(entries)
-        livetime = as_float(online_summary.get("by_ifo", {}).get(ifo, {}).get("online_seconds"))
-        window = windows.get(ifo, {})
-        if livetime > 0:
-            floor_far_by_ifo[ifo] = 1.0 / livetime
-        for llr, feature, gps in entries:
-            count_ge = len(ranks) - bisect.bisect_left(ranks, llr)
-            direct_far = max(float(count_ge), 1.0) / livetime if livetime > 0.0 else float("inf")
-            if not finite_positive(direct_far):
+    parsed_backgrounds: dict[str, dict] = {}
+    total_support = 0
+    for ifo in ("H1", "L1"):
+        payload = backgrounds[ifo]
+        if not isinstance(payload, dict):
+            raise ValueError(f"{ifo} authoritative background is not an object")
+        require_exact_keys(
+            payload,
+            ("livetime", "support_count", "tail_fit", "far_llr_points"),
+            f"{ifo} authoritative background",
+        )
+        livetime_ns = _schema4_ns(
+            payload["livetime"], f"{ifo}.livetime", duration=True
+        )
+        support_count = _schema4_exact_int(
+            payload["support_count"], f"{ifo}.support_count",
+            minimum=1, maximum=1_000_000,
+        )
+        points_raw = payload["far_llr_points"]
+        if not isinstance(points_raw, list) or len(points_raw) != support_count:
+            raise ValueError(f"{ifo} support_count/far_llr_points length mismatch")
+        if (
+            livetime_ns <= 0
+            or livetime_ns > window_duration_ns
+            or livetime_ns >= (1 << 53)
+            or livetime_ns * 5 <= window_duration_ns
+        ):
+            raise ValueError(f"{ifo} detector occupancy/livetime is invalid")
+
+        tail_fit = payload["tail_fit"]
+        if not isinstance(tail_fit, dict):
+            raise ValueError(f"{ifo}.tail_fit is not an object")
+        require_exact_keys(
+            tail_fit,
+            ("method", "r_tail", "slope", "fit_unique_rank_count"),
+            f"{ifo}.tail_fit",
+        )
+        if tail_fit["method"] != "anchored_ols_all_unique_ranks_ge_r_tail":
+            raise ValueError(f"{ifo} tail method mismatch")
+        stored_r_tail = _schema4_binary64(tail_fit["r_tail"], f"{ifo}.r_tail")
+        stored_slope = _schema4_binary64(tail_fit["slope"], f"{ifo}.slope")
+        fit_count = _schema4_exact_int(
+            tail_fit["fit_unique_rank_count"], f"{ifo}.fit_unique_rank_count",
+            minimum=2, maximum=support_count,
+        )
+        if stored_slope >= 0.0:
+            raise ValueError(f"{ifo} tail slope must be negative")
+
+        parsed_points = []
+        for index, point in enumerate(points_raw):
+            if not isinstance(point, dict):
+                raise ValueError(f"{ifo} point {index} is not an object")
+            require_exact_keys(point, ("gps", "llr", "far"), f"{ifo} point {index}")
+            gps_ns = _schema4_ns(point["gps"], f"{ifo} point {index}.gps")
+            llr = _schema4_binary64(point["llr"], f"{ifo} point {index}.llr")
+            far = _schema4_binary64(point["far"], f"{ifo} point {index}.far")
+            if not window_start_ns <= gps_ns < window_end_ns:
+                raise ValueError(f"{ifo} point {index} GPS is outside the authority window")
+            if far <= 0.0:
+                raise ValueError(f"{ifo} point {index} FAR must be positive")
+            parsed_points.append({
+                "gps_ns": gps_ns,
+                "gps": gps_ns / 1_000_000_000.0,
+                "llr": llr,
+                "far": far,
+                "llr_hex": point["llr"],
+                "far_hex": point["far"],
+            })
+
+        if parsed_points != sorted(
+            parsed_points, key=lambda point: (point["llr"], point["gps_ns"])
+        ):
+            raise ValueError(f"{ifo} far_llr_points are not canonically sorted")
+
+        livetime_seconds = livetime_ns / 1_000_000_000.0
+        ranks = [point["llr"] for point in parsed_points]
+        for begin in range(len(parsed_points)):
+            if begin > 0 and ranks[begin] == ranks[begin - 1]:
                 continue
-            min_far_by_ifo[ifo] = min(min_far_by_ifo.get(ifo, direct_far), direct_far)
-            points.append(
-                {
-                    "ifo": ifo,
-                    "llr": float(llr),
-                    "log_far": math.log10(direct_far),
-                    "direct_far": direct_far,
-                    "direct_far_count_ge": int(count_ge),
-                    "bg_livetime": livetime,
-                    "window_count": len(entries),
-                    "total_window_count": sum(len(values) for values in by_ifo.values()),
-                    "bg_start": int(window.get("start", 0)),
-                    "bg_end": int(window.get("end", 0)),
-                    "event_id": getattr(feature, "source_row", {}).get("event_id", "") if isinstance(getattr(feature, "source_row", None), dict) else "",
-                    "snglsnr": float(feature.rho),
-                    "chisq": float(feature.chisq),
-                    "bankid": getattr(feature, "bankid", ""),
-                    "tmplt_idx": getattr(feature, "tmplt_idx", ""),
-                    "worker": worker_id,
-                    "gps": gps,
-                }
-            )
+            end = begin + 1
+            while end < len(ranks) and ranks[end] == ranks[begin]:
+                end += 1
+            count_ge = len(ranks) - begin
+            expected_far = count_ge / livetime_seconds
+            if not math.isfinite(expected_far) or expected_far <= 0.0:
+                raise ValueError(f"{ifo} Calculated FAR invariant is invalid")
+            for index in range(begin, end):
+                if parsed_points[index]["far"].hex() != expected_far.hex():
+                    raise ValueError(f"{ifo} stored Calculated FAR bit mismatch")
+                parsed_points[index]["count_ge"] = count_ge
 
-    downsampled = False
-    original_points = len(points)
-    if max_points > 0 and len(points) > max_points:
-        step = max(1, math.ceil(len(points) / max_points))
-        points = points[::step]
-        downsampled = True
+        tail_model = CRASHCAR_NUMERIC.tail_model(ranks, livetime_seconds)
+        recomputed_slope = tail_model["tail_slope"]
+        recomputed_r_tail = tail_model["r_tail"]
+        recomputed_fit_count = (
+            len(tail_model["empirical_ranks"]) - tail_model["tail_index"]
+        )
+        if (
+            recomputed_slope is None
+            or stored_r_tail.hex() != float(recomputed_r_tail).hex()
+            or stored_slope.hex() != float(recomputed_slope).hex()
+            or fit_count != recomputed_fit_count
+        ):
+            raise ValueError(f"{ifo} stored tail fit bit mismatch")
 
-    for ifo, window in windows.items():
-        if ifo in counts_ready:
-            window["row_count"] = counts_ready[ifo]
-            online_window = (
-                online_summary.get("by_ifo", {})
-                .get(ifo, {})
-                .get("background_window")
-            )
-            if isinstance(online_window, dict):
-                online_window["row_count"] = counts_ready[ifo]
+        total_support += support_count
+        parsed_backgrounds[ifo] = {
+            "livetime_ns": livetime_ns,
+            "livetime_seconds": livetime_seconds,
+            "support_count": support_count,
+            "tail_fit": {
+                "method": tail_fit["method"],
+                "r_tail": stored_r_tail,
+                "slope": stored_slope,
+                "fit_unique_rank_count": fit_count,
+            },
+            "points": parsed_points,
+        }
 
+    if total_support > 2_000_000:
+        raise ValueError("authoritative total support bound exceeded")
     return {
-        "exists": True,
-        "source_kind": "raw_background_support",
-        "worker": worker_id,
-        "files": [str(path) for path in raw_files],
-        "shape_map": str(shape_map_path),
-        "shape_map_rows": len(shape_map),
-        "rows_seen": raw_summary.get("rows_seen", 0),
-        "points": points,
-        "counts_all": counts_ready,
-        "counts_ready": counts_ready,
-        "counts_ready_selected": dict(Counter(point["ifo"] for point in points)),
-        "bg_policy": "latest",
-        "latest_total_window_count_by_ifo": {ifo: len(entries) for ifo, entries in by_ifo.items()},
-        "latest_bg_end_by_ifo": {ifo: finite_int_or_none(info.get("end")) for ifo, info in windows.items()},
-        "ready_windows": [
-            {
-                "ifo": ifo,
-                "bg_start": finite_int_or_none(info.get("start")),
-                "bg_end": finite_int_or_none(info.get("end")),
-                "window_count": counts_ready.get(ifo, 0),
-                "total_window_count": sum(counts_ready.values()),
-                "rows": counts_ready.get(ifo, 0),
-                "source": info.get("source", ""),
-            }
-            for ifo, info in sorted(windows.items())
-        ],
-        "points_original": original_points,
-        "points_plotted": len(points),
-        "downsampled": downsampled,
-        "raw_features_seen": raw_summary.get("features_seen", 0),
-        "online_summary": online_summary,
-        "min_direct_far_by_ifo": min_far_by_ifo,
-        "floor_far_by_ifo": floor_far_by_ifo,
+        "worker_id": worker_id,
+        "worker_count": worker_count,
+        "worker_bank_ids": list(bank_ids),
+        "accepted_version": accepted_version,
+        "epoch_gps": dict(doc["epoch_gps"]),
+        "epoch_gps_ns": epoch_ns,
+        "window_start_gps": dict(doc["window_start_gps"]),
+        "window_start_gps_ns": window_start_ns,
+        "window_end_gps": dict(doc["window_end_gps"]),
+        "window_end_gps_ns": window_end_ns,
+        "window_duration": dict(doc["window_duration"]),
+        "window_duration_ns": window_duration_ns,
+        "update_period": dict(doc["update_period"]),
+        "update_period_ns": update_period_ns,
+        "far_floor_count": 1,
+        "tail_log10_far": -2,
+        "provenance": {key: doc[key] for key in provenance_keys},
+        "backgrounds": parsed_backgrounds,
     }
 
 
@@ -838,146 +925,109 @@ def load_panel_a_background_json(
     background_accumulation_seconds: float,
     max_points: int,
     panel_a_worker: str,
+    *,
+    start_bank: int,
+    banks_per_worker: int,
+    worker_count: int,
+    expected_sha256: str | None = None,
 ) -> dict:
-    if not path.exists():
-        return {
-            "exists": False,
-            "source_kind": "background_json",
-            "files": [],
-            "points": [],
-            "reason": f"background JSON not found: {path}",
-        }
-    try:
-        doc = json.loads(path.read_text())
-    except Exception as exc:
-        return {
-            "exists": False,
-            "source_kind": "background_json",
-            "files": [str(path)],
-            "points": [],
-            "reason": f"failed to parse background JSON: {exc}",
-        }
-
+    worker_text = normalize_worker_id(panel_a_worker)
+    if (
+        not worker_text.isdigit()
+        or type(start_bank) is not int
+        or type(banks_per_worker) is not int
+        or type(worker_count) is not int
+        or start_bank < 0
+        or banks_per_worker < 1
+        or worker_count < 1
+        or int(worker_text) >= worker_count
+    ):
+        raise ValueError("Panel-A worker geometry is invalid")
+    worker_index = int(worker_text)
+    expected_roster = list(range(
+        start_bank + worker_index * banks_per_worker,
+        start_bank + (worker_index + 1) * banks_per_worker,
+    ))
+    doc, source_sha256 = read_strict_schema4_background(
+        path, expected_sha256=expected_sha256
+    )
+    authority = validate_schema4_background_document(
+        doc,
+        expected_worker=worker_index,
+        expected_worker_count=worker_count,
+        expected_worker_bank_ids=expected_roster,
+        expected_window_seconds=background_accumulation_seconds,
+    )
+    total_window_count = sum(
+        payload["support_count"] for payload in authority["backgrounds"].values()
+    )
     points: list[dict] = []
     counts_ready: dict[str, int] = {}
-    counts_selected: Counter[str] = Counter()
     min_far_by_ifo: dict[str, float] = {}
     floor_far_by_ifo: dict[str, float] = {}
     latest_bg_end_by_ifo: dict[str, int] = {}
     online_by_ifo: dict[str, dict] = {}
     ready_windows = []
-    total_window_count = sum(
-        len(item.get("far_llr_points") or item.get("background_triggers", []))
-        for item in doc.get("backgrounds", {}).values()
-        if isinstance(item, dict)
-    )
-    for ifo, payload in sorted(doc.get("backgrounds", {}).items()):
-        if ifo not in ("H1", "L1") or not isinstance(payload, dict):
-            continue
-        payload_livetime = as_float(payload.get("livetime"))
-        livetime = payload_livetime if payload_livetime > 0 else (
-            float(background_accumulation_seconds) if background_accumulation_seconds > 0 else 1.0
-        )
-        far_llr_points = payload.get("far_llr_points") or []
-        triggers = payload.get("background_triggers", [])
-        entries: list[tuple[float, dict]] = []
-        if far_llr_points:
-            for point in far_llr_points:
-                llr = as_float(point.get("llr", point.get("rank")))
-                far = finite_positive(point.get("far"))
-                if math.isfinite(llr) and far is not None:
-                    entries.append((llr, point))
-        else:
-            for trig in triggers:
-                llr = as_float(trig.get("llr", trig.get("rank")))
-                if math.isfinite(llr):
-                    entries.append((llr, trig))
-        entries.sort(key=lambda item: item[0])
-        ranks = [entry[0] for entry in entries]
-        counts_ready[ifo] = len(entries)
-        floor_far_by_ifo[ifo] = 1.0 / livetime if livetime > 0 else float("inf")
-        bg_start = as_float(payload.get("background_start_gps", doc.get("background_start_gps", 0)))
-        bg_end = as_float(payload.get("background_end_gps", doc.get("background_end_gps", 0)))
-        gps_values = [as_float(item.get("gps")) for _llr, item in entries]
-        gps_values = [value for value in gps_values if math.isfinite(value)]
-        if not gps_values and triggers:
-            for trig in triggers:
-                gps = as_float(trig.get("end_time"))
-                ns = as_float(trig.get("end_time_ns"))
-                if math.isfinite(gps) and math.isfinite(ns):
-                    gps += 1e-9 * ns
-                if math.isfinite(gps):
-                    gps_values.append(gps)
-        if not math.isfinite(bg_start):
-            bg_start = 0.0
-        if bg_start <= 0.0 and gps_values:
-            bg_start = math.floor(min(gps_values))
-        if not math.isfinite(bg_end) or bg_end <= bg_start:
-            duration = float(background_accumulation_seconds) if background_accumulation_seconds > 0 else livetime
-            bg_end = bg_start + duration
-        latest_bg_end_by_ifo[ifo] = int(bg_end)
+    bg_start = authority["window_start_gps_ns"] / 1_000_000_000.0
+    bg_end = authority["window_end_gps_ns"] / 1_000_000_000.0
+    window_seconds = authority["window_duration_ns"] / 1_000_000_000.0
+
+    for ifo in ("H1", "L1"):
+        payload = authority["backgrounds"][ifo]
+        livetime = payload["livetime_seconds"]
+        counts_ready[ifo] = payload["support_count"]
+        floor_far_by_ifo[ifo] = 1.0 / livetime
+        latest_bg_end_by_ifo[ifo] = math.floor(bg_end)
         online_by_ifo[ifo] = {
             "online_seconds": livetime,
-            "fraction": livetime / float(background_accumulation_seconds) if background_accumulation_seconds > 0 else float("nan"),
-            "raw_interval_count": len(payload.get("livetime_segments") or []),
+            "fraction": livetime / window_seconds,
+            "raw_interval_count": 0,
             "background_window": {
-                "start": float(bg_start),
-                "end": float(bg_end),
-                "duration": float(max(0.0, bg_end - bg_start)),
-                "row_count": len(entries),
-                "source": "background_json_livetime",
+                "start": bg_start,
+                "end": bg_end,
+                "duration": window_seconds,
+                "row_count": payload["support_count"],
+                "source": "schema4_background_livetime",
             },
         }
-        ready_windows.append(
-            {
-                "ifo": ifo,
-                "bg_start": int(bg_start),
-                "bg_end": int(bg_end),
-                "window_count": len(entries),
-                "total_window_count": total_window_count,
-                "rows": len(entries),
-                "source": "background_json",
-            }
-        )
-        for llr, trig in entries:
-            count_ge = len(ranks) - bisect.bisect_left(ranks, llr)
-            direct_far = finite_positive(trig.get("far"))
-            if direct_far is None:
-                direct_far = max(float(count_ge), 1.0) / livetime if livetime > 0 else float("inf")
-            if not finite_positive(direct_far):
-                continue
-            min_far_by_ifo[ifo] = min(min_far_by_ifo.get(ifo, direct_far), direct_far)
-            gps = as_float(trig.get("gps"))
-            if not math.isfinite(gps):
-                gps = as_float(trig.get("end_time"))
-                end_time_ns = as_float(trig.get("end_time_ns"))
-                if math.isfinite(gps) and math.isfinite(end_time_ns):
-                    gps += end_time_ns * 1e-9
-            points.append(
-                {
-                    "ifo": ifo,
-                    "llr": float(llr),
-                    "log_far": math.log10(direct_far),
-                    "direct_far": direct_far,
-                    "direct_far_count_ge": int(count_ge),
-                    "bg_livetime": livetime,
-                    "window_count": len(entries),
-                    "total_window_count": total_window_count,
-                    "bg_start": int(bg_start),
-                    "bg_end": int(bg_end),
-                    "event_id": trig.get("event_id", ""),
-                    "snglsnr": as_float(trig.get("rho", trig.get("snglsnr"))),
-                    "chisq": as_float(trig.get("chisq")),
-                    "bankid": trig.get("bankid", ""),
-                    "tmplt_idx": trig.get("tmplt_idx", ""),
-                    "worker": normalize_worker_id(panel_a_worker),
-                    "gps": gps if math.isfinite(gps) else None,
-                }
+        ready_windows.append({
+            "ifo": ifo,
+            "bg_start": math.floor(bg_start),
+            "bg_end": math.floor(bg_end),
+            "window_count": payload["support_count"],
+            "total_window_count": total_window_count,
+            "rows": payload["support_count"],
+            "source": "schema4_background",
+        })
+        for point in payload["points"]:
+            direct_far = point["far"]
+            min_far_by_ifo[ifo] = min(
+                min_far_by_ifo.get(ifo, direct_far), direct_far
             )
-            counts_selected[ifo] += 1
+            points.append({
+                "ifo": ifo,
+                "llr": point["llr"],
+                "log_far": math.log10(direct_far),
+                "direct_far": direct_far,
+                "direct_far_count_ge": point["count_ge"],
+                "bg_livetime": livetime,
+                "window_count": payload["support_count"],
+                "total_window_count": total_window_count,
+                "bg_start": math.floor(bg_start),
+                "bg_end": math.floor(bg_end),
+                "event_id": "",
+                "snglsnr": float("nan"),
+                "chisq": float("nan"),
+                "bankid": "",
+                "tmplt_idx": "",
+                "worker": normalize_worker_id(panel_a_worker),
+                "gps": point["gps"],
+                "stored_llr_hex": point["llr_hex"],
+                "stored_far_hex": point["far_hex"],
+            })
 
-    downsampled = False
     original_points = len(points)
+    downsampled = False
     if max_points > 0 and len(points) > max_points:
         step = max(1, math.ceil(len(points) / max_points))
         points = points[::step]
@@ -985,15 +1035,20 @@ def load_panel_a_background_json(
 
     return {
         "exists": True,
+        "authoritative": True,
+        "metadata_role": "authoritative_schema4_background",
         "source_kind": "background_json",
         "worker": normalize_worker_id(panel_a_worker),
         "files": [str(path)],
+        "source_sha256": source_sha256,
         "points": points,
         "counts_all": counts_ready,
         "counts_ready": counts_ready,
-        "counts_ready_selected": dict(counts_selected),
-        "bg_policy": "background_json",
-        "latest_total_window_count_by_ifo": {ifo: total_window_count for ifo in counts_ready},
+        "counts_ready_selected": dict(Counter(point["ifo"] for point in points)),
+        "bg_policy": "schema4_background",
+        "latest_total_window_count_by_ifo": {
+            ifo: total_window_count for ifo in counts_ready
+        },
         "latest_bg_end_by_ifo": latest_bg_end_by_ifo,
         "ready_windows": ready_windows,
         "points_original": original_points,
@@ -1001,14 +1056,25 @@ def load_panel_a_background_json(
         "downsampled": downsampled,
         "min_direct_far_by_ifo": min_far_by_ifo,
         "floor_far_by_ifo": floor_far_by_ifo,
-        "source_description": doc.get("description", ""),
+        "schema4_authority": {
+            key: authority[key]
+            for key in (
+                "worker_id", "worker_count", "worker_bank_ids",
+                "accepted_version", "epoch_gps", "epoch_gps_ns",
+                "window_start_gps", "window_start_gps_ns",
+                "window_end_gps", "window_end_gps_ns",
+                "window_duration", "window_duration_ns",
+                "update_period", "update_period_ns",
+                "far_floor_count", "tail_log10_far", "provenance",
+            )
+        },
         "online_summary": {
             "available": True,
             "segment_glob": "",
             "segment_file_count": 0,
             "parsed_segment_file_count": 0,
             "by_ifo": online_by_ifo,
-            "source": "background_json_livetime",
+            "source": "schema4_background_livetime",
         },
     }
 
@@ -1062,10 +1128,10 @@ def min_bin_grid(xs, ys, values, xedges, yedges):
 def build_single_points(zerolag_rows: list[dict], single_far_bases: tuple[str, ...]) -> list[dict]:
     points: list[dict] = []
     for row in zerolag_rows:
-        for ifo in ("H1", "L1", "V1", "K1"):
+        for ifo in ("H1", "L1"):
             snr = finite_positive(row.get(f"snglsnr_{ifo}"))
             chisq = finite_positive(row.get(f"chisq_{ifo}"))
-            far, far_source = min_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
+            far, far_source = first_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
             if not row_contains_ifo(row, ifo) or snr is None or chisq is None or far is None:
                 continue
             points.append(
@@ -1167,57 +1233,116 @@ def thin_curve(xs: np.ndarray, ys: np.ndarray, max_points: int = FIT_CURVE_MAX_P
     return xs[indices], ys[indices]
 
 
-def panel_a_segmented_fit(points: list[dict], tail_boundary: float = TAIL_BOUNDARY_LOG10_FAR) -> dict | None:
-    rows = [
-        (as_float(point.get("llr")), as_float(point.get("log_far")))
+def panel_a_segmented_fit(
+    points: list[dict],
+    tail_boundary: float = TAIL_BOUNDARY_LOG10_FAR,
+) -> dict | None:
+    """Render the same direct/tail law used by the crashcar FAR assignment."""
+    if not math.isclose(
+        float(tail_boundary), TAIL_BOUNDARY_LOG10_FAR, rel_tol=0.0, abs_tol=1.0e-12
+    ):
+        raise ValueError(
+            "crashcar tail boundary is fixed by the numeric contract at log10(FAR)=-2"
+        )
+    ranks = [
+        as_float(point.get("llr"))
         for point in points
-        if math.isfinite(as_float(point.get("llr"))) and math.isfinite(as_float(point.get("log_far")))
+        if math.isfinite(as_float(point.get("llr")))
     ]
-    if len(rows) < 2:
+    if len(ranks) < 2:
         return None
 
-    arr = np.asarray(rows, dtype=float)
-    order = np.argsort(arr[:, 0], kind="mergesort")
-    xs = arr[order, 0]
-    ys = arr[order, 1]
-    support_y = np.minimum.accumulate(ys)
-    support_x_plot, support_y_plot = thin_curve(xs, support_y)
-
-    tail_mask = ys <= tail_boundary
-    tail_x = xs[tail_mask]
-    tail_y = ys[tail_mask]
+    livetimes = [
+        as_float(point.get("bg_livetime"))
+        for point in points
+        if finite_positive(point.get("bg_livetime")) is not None
+    ]
     result = {
-        "support_point_count": int(xs.size),
-        "support_plot_point_count": int(support_x_plot.size),
-        "tail_point_count": int(tail_x.size),
-        "tail_source": "fixed_log10_far_boundary",
-        "tail_boundary_log10_far": float(tail_boundary),
-        "support_x": support_x_plot,
-        "support_y": support_y_plot,
+        "support_point_count": 0,
+        "support_plot_point_count": 0,
+        "tail_point_count": 0,
+        "tail_source": "shared_crashcar_numeric.tail_model",
+        "tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
+        "r_tail": None,
+        "assignment_boundary": "r<=r_tail direct calculated FAR; r>r_tail fitted FAR",
+        "tail_status": "unavailable_missing_livetime",
+        "livetime": None,
+        "support_x": np.asarray([], dtype=float),
+        "support_y": np.asarray([], dtype=float),
         "tail_line_x": np.asarray([], dtype=float),
         "tail_line_y": np.asarray([], dtype=float),
-        "tail_x": tail_x,
-        "tail_y": tail_y,
-        "tail_x_min": float(np.nanmin(tail_x)) if tail_x.size else None,
-        "tail_x_max": float(np.nanmax(tail_x)) if tail_x.size else None,
+        "tail_x": np.asarray([], dtype=float),
+        "tail_y": np.asarray([], dtype=float),
+        "tail_x_min": None,
+        "tail_x_max": None,
         "tail_slope": None,
         "tail_intercept": None,
     }
-    if tail_x.size >= 2 and np.unique(tail_x).size >= 2:
-        slope, intercept = np.polyfit(tail_x, tail_y, 1)
-        line_x_min = max(float(np.nanmin(tail_x)), LLR_XMIN)
-        line_x_max = max(float(np.nanmax(tail_x)), line_x_min + 1e-6)
-        line_x = np.linspace(line_x_min, line_x_max, 160)
-        result.update(
-            {
-                "tail_line_x": line_x,
-                "tail_line_y": slope * line_x + intercept,
-                "tail_slope": float(slope),
-                "tail_intercept": float(intercept),
-            }
-        )
-    return result
+    if not livetimes:
+        return result
+    livetime = livetimes[0]
+    if len(livetimes) != len(points) or any(
+        not math.isclose(value, livetime, rel_tol=1.0e-12, abs_tol=1.0e-12)
+        for value in livetimes[1:]
+    ):
+        result["tail_status"] = "unavailable_inconsistent_livetime"
+        return result
 
+    model = CRASHCAR_NUMERIC.tail_model(ranks, livetime)
+    support_x = np.asarray(model["empirical_ranks"], dtype=float)
+    support_y = np.asarray(model["empirical_log10_fars"], dtype=float)
+    support_x_plot, support_y_plot = thin_curve(support_x, support_y)
+    tail_index = int(model["tail_index"])
+    r_tail = float(model["r_tail"])
+    tail_x = support_x[tail_index:]
+    tail_y = support_y[tail_index:]
+    slope = model["tail_slope"]
+    intercept = model["tail_intercept"]
+    result.update(
+        {
+            "support_point_count": int(support_x.size),
+            "support_plot_point_count": int(support_x_plot.size),
+            "tail_point_count": int(tail_x.size),
+            "livetime": float(livetime),
+            "r_tail": r_tail,
+            "support_x": support_x_plot,
+            "support_y": support_y_plot,
+            "tail_x": tail_x,
+            "tail_y": tail_y,
+            "tail_x_min": float(np.nanmin(tail_x)) if tail_x.size else None,
+            "tail_x_max": float(np.nanmax(tail_x)) if tail_x.size else None,
+        }
+    )
+    if slope is None or intercept is None:
+        result["tail_status"] = "failed_nonnegative_or_insufficient_tail_fit"
+        return result
+    slope = float(slope)
+    intercept = float(intercept)
+    anchored_y = slope * r_tail + intercept
+    if (
+        not math.isfinite(slope)
+        or slope >= 0.0
+        or not math.isfinite(intercept)
+        or not math.isclose(
+            anchored_y, TAIL_BOUNDARY_LOG10_FAR, rel_tol=0.0, abs_tol=1.0e-12
+        )
+    ):
+        result["tail_status"] = "failed_invalid_unanchored_tail_fit"
+        return result
+
+    line_x_max = max(float(np.nanmax(tail_x)), r_tail + 1.0e-6)
+    line_x = np.linspace(r_tail, line_x_max, 160)
+    line_y = TAIL_BOUNDARY_LOG10_FAR + slope * (line_x - r_tail)
+    result.update(
+        {
+            "tail_line_x": line_x,
+            "tail_line_y": line_y,
+            "tail_slope": slope,
+            "tail_intercept": intercept,
+            "tail_status": "valid_anchored_negative_slope",
+        }
+    )
+    return result
 
 def format_online_label(online_summary: dict, ifo: str) -> str:
     info = online_summary.get("by_ifo", {}).get(ifo, {})
@@ -1227,9 +1352,18 @@ def format_online_label(online_summary: dict, ifo: str) -> str:
     return ""
 
 
-def plot_far_points(ax, points: list[dict], cmap, norm, xlabel: str, ylabel: str, title: str):
+def plot_far_points(
+    ax,
+    points: list[dict],
+    cmap,
+    norm,
+    xlabel: str,
+    ylabel: str,
+    title: str,
+    view_mode: str = "fixed",
+):
     eligible = eligible_far_points(points)
-    view = final_view_points(points)
+    view = eligible if view_mode == "all" else final_view_points(points)
     if view:
         artist = ax.scatter(
             [p["snr"] for p in view],
@@ -1242,22 +1376,35 @@ def plot_far_points(ax, points: list[dict], cmap, norm, xlabel: str, ylabel: str
             linewidths=0,
             alpha=0.76,
             rasterized=True,
+            zorder=2,
         )
     else:
         artist = ax.scatter([], [], c=[], cmap=cmap, norm=norm, s=FAR_POINT_SIZE, marker=".")
-        ax.text(0.5, 0.5, "no points in view", ha="center", va="center", transform=ax.transAxes)
+        empty_label = "no SNR>=4 FAR points" if view_mode == "all" else "no points in view"
+        ax.text(0.5, 0.5, empty_label, ha="center", va="center", transform=ax.transAxes)
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(left=SNR_XMIN)
-    ax.set_ylim(*CHISQ_VIEW)
+    if view_mode != "all" or not view:
+        ax.set_ylim(*CHISQ_VIEW)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.set_title(f"{title}\n{len(view)} in view / {len(eligible)} total (SNR>={SNR_XMIN:g})", fontweight="bold")
+    count_label = (
+        f"{len(view)} plotted / {len(eligible)} total (SNR>={SNR_XMIN:g})"
+        if view_mode == "all"
+        else f"{len(view)} in view / {len(eligible)} total (SNR>={SNR_XMIN:g})"
+    )
+    ax.set_title(f"{title}\n{count_label}", fontweight="bold")
     ax.grid(True, which="both", alpha=0.18)
     return artist, view
 
-
-def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float) -> dict:
+def plot_first_2x2(
+    payload: dict,
+    output: Path,
+    title: str,
+    tail_boundary: float,
+    far_point_view: str = "fixed",
+) -> dict:
     zerolag_rows = payload["zerolag"]["rows"]
     panel_a = payload["panel_a"]
     single_points = payload["single_points"]
@@ -1271,11 +1418,12 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
     ax = axes[0, 0]
     panel_a_worker = panel_a.get("worker", "000")
     panel_a_policy = panel_a.get("bg_policy", "latest")
-    panel_a_source_kind = panel_a.get("source_kind", "detail_direct_far_proxy")
+    panel_a_source_kind = panel_a.get(
+        "source_kind", "detail_calculated_far_diagnostic")
     panel_a_source_label = (
-        "raw BG support" if panel_a_source_kind == "raw_background_support"
-        else "background JSON FAR support" if panel_a_source_kind == "background_json"
-        else "detail/direct-FAR proxy"
+        "authoritative single_background.json FAR support"
+        if panel_a_source_kind == "background_json"
+        else "non-authoritative detail calculated-FAR diagnostic"
     )
     panel_a_fit_summary: dict[str, dict] = {}
     for ifo in ("H1", "L1"):
@@ -1299,6 +1447,10 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                     "tail_point_count": fit["tail_point_count"],
                     "tail_source": fit["tail_source"],
                     "tail_boundary_log10_far": fit["tail_boundary_log10_far"],
+                    "r_tail": fit["r_tail"],
+                    "assignment_boundary": fit["assignment_boundary"],
+                    "tail_status": fit["tail_status"],
+                    "livetime": fit["livetime"],
                     "tail_x_min": fit["tail_x_min"],
                     "tail_x_max": fit["tail_x_max"],
                     "tail_slope": fit["tail_slope"],
@@ -1314,7 +1466,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                         alpha=0.88,
                         color=IFO_COLORS[ifo],
                         rasterized=True,
-                        label=f"{ifo} tail points (log10 FAR <= {TAIL_BOUNDARY_LOG10_FAR:g})",
+                        label=f"{ifo} tail support (r >= r_tail)",
                     )
                 if fit["tail_line_x"].size:
                     ax.plot(
@@ -1324,13 +1476,13 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
                         linewidth=2.0,
                         linestyle="-",
                         alpha=0.96,
-                        label=f"{ifo} tail fit (log10 FAR <= {TAIL_BOUNDARY_LOG10_FAR:g})",
+                        label=f"{ifo} tail fit (r > r_tail, anchored at -2)",
                     )
         else:
             ax.text(0.03, 0.90 if ifo == "H1" else 0.82, f"{ifo}: no worker{panel_a_worker} BG support rows", transform=ax.transAxes, color=IFO_COLORS[ifo])
     ax.axhline(tail_boundary, color="0.25", linestyle="-.", linewidth=1.1, label=f"tail boundary {tail_boundary:g}")
     ax.set_xlabel("LLR")
-    ax.set_ylabel("log10(direct FAR)")
+    ax.set_ylabel("log10(Calculated FAR)")
     ax.set_xlim(left=LLR_XMIN)
     ax.set_title(f"Panel (a): worker{panel_a_worker} H/L {panel_a_policy} BG support\n{panel_a_source_label}", fontweight="bold")
     ax.grid(True, alpha=0.25)
@@ -1349,7 +1501,8 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         norm,
         "single-detector SNR",
         "chisq",
-        "Panel (b): historical assigned-FAR single total (all IFOs)",
+        "Panel (b): historical assigned-FAR single total (H1/L1 only)",
+        view_mode=far_point_view,
     )
 
     ax = axes[1, 0]
@@ -1361,6 +1514,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "coherent SNR",
         "cmbchisq",
         "Panel (c): historical assigned-FAR multi total (all detector combos)",
+        view_mode=far_point_view,
     )
 
     ax = axes[1, 1]
@@ -1373,6 +1527,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "SNR (single or coherent)",
         "chisq / cmbchisq",
         "Panel (d): historical assigned-FAR combination (single + multi)",
+        view_mode=far_point_view,
     )
 
     add_discrete_colorbar(fig, axes, artist_d)
@@ -1407,6 +1562,7 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "colorbar_count": 1,
         "colorbar_location": "right",
         "far_point_size": FAR_POINT_SIZE,
+        "far_point_view": far_point_view,
         "tail_point_size": TAIL_POINT_SIZE,
         "worker000_panel_a_counts": panel_a.get("counts_ready", {}),
         "worker000_panel_a_counts_selected": panel_a.get("counts_ready_selected", {}),
@@ -1418,100 +1574,17 @@ def plot_first_2x2(payload: dict, output: Path, title: str, tail_boundary: float
         "worker000_panel_a_points_original": panel_a.get("points_original", 0),
         "worker000_panel_a_segmented_fit": panel_a_fit_summary,
         "worker000_panel_a_fit_display": "tail_fit_same_color_lines_with_cross_tail_points",
-        "worker000_panel_a_tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
-        "worker000_panel_a_tail_boundary_source": "fixed_code_constant",
+        "worker000_panel_a_tail_boundary_log10_far": tail_boundary,
+        "worker000_panel_a_tail_boundary_source": "shared_crashcar_numeric.TAIL_FAR",
         "worker000_panel_a_source_kind": panel_a_source_kind,
-        "worker000_panel_a_shape_map": panel_a.get("shape_map"),
         "worker000_panel_a_min_direct_far_by_ifo": panel_a.get("min_direct_far_by_ifo", {}),
         "worker000_panel_a_floor_far_by_ifo": panel_a.get("floor_far_by_ifo", {}),
         "background_online_summary": panel_a_online_summary,
         "panel_a_background_online_summary": panel_a_online_summary,
         "global_latest_background_online_summary": global_online_summary,
         "panel_a_source": panel_a.get("files", []),
-        "panel_scope": "Panel (a) is the selected current BG support only; Panels (b)-(d) are historical totals over every trigger with assigned FAR in the zerolag XML glob.",
-        "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} {panel_a_source_label} with bg_policy={panel_a_policy}; each Panel (a) online fraction is computed from that curve's own 3h BG window. Panels b-d aggregate all workers, all bank IDs, and all detector combinations with assigned FAR present in the zerolag XML glob.",
-    }
-
-
-def read_manifest(snr_dir: Path) -> dict:
-    if snr_dir.is_file():
-        path = snr_dir
-        base_dir = snr_dir.parent
-    else:
-        path = snr_dir / "manifest.csv"
-        base_dir = snr_dir
-    if not path.exists():
-        return {"exists": False, "path": str(path), "rows": [], "row_count": 0, "ifo_counts": {}}
-    rows: list[dict] = []
-    counts: Counter[str] = Counter()
-    with path.open(newline="") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            for expanded in expand_candidate_manifest_row(row):
-                expanded["_snr_dir"] = str(base_dir)
-                expanded["_manifest_path"] = str(path)
-                rows.append(expanded)
-                counts[expanded.get("ifo", "")] += 1
-    return {"exists": True, "path": str(path), "rows": rows, "row_count": len(rows), "ifo_counts": dict(counts)}
-
-
-def split_manifest_ifos(value: str) -> list[str]:
-    parts = re.split(r"[;,\s]+", str(value or "").strip())
-    return [part for part in parts if part]
-
-
-def expand_candidate_manifest_row(row: dict) -> list[dict]:
-    """Return component-level rows for a retained candidate/coinc XML manifest row."""
-    if row.get("ifo"):
-        return [dict(row)]
-
-    reasons = set(part for part in str(row.get("reasons", "")).split(";") if part)
-    branches = set(part for part in str(row.get("branches", "")).split(";") if part)
-    ifos = split_manifest_ifos(row.get("ifos", ""))
-    for ifo in ("H1", "L1"):
-        if f"{ifo}_single" in reasons and ifo not in ifos:
-            ifos.append(ifo)
-    if not ifos and "multi" in reasons:
-        ifos = ["H1", "L1"]
-
-    expanded_rows = []
-    for ifo in ifos or [""]:
-        expanded = dict(row)
-        expanded["ifo"] = ifo
-        if "multi" in reasons or "multi" in branches or is_truthy(expanded.get("hit_multi", "0")):
-            expanded["hit_multi"] = "1"
-            expanded.setdefault("far_multi", row.get("far", ""))
-            if not expanded.get("far_multi"):
-                expanded["far_multi"] = row.get("far", "")
-        single_far = row.get(f"far_sngl_{ifo}", "")
-        if f"{ifo}_single" in reasons or (single_far and finite_positive(single_far) is not None):
-            expanded["hit_single"] = "1"
-            expanded["far_sngl"] = single_far
-        expanded_rows.append(expanded)
-    return expanded_rows
-
-
-def read_manifests(snr_dirs: list[Path]) -> dict:
-    manifests = [read_manifest(path) for path in snr_dirs]
-    rows: list[dict] = []
-    counts: Counter[str] = Counter()
-    paths: list[str] = []
-    existing_paths: list[str] = []
-    for manifest in manifests:
-        paths.append(manifest["path"])
-        if not manifest["exists"]:
-            continue
-        existing_paths.append(manifest["path"])
-        rows.extend(manifest["rows"])
-        counts.update(manifest["ifo_counts"])
-    return {
-        "exists": bool(existing_paths),
-        "path": existing_paths[0] if existing_paths else (paths[0] if paths else ""),
-        "paths": paths,
-        "existing_paths": existing_paths,
-        "rows": rows,
-        "row_count": len(rows),
-        "ifo_counts": dict(counts),
+        "panel_scope": "Panel (a) requires authoritative schema4 single_background.json support unless the user explicitly selects diagnostic-only detail. Panels (b)-(d) use normal A109 zerolag rows and require a positive route-owned A107 far_sngl value.",
+        "caveat": f"Current snapshot. Panel (a) uses worker{panel_a_worker} {panel_a_source_label} with bg_policy={panel_a_policy}; each Panel (a) online fraction is computed from that curve's own 3h BG window. Panels b-d aggregate only normal A109 zerolag rows with positive unique-owner single FAR across workers and bank IDs.",
     }
 
 
@@ -1523,23 +1596,6 @@ def row_far(row: dict, far_field: str, log_field: str) -> float | None:
     if math.isfinite(log_far):
         return 10.0**log_far
     return None
-
-
-def is_truthy(value) -> bool:
-    return str(value).strip() in ("1", "1.0", "true", "True", "yes", "YES")
-
-
-def select_min_row(rows: list[dict], ifo: str, hit_field: str, far_field: str, log_field: str) -> dict | None:
-    candidates = []
-    for row in rows:
-        if row.get("ifo") != ifo or not is_truthy(row.get(hit_field, "0")):
-            continue
-        far = row_far(row, far_field, log_field)
-        if far is not None:
-            candidates.append((far, row))
-    if not candidates:
-        return None
-    return min(candidates, key=lambda item: item[0])[1]
 
 
 def normalized_key_value(value) -> str:
@@ -1555,6 +1611,15 @@ def normalized_key_value(value) -> str:
     return text
 
 
+def table_field(row: dict, name: str, default=""):
+    if name in row:
+        return row[name]
+    for key, value in row.items():
+        if key.rsplit(":", 1)[-1] == name:
+            return value
+    return default
+
+
 def component_time(row: dict, ifo: str) -> tuple[str, str]:
     end_time = row.get(f"end_time_sngl_{ifo}") or row.get("end_time") or ""
     end_time_ns = row.get(f"end_time_ns_sngl_{ifo}") or row.get("end_time_ns") or ""
@@ -1565,11 +1630,12 @@ def compact_snr_row(row: dict | None) -> dict | None:
     if not row:
         return None
     keys = (
-        "event_id", "ifo", "bankid", "tmplt_idx", "end_time", "end_time_ns",
-        "snglsnr", "chisq", "far_sngl", "log10_far_sngl", "far_multi",
-        "log10_far_multi", "series_file", "xml_file", "_selection_source",
-        "_selection_kind", "_zerolag_source", "_zerolag_worker", "_zerolag_ifos",
-        "_zerolag_event_id", "_selection_note", "_snr_dir", "_manifest_path",
+        "event_id", "ifo", "ifos", "bankid", "tmplt_idx", "end_time",
+        "end_time_ns", "snglsnr", "chisq", "far_sngl", "log10_far_sngl",
+        "far_multi", "log10_far_multi", "_selection_source",
+        "_selection_kind", "_zerolag_source", "_zerolag_worker",
+        "_zerolag_ifos", "_zerolag_event_id", "_selection_note",
+        "_coincs_path", "_coincs_schema_columns", "H1_LLR", "L1_LLR",
     )
     return {key: row.get(key) for key in keys if row.get(key) not in (None, "")}
 
@@ -1583,14 +1649,17 @@ def make_zerolag_snr_candidate(
     *,
     coherent_far_bases: tuple[str, ...] = DEFAULT_COHERENT_FAR_BASES,
 ) -> dict:
-    end_time, end_time_ns = component_time(row, ifo)
+    component_end_time, component_end_time_ns = component_time(row, ifo)
     candidate = {
-        "event_id": row.get("event_id", ""),
+        "event_id": normalized_key_value(row.get("event_id", "")),
         "ifo": ifo,
+        "ifos": str(row.get("ifos", "")),
         "bankid": normalized_key_value(row.get("bankid", "")),
         "tmplt_idx": normalized_key_value(row.get("tmplt_idx", "")),
-        "end_time": end_time,
-        "end_time_ns": end_time_ns,
+        "end_time": normalized_key_value(row.get("end_time", "")),
+        "end_time_ns": normalized_key_value(row.get("end_time_ns", "")),
+        "component_end_time": component_end_time,
+        "component_end_time_ns": component_end_time_ns,
         "snglsnr": row.get(f"snglsnr_{ifo}", ""),
         "chisq": row.get(f"chisq_{ifo}", row.get("cmbchisq", "")),
         "hit_single": "1" if kind == "single" else "0",
@@ -1598,10 +1667,13 @@ def make_zerolag_snr_candidate(
         "_selection_source": "zerolag_history",
         "_selection_kind": kind,
         "_zerolag_source": row.get("_source", ""),
-        "_zerolag_worker": row.get("_worker", ""),
+        "_zerolag_worker": normalize_worker_id(row.get("_worker", "")),
         "_zerolag_ifos": row.get("ifos", ""),
-        "_zerolag_event_id": row.get("event_id", ""),
+        "_zerolag_event_id": normalized_key_value(row.get("event_id", "")),
         "_selection_far_source": far_source or "",
+        "LLR": table_field(row, f"{ifo}_LLR", ""),
+        "H1_LLR": table_field(row, "H1_LLR", ""),
+        "L1_LLR": table_field(row, "L1_LLR", ""),
     }
     if kind == "single":
         candidate["far_sngl"] = f"{far:.17g}"
@@ -1613,75 +1685,7 @@ def make_zerolag_snr_candidate(
     else:
         candidate["far_multi"] = f"{far:.17g}"
         candidate["log10_far_multi"] = f"{math.log10(far):.12g}"
-        single_far, _single_source = min_positive_field(row, [f"{base}_{ifo}" for base in DEFAULT_SINGLE_FAR_BASES])
-        if single_far is not None:
-            candidate["far_sngl"] = f"{single_far:.17g}"
-            candidate["log10_far_sngl"] = f"{math.log10(single_far):.12g}"
     return candidate
-
-
-def manifest_row_matches_candidate(row: dict, candidate: dict, hit_field: str) -> bool:
-    if row.get("ifo") != candidate.get("ifo"):
-        return False
-    if hit_field and not is_truthy(row.get(hit_field, "0")):
-        return False
-    for field in ("bankid", "tmplt_idx", "end_time", "end_time_ns"):
-        if normalized_key_value(row.get(field, "")) != normalized_key_value(candidate.get(field, "")):
-            return False
-    return True
-
-
-def attach_manifest_series(
-    candidate: dict | None,
-    manifest_rows: list[dict],
-    hit_field: str,
-    snr_series_logfar_threshold: float,
-) -> dict | None:
-    if candidate is None:
-        return None
-    matches = [row for row in manifest_rows if manifest_row_matches_candidate(row, candidate, hit_field)]
-    if not matches:
-        candidate = dict(candidate)
-        far_field = "far_sngl" if hit_field == "hit_single" else "far_multi"
-        log_field = "log10_far_sngl" if hit_field == "hit_single" else "log10_far_multi"
-        far = row_far(candidate, far_field, log_field)
-        snr = finite_positive(candidate.get("snglsnr"))
-        if hit_field == "hit_single" and snr is not None and snr < SNR_XMIN:
-            candidate["_selection_note"] = (
-                f"historical minimum selected, but component SNR={snr:.3g} is below "
-                f"the crashcar min-SNR gate {SNR_XMIN:g}; no SNR series is expected"
-            )
-        elif far is not None and math.log10(far) > snr_series_logfar_threshold:
-            candidate["_selection_note"] = (
-                f"historical minimum selected, but log10 FAR={math.log10(far):.2f} is above "
-                f"SNR-series threshold {snr_series_logfar_threshold:.2f}; no retained SNR series is expected"
-            )
-        else:
-            if hit_field == "hit_multi":
-                candidate["_selection_note"] = (
-                    "historical multi-FAR minimum selected and should have retained component SNR series "
-                    "under the current crashcar runtime; no matching manifest row exists in this run "
-                    "(likely an older runtime product or missing artifact)"
-                )
-            else:
-                candidate["_selection_note"] = (
-                    "historical single-FAR minimum selected and appears to pass the SNR-series gate, "
-                    "but no matching retained SNR-series manifest row exists"
-                )
-        return candidate
-    far_field = "far_sngl" if hit_field == "hit_single" else "far_multi"
-    log_field = "log10_far_sngl" if hit_field == "hit_single" else "log10_far_multi"
-    best_manifest = min(matches, key=lambda row: row_far(row, far_field, log_field) or math.inf)
-    merged = dict(candidate)
-    merged.update(best_manifest)
-    merged["_selection_source"] = "zerolag_history+manifest"
-    merged["_selection_kind"] = candidate.get("_selection_kind", "")
-    merged["_zerolag_source"] = candidate.get("_zerolag_source", "")
-    merged["_zerolag_worker"] = candidate.get("_zerolag_worker", "")
-    merged["_zerolag_ifos"] = candidate.get("_zerolag_ifos", "")
-    merged["_zerolag_event_id"] = candidate.get("_zerolag_event_id", "")
-    merged["_selection_far_source"] = candidate.get("_selection_far_source", "")
-    return merged
 
 
 def select_history_single_candidate(
@@ -1691,29 +1695,28 @@ def select_history_single_candidate(
     coherent_far_bases: tuple[str, ...],
 ) -> dict | None:
     candidates = []
+    final_owner_by_mask = {
+        "H1": "H1",
+        "H1V1": "H1",
+        "L1": "L1",
+        "L1V1": "L1",
+    }
     for row in zerolag_rows:
-        far, far_source = min_positive_field(row, [f"{base}_{ifo}" for base in single_far_bases])
-        if far is None:
+        if final_owner_by_mask.get(str(row.get("ifos", ""))) != ifo:
             continue
-        if not row_contains_ifo(row, ifo):
+        far, far_source = first_positive_field(
+            row, [f"{base}_{ifo}" for base in single_far_bases]
+        )
+        if far is None or not row_contains_ifo(row, ifo):
             continue
         snr = finite_positive(row.get(f"snglsnr_{ifo}"))
         if snr is None or snr < SNR_XMIN:
             continue
-        candidates.append((
-            far,
-            make_zerolag_snr_candidate(
-                row,
-                ifo,
-                "single",
-                far,
-                far_source,
-                coherent_far_bases=coherent_far_bases,
-            ),
-        ))
-    if not candidates:
-        return None
-    return min(candidates, key=lambda item: item[0])[1]
+        candidates.append((far, make_zerolag_snr_candidate(
+            row, ifo, "single", far, far_source,
+            coherent_far_bases=coherent_far_bases,
+        )))
+    return min(candidates, key=lambda item: item[0])[1] if candidates else None
 
 
 def select_history_multi_components(
@@ -1727,351 +1730,433 @@ def select_history_multi_components(
         if not {"H1", "L1"}.issubset(detectors):
             continue
         far, far_source = first_positive_field(row, coherent_far_bases)
-        if far is None:
-            continue
-        candidates.append((far, row, far_source))
+        if far is not None:
+            candidates.append((far, row, far_source))
     if not candidates:
         return {"H1": None, "L1": None}
     far, best_row, far_source = min(candidates, key=lambda item: item[0])
     return {
         ifo: make_zerolag_snr_candidate(
-            best_row,
-            ifo,
-            "multi",
-            far,
-            far_source,
+            best_row, ifo, "multi", far, far_source,
             coherent_far_bases=coherent_far_bases,
         )
         for ifo in ("H1", "L1")
     }
 
 
+def open_binary_maybe_gzip(path: Path):
+    with path.open("rb") as probe:
+        magic = probe.read(2)
+    return gzip.open(path, "rb") if magic == b"\x1f\x8b" else path.open("rb")
+
+
+def open_text_maybe_gzip(path: Path):
+    with path.open("rb") as probe:
+        magic = probe.read(2)
+    if magic == b"\x1f\x8b":
+        return gzip.open(path, "rt", errors="replace")
+    return path.open("rt", errors="replace")
+
+
+def normalize_xml_event_id(value: str | None) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().rsplit(":", 1)[-1]
+
+
+def standard_complex8_event_id(element: ET.Element, path: Path) -> str:
+    event_params = [
+        child
+        for child in element.findall("Param")
+        if child.attrib.get("Name", "").split(":", 1)[0] == "event_id"
+    ]
+    if len(event_params) != 1:
+        raise ValueError(
+            f"COMPLEX8 series must contain exactly one direct standard "
+            f"event_id Param: {path}"
+        )
+    event_param = event_params[0]
+    if (
+        event_param.attrib.get("Name") != "event_id:param"
+        or event_param.attrib.get("Type") != "ilwd:char"
+    ):
+        raise ValueError(f"COMPLEX8 series has nonstandard event_id Param: {path}")
+    match = re.fullmatch(
+        r"sngl_inspiral:event_id:(0|[1-9][0-9]*)",
+        event_param.text or "",
+    )
+    if match is None:
+        raise ValueError(f"COMPLEX8 series has noncanonical event_id value: {path}")
+    return match.group(1)
+
+
+def parse_standard_complex8_series(path: Path) -> dict[str, dict]:
+    """Parse normal CoincsDoc series using only its standard event_id Param."""
+    parsed: dict[str, dict] = {}
+    with open_binary_maybe_gzip(path) as handle:
+        for _event, element in ET.iterparse(handle, events=("end",)):
+            if element.tag != "LIGO_LW" or element.attrib.get("Name") != "COMPLEX8TimeSeries":
+                continue
+            event_id = standard_complex8_event_id(element, path)
+            if event_id in parsed:
+                raise ValueError(f"duplicate COMPLEX8 event_id {event_id} in {path}")
+            array = element.find("Array")
+            stream = array.find("Stream") if array is not None else None
+            dims = array.findall("Dim") if array is not None else []
+            if stream is None or not dims:
+                raise ValueError(f"COMPLEX8 event_id {event_id} has no normal array: {path}")
+            tokens = (stream.text or "").split()
+            if len(tokens) % 3:
+                raise ValueError(f"COMPLEX8 event_id {event_id} has malformed triplets: {path}")
+            values = [float(token) for token in tokens]
+            times = values[0::3]
+            real = values[1::3]
+            imag = values[2::3]
+            declared = int((dims[0].text or "0").strip())
+            if declared != len(times) or not times:
+                raise ValueError(
+                    f"COMPLEX8 event_id {event_id} length {len(times)} != {declared}: {path}"
+                )
+            epoch_node = element.find("Time")
+            epoch = float((epoch_node.text or "nan").strip()) if epoch_node is not None else float("nan")
+            delta_t = as_float(dims[0].attrib.get("Scale"))
+            parsed[event_id] = {
+                "t": times,
+                "real": real,
+                "imag": imag,
+                "abs_snr": [math.hypot(r, i) for r, i in zip(real, imag)],
+                "epoch": epoch,
+                "delta_t": delta_t,
+                "length": declared,
+                "source": str(path),
+                "kind": "normal_coincs_complex8",
+                "event_id": event_id,
+            }
+            element.clear()
+    return parsed
+
+
+def worker_from_bankid(bankid: int, start_bank: int, banks_per_worker: int, worker_count: int) -> int:
+    if banks_per_worker < 1 or worker_count < 1:
+        raise ValueError("worker geometry must be positive")
+    delta = bankid - start_bank
+    if delta < 0:
+        raise ValueError(f"bank {bankid} precedes start bank {start_bank}")
+    worker = delta // banks_per_worker
+    if worker >= worker_count:
+        raise ValueError(f"bank {bankid} is outside the worker roster")
+    return worker
+
+
+def coincs_identity(row: dict, worker: int | str) -> tuple[str, ...]:
+    return (
+        normalize_worker_id(str(worker)),
+        str(row.get("ifos", "")),
+        normalized_key_value(row.get("end_time", "")),
+        normalized_key_value(row.get("end_time_ns", "")),
+        normalized_key_value(row.get("bankid", "")),
+        normalized_key_value(row.get("tmplt_idx", "")),
+        normalized_key_value(row.get("event_id", "")),
+    )
+
+
+def parse_normal_coincs_document(
+    path: Path,
+    *,
+    start_bank: int,
+    banks_per_worker: int,
+    worker_count: int,
+) -> dict:
+    match = COINCS_NAME_RE.fullmatch(path.name)
+    if match is None:
+        raise ValueError(f"not a normal CoincsDoc candidate filename: {path}")
+    postcoh_rows = list(parse_postcoh_rows(path))
+    if len(postcoh_rows) != 1:
+        raise ValueError(f"CoincsDoc must contain exactly one Postcoh row: {path}")
+    postcoh = postcoh_rows[0]
+    filename_key = (
+        match.group("ifos"), match.group("end_time"),
+        normalized_key_value(match.group("end_time_ns")), match.group("bankid"),
+        match.group("tmplt_idx"), match.group("event_id"),
+    )
+    row_key = (
+        str(postcoh.get("ifos", "")), normalized_key_value(postcoh.get("end_time")),
+        normalized_key_value(postcoh.get("end_time_ns")), normalized_key_value(postcoh.get("bankid")),
+        normalized_key_value(postcoh.get("tmplt_idx")), normalized_key_value(postcoh.get("event_id")),
+    )
+    if filename_key != row_key:
+        raise ValueError(f"Coincs filename/Postcoh identity mismatch: {path}")
+    bankid = int(row_key[3])
+    # A109 intentionally serializes no worker column.  Worker ownership is
+    # reconstructed from the formal bank roster used by this run.
+    worker = worker_from_bankid(bankid, start_bank, banks_per_worker, worker_count)
+
+    sngl_rows = list(parse_ligolw_table_rows(path, "sngl_inspiral:table"))
+    sngl_by_event: dict[str, dict] = {}
+    ifo_to_event: dict[str, str] = {}
+    for row in sngl_rows:
+        event_id = normalize_xml_event_id(table_field(row, "event_id"))
+        ifo = str(table_field(row, "ifo")).strip()
+        if not event_id or event_id in sngl_by_event or not ifo or ifo in ifo_to_event:
+            raise ValueError(f"invalid/duplicate SnglInspiral identity in {path}")
+        sngl_by_event[event_id] = row
+        ifo_to_event[ifo] = event_id
+
+    map_rows = list(parse_ligolw_table_rows(path, "coinc_event_map:table"))
+    mapped_event_counts: Counter[str] = Counter()
+    for row in map_rows:
+        if str(table_field(row, "table_name")).strip() != "sngl_inspiral":
+            continue
+        event_id = normalize_xml_event_id(table_field(row, "event_id"))
+        if not event_id:
+            raise ValueError(f"invalid SnglInspiral CoincMap event_id in {path}")
+        mapped_event_counts[event_id] += 1
+    series_by_event = parse_standard_complex8_series(path)
+    series_by_ifo: dict[str, dict] = {}
+    for event_id, series in series_by_event.items():
+        if event_id not in sngl_by_event or mapped_event_counts[event_id] == 0:
+            raise ValueError(f"unmapped COMPLEX8 event_id {event_id} in {path}")
+        if mapped_event_counts[event_id] != 1:
+            raise ValueError(f"duplicate CoincMap for COMPLEX8 event_id {event_id} in {path}")
+        ifo = str(table_field(sngl_by_event[event_id], "ifo")).strip()
+        if ifo in series_by_ifo:
+            raise ValueError(f"duplicate COMPLEX8 IFO {ifo} in {path}")
+        series = dict(series)
+        series["ifo"] = ifo
+        series_by_ifo[ifo] = series
+    return {
+        "path": str(path),
+        "identity": coincs_identity(postcoh, worker),
+        "worker": normalize_worker_id(str(worker)),
+        "postcoh": postcoh,
+        "schema_columns": len(postcoh),
+        "sngl_by_event": sngl_by_event,
+        "series_by_ifo": series_by_ifo,
+    }
+
+
+def discover_normal_coincs(
+    run_root: Path,
+    *,
+    start_bank: int,
+    banks_per_worker: int,
+    worker_count: int,
+) -> dict:
+    files = sorted(
+        path for path in (run_root / "run").glob("*.xml*")
+        if COINCS_NAME_RE.fullmatch(path.name)
+    )
+    by_identity: dict[tuple[str, ...], dict] = {}
+    for path in files:
+        document = parse_normal_coincs_document(
+            path,
+            start_bank=start_bank,
+            banks_per_worker=banks_per_worker,
+            worker_count=worker_count,
+        )
+        key = document["identity"]
+        if key in by_identity:
+            raise ValueError(f"duplicate normal CoincsDoc identity: {key}")
+        by_identity[key] = document
+    return {"files": [str(path) for path in files], "by_identity": by_identity}
+
+
+def candidate_identity(candidate: dict) -> tuple[str, ...]:
+    return (
+        normalize_worker_id(candidate.get("_zerolag_worker", "")),
+        str(candidate.get("_zerolag_ifos") or candidate.get("ifos", "")),
+        normalized_key_value(candidate.get("end_time", "")),
+        normalized_key_value(candidate.get("end_time_ns", "")),
+        normalized_key_value(candidate.get("bankid", "")),
+        normalized_key_value(candidate.get("tmplt_idx", "")),
+        normalized_key_value(candidate.get("event_id", "")),
+    )
+
+
+def attach_normal_coincs(
+    candidate: dict | None,
+    coincs: dict,
+    *,
+    snr_series_logfar_threshold: float,
+) -> dict | None:
+    if candidate is None:
+        return None
+    row = dict(candidate)
+    document = coincs["by_identity"].get(candidate_identity(row))
+    far_field = "far_sngl" if row.get("_selection_kind") == "single" else "far_multi"
+    log_field = "log10_far_sngl" if row.get("_selection_kind") == "single" else "log10_far_multi"
+    far = row_far(row, far_field, log_field)
+    expected = far is not None and math.log10(far) <= snr_series_logfar_threshold
+    if document is None:
+        if expected:
+            raise ValueError(f"missing normal CoincsDoc for exact key {candidate_identity(row)}")
+        row["_selection_note"] = "selected FAR is above the normal SNR-series retention threshold"
+        return row
+    ifo = str(row.get("ifo", ""))
+    series = document["series_by_ifo"].get(ifo)
+    if series is None:
+        raise ValueError(f"normal CoincsDoc lacks {ifo} COMPLEX8 series: {document['path']}")
+    row["_selection_source"] = "zerolag_history+normal_coincs"
+    row["_coincs_path"] = document["path"]
+    row["_coincs_schema_columns"] = document["schema_columns"]
+    row["_normal_series"] = series
+    row["_coincs_postcoh"] = document["postcoh"]
+    return row
+
+
 def select_snr_rows(
     zerolag_rows: list[dict],
-    manifest_rows: list[dict],
+    coincs: dict,
     single_far_bases: tuple[str, ...],
     coherent_far_bases: tuple[str, ...],
     *,
     snr_series_logfar_threshold: float,
 ) -> dict[str, dict | None]:
     h1_single = select_history_single_candidate(
-        zerolag_rows,
-        "H1",
-        single_far_bases,
-        coherent_far_bases,
+        zerolag_rows, "H1", single_far_bases, coherent_far_bases
     )
     l1_single = select_history_single_candidate(
-        zerolag_rows,
-        "L1",
-        single_far_bases,
-        coherent_far_bases,
+        zerolag_rows, "L1", single_far_bases, coherent_far_bases
     )
-    multi_components = select_history_multi_components(
-        zerolag_rows,
-        coherent_far_bases,
-    )
-    selected: dict[str, dict | None] = {
-        "h1_single_min_far": attach_manifest_series(h1_single, manifest_rows, "hit_single", snr_series_logfar_threshold),
-        "l1_single_min_far": attach_manifest_series(l1_single, manifest_rows, "hit_single", snr_series_logfar_threshold),
-        "hl_multi_min_far_h1_component": attach_manifest_series(multi_components.get("H1"), manifest_rows, "hit_multi", snr_series_logfar_threshold),
-        "hl_multi_min_far_l1_component": attach_manifest_series(multi_components.get("L1"), manifest_rows, "hit_multi", snr_series_logfar_threshold),
-    }
-    return selected
-
-
-def read_snr_csv(path: Path) -> dict | None:
-    if not path.exists():
-        return None
-    t: list[float] = []
-    y: list[float] = []
-    with path.open(newline="") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            time = as_float(row.get("relative_time_s", row.get("t")))
-            amp = as_float(row.get("abs", row.get("abs_snr")))
-            if not math.isfinite(amp):
-                real = as_float(row.get("real"))
-                imag = as_float(row.get("imag"))
-                if math.isfinite(real) and math.isfinite(imag):
-                    amp = math.hypot(real, imag)
-            if math.isfinite(time) and math.isfinite(amp):
-                t.append(time)
-                y.append(amp)
-    return {"t": t, "abs_snr": y, "source": str(path), "kind": "csv"} if t and y else None
-
-
-def read_template_autocorr_csv(path: Path) -> dict | None:
-    if not path.exists():
-        return None
-    rel_idx: list[float] = []
-    y: list[float] = []
-    with path.open(newline="") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            idx = as_float(row.get("relative_index", row.get("sample_index")))
-            amp = as_float(row.get("abs", row.get("abs_snr")))
-            if not math.isfinite(amp):
-                real = as_float(row.get("real"))
-                imag = as_float(row.get("imag"))
-                if math.isfinite(real) and math.isfinite(imag):
-                    amp = math.hypot(real, imag)
-            if math.isfinite(idx) and math.isfinite(amp):
-                rel_idx.append(idx)
-                y.append(amp)
-    if not rel_idx or not y:
-        return None
+    multi_components = select_history_multi_components(zerolag_rows, coherent_far_bases)
     return {
-        "relative_index": rel_idx,
-        "abs_autocorr": y,
-        "source": str(path),
-        "kind": "template_autocorrelation_csv",
+        "h1_single_min_far": attach_normal_coincs(
+            h1_single, coincs,
+            snr_series_logfar_threshold=snr_series_logfar_threshold,
+        ),
+        "l1_single_min_far": attach_normal_coincs(
+            l1_single, coincs,
+            snr_series_logfar_threshold=snr_series_logfar_threshold,
+        ),
+        "hl_multi_min_far_h1_component": attach_normal_coincs(
+            multi_components.get("H1"), coincs,
+            snr_series_logfar_threshold=snr_series_logfar_threshold,
+        ),
+        "hl_multi_min_far_l1_component": attach_normal_coincs(
+            multi_components.get("L1"), coincs,
+            snr_series_logfar_threshold=snr_series_logfar_threshold,
+        ),
     }
 
 
-def path_looks_xml(path: Path) -> bool:
-    suffixes = "".join(path.suffixes).lower()
-    return ".xml" in suffixes
+def load_series_for_row(row: dict | None) -> dict | None:
+    return row.get("_normal_series") if row else None
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb", buffering=0) as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                return digest.hexdigest()
+            digest.update(block)
 
 
-def open_text_maybe_gzip(path: Path):
-    if "".join(path.suffixes).lower().endswith(".gz"):
-        return gzip.open(path, "rt", errors="replace")
-    return path.open("rt", errors="replace")
+def strict_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key {key}")
+        result[key] = value
+    return result
 
 
-def parse_selected_xml_series(path: Path, ifo: str, event_id: str) -> dict | None:
-    if not path.exists():
-        return None
-    param_re = re.compile(r'<Param Name="([^"]+):param"[^>]*>(.*?)</Param>')
-    in_block = False
-    in_stream = False
-    times: list[float] = []
-    real: list[float] = []
-    imag: list[float] = []
-    params: dict[str, str] = {}
-    with open_text_maybe_gzip(path) as handle:
-        for line in handle:
-            if '<LIGO_LW Name="COMPLEX8TimeSeries">' in line:
-                in_block = True
-                in_stream = False
-                times, real, imag, params = [], [], [], {}
-                continue
-            if not in_block:
-                continue
-            if "<Stream" in line:
-                in_stream = True
-                continue
-            if in_stream:
-                if "</Stream>" in line:
-                    in_stream = False
-                    continue
-                parts = line.strip().split()
-                if len(parts) >= 3:
-                    try:
-                        times.append(float(parts[0]))
-                        real.append(float(parts[1]))
-                        imag.append(float(parts[2]))
-                    except ValueError:
-                        pass
-                continue
-            match = param_re.search(line)
-            if match:
-                params[match.group(1)] = match.group(2)
-                continue
-            if "</LIGO_LW>" in line:
-                block_event = params.get("crashcar_event_id")
-                block_ifo = params.get("instrument")
-                if str(block_event) == str(event_id) and str(block_ifo) == str(ifo):
-                    return {
-                        "t": times,
-                        "abs_snr": [math.hypot(r, i) for r, i in zip(real, imag)],
-                        "source": str(path),
-                        "kind": "xml",
-                        "params": params,
-                    }
-                in_block = False
-    return None
-
-
-def normalize_xml_event_id(value: str | None) -> str:
-    if value is None:
-        return ""
-    text = str(value)
-    if ":" in text:
-        return text.rsplit(":", 1)[-1]
-    return text
-
-
-def parse_template_autocorr_xml(path: Path, row: dict) -> dict | None:
-    if not path.exists():
-        return None
-    target_event = str(row.get("event_id", ""))
-    target_ifo = str(row.get("ifo", ""))
-    target_bank = str(row.get("bankid", ""))
-    target_template = str(row.get("tmplt_idx", ""))
-    param_re = re.compile(r'<Param Name="([^"]+):param"[^>]*>(.*?)</Param>')
-    in_block = False
-    in_stream = False
-    rel_idx: list[float] = []
-    real: list[float] = []
-    imag: list[float] = []
-    params: dict[str, str] = {}
-    fallback: dict | None = None
-    with open_text_maybe_gzip(path) as handle:
-        for line in handle:
-            if '<LIGO_LW Name="COMPLEX8TimeSeries">' in line:
-                in_block = True
-                in_stream = False
-                rel_idx, real, imag, params = [], [], [], {}
-                continue
-            if not in_block:
-                continue
-            if "<Stream" in line:
-                in_stream = True
-                continue
-            if in_stream:
-                if "</Stream>" in line:
-                    in_stream = False
-                    continue
-                parts = line.strip().split()
-                if len(parts) >= 3:
-                    try:
-                        rel_idx.append(float(parts[0]))
-                        real.append(float(parts[1]))
-                        imag.append(float(parts[2]))
-                    except ValueError:
-                        pass
-                continue
-            match = param_re.search(line)
-            if match:
-                params[match.group(1)] = match.group(2)
-                continue
-            if "</LIGO_LW>" in line:
-                if params.get("series_kind") != "template_autocorrelation":
-                    in_block = False
-                    continue
-                block_event = normalize_xml_event_id(
-                    params.get("crashcar_event_id") or params.get("event_id")
-                )
-                block_ifo = str(params.get("instrument", ""))
-                block_bank = str(params.get("bankid", ""))
-                block_template = str(params.get("tmplt_idx", ""))
-                payload = {
-                    "relative_index": rel_idx,
-                    "abs_autocorr": [math.hypot(r, i) for r, i in zip(real, imag)],
-                    "source": str(path),
-                    "kind": "template_autocorrelation_xml",
-                    "params": params,
-                }
-                if block_event == target_event and block_ifo == target_ifo:
-                    return payload
-                if (
-                    fallback is None
-                    and block_ifo == target_ifo
-                    and block_bank == target_bank
-                    and block_template == target_template
-                ):
-                    fallback = payload
-                in_block = False
-    return fallback
-
-
-def snr_path_for_row(default_snr_dir: Path, row: dict, key: str) -> Path:
-    raw = row.get(key) or ""
-    path = Path(raw)
-    if path.is_absolute():
-        return path
-    row_snr_dir = Path(row.get("_snr_dir") or default_snr_dir)
-    return row_snr_dir / path
-
-
-def load_series_for_row(snr_dir: Path, row: dict | None) -> dict | None:
-    if not row:
-        return None
-    series_file = row.get("series_file") or row.get("snr_file")
-    if series_file:
-        series_path = snr_path_for_row(snr_dir, row, "series_file" if row.get("series_file") else "snr_file")
-        if path_looks_xml(series_path):
-            result = parse_selected_xml_series(
-                series_path, row.get("ifo", ""), row.get("event_id", "")
-            )
-        else:
-            result = read_snr_csv(series_path)
-        if result:
-            return result
-    xml_file = row.get("xml_file") or row.get("series_xml")
-    if xml_file:
-        return parse_selected_xml_series(
-            snr_path_for_row(snr_dir, row, "xml_file" if row.get("xml_file") else "series_xml"),
-            row.get("ifo", ""),
-            row.get("event_id", ""),
+def require_exact_keys(value: dict, expected: tuple[str, ...], label: str) -> None:
+    if set(value) != set(expected):
+        raise ValueError(
+            f"{label} keys mismatch: missing={sorted(set(expected) - set(value))} "
+            f"extra={sorted(set(value) - set(expected))}"
         )
-    return None
 
 
-def load_template_for_row(snr_dir: Path, row: dict | None) -> dict | None:
-    if not row:
-        return None
-    for key in ("template_autocorrelation_file", "template_autocorrelation_csv"):
-        template_file = row.get(key)
-        if not template_file:
-            continue
-        result = read_template_autocorr_csv(snr_path_for_row(snr_dir, row, key))
-        if result:
-            return result
-    for key in ("template_autocorrelation_xml_file", "template_autocorrelation_xml"):
-        template_xml = row.get(key)
-        if not template_xml:
-            continue
-        result = parse_template_autocorr_xml(snr_path_for_row(snr_dir, row, key), row)
-        if result:
-            return result
-    for key in ("candidate_xml_file", "xml_file", "series_xml"):
-        candidate_xml = row.get(key)
-        if not candidate_xml:
-            continue
-        result = parse_template_autocorr_xml(snr_path_for_row(snr_dir, row, key), row)
-        if result:
-            return result
-    return None
+def read_bank_autocorrelation_array(path: Path, array_name: str, tmplt_idx: int) -> tuple[list[int], list[float]]:
+    in_array = False
+    in_stream = False
+    dims: list[int] = []
+    selected: list[float] = []
+    count = 0
+    with open_text_maybe_gzip(path) as handle:
+        for line in handle:
+            if not in_array:
+                if f'<Array Name="{array_name}:array"' in line:
+                    in_array = True
+                continue
+            if not in_stream:
+                for dim in re.finditer(r"<Dim(?: [^>]*)?>(\d+)</Dim>", line):
+                    dims.append(int(dim.group(1)))
+                if "<Stream" in line:
+                    if len(dims) != 2 or not 0 <= tmplt_idx < dims[1]:
+                        raise ValueError(f"{array_name} dimensions/template index invalid in {path}")
+                    in_stream = True
+                continue
+            if "</Stream>" in line:
+                break
+            for token in line.split():
+                value = float(token)
+                if count % dims[1] == tmplt_idx:
+                    selected.append(value)
+                count += 1
+    if len(dims) != 2 or count != dims[0] * dims[1] or len(selected) != dims[0]:
+        raise ValueError(f"{array_name} shape/data mismatch in {path}")
+    return dims, selected
 
 
-def load_template_curves(path: Path | None) -> dict[str, dict]:
-    if path is None or not path.exists():
-        return {}
-    doc = json.loads(path.read_text())
-    curves = {}
-    for curve in doc.get("curves", []):
-        panel = curve.get("panel")
-        if not panel:
-            continue
-        curves[panel] = {
-            "relative_time_s": [as_float(v) for v in curve.get("relative_time_s", [])],
-            "autocorr_abs": [as_float(v) for v in curve.get("autocorr_abs", [])],
-        }
-    return curves
+def load_pinned_bank_autocorrelation(
+    bank_dir: Path,
+    row: dict,
+    *,
+    start_bank: int,
+    banks_per_worker: int,
+    worker_count: int,
+) -> dict:
+    ifo = str(row.get("ifo", ""))
+    if ifo not in ("H1", "L1"):
+        raise ValueError(f"single autocorrelation IFO is not H1/L1: {ifo}")
+    bankid = int(normalized_key_value(row.get("bankid", "")))
+    tmplt_idx = int(normalized_key_value(row.get("tmplt_idx", "")))
+    worker = worker_from_bankid(bankid, start_bank, banks_per_worker, worker_count)
+    row_worker = normalize_worker_id(row.get("_zerolag_worker", ""))
+    if row_worker != f"{worker:03d}":
+        raise ValueError("selected row worker/bank roster mismatch")
+    directory_input = Path(bank_dir)
+    directory_info = directory_input.lstat()
+    if stat.S_ISLNK(directory_info.st_mode) or not stat.S_ISDIR(directory_info.st_mode):
+        raise ValueError(f"bank directory is not a real directory: {directory_input}")
+    directory = directory_input.resolve(strict=True)
+    bank_path = directory / f"iir_{ifo}-GSTLAL_SPLIT_BANK_{bankid:04d}-a1-0-0.xml.gz"
+    info = bank_path.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"pinned bank is not a regular non-symlink file: {bank_path}")
+    resolved = bank_path.resolve(strict=True)
+    if resolved.parent != directory:
+        raise ValueError("pinned bank path escaped the exact bank directory")
+    real_dims, real = read_bank_autocorrelation_array(
+        resolved, "autocorrelation_bank_real", tmplt_idx
+    )
+    imag_dims, imag = read_bank_autocorrelation_array(
+        resolved, "autocorrelation_bank_imag", tmplt_idx
+    )
+    if real_dims != imag_dims:
+        raise ValueError(f"real/imag autocorrelation shapes differ in {resolved}")
+    centre = real_dims[0] // 2
+    return {
+        "relative_index": [index - centre for index in range(real_dims[0])],
+        "real": real,
+        "imag": imag,
+        "abs_autocorr": [math.hypot(r, i) for r, i in zip(real, imag)],
+        "source": str(resolved),
+        "sha256": sha256_file(resolved),
+        "kind": "normal_pinned_bank_autocorrelation",
+        "ifo": ifo,
+        "worker": f"{worker:03d}",
+        "bankid": bankid,
+        "tmplt_idx": tmplt_idx,
+        "autochisq_len": real_dims[0],
+        "ntmplt": real_dims[1],
+        "layout": "offset=k*ntmplt+tmplt_idx",
+    }
 
-
-def scaled_template_curve(panel_key: str, row: dict, curves: dict[str, dict], data_y: list[float]) -> tuple[list[float], list[float]] | None:
-    curve = curves.get(panel_key)
-    if not curve:
-        return None
-    times = np.asarray(curve["relative_time_s"], dtype=float)
-    amps = np.asarray(curve["autocorr_abs"], dtype=float)
-    mask = np.isfinite(times) & np.isfinite(amps) & (amps >= 0)
-    times = times[mask]
-    amps = amps[mask]
-    if times.size == 0 or amps.size == 0 or np.nanmax(amps) <= 0:
-        return None
-    scale = finite_positive(row.get("snglsnr"))
-    if scale is None and data_y:
-        scale = max(data_y)
-    if scale is None or scale <= 0:
-        return None
-    return times.tolist(), (amps / np.nanmax(amps) * scale).tolist()
-
-
-def scaled_template_autocorr_from_manifest(
+def scaled_bank_autocorrelation(
     row: dict,
     template_series: dict | None,
     data_t: np.ndarray,
@@ -2135,8 +2220,7 @@ def plot_series_panel(
     title: str,
     row: dict | None,
     series: dict | None,
-    template_curves: dict[str, dict],
-    template_series: dict | None,
+    bank_autocorrelation: dict | None,
 ) -> dict:
     if not row or not series:
         ax.set_facecolor("white")
@@ -2153,7 +2237,7 @@ def plot_series_panel(
         ax.set_title(title, fontweight="bold")
         ax.set_xticks([])
         ax.set_yticks([])
-        return {"available": False, "reason": "missing selected manifest row or series file", "selected_row": compact_snr_row(row)}
+        return {"available": False, "reason": "missing selected normal CoincsDoc series", "selected_row": compact_snr_row(row)}
 
     t = np.asarray(series["t"], dtype=float)
     y = np.asarray(series["abs_snr"], dtype=float)
@@ -2169,13 +2253,9 @@ def plot_series_panel(
         y = y[window]
     snr_ymax = float(np.nanmax(y)) if y.size else SNR_XMIN
     template_source = None
-    template = scaled_template_autocorr_from_manifest(row, template_series, t, y)
-    if template is not None and template_series:
-        template_source = template_series.get("source")
-    if template is None:
-        template = scaled_template_curve(panel_key, row, template_curves, y.tolist())
-        if template is not None:
-            template_source = "template_autocorr_json"
+    template = scaled_bank_autocorrelation(row, bank_autocorrelation, t, y)
+    if template is not None and bank_autocorrelation:
+        template_source = bank_autocorrelation.get("source")
     if template is not None:
         tx = np.asarray(template[0], dtype=float)
         ty = np.asarray(template[1], dtype=float)
@@ -2203,7 +2283,7 @@ def plot_series_panel(
         "event_id": row.get("event_id"),
         "ifo": row.get("ifo"),
         "series_source": series.get("source"),
-        "series_kind": series.get("kind"),
+        "normal_series_type": series.get("kind"),
         "samples": int(t.size),
         "template_autocorr": autocorr,
         "template_autocorr_source": template_source,
@@ -2214,72 +2294,150 @@ def plot_second_2x2(
     run_root: Path,
     output: Path,
     title: str,
-    template_autocorr: Path | None,
     zerolag_rows: list[dict],
     single_far_bases: tuple[str, ...],
     coherent_far_bases: tuple[str, ...],
     *,
     snr_series_logfar_threshold: float,
-    snr_dirs: list[Path] | None = None,
+    start_bank: int,
+    banks_per_worker: int,
+    worker_count: int,
+    bank_dir: Path | None,
 ) -> dict:
-    if snr_dirs is None:
-        candidates = [
-            run_root / "run" / "candidate_events_manifest.csv",
-            run_root / "candidate_events_manifest.csv",
-            *sorted((run_root / "run").glob("[0-9][0-9][0-9]/candidate_events/manifest.csv")),
-            run_root / "run" / "crashcar_candidate_events_manifest.csv",
-            run_root / "crashcar_candidate_events_manifest.csv",
-            run_root / "run" / "candidate_events",
-            run_root / "candidate_events",
-            run_root / "run" / "crashcar_snr_series",
-            run_root / "crashcar_snr_series",
-        ]
-        snr_dirs = [path for path in candidates if path.exists()] or [candidates[0]]
-    else:
-        snr_dirs = [path.resolve() for path in snr_dirs]
-    default_snr_dir = (
-        snr_dirs[0].parent if snr_dirs and snr_dirs[0].is_file()
-        else (snr_dirs[0] if snr_dirs else run_root / "run")
+    coincs = discover_normal_coincs(
+        run_root,
+        start_bank=start_bank,
+        banks_per_worker=banks_per_worker,
+        worker_count=worker_count,
     )
-    manifest = read_manifests(snr_dirs)
     selections = select_snr_rows(
         zerolag_rows,
-        manifest["rows"] if manifest["exists"] else [],
+        coincs,
         single_far_bases,
         coherent_far_bases,
         snr_series_logfar_threshold=snr_series_logfar_threshold,
     )
-    series = {key: load_series_for_row(default_snr_dir, row) for key, row in selections.items()}
-    template_series = {key: load_template_for_row(default_snr_dir, row) for key, row in selections.items()}
-    template_curves = load_template_curves(template_autocorr)
+    series = {key: load_series_for_row(row) for key, row in selections.items()}
+    bank_autocorrelation: dict[str, dict | None] = {}
+    for key, row in selections.items():
+        if row is None or series.get(key) is None:
+            bank_autocorrelation[key] = None
+            continue
+        if bank_dir is None:
+            raise ValueError("--bank-dir is required for exact template autocorrelation")
+        bank_autocorrelation[key] = load_pinned_bank_autocorrelation(
+            bank_dir,
+            row,
+            start_bank=start_bank,
+            banks_per_worker=banks_per_worker,
+            worker_count=worker_count,
+        )
 
     fig, axes = plt.subplots(2, 2, figsize=(16.5, 11.5), constrained_layout=True)
-    fig.suptitle(f"{title}: retained SNR series", fontsize=17, fontweight="bold")
+    fig.suptitle(f"{title}: normal CoincsDoc SNR series", fontsize=17, fontweight="bold")
     panels = {
-        "a": plot_series_panel(axes[0, 0], "single_H1", "Panel (a): H1 single-detector selection", selections.get("h1_single_min_far"), series.get("h1_single_min_far"), template_curves, template_series.get("h1_single_min_far")),
-        "b": plot_series_panel(axes[0, 1], "single_L1", "Panel (b): L1 single-detector selection", selections.get("l1_single_min_far"), series.get("l1_single_min_far"), template_curves, template_series.get("l1_single_min_far")),
-        "c": plot_series_panel(axes[1, 0], "multi_H1", "Panel (c): H1 component of H/L multi selection", selections.get("hl_multi_min_far_h1_component"), series.get("hl_multi_min_far_h1_component"), template_curves, template_series.get("hl_multi_min_far_h1_component")),
-        "d": plot_series_panel(axes[1, 1], "multi_L1", "Panel (d): L1 component of H/L multi selection", selections.get("hl_multi_min_far_l1_component"), series.get("hl_multi_min_far_l1_component"), template_curves, template_series.get("hl_multi_min_far_l1_component")),
+        "a": plot_series_panel(axes[0, 0], "single_H1", "Panel (a): H1 single-detector selection", selections.get("h1_single_min_far"), series.get("h1_single_min_far"), bank_autocorrelation.get("h1_single_min_far")),
+        "b": plot_series_panel(axes[0, 1], "single_L1", "Panel (b): L1 single-detector selection", selections.get("l1_single_min_far"), series.get("l1_single_min_far"), bank_autocorrelation.get("l1_single_min_far")),
+        "c": plot_series_panel(axes[1, 0], "multi_H1", "Panel (c): H1 component of H/L multi selection", selections.get("hl_multi_min_far_h1_component"), series.get("hl_multi_min_far_h1_component"), bank_autocorrelation.get("hl_multi_min_far_h1_component")),
+        "d": plot_series_panel(axes[1, 1], "multi_L1", "Panel (d): L1 component of H/L multi selection", selections.get("hl_multi_min_far_l1_component"), series.get("hl_multi_min_far_l1_component"), bank_autocorrelation.get("hl_multi_min_far_l1_component")),
     }
-    if not manifest["exists"]:
-        fig.text(0.01, 0.01, "Current snapshot has no retained candidate/coinc XML manifest.", fontsize=9, color="0.35")
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=170, bbox_inches="tight")
     plt.close(fig)
     return {
         "plot": str(output),
-        "manifest_exists": manifest["exists"],
-        "manifest_path": manifest["path"],
-        "manifest_paths": manifest["paths"],
-        "manifest_existing_paths": manifest["existing_paths"],
-        "manifest_rows": manifest["row_count"],
-        "manifest_ifo_counts": manifest["ifo_counts"],
+        "normal_coincs_files": coincs["files"],
+        "normal_coincs_count": len(coincs["files"]),
         "panels": panels,
-        "selection_policy": "Each SNR-series panel scans historical zerolag assigned FAR values and selects the minimum event. Single panels use the numeric minimum across single FAR fields; multi panels use the normal SPIIR coherent FAR field priority.",
-        "template_autocorr_sources": {key: (value.get("source") if value else None) for key, value in template_series.items()},
+        "selection_policy": "Historical zerolag FAR selects an exact event; its series is read only from the matching normal CoincsDoc using worker/ifos/time/bank/template/event identity and standard event_id-to-SnglInspiral IFO mapping.",
         "selected_rows": {key: compact_snr_row(row) for key, row in selections.items()},
-        "caveat": "Missing retained SNR-series panels are left blank, but their historical FAR-selected row is reported when available; no replacement curve is synthesized.",
+        "bank_autocorrelation": {
+            key: ({
+                "source": value["source"], "sha256": value["sha256"],
+                "ifo": value["ifo"], "worker": value["worker"],
+                "bankid": value["bankid"], "tmplt_idx": value["tmplt_idx"],
+                "autochisq_len": value["autochisq_len"], "ntmplt": value["ntmplt"],
+                "layout": value["layout"],
+            } if value else None)
+            for key, value in bank_autocorrelation.items()
+        },
+        "caveat": "A selected event below the normal retention threshold must have an exact CoincsDoc series or plotting fails closed; no substitute is synthesized.",
     }
+
+def resolve_panel_a_background_path(
+    run_root: Path,
+    panel_a_worker: str,
+    explicit_background_json: Path | None,
+) -> Path:
+    worker_id = normalize_worker_id(panel_a_worker)
+    if not worker_id.isdigit():
+        raise ValueError(f"invalid Panel-A worker id: {panel_a_worker!r}")
+    if explicit_background_json is not None:
+        return (
+            explicit_background_json
+            if explicit_background_json.is_absolute()
+            else run_root / explicit_background_json
+        )
+    return run_root / "run" / worker_id / "single_background.json"
+
+
+def resolve_live_producer_background_path(
+    producer_root: Path,
+    panel_a_worker: str,
+) -> Path:
+    """Resolve one worker-local live no-injection background product."""
+    worker_id = normalize_worker_id(panel_a_worker)
+    if not worker_id.isdigit():
+        raise ValueError(f"invalid Panel-A worker id: {panel_a_worker!r}")
+    root = Path(producer_root).resolve(strict=True)
+    return root / "run" / worker_id / "single_background.json"
+
+
+def load_requested_panel_a_source(
+    run_root: Path,
+    *,
+    panel_a_source: str,
+    explicit_background_json: Path | None,
+    background_accumulation_seconds: float,
+    max_points: int,
+    panel_a_worker: str,
+    start_bank: int,
+    banks_per_worker: int,
+    worker_count: int,
+    detail_glob: str,
+    ifo_id_map: dict[str, str],
+    panel_a_bg_policy: str,
+) -> dict:
+    if panel_a_source == "background":
+        background_path = resolve_panel_a_background_path(
+            run_root, panel_a_worker, explicit_background_json
+        )
+        return load_panel_a_background_json(
+            background_path,
+            background_accumulation_seconds,
+            max_points,
+            panel_a_worker,
+            start_bank=start_bank,
+            banks_per_worker=banks_per_worker,
+            worker_count=worker_count,
+        )
+    if panel_a_source != "detail":
+        raise ValueError(f"unsupported Panel-A source: {panel_a_source!r}")
+    detail = load_panel_a_detail(
+        run_root,
+        detail_glob,
+        panel_a_worker,
+        ifo_id_map,
+        max_points,
+        panel_a_bg_policy,
+    )
+    if not detail.get("exists") or not detail.get("points"):
+        raise ValueError("explicit diagnostic Panel-A detail source is not plottable")
+    detail = dict(detail)
+    detail["authoritative"] = False
+    detail["metadata_role"] = "diagnostic_only"
+    detail["source_kind"] = "detail_calculated_far_diagnostic"
+    return detail
 
 
 def main() -> None:
@@ -2289,16 +2447,15 @@ def main() -> None:
     parser.add_argument("--run-label", default=None, help="Filename/title stem; default is run root name.")
     parser.add_argument("--stamp", default=None, help="Timestamp suffix; default is current UTC.")
     parser.add_argument("--zerolag-glob", default="run/[0-9][0-9][0-9]/*_zerolag_*.xml.gz")
-    parser.add_argument("--detail-glob", default="run/crashcar_singlefar_detail_worker*.csv")
-    parser.add_argument("--raw-trigger-glob", default=DEFAULT_RAW_TRIGGER_GLOB)
+    parser.add_argument("--detail-glob", default="run/crashcar_singlefar_detail_worker*.csv", help="Non-authoritative diagnostic source used only with --panel-a-source detail.")
     parser.add_argument("--segment-glob", default=DEFAULT_SEGMENT_GLOB)
     parser.add_argument("--panel-a-worker", default="000")
-    parser.add_argument("--panel-a-source", choices=("raw", "detail"), default="raw", help="Use raw reconstructed BG support for panel (a) by default; detail is a legacy diagnostic fallback.")
+    parser.add_argument("--panel-a-source", choices=("background", "detail"), default="background", help="Require authoritative schema4 single_background.json by default; detail is explicit diagnostic-only mode.")
     parser.add_argument("--ifo-id-map", default="0:H1,1:L1,2:V1,3:K1")
     parser.add_argument(
         "--single-far-priority",
         default=",".join(DEFAULT_SINGLE_FAR_BASES),
-        help="Comma-separated single-detector FAR fields; plotting uses the numeric minimum across these fields.",
+        help="Comma-separated existing A107 FAR payload fields; A109 accepts a positive value only on the exact H/HV or L/LV owner route.",
     )
     parser.add_argument(
         "--coherent-far-priority",
@@ -2308,16 +2465,48 @@ def main() -> None:
     parser.add_argument("--snr-series-logfar-threshold", type=float, default=-4.0, help="Threshold used to decide whether a selected historical FAR event is expected to have retained SNR series.")
     parser.add_argument("--background-accumulation-seconds", type=float, default=10800.0, help="BG accumulation window used for panel (a) H/L online fractions.")
     parser.add_argument("--tail-boundary-log10-far", type=float, default=TAIL_BOUNDARY_LOG10_FAR, help=argparse.SUPPRESS)
-    parser.add_argument("--max-panel-a-points", type=int, default=0, help="0 means plot all worker detail support points.")
-    parser.add_argument("--panel-a-bg-policy", choices=("latest", "all"), default="latest", help="Panel (a) defaults to the latest worker BG support per IFO; use all to debug historical BG updates.")
-    parser.add_argument("--shape-map", default=DEFAULT_TEMPLATE_SHAPE_MAP, help="Crashcar template shape CSV with autocorr_power and dof for panel (a) raw BG reconstruction.")
-    parser.add_argument("--background-json", type=Path, default=None, help="Crashcar frozen/background JSON for Panel (a); defaults to run artifacts when present.")
-    parser.add_argument("--template-autocorr-json", type=Path, default=None)
-    parser.add_argument("--snr-dir", action="append", type=Path, default=[], help="Explicit candidate-event manifest or legacy crashcar_snr_series directory; may be repeated.")
-    parser.add_argument("--snr-dir-glob", action="append", default=[], help="Run-root-relative glob for candidate-event manifests or legacy crashcar_snr_series directories; may be repeated.")
+    parser.add_argument("--max-panel-a-points", type=int, default=0, help="0 means plot all authoritative BG support points (or all explicitly selected diagnostic detail points).")
+    parser.add_argument("--panel-a-bg-policy", choices=("latest", "all"), default="latest", help="Policy used only for explicitly selected diagnostic detail; schema4 authority already identifies one BG.")
+    parser.add_argument("--background-json", type=Path, default=None, help="Authoritative single_background.json for Panel (a); defaults to the selected worker's normal run output.")
+    parser.add_argument("--background-producer-root", type=Path, default=None, help="Continuing no-injection producer root; Panel (a) reads its worker-local live single_background.json.")
+    parser.add_argument("--start-bank", type=int, default=None)
+    parser.add_argument("--banks-per-worker", type=int, default=None)
+    parser.add_argument("--worker-count", type=int, default=None)
+    parser.add_argument("--bank-dir", type=Path, default=None)
+    parser.add_argument(
+        "--far-point-view",
+        choices=("fixed", "all"),
+        default="fixed",
+        help="Use the fixed publication view or plot every finite assigned-FAR point with SNR>=4 in panels (b)-(d).",
+    )
     args = parser.parse_args()
+    if not math.isclose(
+        args.tail_boundary_log10_far,
+        TAIL_BOUNDARY_LOG10_FAR,
+        rel_tol=0.0,
+        abs_tol=1.0e-12,
+    ):
+        parser.error("--tail-boundary-log10-far is fixed at -2 by crashcar_numeric")
 
     run_root = args.run_root.resolve()
+    start_bank = 0 if args.start_bank is None else args.start_bank
+    banks_per_worker = 8 if args.banks_per_worker is None else args.banks_per_worker
+    worker_count = 2 if args.worker_count is None else args.worker_count
+
+    background_producer_root = None
+    explicit_background_json = args.background_json
+    if args.background_producer_root is not None:
+        if args.panel_a_source != "background":
+            parser.error("--background-producer-root requires --panel-a-source background")
+        if args.background_json is not None:
+            parser.error("--background-producer-root and --background-json are mutually exclusive")
+        background_producer_root = args.background_producer_root.resolve(strict=True)
+        explicit_background_json = resolve_live_producer_background_path(
+            background_producer_root, args.panel_a_worker
+        )
+    if start_bank < 0 or banks_per_worker < 1 or worker_count < 1:
+        parser.error("invalid worker geometry")
+    bank_dir = args.bank_dir.resolve() if args.bank_dir is not None else None
     output_dir = (args.output_dir or (run_root / "figures")).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     stamp = args.stamp or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -2327,56 +2516,26 @@ def main() -> None:
     single_far_bases = parse_csv_list(args.single_far_priority)
     coherent_far_bases = parse_csv_list(args.coherent_far_priority)
     ifo_id_map = parse_ifo_id_map(args.ifo_id_map)
-    snr_dirs: list[Path] = []
-    for path in args.snr_dir:
-        snr_dirs.append(path if path.is_absolute() else run_root / path)
-    for pattern in args.snr_dir_glob:
-        snr_dirs.extend(sorted(path for path in run_root.glob(pattern) if path.is_dir() or path.is_file()))
-
     zerolag = load_zerolag(run_root, args.zerolag_glob)
-    panel_a_detail = load_panel_a_detail(run_root, args.detail_glob, args.panel_a_worker, ifo_id_map, args.max_panel_a_points, args.panel_a_bg_policy)
-    if args.panel_a_source == "raw":
-        background_json_candidates = []
-        if args.background_json is not None:
-            background_json_candidates.append(args.background_json if args.background_json.is_absolute() else run_root / args.background_json)
-        background_json_candidates.extend(
-            [
-                run_root / "artifacts" / "crashcar_day1_last_bg3h_full_background.json",
-                run_root / "bg_noinj" / "artifacts" / "crashcar_day1_last_bg3h_full_background.json",
-            ]
-        )
-        panel_a = {}
-        for background_json in background_json_candidates:
-            if not background_json.exists():
-                continue
-            panel_a = load_panel_a_background_json(
-                background_json,
-                args.background_accumulation_seconds,
-                args.max_panel_a_points,
-                args.panel_a_worker,
-            )
-            if panel_a.get("points"):
-                break
-        shape_map_path = Path(args.shape_map)
-        if not shape_map_path.is_absolute():
-            shape_map_path = run_root / shape_map_path
-        if not panel_a.get("points"):
-            panel_a = build_panel_a_raw_background(
-                run_root,
-                args.raw_trigger_glob,
-                args.panel_a_worker,
-                panel_a_detail,
-                args.segment_glob,
-                args.background_accumulation_seconds,
-                args.max_panel_a_points,
-                shape_map_path,
-            )
-        if not panel_a.get("exists"):
-            panel_a = panel_a_detail
-            panel_a["source_kind"] = "detail_direct_far_proxy_fallback"
-    else:
-        panel_a = panel_a_detail
-        panel_a["source_kind"] = "detail_direct_far_proxy"
+    panel_a = load_requested_panel_a_source(
+        run_root,
+        panel_a_source=args.panel_a_source,
+        explicit_background_json=explicit_background_json,
+        background_accumulation_seconds=args.background_accumulation_seconds,
+        max_points=args.max_panel_a_points,
+        panel_a_worker=args.panel_a_worker,
+        start_bank=start_bank,
+        banks_per_worker=banks_per_worker,
+        worker_count=worker_count,
+        detail_glob=args.detail_glob,
+        ifo_id_map=ifo_id_map,
+        panel_a_bg_policy=args.panel_a_bg_policy,
+    )
+    if background_producer_root is not None:
+        panel_a = dict(panel_a)
+        panel_a["source_kind"] = "live_no_injection_single_background"
+        panel_a["metadata_role"] = "authoritative_live_no_injection_background"
+        panel_a["background_producer_root"] = str(background_producer_root)
     background_window = infer_background_window(zerolag, args.background_accumulation_seconds)
     online_summary = load_online_summary(run_root, args.segment_glob, background_window)
     panel_a_online_summary = panel_a.get("online_summary") or load_panel_a_online_summary(run_root, args.segment_glob, panel_a)
@@ -2391,28 +2550,35 @@ def main() -> None:
 
     first_plot = output_dir / f"{safe_label}_first_2x2_zerolag_current_{stamp}.png"
     second_plot = output_dir / f"{safe_label}_second_2x2_snr_current_{stamp}.png"
-    first = plot_first_2x2(first_payload, first_plot, label, TAIL_BOUNDARY_LOG10_FAR)
+    first = plot_first_2x2(
+        first_payload,
+        first_plot,
+        label,
+        args.tail_boundary_log10_far,
+        far_point_view=args.far_point_view,
+    )
     second = plot_second_2x2(
         run_root,
         second_plot,
         label,
-        args.template_autocorr_json,
         zerolag["rows"],
         single_far_bases,
         coherent_far_bases,
         snr_series_logfar_threshold=args.snr_series_logfar_threshold,
-        snr_dirs=snr_dirs or None,
+        start_bank=start_bank,
+        banks_per_worker=banks_per_worker,
+        worker_count=worker_count,
+        bank_dir=bank_dir,
     )
 
     meta = {
         "created_utc": stamp,
         "run_root": str(run_root),
         "run_label": label,
-        "note_contract": "Eric-bless-crashcar.pdf Section 4.1 two crashcar 2x2 plotting rules",
+        "note_contract": "crashcar_workflow.pdf plotting contract plus current user rulings",
         "parameters": {
             "zerolag_glob": args.zerolag_glob,
             "detail_glob": args.detail_glob,
-            "raw_trigger_glob": args.raw_trigger_glob,
             "segment_glob": args.segment_glob,
             "panel_a_worker": args.panel_a_worker,
             "panel_a_source": args.panel_a_source,
@@ -2421,15 +2587,23 @@ def main() -> None:
             "coherent_far_priority": coherent_far_bases,
             "snr_series_logfar_threshold": args.snr_series_logfar_threshold,
             "background_accumulation_seconds": args.background_accumulation_seconds,
-            "tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
-            "tail_boundary_source": "fixed_code_constant",
+            "tail_boundary_log10_far": args.tail_boundary_log10_far,
+            "tail_boundary_source": "shared_crashcar_numeric.TAIL_FAR",
             "max_panel_a_points": args.max_panel_a_points,
             "panel_a_bg_policy": args.panel_a_bg_policy,
-            "shape_map": str(args.shape_map),
-            "background_json": str(args.background_json) if args.background_json else None,
-            "template_autocorr_json": str(args.template_autocorr_json) if args.template_autocorr_json else None,
-            "snr_dirs": [str(path) for path in snr_dirs],
-            "snr_dir_globs": args.snr_dir_glob,
+            "background_json": (
+                str(explicit_background_json)
+                if explicit_background_json is not None else None
+            ),
+            "background_producer_root": (
+                str(background_producer_root)
+                if background_producer_root is not None else None
+            ),
+            "start_bank": start_bank,
+            "banks_per_worker": banks_per_worker,
+            "worker_count": worker_count,
+            "bank_dir": str(args.bank_dir) if args.bank_dir else None,
+            "far_point_view": args.far_point_view,
         },
         "first": first,
         "second": second,

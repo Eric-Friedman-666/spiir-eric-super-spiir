@@ -11,6 +11,7 @@
 
 #include <ifo_set.h>
 #include <pipe_macro.h>
+#include <postcohtable.h>
 #include <stdio.h>
 
 // Suppresses a warning that only occurs on NVCC
@@ -35,6 +36,41 @@
 
 G_BEGIN_DECLS
 
+#define CRASHCAR_SHA256_HEX_LENGTH 64
+
+typedef enum {
+    CRASHCAR_SINGLE_FAR_SOURCE_NONE = 0,
+    CRASHCAR_SINGLE_FAR_SOURCE_COMPLETED_BG = 1,
+    CRASHCAR_SINGLE_FAR_SOURCE_FROZEN_BG = 2,
+    CRASHCAR_SINGLE_FAR_SOURCE_COMPLETED_BG_TAIL_FIT = 3,
+    CRASHCAR_SINGLE_FAR_SOURCE_FROZEN_BG_TAIL_FIT = 4,
+    CRASHCAR_SINGLE_FAR_SOURCE_LIVE_BG = 5,
+    CRASHCAR_SINGLE_FAR_SOURCE_LIVE_BG_TAIL_FIT = 6
+} CrashcarSingleFarSource;
+
+typedef enum {
+    CRASHCAR_SINGLE_FAR_STATUS_NOT_EVALUATED = 0,
+    CRASHCAR_SINGLE_FAR_STATUS_ASSIGNED = 1,
+    CRASHCAR_SINGLE_FAR_STATUS_PENDING_BG = 2,
+    CRASHCAR_SINGLE_FAR_STATUS_FAILED_BG = 3,
+    CRASHCAR_SINGLE_FAR_STATUS_NOT_ELIGIBLE = 4,
+    CRASHCAR_SINGLE_FAR_STATUS_UNSUPPORTED = 5,
+    CRASHCAR_SINGLE_FAR_STATUS_FAILED_LLR = 6,
+    CRASHCAR_SINGLE_FAR_STATUS_FAILED_OUTPUT_POLICY = 7,
+    CRASHCAR_SINGLE_FAR_STATUS_PRESERVED_LEGACY = 8,
+    CRASHCAR_SINGLE_FAR_STATUS_BG_ONLY = 9,
+    CRASHCAR_SINGLE_FAR_STATUS_FAILED_INPUT = 10,
+    CRASHCAR_SINGLE_FAR_STATUS_LLR_ONLY_MULTI = 11
+} CrashcarSingleFarStatus;
+
+typedef enum {
+    CRASHCAR_SINGLE_AUTHORITY_MODE_UNSET = 0,
+    CRASHCAR_SINGLE_AUTHORITY_MODE_CAUSAL_NOINJ = 1,
+    CRASHCAR_SINGLE_AUTHORITY_MODE_BG_ONLY = 2,
+    CRASHCAR_SINGLE_AUTHORITY_MODE_FROZEN_ASSIGNMENT = 3,
+    CRASHCAR_SINGLE_AUTHORITY_MODE_LIVE_READONLY = 4
+} CrashcarSingleAuthorityMode;
+
 #define CRASHCAR_SINGLEFAR_TYPE (crashcar_singlefar_get_type())
 #define CRASHCAR_SINGLEFAR(obj)                                                \
     (G_TYPE_CHECK_INSTANCE_CAST((obj), CRASHCAR_SINGLEFAR_TYPE,                \
@@ -52,19 +88,64 @@ typedef struct {
 } CrashcarSinglefarClass;
 
 typedef struct {
-    double autocorr_power;
-    gboolean has_autocorr_power;
+    double a_eff;
+    gboolean has_a_eff;
+    double dof;
+    gboolean has_dof;
 } CrashcarTemplateShape;
 
 typedef struct {
+    double calculated_far;
+    double assigned_far;
+    double r_tail;
+    double tail_slope;
+    double tail_intercept;
+    gboolean used_tail_fit;
+} CrashcarSingleFarEvaluation;
+
+typedef enum {
+    CRASHCAR_SINGLE_FINAL_ROUTE_INVALID = 0,
+    CRASHCAR_SINGLE_FINAL_ROUTE_H1 = 1,
+    CRASHCAR_SINGLE_FINAL_ROUTE_L1 = 2,
+    CRASHCAR_SINGLE_FINAL_ROUTE_MULTI = 3,
+    CRASHCAR_SINGLE_FINAL_ROUTE_V1_ONLY = 4
+} CrashcarSingleFinalRoute;
+
+typedef struct {
     double rank;
-    double gps;
+    gint64 gps_ns;
+    /*
+     * Scientific-availability fence: a support point scored at shared GPS T
+     * may enter only authorities published for a strictly later shared GPS.
+     * This is independent of when files or input paths become visible.
+     */
+    gint64 available_after_gps_ns;
 } CrashcarSupportPoint;
 
 typedef struct {
-    double start_gps;
-    double end_gps;
+    gint64 start_gps_ns;
+    gint64 end_gps_ns;
 } CrashcarLivetimeSegment;
+
+typedef struct {
+    gboolean valid;
+    guint64 version;
+    gint64 epoch_gps_ns;
+    gint64 window_start_gps_ns;
+    gint64 window_end_gps_ns;
+    gint64 livetime_ns;
+    GArray *ranks;
+} CrashcarCompletedAuthorityIfo;
+
+typedef enum {
+    CRASHCAR_LIVE_REFRESH_NONE = 0,
+    CRASHCAR_LIVE_REFRESH_ADOPTED = 1,
+    CRASHCAR_LIVE_REFRESH_UNCHANGED = 2,
+    CRASHCAR_LIVE_REFRESH_REJECTED_READ = 3,
+    CRASHCAR_LIVE_REFRESH_REJECTED_SCHEMA = 4,
+    CRASHCAR_LIVE_REFRESH_REJECTED_VERSION = 5,
+    CRASHCAR_LIVE_REFRESH_REJECTED_FUTURE = 6
+} CrashcarLiveRefreshStatus;
 
 typedef struct {
     GstBaseTransform element;
@@ -73,29 +154,68 @@ typedef struct {
     int nifo;
     ifo_set_type enabled_ifos;
 
+    int stream_id;
+    int stream_count;
+    int stream_bank_id;
+    char *worker_bank_ids;
+    GArray *worker_bank_id_values;
+    gboolean graph_binding_locked;
+
     gboolean enabled;
     double dof;
     double log10_far_threshold;
-    double snr_series_log10_far_threshold;
-    double min_snr;
-    double far_floor_count;
     double livetime_step;
     double background_window_seconds;
     double background_required_seconds;
     double background_update_seconds;
     double snapshot_interval_seconds;
     double data_start_gps;
+    gint64 background_window_ns;
+    gint64 background_required_ns;
+    gint64 background_update_ns;
+    gint64 snapshot_interval_ns;
     gboolean have_livetime_segments;
+    gboolean segment_livetime_binding_valid;
+    gint64 segment_run_start_gps_ns;
+    gint64 segment_run_end_gps_ns;
+    char segment_source_xml_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    char segment_livetime_json_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    int worker_id;
+    int background_worker_count;
+    gint64 background_origin_gps_ns;
+    CrashcarSingleAuthorityMode authority_mode;
+    gboolean background_binding_valid;
+    char run_namespace_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    char source_manifest_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    char runtime_manifest_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    char config_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    char background_segment_xml_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    char background_segment_canonical_sha256[
+      CRASHCAR_SHA256_HEX_LENGTH + 1];
+    char template_shape_map_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    /* SHA-256 of the currently selected complete single-background bytes. */
+    char background_file_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
+    char *background_json_fname;
+    gboolean live_single_background_readonly;
+    gboolean live_lkg_valid;
+    guint64 live_lkg_version;
+    gint64 live_lkg_epoch_gps_ns;
+    gint64 live_lkg_window_start_gps_ns;
+    gint64 live_lkg_window_end_gps_ns;
+    gint64 live_last_refresh_attempt_gps_ns;
+    gint64 live_last_refresh_success_gps_ns;
+    guint64 live_refresh_reject_count;
+    CrashcarLiveRefreshStatus live_last_refresh_status;
+    char live_last_reject_reason[160];
+    guint64 live_last_candidate_version;
+    gint64 live_last_candidate_coverage_gps_ns;
+    char live_last_candidate_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1];
     double livetime[MAX_NIFO];
     GArray *ranks[MAX_NIFO];
     GArray *support_points[MAX_NIFO];
     GArray *livetime_segments[MAX_NIFO];
-    gboolean frozen_single_background;
-    gboolean frozen_support_loaded;
-    double frozen_livetime[MAX_NIFO];
-    GArray *frozen_ranks[MAX_NIFO];
-    GArray *frozen_fit_ranks[MAX_NIFO];
-    GArray *frozen_fit_log_fars[MAX_NIFO];
+    /* Per-element immutable snapshot used for one single FAR calculation. */
+    CrashcarCompletedAuthorityIfo completed_authority[MAX_NIFO];
 
     char *template_shape_map_fname;
     GHashTable *template_shape_map;
@@ -107,6 +227,35 @@ typedef struct {
 } CrashcarSinglefar;
 
 GType crashcar_singlefar_get_type(void);
+gboolean crashcar_singlefar_ifos_valid(const char *ifos);
+CrashcarSingleFinalRoute crashcar_singlefar_final_route_from_ifos(
+  const char *ifos);
+gboolean crashcar_singlefar_route_assigns_ifo(
+  CrashcarSingleFinalRoute route,
+  int ifo_id);
+gboolean crashcar_singlefar_dof_for_bank(int bankid, double *dof_out);
+gboolean crashcar_singlefar_parse_template_shape_row(
+  const char *line,
+  int *ifo_id,
+  int *bankid,
+  int *tmplt_idx,
+  double *a_eff,
+  double *dof);
+guint crashcar_singlefar_beta_grid_size(void);
+gboolean crashcar_singlefar_beta_at(guint index, double *beta_out);
+gboolean crashcar_singlefar_compute_llr(double rho,
+                                        double chisq,
+                                        double a_eff,
+                                        double dof,
+                                        double *llr_out);
+gboolean crashcar_singlefar_evaluate_far(
+  const double *ranks,
+  guint rank_count,
+  double livetime,
+  double rank,
+  CrashcarSingleFarEvaluation *evaluation);
+void crashcar_singlefar_prepare_row_llrs(PostcohInspiralTable *table);
+guint crashcar_singlefar_support_count(int ifo_id);
 
 G_END_DECLS
 

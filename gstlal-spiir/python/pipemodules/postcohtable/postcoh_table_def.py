@@ -92,6 +92,42 @@ class PostcohInspiralTable(table.Table):
     next_id = 0
 
 
+POSTCOH_SCHEMA_MODE_LEGACY_A107 = "legacy-a107"
+POSTCOH_SCHEMA_MODE_CRASHCAR_A109 = "crashcar-a109"
+POSTCOH_A107_COLUMN_PAIRS = tuple(
+    PostcohInspiralTable.validcolumns.items())
+
+POSTCOH_A109_SUFFIX_COLUMN_PAIRS = (
+    ("H1_LLR", "real_8"),
+    ("L1_LLR", "real_8"),
+)
+POSTCOH_A109_COLUMN_PAIRS = (
+    POSTCOH_A107_COLUMN_PAIRS + POSTCOH_A109_SUFFIX_COLUMN_PAIRS)
+
+if (len(POSTCOH_A107_COLUMN_PAIRS) != 107 or
+        len(POSTCOH_A109_COLUMN_PAIRS) != 109 or
+        len(dict(POSTCOH_A109_COLUMN_PAIRS)) != 109 or
+        POSTCOH_A109_COLUMN_PAIRS[:107] != POSTCOH_A107_COLUMN_PAIRS or
+        POSTCOH_A109_COLUMN_PAIRS[107:] !=
+        POSTCOH_A109_SUFFIX_COLUMN_PAIRS):
+    raise RuntimeError("invalid Postcoh A107/A109 registry")
+
+# Row wrappers expose the exact A109 union.  Output code explicitly requests
+# immutable A107 or A109; no ambient environment selects a schema.
+PostcohInspiralTable.validcolumns = dict(POSTCOH_A109_COLUMN_PAIRS)
+
+
+def postcoh_columns_for_schema_mode(schema_mode):
+    if schema_mode == POSTCOH_SCHEMA_MODE_LEGACY_A107:
+        pairs = POSTCOH_A107_COLUMN_PAIRS
+    elif schema_mode == POSTCOH_SCHEMA_MODE_CRASHCAR_A109:
+        pairs = POSTCOH_A109_COLUMN_PAIRS
+    else:
+        raise ValueError("unknown explicit Postcoh schema mode %r" %
+                         (schema_mode,))
+    return tuple(name for name, unused_kind in pairs)
+
+
 class PostcohInspiral(table.Table.RowType):
     __slots__ = list(PostcohInspiralTable.validcolumns.keys())
 
@@ -138,10 +174,9 @@ def use_in(ContentHandler):
 	<class 'ligo.lw.lsctables.MyContentHandler'>
 	"""
 
-    # need to comment out the next clause in case there are other use_in performed
-    # e.g. lsctables.use_in before this use_in
-    # ContentHandler = table.use_in(ContentHandler)
-    raise NotImplementedError
+    # This hook is intentionally composable with lsctables.use_in.  It only
+    # intercepts the custom postcoh table name and delegates every other table
+    # to the previously installed handler.
 
     def startTable(self,
                    parent,

@@ -94,5 +94,11 @@ typedef struct tagPostcohInspiralTable {
     REAL4 f_final;
     COMPLEX8TimeSeries
       *snr_series_list[MAX_NIFO]; // snr series data around peak
+    /*
+     * Crashcar A109 suffix.  Appending two binary64 scalars preserves every
+     * normal A107 field offset and byte.  V1/K1 have no single LLR column.
+     */
+    REAL8 H1_LLR;
+    REAL8 L1_LLR;
 } PostcohInspiralTable;
 #endif /* __POSTCOH_TABLE_H */

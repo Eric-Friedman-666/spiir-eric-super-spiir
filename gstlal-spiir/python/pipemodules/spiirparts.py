@@ -52,6 +52,48 @@ def _env_bool(name, default=False):
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _cohfar_graph_stage_policy(multi_background_frozen, background_only):
+    """Select normal cohfar stages for rolling, BG-only, and frozen modes."""
+    if multi_background_frozen and background_only:
+        raise ValueError(
+            "background-only mode cannot use frozen multi/coherent background")
+    return (not multi_background_frozen, not background_only)
+
+
+def _crashcar_worker_bank_layout(banks):
+    """Return the exact graph stream-to-bank mapping for one worker."""
+
+    if not banks or len(banks) > 384:
+        raise ValueError("crashcar requires a nonempty worker bank roster")
+    stream_bank_ids = []
+    for stream_id, bank_dict in enumerate(banks):
+        if not bank_dict:
+            raise ValueError(
+                "crashcar stream %d has no detector bank mapping" % stream_id)
+        detector_bank_ids = set()
+        for instrument, bank_list in bank_dict.items():
+            if len(bank_list) != 1:
+                raise ValueError(
+                    "crashcar stream %d detector %s must have exactly one bank"
+                    % (stream_id, instrument))
+            bank_id = int(
+                spiir_utils.get_bankid_from_bankname(bank_list[0]))
+            if bank_id < 0 or bank_id >= 384:
+                raise ValueError(
+                    "crashcar stream %d detector %s bank %d is out of scope"
+                    % (stream_id, instrument, bank_id))
+            detector_bank_ids.add(bank_id)
+        if len(detector_bank_ids) != 1:
+            raise ValueError(
+                "crashcar stream %d detector banks disagree: %r"
+                % (stream_id, sorted(detector_bank_ids)))
+        stream_bank_ids.append(detector_bank_ids.pop())
+    if len(set(stream_bank_ids)) != len(stream_bank_ids):
+        raise ValueError(
+            "crashcar worker bank roster contains duplicate bank ids")
+    return tuple(stream_bank_ids)
+
+
 def mkSPIIRmulti(
     pipeline,
     detectors,
@@ -668,6 +710,26 @@ def mkPostcohSPIIROnline(pipeline,
     for instrument in banks[0].keys():
         ifos += str(instrument)
 
+    crashcar_enabled = _env_bool("CRASHCAR_ENABLE", False)
+    multi_background_frozen = _env_bool(
+        "CRASHCAR_MULTI_BACKGROUND_FROZEN", False)
+    crashcar_bg_only = _env_bool("CRASHCAR_BG_ONLY", False)
+    (accumulate_multi_background,
+     assign_multi_far) = _cohfar_graph_stage_policy(
+         multi_background_frozen,
+         crashcar_bg_only)
+    crashcar_worker_bank_ids = (
+        _crashcar_worker_bank_layout(banks)
+        if crashcar_enabled else ())
+    crashcar_worker_bank_ids_csv = ",".join(
+        str(bank_id) for bank_id in crashcar_worker_bank_ids)
+    expected_worker_bank_ids = os.environ.get(
+        "CRASHCAR_WORKER_BANK_IDS_EXPECTED", "")
+    if (crashcar_enabled and
+            expected_worker_bank_ids != crashcar_worker_bank_ids_csv):
+        raise ValueError(
+            "instantiated bank roster differs from authenticated worker binding")
+
     # format of banks :	[{'H1': <H1Bank0>; 'L1': <L1Bank0>..;}
     # 			 {'H1': <H1Bank1>; 'L1': <L1Bank1>..;}
     # 			 ...]
@@ -781,35 +843,37 @@ def mkPostcohSPIIROnline(pipeline,
             postcoh = pipeparts.mkprogressreport(
                 pipeline, postcoh, "progress_xml_dump_bank_stream%d" % i_dict)
 
-        if cohfar_accumbackground_output_prefix is None:
-            postcoh = pipemodules.mkcohfar_accumbackground(
+        if accumulate_multi_background:
+            if cohfar_accumbackground_output_prefix is None:
+                postcoh = pipemodules.mkcohfar_accumbackground(
+                    pipeline,
+                    postcoh,
+                    ifos=ifos,
+                    hist_trials=cuda_postcoh_hist_trials,
+                    output_prefix=None,
+                    output_name=cohfar_accumbackground_output_name[i_dict],
+                    snapshot_interval=cohfar_accumbackground_snapshot_interval,
+                )
+            else:
+                postcoh = pipemodules.mkcohfar_accumbackground(
+                    pipeline,
+                    postcoh,
+                    ifos=ifos,
+                    hist_trials=cuda_postcoh_hist_trials,
+                    output_prefix=cohfar_accumbackground_output_prefix[i_dict],
+                    output_name=None,
+                    snapshot_interval=cohfar_accumbackground_snapshot_interval,
+                )
+        if assign_multi_far:
+            postcoh = pipemodules.mkcohfar_assignfar(
                 pipeline,
                 postcoh,
                 ifos=ifos,
-                hist_trials=cuda_postcoh_hist_trials,
-                output_prefix=None,
-                output_name=cohfar_accumbackground_output_name[i_dict],
-                snapshot_interval=cohfar_accumbackground_snapshot_interval,
+                assignfar_refresh_interval=cohfar_assignfar_refresh_interval,
+                silent_time=cohfar_assignfar_silent_time,
+                input_fname=cohfar_assignfar_input_fname,
             )
-        else:
-            postcoh = pipemodules.mkcohfar_accumbackground(
-                pipeline,
-                postcoh,
-                ifos=ifos,
-                hist_trials=cuda_postcoh_hist_trials,
-                output_prefix=cohfar_accumbackground_output_prefix[i_dict],
-                output_name=None,
-                snapshot_interval=cohfar_accumbackground_snapshot_interval,
-            )
-        postcoh = pipemodules.mkcohfar_assignfar(
-            pipeline,
-            postcoh,
-            ifos=ifos,
-            assignfar_refresh_interval=cohfar_assignfar_refresh_interval,
-            silent_time=cohfar_assignfar_silent_time,
-            input_fname=cohfar_assignfar_input_fname,
-        )
-        if _env_bool("CRASHCAR_ENABLE", False):
+        if crashcar_enabled:
             crashcar_worker_id = int(os.environ.get(
                 "SINGLE_WORKER_GROUP",
                 os.environ.get("SLURM_ARRAY_TASK_ID", i_dict),
@@ -824,15 +888,18 @@ def mkPostcohSPIIROnline(pipeline,
                 stream=i_dict,
                 stream03d="%03d" % i_dict,
             )
-            # Run after coherent FAR assignment so crashcar is the final writer
-            # for detector-local FAR columns before the Python finalsink applies
-            # its normal clustering and output snapshots.
+            # Assignment modes run after normal coherent FAR assignment.
+            # BG-only deliberately omits assignfar but keeps the normal
+            # accumulator before this same-row single-background update.
+            # FinalSink then receives the same Postcoh stream in every mode.
             postcoh = pipemodules.mkcrashcar_singlefar(
                 pipeline,
                 postcoh,
-                ifos=ifos,
+                # The crashcar single-detector branch is intentionally H/L
+                # only.  Keep V/K available to the unchanged coherent branch,
+                # but never enable them in crashcar_singlefar.
+                ifos="H1L1",
                 enabled=True,
-                dof=float(os.environ.get("CRASHCAR_DOF", "120.0")),
                 detail_output_fname=crashcar_detail_output_fname,
                 template_shape_map_fname=(
                     os.environ.get("CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME") or None
@@ -840,15 +907,13 @@ def mkPostcohSPIIROnline(pipeline,
                 log10_far_threshold=float(
                     os.environ.get("CRASHCAR_LOG10_FAR_THRESHOLD", "-4.0"),
                 ),
-                min_snr=float(
-                    os.environ.get("CRASHCAR_MIN_SNR", str(cuda_postcoh_snglsnr_thresh)),
-                ),
-                far_floor_count=float(
-                    os.environ.get("CRASHCAR_FAR_FLOOR_COUNT", "1.0"),
-                ),
                 livetime_step=float(
                     os.environ.get("CRASHCAR_LIVETIME_STEP", "1.0"),
                 ),
+                stream_id=i_dict,
+                stream_count=len(crashcar_worker_bank_ids),
+                stream_bank_id=crashcar_worker_bank_ids[i_dict],
+                worker_bank_ids=crashcar_worker_bank_ids_csv,
             )
         # head = mkpostcohfilesink(pipeline, postcoh, location = output_prefix[i_dict], compression = 1, snapshot_interval = snapshot_interval)
         triggersrcs.append(postcoh)

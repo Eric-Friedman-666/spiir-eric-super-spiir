@@ -40,21 +40,13 @@ RUN_ID=${run_id:-${RUN_ID:-${run_slug:-${RUN_SLUG:-crashcar}}}}
 RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
 RUN_ROOT=${run_root:-${RUN_ROOT:-"${SAVE_DIR}/${RUN_ID}/${RUN_TIMESTAMP}"}}
 SOURCE_ROOT_VALUE=${ROOT_VALUE}
-if [ -d "${SOURCE_ROOT_VALUE}/single_detector_sidecar/online_single_llrfar_wguo_refined" ]; then
-    SIDECAR_HELPER_DIR="${SOURCE_ROOT_VALUE}/single_detector_sidecar/online_single_llrfar_wguo_refined"
-else
-    SIDECAR_HELPER_DIR="${SOURCE_ROOT_VALUE}/gstlal-spiir/single_detector_sidecar/online_single_llrfar_wguo_refined"
-fi
 
 copy_crashcar_script() {
     local script=$1
     local src="${SCRIPT_DIR}/${script}"
-    if [ ! -f "${src}" ] && [ -f "${SIDECAR_HELPER_DIR}/${script}" ]; then
-        src="${SIDECAR_HELPER_DIR}/${script}"
-    fi
     if [ ! -f "${src}" ]; then
-        printf 'crashcar: missing staged helper %s; checked %s and %s\n' \
-            "${script}" "${SCRIPT_DIR}" "${SIDECAR_HELPER_DIR}" >&2
+        printf 'crashcar: missing crashcar-owned helper %s under %s; sidecar fallback is forbidden\n' \
+            "${script}" "${SCRIPT_DIR}" >&2
         exit 2
     fi
     cp "${src}" "${RUN_ROOT}/scripts/${script}"
@@ -71,21 +63,11 @@ for script in \
     crashcar.sh \
     crashcar_controller.sh \
     crashcar_frozen_injection_workflow.sh \
+    crashcar_live_background.py \
     crashcar_sbatch.sh \
     crashcar_pipeline.sh \
-    filter_injection_xml_by_gps.py \
-    materialize_frozen_single_support.py \
-    materialize_snr_autocorrelation.py \
-    single_detector_far.py \
     dump_segment_livetime_csv.py \
-    plot_single_llr_far.py \
-    export_template_shape_map.py \
-    update_single_background_once.sh \
-    extract_crashcar_detail_features.py \
-    extract_zerolag_features.py \
-    assign_frozen_far_ledger.py \
-    merge_worker_far_ledgers.py \
-    patch_zerolag_single_far_from_ledger.py; do
+    export_template_shape_map.py; do
     copy_crashcar_script "${script}"
 done
 cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.env"
@@ -95,19 +77,9 @@ chmod +x \
     "${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh" \
     "${RUN_ROOT}/scripts/crashcar_sbatch.sh" \
     "${RUN_ROOT}/scripts/crashcar_pipeline.sh" \
-    "${RUN_ROOT}/scripts/filter_injection_xml_by_gps.py" \
-    "${RUN_ROOT}/scripts/materialize_frozen_single_support.py" \
-    "${RUN_ROOT}/scripts/materialize_snr_autocorrelation.py" \
-    "${RUN_ROOT}/scripts/single_detector_far.py" \
     "${RUN_ROOT}/scripts/dump_segment_livetime_csv.py" \
-    "${RUN_ROOT}/scripts/plot_single_llr_far.py" \
-    "${RUN_ROOT}/scripts/export_template_shape_map.py" \
-    "${RUN_ROOT}/scripts/update_single_background_once.sh" \
-    "${RUN_ROOT}/scripts/extract_crashcar_detail_features.py" \
-    "${RUN_ROOT}/scripts/extract_zerolag_features.py" \
-    "${RUN_ROOT}/scripts/assign_frozen_far_ledger.py" \
-    "${RUN_ROOT}/scripts/merge_worker_far_ledgers.py" \
-    "${RUN_ROOT}/scripts/patch_zerolag_single_far_from_ledger.py"
+    "${RUN_ROOT}/scripts/export_template_shape_map.py"
+chmod 0555 "${RUN_ROOT}/scripts/crashcar_live_background.py"
 
 INJECTION_MODE_RAW=${injection_mode:-${INJECTION_MODE:-False}}
 case "$(printf '%s' "${INJECTION_MODE_RAW}" | tr '[:upper:]' '[:lower:]')" in
@@ -121,7 +93,7 @@ esac
 INTERNAL_STAGE=${crashcar_internal_stage:-${CRASHCAR_INTERNAL_STAGE:-0}}
 if [ "${INJECTION_MODE_NORMALIZED}" = "True" ] && [ "${INTERNAL_STAGE}" != "1" ]; then
     CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh"
-    CONTROLLER_NAME="frozen injection workflow"
+    CONTROLLER_NAME="live background injection workflow"
 else
     CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_controller.sh"
     CONTROLLER_NAME="single-stage controller"

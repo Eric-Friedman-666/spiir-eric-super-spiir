@@ -17,8 +17,14 @@ import json
 import math
 import os
 import pickle
+import re
 import sys
 import time
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+import crashcar_numeric
 
 try:
     from gstlal.pipemodules import pipe_macro
@@ -43,9 +49,11 @@ FLAG_EMPTY = 2
 
 LOG_ZERO = -1.0e300
 DEFAULT_EFFECTIVE_DOF = 120.0
-WGUO_BETA_MIN = 0.003
-WGUO_BETA_MAX = 0.03
-WGUO_BETA_GRID_SIZE = 10
+WGUO_BETA_MIN = crashcar_numeric.BETA_MIN
+WGUO_BETA_MAX = (
+    crashcar_numeric.BETA_MIN
+    + crashcar_numeric.BETA_STEP * (crashcar_numeric.BETA_COUNT - 1))
+WGUO_BETA_GRID_SIZE = crashcar_numeric.BETA_COUNT
 
 FAR_SOURCE_FIT_LOOKUP = "fit_lookup"
 FAR_SOURCE_BOOTSTRAP_DIRECT = "bootstrap_direct"
@@ -619,7 +627,7 @@ def features_from_feature_csv_row(row,
         ])
         if not is_finite_positive(rho) or not is_finite_positive(chisq):
             continue
-        if float(rho) < min_snr:
+        if float(rho) <= min_snr:
             continue
         source_info = dict(row)
         if source_row_index is not None:
@@ -1075,48 +1083,121 @@ def split_ifos(ifos):
     return tuple(ifos)
 
 
-def load_autocorr_power_map(filename):
-    """Load optional template-dependent sum_delta |C|^2 values.
+FORMAL_TEMPLATE_SHAPE_FIELDS = (
+    "ifo_id", "bankid", "tmplt_idx", "autocorr_power", "dof", "ifo",
+    "source_class",
+)
+FORMAL_TEMPLATE_SHAPE_MAX_PAYLOAD_BYTES = 1022
+FORMAL_TEMPLATE_SHAPE_ASCII_WHITESPACE = " \t\r\n\v\f"
+FORMAL_POSITIVE_DECIMAL_RE = re.compile(
+    r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z")
 
-    The map is deliberately permissive because the exact bank-side export format
-    may evolve.  JSON may be either a dictionary of key -> value or a list of
-    objects with fields such as ifo, bankid, tmplt_idx, and autocorr_power.  CSV
-    uses the same object-style fields.
-    """
+
+def _ascii_strip(value):
+    return str(value).strip(FORMAL_TEMPLATE_SHAPE_ASCII_WHITESPACE)
+
+
+def _formal_positive_decimal(value, name):
+    if isinstance(value, bool):
+        raise ValueError("%s must be a formal positive decimal" % name)
+    if isinstance(value, string_types):
+        text = _ascii_strip(value)
+        if not FORMAL_POSITIVE_DECIMAL_RE.match(text):
+            raise ValueError("%s must be a formal positive decimal" % name)
+        parsed = float(text)
+    else:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("%s must be a formal positive decimal" % name)
+    if (not math.isfinite(parsed) or parsed <= 0.0
+            or parsed < sys.float_info.min):
+        raise ValueError(
+            "%s must be finite, positive and non-subnormal" % name)
+    return parsed
+
+
+def _strip_one_formal_line_terminator(line):
+    if line.endswith("\n"):
+        line = line[:-1]
+        if line.endswith("\r"):
+            line = line[:-1]
+    elif line.endswith("\r"):
+        line = line[:-1]
+    return line
+
+
+def _iter_lf_delimited_lines(text):
+    start = 0
+    while start < len(text):
+        newline = text.find("\n", start)
+        if newline < 0:
+            yield text[start:]
+            return
+        yield text[start:newline + 1]
+        start = newline + 1
+
+
+def load_autocorr_power_map(filename):
+    """Load the exact seven-column crashcar template-shape CSV."""
 
     if not filename:
         return {}
     if not os.path.exists(filename):
         raise ValueError("autocorr power file does not exist: %s" % filename)
 
-    if filename.endswith(".json"):
-        with open(filename, "r") as input_file:
-            data = json.load(input_file)
-        if isinstance(data, dict):
-            return dict((str(key), float(value))
-                        for key, value in data.items()
-                        if is_finite_positive(value))
-        if isinstance(data, list):
-            return autocorr_power_rows_to_map(data)
-        raise ValueError("unsupported autocorr power JSON structure")
-
-    with open_csv_for_read(filename) as input_file:
-        return autocorr_power_rows_to_map(csv.DictReader(input_file))
+    with open(filename, "rb") as input_file:
+        raw_content = input_file.read()
+    text_content = raw_content.decode("utf-8", errors="strict")
+    if text_content:
+        retained_lines = []
+        for line_number, line in enumerate(
+                _iter_lf_delimited_lines(text_content), 1):
+            payload = _strip_one_formal_line_terminator(line)
+            if (len(payload.encode("utf-8")) >
+                    FORMAL_TEMPLATE_SHAPE_MAX_PAYLOAD_BYTES):
+                raise ValueError(
+                    "overlong template-shape CSV row %d" % line_number)
+            if "\x00" in payload:
+                raise ValueError(
+                    "embedded NUL in template-shape CSV row %d" % line_number)
+            if "\r" in payload or "\n" in payload:
+                raise ValueError(
+                    "invalid template-shape line terminator at row %d" %
+                    line_number)
+            stripped = payload.lstrip(FORMAL_TEMPLATE_SHAPE_ASCII_WHITESPACE)
+            if (not stripped.strip(FORMAL_TEMPLATE_SHAPE_ASCII_WHITESPACE)
+                    or stripped.startswith("#")):
+                continue
+            if '"' in payload:
+                raise ValueError(
+                    "quoted template-shape CSV field at row %d" % line_number)
+            retained_lines.append((line_number, payload))
+        if not retained_lines:
+            raise ValueError("template-shape CSV is empty")
+        exact_header = ",".join(FORMAL_TEMPLATE_SHAPE_FIELDS)
+        raw_header = retained_lines[0][1]
+        if raw_header != exact_header:
+            raise ValueError("template-shape CSV header is not exact")
+        reader = csv.DictReader(
+            line for _line_number, line in retained_lines)
+        if tuple(reader.fieldnames or ()) != FORMAL_TEMPLATE_SHAPE_FIELDS:
+            raise ValueError("template-shape CSV header is not the exact formal schema")
+        return autocorr_power_rows_to_map(reader)
+    raise ValueError("template-shape CSV is empty")
 
 
 def load_template_shape_map(autocorr_power_file=None, bank_stats_dir=None,
                             ifos=None):
-    """Load per-template shape amplitude and effective degrees of freedom.
+    """Load only the formal exporter CSV used by the online C branch."""
 
-    The original prototype accepted a simple key -> A_m map.  Wguo's branch also
-    carries template-dependent degrees of freedom in pickle files.  The online
-    single branch can use both without changing the upstream postcoh stream.
-    """
-
-    mapping = {}
-    mapping.update(load_autocorr_power_map(autocorr_power_file))
-    mapping.update(load_wguo_bank_stats_map(bank_stats_dir, ifos=ifos))
-    return mapping
+    if bank_stats_dir:
+        raise ValueError(
+            "bank-stats fallback is not authoritative; export the formal "
+            "seven-column template-shape CSV first")
+    if not autocorr_power_file:
+        return {}
+    return load_autocorr_power_map(autocorr_power_file)
 
 
 def load_wguo_bank_stats_map(directory, ifos=None):
@@ -1175,19 +1256,52 @@ def load_wguo_bank_stats_map(directory, ifos=None):
 
 def autocorr_power_rows_to_map(rows):
     mapping = {}
-    for row in rows:
-        value = (row.get("autocorr_power") or row.get("power")
-                 or row.get("sum_abs_c_sq") or row.get("sum_c_sq"))
-        if not is_finite_positive(value):
-            continue
-        ifo = row.get("ifo") or row.get("instrument")
-        bankid = row.get("bankid") or row.get("bank_id")
-        tmplt_idx = row.get("tmplt_idx") or row.get("template_id")
-        direct_key = row.get("key")
-        for key in autocorr_power_keys(ifo, bankid, tmplt_idx):
-            mapping[key] = float(value)
-        if direct_key is not None:
-            mapping[str(direct_key)] = float(value)
+    for row_number, row in enumerate(rows, 2):
+        if (not isinstance(row, dict)
+                or set(row.keys()) != set(FORMAL_TEMPLATE_SHAPE_FIELDS)):
+            raise ValueError(
+                "template-shape row %d does not have the exact formal fields" %
+                row_number)
+        if any(row[field] is None for field in FORMAL_TEMPLATE_SHAPE_FIELDS):
+            raise ValueError(
+                "template-shape row %d has a missing field" % row_number)
+        ifo_id = crashcar_numeric.strict_nonnegative_integer(
+            row["ifo_id"], "ifo_id")
+        bankid = crashcar_numeric.strict_nonnegative_integer(
+            row["bankid"], "bankid")
+        tmplt_idx = crashcar_numeric.strict_nonnegative_integer(
+            row["tmplt_idx"], "tmplt_idx")
+        ifo = _ascii_strip(row["ifo"])
+        if not ((ifo_id == 0 and ifo == "H1")
+                or (ifo_id == 1 and ifo == "L1")):
+            raise ValueError(
+                "template-shape row %d has conflicting ifo_id/ifo" %
+                row_number)
+        source_class, required_dof = crashcar_numeric.source_class_and_dof(
+            bankid)
+        if _ascii_strip(row["source_class"]) != source_class:
+            raise ValueError(
+                "template-shape row %d has conflicting source_class" %
+                row_number)
+        autocorr_power = _formal_positive_decimal(
+            row["autocorr_power"], "A_eff")
+        mapped_dof = _formal_positive_decimal(row["dof"], "dof")
+        if mapped_dof != required_dof:
+            raise ValueError(
+                "template-shape row %d has conflicting dof" % row_number)
+        key = "%s:%d:%d" % (ifo, bankid, tmplt_idx)
+        if key in mapping:
+            raise ValueError(
+                "duplicate exact template-shape tuple at row %d" % row_number)
+        mapping[key] = {
+            "ifo_id": ifo_id,
+            "ifo": ifo,
+            "bankid": bankid,
+            "tmplt_idx": tmplt_idx,
+            "autocorr_power": autocorr_power,
+            "dof": required_dof,
+            "source_class": source_class,
+        }
     return mapping
 
 
@@ -1211,6 +1325,16 @@ def autocorr_power_keys(ifo, bankid, tmplt_idx):
     return keys
 
 
+def exact_template_shape_keys(ifo, bankid, tmplt_idx):
+    if ifo not in ("H1", "L1"):
+        raise ValueError("single-detector template map supports only H1/L1")
+    bankid = crashcar_numeric.strict_nonnegative_integer(bankid, "bankid")
+    tmplt_idx = crashcar_numeric.strict_nonnegative_integer(
+        tmplt_idx, "tmplt_idx")
+    crashcar_numeric.source_class_and_dof(bankid)
+    return ["%s:%d:%d" % (ifo, bankid, tmplt_idx)]
+
+
 def normalized_index_strings(value, width=None):
     if value is None:
         return []
@@ -1232,27 +1356,47 @@ def normalized_index_strings(value, width=None):
 def lookup_autocorr_power(mapping, ifo, bankid, tmplt_idx):
     if not mapping:
         return None
-    for key in autocorr_power_keys(ifo, bankid, tmplt_idx):
+    for key in exact_template_shape_keys(ifo, bankid, tmplt_idx):
         if key in mapping:
-            value = mapping[key]
-            if isinstance(value, dict):
-                value = (value.get("autocorr_power") or value.get("power")
-                         or value.get("am"))
-            if is_finite_positive(value):
-                return float(value)
+            entry = _validated_template_shape_entry(
+                mapping[key], ifo, bankid, tmplt_idx)
+            return entry["autocorr_power"]
     return None
 
 
 def lookup_template_dof(mapping, ifo, bankid, tmplt_idx):
     if not mapping:
-        return None
-    for key in autocorr_power_keys(ifo, bankid, tmplt_idx):
-        if key in mapping and isinstance(mapping[key], dict):
-            value = (mapping[key].get("dof") or mapping[key].get("nu")
-                     or mapping[key].get("effective_dof"))
-            if is_finite_positive(value):
-                return float(value)
-    return None
+        raise ValueError("exact template-shape mapping is required")
+    for key in exact_template_shape_keys(ifo, bankid, tmplt_idx):
+        if key in mapping:
+            entry = _validated_template_shape_entry(
+                mapping[key], ifo, bankid, tmplt_idx)
+            return entry["dof"]
+    raise ValueError("missing exact template-shape mapping")
+
+
+def _validated_template_shape_entry(entry, ifo, bankid, tmplt_idx):
+    if not isinstance(entry, dict):
+        raise ValueError("template-shape entry must preserve row metadata")
+    bankid = crashcar_numeric.strict_nonnegative_integer(bankid, "bankid")
+    tmplt_idx = crashcar_numeric.strict_nonnegative_integer(
+        tmplt_idx, "tmplt_idx")
+    source_class, required_dof = crashcar_numeric.source_class_and_dof(bankid)
+    if (entry.get("ifo") != ifo
+            or entry.get("ifo_id") != (0 if ifo == "H1" else 1)
+            or entry.get("bankid") != bankid
+            or entry.get("tmplt_idx") != tmplt_idx
+            or entry.get("source_class") != source_class):
+        raise ValueError("template-shape entry identity/class mismatch")
+    autocorr_power = _formal_positive_decimal(
+        entry.get("autocorr_power"), "A_eff")
+    mapped_dof = _formal_positive_decimal(entry.get("dof"), "dof")
+    if mapped_dof != required_dof:
+        raise ValueError("template dof conflicts with controlled bank class")
+    return {
+        "autocorr_power": autocorr_power,
+        "dof": required_dof,
+    }
 
 
 def is_finite_positive(value):
@@ -1292,7 +1436,11 @@ def features_from_postcoh_row(row, ifos=None, min_snr=0.0,
 
         if rho is None or chisq is None:
             continue
-        if float(rho) < min_snr or float(chisq) <= 0.0:
+        if not is_finite_number(rho) or not is_finite_number(chisq):
+            raise ValueError(
+                "nonfinite detector feature for %s" % ifo)
+        if (float(rho) <= 0.0 or float(chisq) <= 0.0
+                or float(rho) <= min_snr):
             continue
 
         features.append(
@@ -1410,6 +1558,9 @@ class SingleDetectorBranch(object):
         self.background_window_seconds = background_window_seconds
         self.fit_min_points = int(fit_min_points)
         self.far_floor_count = float(far_floor_count)
+        if not math.isclose(self.far_floor_count, 1.0,
+                            rel_tol=0.0, abs_tol=1.0e-15):
+            raise ValueError("R7 requires a fixed one-count FAR floor")
         self.far_fit_boundary = float(far_fit_boundary)
         self.use_fitted_far = False
         self.background = dict(
@@ -1422,12 +1573,28 @@ class SingleDetectorBranch(object):
         return self.llr_feature(feature, autocorr_power)
 
     def llr_feature(self, feature, autocorr_power=None):
+        if (not is_finite_positive(feature.rho)
+                or not is_finite_positive(feature.chisq)):
+            raise ValueError("rho and chisq must be finite and positive")
         if autocorr_power is None:
             autocorr_power = feature.autocorr_power
-        feature.dof = self.likelihood_model.dof
-        return self.likelihood_model.rank(feature.rho, feature.chisq,
-                                          autocorr_power, ifo=feature.ifo,
-                                          dof=self.likelihood_model.dof)
+        if not is_finite_positive(autocorr_power):
+            raise ValueError(
+                "missing/invalid exact A_eff for %s bank=%s template=%s" %
+                (feature.ifo, feature.bankid, feature.tmplt_idx))
+        _source_class, required_dof = crashcar_numeric.source_class_and_dof(
+            feature.bankid)
+        if (feature.dof is not None
+                and (not is_finite_positive(feature.dof)
+                     or float(feature.dof) != required_dof)):
+            raise ValueError("template dof conflicts with controlled bank class")
+        feature.dof = required_dof
+        llr = self.likelihood_model.rank(
+            feature.rho, feature.chisq, autocorr_power, ifo=feature.ifo,
+            dof=required_dof)
+        if not is_finite_number(llr):
+            raise ValueError("nonfinite Gaussian single-detector LLR")
+        return float(llr)
 
     def add_livetime(self, seconds, ifos=None, gps=None):
         for ifo in tuple(ifos or self.ifos):
@@ -1603,14 +1770,20 @@ def make_default_likelihood_model():
 
 
 def make_likelihood_model_from_args(args):
-    fixed_dof = getattr(args, "dof", None)
-    if fixed_dof is None:
-        fixed_dof = args.signal_dof or args.noise_dof or DEFAULT_EFFECTIVE_DOF
-    if not is_finite_positive(fixed_dof):
-        raise ValueError("dof must be finite and positive")
+    if (int(args.beta_grid_size) != WGUO_BETA_GRID_SIZE
+            or not math.isclose(float(args.beta_max), WGUO_BETA_MAX,
+                                rel_tol=0.0, abs_tol=1.0e-15)):
+        raise ValueError("R7 requires exactly 64 beta values 0.003..0.192")
+    if (not math.isclose(float(args.snr_log_weight), 0.5,
+                         rel_tol=0.0, abs_tol=1.0e-15)
+            or not math.isclose(float(args.rank_offset), 0.0,
+                                rel_tol=0.0, abs_tol=1.0e-15)):
+        raise ValueError("R7 Gaussian LLR requires rho^2/2 and zero offset")
     return SingleDetectorLikelihoodModel(
-        signal_dof=fixed_dof,
-        noise_dof=fixed_dof,
+        # Legacy constructor metadata only. rank_feature() supplies the
+        # authoritative bank-class dof for every row.
+        signal_dof=DEFAULT_EFFECTIVE_DOF,
+        noise_dof=DEFAULT_EFFECTIVE_DOF,
         beta_grid=uniform_beta_grid(args.beta_max, args.beta_grid_size),
         beta_weights=None,
         default_autocorr_power=args.default_autocorr_power,
@@ -1806,7 +1979,7 @@ class SingleDetectorLikelihoodModel(object):
 
     x = nu_eff * chi_r^2 is approximated as Gaussian under both hypotheses.
     The H0 noncentrality is rho_m^2 A_eff and the H1 term marginalizes
-    beta^2 rho_m^2 A_eff over beta=0.003,...,0.03.  The supplied A_eff is
+    beta^2 rho_m^2 A_eff over beta=0.003,...,0.192.  The supplied A_eff is
     sqrt(sum_delta |C_{j,m}(Delta)|^2) and is not squared again.
     """
 
@@ -1830,6 +2003,13 @@ class SingleDetectorLikelihoodModel(object):
             raise ValueError("Gaussian single-detector LLR requires one fixed dof")
         self.dof = self.signal_dof
         self.beta_grid = list(beta_grid or [0.0])
+        required_beta_grid = crashcar_numeric.beta_grid()
+        if (len(self.beta_grid) != len(required_beta_grid)
+                or any(not math.isclose(float(actual), expected,
+                                        rel_tol=0.0, abs_tol=1.0e-15)
+                       for actual, expected in zip(
+                           self.beta_grid, required_beta_grid))):
+            raise ValueError("R7 requires exactly 64 beta values 0.003..0.192")
         if beta_weights is None:
             self.beta_weights = [1.0] * len(self.beta_grid)
         else:
@@ -1837,6 +2017,11 @@ class SingleDetectorLikelihoodModel(object):
         self.default_autocorr_power = float(default_autocorr_power)
         self.snr_log_weight = float(snr_log_weight)
         self.rank_offset = float(rank_offset)
+        if (not math.isclose(self.snr_log_weight, 0.5,
+                             rel_tol=0.0, abs_tol=1.0e-15)
+                or not math.isclose(self.rank_offset, 0.0,
+                                    rel_tol=0.0, abs_tol=1.0e-15)):
+            raise ValueError("R7 requires rho^2/2 and zero LLR offset")
         self.noise_beta = float(noise_beta)
         self.ncx2_max_terms = int(ncx2_max_terms)
         self.noise_dof_calibration = {}
@@ -1844,12 +2029,27 @@ class SingleDetectorLikelihoodModel(object):
 
         if len(self.beta_grid) != len(self.beta_weights):
             raise ValueError("beta_grid and beta_weights must have same length")
-        if sum(self.beta_weights) <= 0.0:
-            raise ValueError("beta_weights must have positive total weight")
+        converted_weights = []
+        for weight in self.beta_weights:
+            try:
+                converted = float(weight)
+            except (TypeError, ValueError):
+                raise ValueError("beta weights must be finite and positive")
+            if not math.isfinite(converted) or converted <= 0.0:
+                raise ValueError("beta weights must be finite and positive")
+            converted_weights.append(converted)
+        first_weight = converted_weights[0]
+        if any(weight != first_weight for weight in converted_weights):
+            raise ValueError("R7 requires exactly equal beta weights")
 
-        total_weight = float(sum(self.beta_weights))
-        self.beta_weights = [float(w) / total_weight
-                             for w in self.beta_weights]
+        exact_weight = 1.0 / float(len(converted_weights))
+        self.beta_weights = [exact_weight] * len(converted_weights)
+        normalized_sum = math.fsum(self.beta_weights)
+        if (not math.isfinite(normalized_sum) or normalized_sum <= 0.0
+                or any(not math.isfinite(weight) or weight <= 0.0
+                       or weight != exact_weight
+                       for weight in self.beta_weights)):
+            raise ValueError("invalid normalized beta weights")
 
     def to_dict(self):
         return {
@@ -1899,10 +2099,14 @@ class SingleDetectorLikelihoodModel(object):
         self.signal_dof_calibration = calibration or {}
 
     def noise_dof_for(self, rho, ifo=None, dof=None):
-        return self.noise_dof
+        if dof not in (120.0, 600.0):
+            raise ValueError("row dof must be derived from controlled bankid")
+        return float(dof)
 
     def signal_dof_for(self, rho, ifo=None, dof=None):
-        return self.signal_dof
+        if dof not in (120.0, 600.0):
+            raise ValueError("row dof must be derived from controlled bankid")
+        return float(dof)
 
     def _dof_for(self, rho, ifo, calibration, default):
         candidates = []
@@ -1922,9 +2126,9 @@ class SingleDetectorLikelihoodModel(object):
         return float(default)
 
     def base_noncentrality(self, rho, autocorr_power=None):
-        scale = self.default_autocorr_power
-        if autocorr_power is not None:
-            scale = float(autocorr_power)
+        if not is_finite_positive(autocorr_power):
+            raise ValueError("exact finite positive A_eff is required")
+        scale = float(autocorr_power)
         return float(rho) * float(rho) * scale
 
     def log_signal_shape_pdf(self, rho, chisq, autocorr_power=None, ifo=None,
@@ -1954,13 +2158,18 @@ class SingleDetectorLikelihoodModel(object):
 
     def log_likelihood_ratio(self, rho, chisq, autocorr_power=None, ifo=None,
                              dof=None):
+        if not is_finite_positive(rho) or not is_finite_positive(chisq):
+            raise ValueError("rho and chisq must be finite and positive")
         shape_llr = (
             self.log_signal_shape_pdf(rho, chisq, autocorr_power, ifo=ifo,
                                       dof=dof)
             - self.log_noise_shape_pdf(rho, chisq, autocorr_power, ifo=ifo,
                                        dof=dof))
         snr_llr = self.snr_log_weight * float(rho) * float(rho)
-        return shape_llr + snr_llr + self.rank_offset
+        llr = shape_llr + snr_llr + self.rank_offset
+        if not is_finite_number(llr):
+            raise ValueError("nonfinite Gaussian single-detector LLR")
+        return float(llr)
 
     def rank(self, rho, chisq, autocorr_power=None, ifo=None, dof=None):
         return self.log_likelihood_ratio(rho, chisq, autocorr_power, ifo=ifo,
@@ -2189,6 +2398,9 @@ class RankBackground(object):
         self.background_triggers = []
         self.fit_min_points = int(fit_min_points)
         self.far_floor_count = float(far_floor_count)
+        if not math.isclose(self.far_floor_count, 1.0,
+                            rel_tol=0.0, abs_tol=1.0e-15):
+            raise ValueError("R7 requires a fixed one-count FAR floor")
         self.far_fit_boundary = float(far_fit_boundary)
         self.far_fit_pretail_boundary = float(far_fit_pretail_boundary)
         self._fit_cache = None
@@ -2197,12 +2409,17 @@ class RankBackground(object):
         self._fit_cache = None
 
     def add_rank(self, rank):
+        if not is_finite_number(rank):
+            raise ValueError("background rank must be finite")
         bisect.insort(self._ranks, float(rank))
         self._invalidate_fit_cache()
 
     def extend_ranks(self, ranks):
-        for rank in ranks:
-            bisect.insort(self._ranks, float(rank))
+        converted = [float(rank) for rank in ranks]
+        if any(not is_finite_number(rank) for rank in converted):
+            raise ValueError("background ranks must all be finite")
+        for rank in converted:
+            bisect.insort(self._ranks, rank)
         self._invalidate_fit_cache()
 
     def reset_rank_support(self):
@@ -2212,8 +2429,13 @@ class RankBackground(object):
         self._invalidate_fit_cache()
 
     def add_livetime(self, seconds, gps=None):
+        if not is_finite_positive(seconds):
+            raise ValueError("detector livetime increment must be finite and positive")
         seconds = float(seconds)
-        self.livetime += seconds
+        candidate_livetime = self.livetime + seconds
+        if not is_finite_positive(candidate_livetime):
+            raise ValueError("cumulative detector livetime must remain finite")
+        self.livetime = candidate_livetime
         if gps is not None:
             self.livetime_segments.append({
                 "gps": json_safe_float(gps),
@@ -2371,42 +2593,30 @@ class RankBackground(object):
 
     def far_with_source(self, rank, use_fit=True):
         if use_fit:
-            fitted = self.fitted_far(rank)
-            if fitted is not None:
-                return fitted, FAR_SOURCE_FIT_LOOKUP
+            try:
+                evaluation = crashcar_numeric.evaluate_far(
+                    self._ranks, self.livetime, rank)
+            except ValueError:
+                return float("inf"), FAR_SOURCE_UNASSIGNED
+            assigned = evaluation["assigned_far"]
+            if assigned is None:
+                return float("inf"), FAR_SOURCE_UNASSIGNED
+            if evaluation["used_tail_fit"]:
+                return assigned, FAR_SOURCE_FIT_LOOKUP
+            return assigned, FAR_SOURCE_DIRECT_EMPIRICAL
 
         direct = self.direct_far(rank)
         if direct == float("inf"):
             return direct, FAR_SOURCE_UNASSIGNED
-        if use_fit:
-            return direct, FAR_SOURCE_DIRECT_FALLBACK
         return direct, FAR_SOURCE_BOOTSTRAP_DIRECT
 
     def fitted_far(self, llr):
-        fit = self._fitted_log10_far_curve()
-        if fit is None:
+        try:
+            evaluation = crashcar_numeric.evaluate_far(
+                self._ranks, self.livetime, llr)
+        except ValueError:
             return None
-        xs, log_fars, tail_slope, tail_intercept = fit
-        llr = float(llr)
-        idx = bisect.bisect_left(xs, llr)
-        if idx <= 0:
-            log_far = log_fars[0]
-        elif idx >= len(xs):
-            if tail_slope is not None and tail_intercept is not None:
-                log_far = tail_slope * llr + tail_intercept
-            else:
-                log_far = log_fars[-1]
-        else:
-            x0 = xs[idx - 1]
-            x1 = xs[idx]
-            y0 = log_fars[idx - 1]
-            y1 = log_fars[idx]
-            if x1 == x0:
-                log_far = min(y0, y1)
-            else:
-                weight = (llr - x0) / (x1 - x0)
-                log_far = y0 + weight * (y1 - y0)
-        return math.pow(10.0, log_far)
+        return evaluation["assigned_far"]
 
     @staticmethod
     def _median(values):

@@ -16,9 +16,6 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 from collections import deque
-import csv
-import gzip
-import html
 import math
 import threading
 import sys
@@ -59,6 +56,7 @@ from ligo.lw.utils import process as ligolw_process
 from ligo.lw.utils import segments as ligolw_segments
 
 import lal
+import lal.series
 from lal import LIGOTimeGPS
 
 from gstlal import bottle
@@ -71,86 +69,206 @@ lsctables.LIGOTimeGPS = LIGOTimeGPS
 logger = logging.getLogger(__name__)
 
 
-def _env_truthy(name, default=False):
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip() in ("1", "true", "TRUE", "yes", "YES", "on", "ON")
+def _crashcar_single_snr_eligible(snr, threshold=4.0):
+    try:
+        value = float(snr)
+        minimum = float(threshold)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(value) and math.isfinite(minimum) and value >= minimum
 
 
-_TEMPLATE_AUTOCORR_BANK_CACHE = {}
+def _crashcar_real4_projection_or_none(value):
+    """Return a positive finite REAL4 projection, else the XML-NULL case."""
+    try:
+        exact = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (exact > 0.0 and math.isfinite(exact)):
+        return None
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        projected = float(np.float32(exact))
+    if not (projected > 0.0 and math.isfinite(projected)):
+        return None
+    return projected
 
 
-def _read_text_maybe_gzip(path):
-    with open(path, "rb") as handle:
-        magic = handle.read(2)
-    if magic == b"\x1f\x8b":
-        with gzip.open(path, "rt", errors="ignore") as handle:
-            return handle.read()
-    with open(path, "rt", errors="ignore") as handle:
-        return handle.read()
+def _crashcar_valid_sha256(value):
+    return bool(re.fullmatch(r"[0-9a-f]{64}", str(value or "")))
 
 
-def _write_text_maybe_gzip(path, text):
-    if str(path).endswith(".gz"):
-        with gzip.open(path, "wt") as handle:
-            handle.write(text)
-        return
-    with open(path, "wt") as handle:
-        handle.write(text)
+_CRASHCAR_FINAL_ROUTE_BY_IFOS = {
+    "H1": "H1_SINGLE",
+    "H1V1": "H1_SINGLE",
+    "L1": "L1_SINGLE",
+    "L1V1": "L1_SINGLE",
+    "H1L1": "MULTI",
+    "H1L1V1": "MULTI",
+    "V1": "V1_ONLY",
+}
 
 
-def _parse_ligolw_array(text, name):
-    match = re.search(
-        r"<Array\b[^>]*Name=\"%s\"[^>]*>(.*?)</Array>" %
-        re.escape(name),
-        text,
-        flags=re.DOTALL)
-    if not match:
-        raise ValueError("array %s not found" % name)
-    block = match.group(1)
-    dims = [
-        int(value)
-        for value in re.findall(r"<Dim\b[^>]*>\s*(\d+)\s*</Dim>", block)
-    ]
-    if len(dims) < 2:
-        raise ValueError("array %s has fewer than two dimensions" % name)
-    stream = re.search(r"<Stream\b[^>]*>(.*?)</Stream>",
-                       block,
-                       flags=re.DOTALL)
-    if stream is None:
-        raise ValueError("array %s has no stream" % name)
-    values = [float(token) for token in stream.group(1).split()]
-    expected = dims[0] * dims[1]
-    if len(values) < expected:
-        raise ValueError("array %s has %d values but expected %d" %
-                         (name, len(values), expected))
-    return dims[0], dims[1], values
+def _crashcar_active_ifos_and_route(ifos):
+    route = _CRASHCAR_FINAL_ROUTE_BY_IFOS.get(ifos)
+    if route is None:
+        raise RuntimeError(
+            "INVALID_FINAL_FAR_ROUTE ifos=%r; accepted exact masks are %s" %
+            (ifos, ",".join(_CRASHCAR_FINAL_ROUTE_BY_IFOS)))
+    return tuple(re.findall("..", ifos)), route
 
 
-def _load_template_autocorr_bank(path):
-    text = _read_text_maybe_gzip(path)
-    real_len, real_ntemplate, real_values = _parse_ligolw_array(
-        text, "autocorrelation_bank_real:array")
-    imag_len, imag_ntemplate, imag_values = _parse_ligolw_array(
-        text, "autocorrelation_bank_imag:array")
-    if real_len != imag_len or real_ntemplate != imag_ntemplate:
-        raise ValueError("real/imag autocorrelation dimensions differ")
-    return real_len, real_ntemplate, real_values, imag_values
+def _crashcar_protected_ifos_for_route(postcoh_inspiral):
+    """Return the unique single-FAR owner protected from legacy recompute."""
+    unused_active_ifos, route = _crashcar_active_ifos_and_route(
+        postcoh_inspiral.ifos)
+    del unused_active_ifos
+    return {
+        "H1_SINGLE": ("H1",),
+        "L1_SINGLE": ("L1",),
+    }.get(route, ())
 
 
-def _xml_text(value):
-    return html.escape("" if value is None else str(value), quote=False)
+def _crashcar_coinc_nevents_for_route(route, active_ifos):
+    """Keep CoincTable cardinality consistent without changing legacy multi."""
+    if route == "MULTI":
+        return 2
+    if route in ("H1_SINGLE", "L1_SINGLE"):
+        return len(active_ifos)
+    if route == "V1_ONLY":
+        return len(active_ifos)
+    raise RuntimeError("INVALID_FINAL_FAR_ROUTE route=%r" % route)
+
+
+def _crashcar_far_meets_log_threshold(value, log10_threshold):
+    """Return whether a positive finite FAR meets the configured log10 cut."""
+    try:
+        far = float(value)
+        threshold = float(log10_threshold)
+    except (TypeError, ValueError):
+        return False
+    return (far > 0.0 and math.isfinite(far)
+            and math.isfinite(threshold)
+            and math.log10(far) <= threshold)
+
+
+def _crashcar_a109_llrs_and_route(postcoh_inspiral):
+    """Validate the exact A109 scalar payloads and return the unique route."""
+    active_ifos, route = _crashcar_active_ifos_and_route(
+        postcoh_inspiral.ifos)
+    try:
+        llrs = {
+            "H1": float(postcoh_inspiral.H1_LLR),
+            "L1": float(postcoh_inspiral.L1_LLR),
+        }
+    except (AttributeError, TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError(
+            "INVALID_A109_LLR event_id=%s error=%s" %
+            (postcoh_inspiral.event_id, exc))
+    for ifo, value in llrs.items():
+        if not math.isfinite(value):
+            raise RuntimeError(
+                "INVALID_A109_LLR event_id=%s ifo=%s llr=%r" %
+                (postcoh_inspiral.event_id, ifo, value))
+
+    canonical_zero_ifos = {
+        "H1_SINGLE": ("L1",),
+        "L1_SINGLE": ("H1",),
+        "V1_ONLY": ("H1", "L1"),
+    }.get(route, ())
+    for ifo in canonical_zero_ifos:
+        if llrs[ifo] != 0.0:
+            raise RuntimeError(
+                "INACTIVE_A109_LLR event_id=%s ifos=%s ifo=%s llr=%r" %
+                (postcoh_inspiral.event_id, postcoh_inspiral.ifos,
+                 ifo, llrs[ifo]))
+    return active_ifos, route, llrs
+
+
+def _crashcar_final_far_decision(postcoh_inspiral,
+                                 enable_feature_best_far=False,
+                                 best_far_threshold=0):
+    """Select exactly one final FAR owner; never compare single with multi."""
+    del enable_feature_best_far, best_far_threshold
+    active_ifos, route, unused_llrs = _crashcar_a109_llrs_and_route(
+        postcoh_inspiral)
+    del unused_llrs
+
+    owner_ifo = ""
+    if route == "H1_SINGLE":
+        owner_ifo = "H1"
+        raw_value = postcoh_inspiral.far_sngl[
+            pipe_macro.get_ifo_id(owner_ifo)]
+    elif route == "L1_SINGLE":
+        owner_ifo = "L1"
+        raw_value = postcoh_inspiral.far_sngl[
+            pipe_macro.get_ifo_id(owner_ifo)]
+    else:
+        # HL/HLV and V-only stay on the unchanged normal FAR path.
+        raw_value = postcoh_inspiral.far
+
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError(
+            "INVALID_FINAL_FAR event_id=%s ifos=%s error=%s" %
+            (postcoh_inspiral.event_id, postcoh_inspiral.ifos, exc))
+    if not math.isfinite(value):
+        raise RuntimeError(
+            "INVALID_FINAL_FAR event_id=%s ifos=%s far=%r" %
+            (postcoh_inspiral.event_id, postcoh_inspiral.ifos, value))
+    valid = int(value > 0.0)
+    return {
+        "route": route,
+        "owner_ifo": owner_ifo,
+        "value": value if valid else 0.0,
+        "valid": valid,
+        "active_ifos": active_ifos,
+    }
+
+
+def _crashcar_cluster_zero_dispatch(postcoh_inspiral,
+                                    final_decision,
+                                    log10_threshold):
+    """Apply the existing normal threshold to the one route-owned FAR."""
+    active_ifos, route, unused_llrs = _crashcar_a109_llrs_and_route(
+        postcoh_inspiral)
+    del unused_llrs
+    if (route != final_decision.get("route") or
+            active_ifos != final_decision.get("active_ifos")):
+        raise RuntimeError(
+            "INVALID_FINAL_OWNER event_id=%s ifos=%s" %
+            (postcoh_inspiral.event_id, postcoh_inspiral.ifos))
+    valid = final_decision.get("valid") == 1
+    write = valid and _crashcar_far_meets_log_threshold(
+        final_decision.get("value"), log10_threshold)
+    return {
+        "write": bool(write),
+        "owner_ifo": final_decision.get("owner_ifo", ""),
+        "route": route,
+    }
+
+
+def _postcoh_row_for_serialization(postcoh_inspiral, postcoh_schema_mode):
+    """Validate A109 and retain the same authoritative Postcoh row."""
+    if (postcoh_schema_mode ==
+            postcoh_table_def.POSTCOH_SCHEMA_MODE_LEGACY_A107):
+        return postcoh_inspiral
+    if (postcoh_schema_mode !=
+            postcoh_table_def.POSTCOH_SCHEMA_MODE_CRASHCAR_A109):
+        raise ValueError(
+            "unknown explicit Postcoh schema mode %r" %
+            (postcoh_schema_mode,))
+    _crashcar_a109_llrs_and_route(postcoh_inspiral)
+    return postcoh_inspiral
 
 
 #
 # =============================================================================
 #
-#						 ligo.lw Content Handlers
+#                         ligo.lw Content Handlers
 #
 # =============================================================================
 #
-
 
 class LIGOLWContentHandler(ligolw.LIGOLWContentHandler):
     pass
@@ -207,9 +325,13 @@ class SegmentDocument(object):
 #
 class PostcohDocument(object):
 
-    def __init__(self, verbose=False):
+    def __init__(self, postcoh_schema_mode, verbose=False):
 
         self.filename = None
+        self.postcoh_schema_mode = postcoh_schema_mode
+        self.postcoh_columns = (
+            postcoh_table_def.postcoh_columns_for_schema_mode(
+                self.postcoh_schema_mode))
 
         #
         # build the XML document
@@ -221,7 +343,8 @@ class PostcohDocument(object):
         # FIXME: process table, search summary table
         # FIXME: should be implemented as lsctables.PostcohInspiralTable
         self.xmldoc.childNodes[-1].appendChild(
-            lsctables.New(postcoh_table_def.PostcohInspiralTable))
+            lsctables.New(postcoh_table_def.PostcohInspiralTable,
+                          columns=self.postcoh_columns))
 
     def close(self):
         self.xmldoc.unlink()
@@ -539,6 +662,7 @@ class FinalSink(object):
                  output_prefix,
                  output_name,
                  far_factor,
+                 postcoh_schema_mode,
                  cluster_window=0.5,
                  snapshot_interval=None,
                  calcfap_interval=None,
@@ -563,30 +687,26 @@ class FinalSink(object):
                  expected_buffers_per_timestamp=None,
                  feature_best_far=False,
                  feature_best_far_threshold=0,
-                 single_trigger_stream_fname=None,
+                 snr_series_logfar_threshold=-4,
                  verbose=False):
+        self.postcoh_schema_mode = postcoh_schema_mode
+        postcoh_table_def.postcoh_columns_for_schema_mode(
+            self.postcoh_schema_mode)
+        self.crashcar_enabled = (
+            self.postcoh_schema_mode ==
+            postcoh_table_def.POSTCOH_SCHEMA_MODE_CRASHCAR_A109)
         # best far
         self.enable_feature_best_far = feature_best_far
         self.best_far_threshold = feature_best_far_threshold
-        self.single_trigger_stream_fname = single_trigger_stream_fname
-        self.single_trigger_stream_seq = 0
-        self.single_trigger_stream_fields = [
-            "source_kind", "stream_seq", "stream_write_unix",
-            "source_file", "source_row", "bank_group", "bankid",
-            "event_id", "ifos", "ifo", "is_background", "end_time",
-            "end_time_ns", "rho", "snglsnr", "chisq", "cohsnr",
-            "cmbchisq", "far", "fap", "far_1d", "far_1w", "far_2h",
-            "end_time_sngl_H1", "end_time_ns_sngl_H1",
-            "end_time_sngl_L1", "end_time_ns_sngl_L1",
-            "snglsnr_H1", "snglsnr_L1", "chisq_H1", "chisq_L1",
-            "mass1", "mass2", "mchirp", "tmplt_idx"
-        ]
-        self.single_trigger_stream_real4_fields = set([
-            "rho", "snglsnr", "chisq", "cohsnr", "cmbchisq", "far", "fap",
-            "far_1d", "far_1w", "far_2h", "snglsnr_H1", "snglsnr_L1",
-            "chisq_H1", "chisq_L1", "mass1", "mass2", "mchirp"
-        ])
-
+        try:
+            self.snr_series_logfar_threshold = float(
+                snr_series_logfar_threshold)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "snr_series_logfar_threshold must be finite")
+        if not math.isfinite(self.snr_series_logfar_threshold):
+            raise ValueError(
+                "snr_series_logfar_threshold must be finite")
         # initialize
         #
         self.lock = threading.Lock()
@@ -633,29 +753,21 @@ class FinalSink(object):
             self.gracedb_client = GraceDb(gracedb_service_url,
                                           reload_certificate=True)
         self.threads_gracedb_upload = []
-        # Crashcar single-branch retention uses the same candidate/coinc XML
-        # container as normal SPIIR. Keep the storage path generic so single
-        # and multi selections are one candidate-event stream, not a second
-        # crashcar-specific SNR-series persistence system.
-        self.candidate_event_dir = os.environ.get(
-            "SPIIR_CANDIDATE_EVENT_DIR", os.path.join(path, "candidate_events"))
-        self.candidate_event_manifest = os.path.join(
-            self.candidate_event_dir, "manifest.csv")
-        self.candidate_event_seq = 0
-
         # keep a record of segments and is snapshotted
         # our segments is determined by if incoming buf is GAP
         self.seg_document = SegmentDocument(self.ifos)
 
         # the postcoh doc stores clustered postcoh triggers and is snapshotted
-        self.postcoh_document = PostcohDocument()
+        self.postcoh_document = PostcohDocument(
+            postcoh_schema_mode=self.postcoh_schema_mode)
         self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
             self.postcoh_document.xmldoc)
 
         # coinc doc to be uploaded to gracedb
         self.append_psd_to_coincs_doc = append_psd_to_coincs_doc
-        self.coincs_document = CoincsDocFromPostcoh(path, process_params,
-                                                    channel_dict)
+        self.coincs_document = CoincsDocFromPostcoh(
+            path, process_params, channel_dict,
+            postcoh_schema_mode=self.postcoh_schema_mode)
         # get values needed for skymap accompanying the trigger uploads
         for param in process_params:
             if param == 'cuda_postcoh_detrsp_fname':
@@ -673,15 +785,26 @@ class FinalSink(object):
         self.t_snapshot_start = None
         self.last_buffer_timestamp = None
 
-        # background updater
+        # Normal SPIIR owns the updater.  Frozen injection assignment keeps the
+        # same FinalSink but disables only its background mutation timers.
+        multi_background_frozen = (
+            os.environ.get("CRASHCAR_MULTI_BACKGROUND_FROZEN", "0") == "1")
+        if multi_background_frozen and (
+                cohfar_accumbackground_output_prefix is not None or
+                cohfar_accumbackground_output_name is not None or
+                fapupdater_output_fname is not None):
+            raise ValueError(
+                "frozen crashcar assignment received a mutable multi background output")
         self.fapupdater = FAPUpdater(
             path=path,
             input_prefix_list=cohfar_accumbackground_output_prefix,
             output_list_string=fapupdater_output_fname,
             collect_walltime_string=fapupdater_collect_walltime_string,
             ifos=self.ifos,
-            calcfap_interval=calcfap_interval,
-            combine_stats_interval=snapshot_interval,
+            calcfap_interval=(
+                None if multi_background_frozen else calcfap_interval),
+            combine_stats_interval=(
+                None if multi_background_frozen else snapshot_interval),
             verbose=verbose)
 
         # online information performer
@@ -701,16 +824,18 @@ class FinalSink(object):
         self.output_skymap = output_skymap
         self.thread_upload_skymap = None
 
-    def __pass_test(self, postcoh_inspiral):
-        if postcoh_inspiral.far <= 0.0:
+    def __pass_test(self, postcoh_inspiral, final_decision=None):
+        final_far = (postcoh_inspiral.far if final_decision is None
+                     else final_decision["value"])
+        if final_far <= 0.0:
             return False
 
         # just submit it if is a low-significance trigger
-        if ((postcoh_inspiral.far < self.gracedb_far_threshold)
-                and (postcoh_inspiral.far > self.superevent_thresh)):
+        if ((final_far < self.gracedb_far_threshold)
+                and (final_far > self.superevent_thresh)):
             return True
 
-        if ((postcoh_inspiral.far < self.opa_thresh)
+        if ((final_far < self.opa_thresh)
                 and (postcoh_inspiral.cohsnr < self.opa_cohsnr_thresh)):
             return False
 
@@ -725,7 +850,7 @@ class FinalSink(object):
             far < self.singlefar_veto_thresh and far > 0.
             for far in postcoh_inspiral.far_sngl
         ]
-        if postcoh_inspiral.far < self.superevent_thresh:
+        if final_far < self.superevent_thresh:
             return sum([
                 i for (i, v) in zip(ifo_fars_ok, ifo_active) if v
             ]) >= 2 and all(
@@ -785,7 +910,7 @@ class FinalSink(object):
                 t for t in self.threads_gracedb_upload if t.is_alive()
             ]
 
-    # This is named verbosely pending a refactor
+    # This retains its historical verbose name until a refactor
     # It should return a list of significant triggers to be processed instead of setting self.candidate
     def cluster_and_process_significant_triggers(self, buf_timestamp, duration,
                                                  newevents):
@@ -827,16 +952,41 @@ class FinalSink(object):
         while ((self.cluster_window > 0) and (self.cluster_boundary)
                and (max_cluster_boundary > self.cluster_boundary)):
             if self.try_get_cluster_candidate():
-                self.__set_far(self.candidate.postcoh_inspiral)
-                self.__maybe_retain_crashcar_candidate_event(self.candidate)
-                if self.gracedb_far_threshold and self.__pass_test(
-                        self.candidate.postcoh_inspiral):
-                    self.__do_gracedb_alert(self.candidate,
-                                            self.gracedb_upload_attempts)
+                postcoh_inspiral = self.candidate.postcoh_inspiral
+                final_decision = None
+                if self.crashcar_enabled:
+                    protected_ifos = _crashcar_protected_ifos_for_route(
+                        postcoh_inspiral)
+                    # Keep the normal clustered FAR update.  The helper only
+                    # protects the unique H/L single owner from recomputation.
+                    self.__set_far(
+                        postcoh_inspiral,
+                        protected_ifos=protected_ifos)
+                    final_decision = _crashcar_final_far_decision(
+                        postcoh_inspiral,
+                        enable_feature_best_far=(
+                            self.enable_feature_best_far),
+                        best_far_threshold=self.best_far_threshold)
+                else:
+                    # Preserve the normal SPIIR clustered FAR path exactly.
+                    self.__set_far(postcoh_inspiral)
 
-                self.postcoh_table.append(self.candidate.postcoh_inspiral)
-                self._append_single_trigger_stream_rows(
-                    [self.candidate.postcoh_inspiral])
+                candidate_written = False
+                if self.gracedb_far_threshold and self.__pass_test(
+                        postcoh_inspiral,
+                        final_decision=final_decision):
+                    self.__do_gracedb_alert(
+                        self.candidate, self.gracedb_upload_attempts,
+                        final_decision=final_decision)
+                    candidate_written = True
+                if self.crashcar_enabled and not candidate_written:
+                    self.__write_crashcar_single_coinc_if_needed(
+                        self.candidate, final_decision=final_decision)
+
+                self.postcoh_table.append(
+                    _postcoh_row_for_serialization(
+                        postcoh_inspiral,
+                        self.postcoh_schema_mode))
 
                 if self.need_online_perform:
                     self.onperformer.update_eye_candy(
@@ -852,10 +1002,33 @@ class FinalSink(object):
             self.cur_event_table.extend(newevents)
 
         if self.cluster_window == 0:
-            output_rows = [event.postcoh_inspiral for event in newevents]
-            self.postcoh_table.extend(
-                output_rows)
-            self._append_single_trigger_stream_rows(output_rows)
+            if not self.crashcar_enabled:
+                # Exact normal SPIIR baseline: direct append only.  In
+                # particular there is no FAR recompute and no Coinc/SNR write.
+                output_rows = [
+                    event.postcoh_inspiral for event in newevents
+                ]
+                self.postcoh_table.extend(output_rows)
+                del self.cur_event_table[:]
+                return
+
+            output_rows = []
+            for event in newevents:
+                postcoh_inspiral = event.postcoh_inspiral
+                # The upstream C element has already written the unique H/L
+                # owner FAR.  Cluster-zero must not recompute any A107 FAR:
+                # this loop only selects the owner and reuses the normal writer.
+                final_decision = _crashcar_final_far_decision(
+                    postcoh_inspiral,
+                    enable_feature_best_far=(
+                        self.enable_feature_best_far),
+                    best_far_threshold=self.best_far_threshold)
+                self.__write_crashcar_single_coinc_if_needed(
+                    event, final_decision=final_decision)
+                output_rows.append(
+                    _postcoh_row_for_serialization(
+                        postcoh_inspiral, self.postcoh_schema_mode))
+            self.postcoh_table.extend(output_rows)
             del self.cur_event_table[:]
 
     def add_segments(self, heartbeat, buf_timestamp, duration):
@@ -870,131 +1043,6 @@ class FinalSink(object):
                         [buf_seg])
                     this_seglist.coalesce()
                     one_type_dict[ifo] = this_seglist
-        self._append_single_trigger_stream_boundaries(
-            participating_ifos, buf_timestamp + LIGOTimeGPS(0, duration))
-
-    def _single_trigger_stream_enabled(self):
-        return bool(self.single_trigger_stream_fname)
-
-    def _stringify_single_trigger_value(self, field, value):
-        if value is None:
-            return ""
-        if field in self.single_trigger_stream_real4_fields:
-            try:
-                value = np.float32(value)
-            except (TypeError, ValueError):
-                return str(value)
-            if np.isfinite(value):
-                return "{0:.8g}".format(value)
-        try:
-            if isinstance(value, np.generic):
-                value = value.item()
-        except Exception:
-            pass
-        return str(value)
-
-    def _single_trigger_row_attr(self, row, name):
-        try:
-            return getattr(row, name)
-        except Exception:
-            return ""
-
-    def _gps_parts_for_stream(self, gps):
-        if gps is None:
-            return "", ""
-        seconds = getattr(gps, "gpsSeconds", None)
-        nanoseconds = getattr(gps, "gpsNanoSeconds", None)
-        if seconds is not None:
-            return seconds, nanoseconds or 0
-        try:
-            return int(gps), 0
-        except Exception:
-            return "", ""
-
-    def _ensure_single_trigger_stream_parent(self):
-        dirname = os.path.dirname(self.single_trigger_stream_fname)
-        if dirname and not os.path.isdir(dirname):
-            os.makedirs(dirname)
-
-    def _write_single_trigger_stream_dicts(self, rows):
-        if not self._single_trigger_stream_enabled() or not rows:
-            return
-        self._ensure_single_trigger_stream_parent()
-        write_header = (
-            (not os.path.exists(self.single_trigger_stream_fname))
-            or os.path.getsize(self.single_trigger_stream_fname) == 0)
-        with open(self.single_trigger_stream_fname, "a", newline="") as output_file:
-            writer = csv.DictWriter(
-                output_file, fieldnames=self.single_trigger_stream_fields)
-            if write_header:
-                writer.writeheader()
-            for row in rows:
-                writer.writerow(row)
-            output_file.flush()
-
-    def _single_trigger_stream_row(self, postcoh_inspiral):
-        self.single_trigger_stream_seq += 1
-        row = dict((field, "") for field in self.single_trigger_stream_fields)
-        row.update({
-            "source_kind": "postcoh_trigger",
-            "stream_seq": self.single_trigger_stream_seq,
-            "stream_write_unix": "%.6f" % time.time(),
-            "bankid": self._single_trigger_row_attr(postcoh_inspiral, "bankid"),
-            "event_id": self._single_trigger_row_attr(postcoh_inspiral, "event_id"),
-            "ifos": self._single_trigger_row_attr(postcoh_inspiral, "ifos"),
-            "is_background": self._single_trigger_row_attr(
-                postcoh_inspiral, "is_background"),
-            "end_time": self._single_trigger_row_attr(postcoh_inspiral, "end_time"),
-            "end_time_ns": self._single_trigger_row_attr(
-                postcoh_inspiral, "end_time_ns"),
-            "cohsnr": self._single_trigger_row_attr(postcoh_inspiral, "cohsnr"),
-            "cmbchisq": self._single_trigger_row_attr(postcoh_inspiral, "cmbchisq"),
-            "far": self._single_trigger_row_attr(postcoh_inspiral, "far"),
-            "fap": self._single_trigger_row_attr(postcoh_inspiral, "fap"),
-            "far_1d": self._single_trigger_row_attr(postcoh_inspiral, "far_1d"),
-            "far_1w": self._single_trigger_row_attr(postcoh_inspiral, "far_1w"),
-            "far_2h": self._single_trigger_row_attr(postcoh_inspiral, "far_2h"),
-            "mass1": self._single_trigger_row_attr(postcoh_inspiral, "mass1"),
-            "mass2": self._single_trigger_row_attr(postcoh_inspiral, "mass2"),
-            "mchirp": self._single_trigger_row_attr(postcoh_inspiral, "mchirp"),
-            "tmplt_idx": self._single_trigger_row_attr(postcoh_inspiral, "tmplt_idx"),
-        })
-        for ifo in ("H1", "L1"):
-            for base in ("end_time_sngl", "end_time_ns_sngl", "snglsnr", "chisq"):
-                column = "%s_%s" % (base, ifo)
-                row[column] = self._single_trigger_row_attr(postcoh_inspiral, column)
-        return dict((key, self._stringify_single_trigger_value(key, value))
-                    for key, value in row.items())
-
-    def _append_single_trigger_stream_rows(self, postcoh_rows):
-        if not self._single_trigger_stream_enabled():
-            return
-        self._write_single_trigger_stream_dicts([
-            self._single_trigger_stream_row(row)
-            for row in postcoh_rows
-        ])
-
-    def _append_single_trigger_stream_boundaries(self, ifos, boundary_gps):
-        if not self._single_trigger_stream_enabled():
-            return
-        end_time, end_time_ns = self._gps_parts_for_stream(boundary_gps)
-        rows = []
-        for ifo in ifos:
-            self.single_trigger_stream_seq += 1
-            row = dict((field, "") for field in self.single_trigger_stream_fields)
-            row.update({
-                "source_kind": "chunk_boundary",
-                "stream_seq": self.single_trigger_stream_seq,
-                "stream_write_unix": "%.6f" % time.time(),
-                "ifos": ifo,
-                "ifo": ifo,
-                "is_background": "empty",
-                "end_time": end_time,
-                "end_time_ns": end_time_ns,
-            })
-            rows.append(dict((key, self._stringify_single_trigger_value(key, value))
-                             for key, value in row.items()))
-        self._write_single_trigger_stream_dicts(rows)
 
     def run_snapshot(self, timestamp):
         # Initialization
@@ -1124,21 +1172,8 @@ class FinalSink(object):
             for i in range(len(ifo_fars))
         ]
 
-    def __set_far(self, postcoh_inspiral):
-        preserve_crashcar_single_far = (
-            os.environ.get("CRASHCAR_ENABLE", "0") == "1"
-            and os.environ.get(
-                "CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR", "1") != "0")
-        crashcar_single_far = None
-        crashcar_single_far_1w = None
-        crashcar_single_far_1d = None
-        crashcar_single_far_2h = None
-        if preserve_crashcar_single_far:
-            crashcar_single_far = list(postcoh_inspiral.far_sngl)
-            crashcar_single_far_1w = list(postcoh_inspiral.far_1w_sngl)
-            crashcar_single_far_1d = list(postcoh_inspiral.far_1d_sngl)
-            crashcar_single_far_2h = list(postcoh_inspiral.far_2h_sngl)
-
+    def __set_far(self, postcoh_inspiral, protected_ifos=()):
+        protected_ifos = frozenset(protected_ifos)
         if self.enable_feature_best_far:
             valid_combined_fars = self.__get_valid_combined_fars(
                 postcoh_inspiral)
@@ -1154,96 +1189,53 @@ class FinalSink(object):
                 postcoh_inspiral.far_1w)) * self.far_factor
             far_sngl = [
                 (max(fars) * self.far_factor)
-                for fars in zip(postcoh_inspiral.far_2h_sngl, postcoh_inspiral.
-                                far_1d_sngl, postcoh_inspiral.far_1w_sngl)
+                for fars in zip(postcoh_inspiral.far_2h_sngl,
+                                postcoh_inspiral.far_1d_sngl,
+                                postcoh_inspiral.far_1w_sngl)
             ]
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
-            if crashcar_single_far is not None:
-                postcoh_inspiral.far_sngl[ifo_id] = crashcar_single_far[ifo_id]
-                postcoh_inspiral.far_1w_sngl[ifo_id] = (
-                    crashcar_single_far_1w[ifo_id])
-                postcoh_inspiral.far_1d_sngl[ifo_id] = (
-                    crashcar_single_far_1d[ifo_id])
-                postcoh_inspiral.far_2h_sngl[ifo_id] = (
-                    crashcar_single_far_2h[ifo_id])
-            else:
-                postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
-
-    def __crashcar_snr_series_threshold_far(self):
-        if os.environ.get("CRASHCAR_ENABLE", "0") != "1":
-            return None
-        if _env_truthy("CRASHCAR_DISABLE_EVENT_SNR_ARCHIVE", False):
-            return None
-        raw_threshold = os.environ.get(
-            "CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD", "")
-        if raw_threshold == "":
-            return None
-        try:
-            log10_far_threshold = float(raw_threshold)
-        except ValueError:
-            logger.warning("invalid CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD=%r",
-                           raw_threshold)
-            return None
-        return 10.0**log10_far_threshold
-
-    def __crashcar_snr_series_reasons(self, postcoh_inspiral):
-        far_threshold = self.__crashcar_snr_series_threshold_far()
-        if far_threshold is None:
-            return []
-
-        reasons = []
-        far = float(postcoh_inspiral.far)
-        if far > 0.0 and far <= far_threshold:
-            reasons.append("multi")
-        for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
-            if ifo not in ("H1", "L1"):
+            if ifo in protected_ifos:
                 continue
-            single_far = float(postcoh_inspiral.far_sngl[ifo_id])
-            if single_far > 0.0 and single_far <= far_threshold:
-                reasons.append("%s_single" % ifo)
-        if _env_truthy("CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL", False):
-            for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
-                if ifo not in ("H1", "L1"):
-                    continue
-                try:
-                    snr = float(postcoh_inspiral.snglsnr[ifo_id])
-                    chisq = float(postcoh_inspiral.chisq[ifo_id])
-                except Exception:
-                    continue
-                reason = "%s_single_preselect" % ifo
-                if snr >= 4.0 and chisq > 0.0 and reason not in reasons:
-                    reasons.append(reason)
-        return reasons
+            postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
 
-    def __candidate_retention_metadata(self, postcoh_inspiral, reasons, kind):
-        branches = []
-        for reason in reasons:
-            branch = "multi" if reason == "multi" else "single"
-            if branch not in branches:
-                branches.append(branch)
-        far_sngl = list(postcoh_inspiral.far_sngl)
+    def __write_crashcar_single_coinc_if_needed(self,
+                                                trigger,
+                                                final_decision=None):
+        """Reuse the normal writer only for a crashcar single-owned event."""
+        if not self.crashcar_enabled:
+            raise RuntimeError(
+                "DISABLED_CRASHCAR_SINGLE_COINC_WRITE_ATTEMPT")
+        postcoh_inspiral = trigger.postcoh_inspiral
+        if final_decision is None:
+            raise RuntimeError(
+                "MISSING_FINAL_FAR_DECISION event_id=%s" %
+                postcoh_inspiral.event_id)
+        if final_decision.get("route") not in (
+                "H1_SINGLE", "L1_SINGLE"):
+            return False
+        dispatch = _crashcar_cluster_zero_dispatch(
+            postcoh_inspiral,
+            final_decision,
+            self.snr_series_logfar_threshold)
+        if not dispatch["write"]:
+            return False
 
-        def _single_far(ifo):
-            try:
-                return far_sngl[pipe_macro.get_ifo_id(ifo)]
-            except Exception:
-                return ""
-
-        return {
-            "retention_kind": kind,
-            "retention_reasons": ";".join(reasons),
-            "retention_branches": ";".join(branches),
-            "event_id": postcoh_inspiral.event_id,
-            "ifos": postcoh_inspiral.ifos,
-            "end_time": postcoh_inspiral.end_time,
-            "end_time_ns": postcoh_inspiral.end_time_ns,
-            "bankid": postcoh_inspiral.bankid,
-            "tmplt_idx": postcoh_inspiral.tmplt_idx,
-            "multi_far": postcoh_inspiral.far,
-            "single_far_h1": _single_far("H1"),
-            "single_far_l1": _single_far("L1"),
-            "code_version": os.environ.get("CRASHCAR_CODE_VERSION", ""),
-        }
+        filename = "%s_%d_%09d_%d_%d_%d.xml" % (
+            postcoh_inspiral.ifos,
+            postcoh_inspiral.end_time,
+            postcoh_inspiral.end_time_ns,
+            postcoh_inspiral.bankid,
+            postcoh_inspiral.tmplt_idx,
+            postcoh_inspiral.event_id,
+        )
+        self.__write_candidate_coinc_xml(
+            trigger,
+            filename,
+            psds=None,
+            return_bytes=False,
+            log_label="crashcar single-owned candidate/coinc XML",
+            final_decision=final_decision)
+        return True
 
     def __write_candidate_coinc_xml(self,
                                     trigger,
@@ -1251,128 +1243,26 @@ class FinalSink(object):
                                     psds=None,
                                     return_bytes=False,
                                     log_label="candidate/coinc XML",
-                                    metadata=None):
-        self.coincs_document.assemble_ligolw_xmldoc(
-            trigger, psds, metadata=metadata)
+                                    final_decision=None):
+        # Preserve the original normal SPIIR writer and byte/schema path.
+        if final_decision is None:
+            self.coincs_document.assemble_ligolw_xmldoc(trigger, psds)
+        else:
+            self.coincs_document.assemble_ligolw_xmldoc(
+                trigger, psds, final_decision=final_decision)
         logger.info("writing %s %s", log_label, filename)
         ligolw_utils.write_filename(self.coincs_document.xmldoc,
                                     filename,
                                     trap_signals=None)
-        template_autocorr_elements = []
-        if metadata and metadata.get("retention_kind"):
-            template_autocorr_elements = (
-                self.coincs_document
-                .build_template_autocorrelation_xml_elements(
-                    trigger.postcoh_inspiral, metadata=metadata))
-        if template_autocorr_elements:
-            try:
-                text = _read_text_maybe_gzip(filename)
-                marker = "</LIGO_LW>"
-                insert_at = text.rfind(marker)
-                if insert_at < 0:
-                    raise ValueError("root LIGO_LW closing tag not found")
-                text = (text[:insert_at] +
-                        "".join(template_autocorr_elements) +
-                        text[insert_at:])
-                _write_text_maybe_gzip(filename, text)
-            except Exception as exc:
-                logger.warning("failed to embed template autocorrelation in %s: %s",
-                               filename, exc)
         payload = None
         if return_bytes:
             payload = BytesIO()
             ligolw_utils.write_fileobj(self.coincs_document.xmldoc, payload)
         self.coincs_document.close()
-        self.coincs_document = CoincsDocFromPostcoh(self.path,
-                                                    self.process_params,
-                                                    self.channel_dict)
+        self.coincs_document = CoincsDocFromPostcoh(
+            self.path, self.process_params, self.channel_dict,
+            postcoh_schema_mode=self.postcoh_schema_mode)
         return payload
-
-    def __append_candidate_event_manifest(self, row):
-        os.makedirs(self.candidate_event_dir, exist_ok=True)
-        write_header = (
-            not os.path.exists(self.candidate_event_manifest)
-            or os.path.getsize(self.candidate_event_manifest) == 0)
-        fields = [
-            "archive_seq", "filename", "series_file", "xml_file",
-            "candidate_xml_file", "template_autocorrelation_xml_file",
-            "archive_kind", "candidate_schema",
-            "retention_kind", "reasons", "branches", "event_id", "ifos", "ifo",
-            "end_time", "end_time_ns", "bankid", "tmplt_idx", "far",
-            "far_sngl_H1", "far_sngl_L1", "code_version"
-        ]
-        for ifo in ("H1", "L1"):
-            fields.extend([
-                "end_time_sngl_%s" % ifo,
-                "end_time_ns_sngl_%s" % ifo,
-                "snglsnr_%s" % ifo,
-                "chisq_%s" % ifo,
-            ])
-        with open(self.candidate_event_manifest, "a", newline="") as fout:
-            writer = csv.DictWriter(fout, fieldnames=fields)
-            if write_header:
-                writer.writeheader()
-            writer.writerow(dict((field, row.get(field, "")) for field in fields))
-
-    def __maybe_retain_crashcar_candidate_event(self, trigger):
-        postcoh_inspiral = trigger.postcoh_inspiral
-        reasons = self.__crashcar_snr_series_reasons(postcoh_inspiral)
-        if not reasons:
-            return
-        os.makedirs(self.candidate_event_dir, exist_ok=True)
-        self.candidate_event_seq += 1
-        filename = os.path.join(
-            self.candidate_event_dir,
-            "candidate_%06d_%s_%d_%d_%d_%d_%d.xml.gz" % (
-                self.candidate_event_seq, postcoh_inspiral.ifos,
-                postcoh_inspiral.end_time, postcoh_inspiral.end_time_ns,
-                postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx,
-                postcoh_inspiral.event_id))
-
-        retention_kind = "crashcar_threshold_candidate"
-        if all(reason.endswith("_single_preselect") for reason in reasons):
-            retention_kind = "crashcar_single_candidate_preselect"
-        metadata = self.__candidate_retention_metadata(
-            postcoh_inspiral, reasons, retention_kind)
-        self.__write_candidate_coinc_xml(
-            trigger, filename, psds=None,
-            log_label="retained candidate/coinc XML", metadata=metadata)
-
-        far_sngl = list(postcoh_inspiral.far_sngl)
-        row = {
-            "archive_seq": self.candidate_event_seq,
-            "filename": filename,
-            "series_file": filename,
-            "xml_file": filename,
-            "candidate_xml_file": filename,
-            "template_autocorrelation_xml_file": filename,
-            "archive_kind": "candidate_event_xml",
-            "candidate_schema": "ligolw_coinc",
-            "retention_kind": metadata["retention_kind"],
-            "reasons": ";".join(reasons),
-            "branches": metadata["retention_branches"],
-            "event_id": postcoh_inspiral.event_id,
-            "ifos": postcoh_inspiral.ifos,
-            "end_time": postcoh_inspiral.end_time,
-            "end_time_ns": postcoh_inspiral.end_time_ns,
-            "bankid": postcoh_inspiral.bankid,
-            "tmplt_idx": postcoh_inspiral.tmplt_idx,
-            "far": postcoh_inspiral.far,
-            "far_sngl_H1": far_sngl[pipe_macro.get_ifo_id("H1")],
-            "far_sngl_L1": far_sngl[pipe_macro.get_ifo_id("L1")],
-            "code_version": os.environ.get("CRASHCAR_CODE_VERSION", ""),
-        }
-        for ifo in ("H1", "L1"):
-            ifo_id = pipe_macro.get_ifo_id(ifo)
-            row.update({
-                "end_time_sngl_%s" % ifo: getattr(
-                    postcoh_inspiral, "end_time_sngl_%s" % ifo, ""),
-                "end_time_ns_sngl_%s" % ifo: getattr(
-                    postcoh_inspiral, "end_time_ns_sngl_%s" % ifo, ""),
-                "snglsnr_%s" % ifo: postcoh_inspiral.snglsnr[ifo_id],
-                "chisq_%s" % ifo: postcoh_inspiral.chisq[ifo_id],
-            })
-        self.__append_candidate_event_manifest(row)
 
     def __read_trigger_control(self):
         with open(self.trigger_control_doc, "r") as f:
@@ -1533,12 +1423,13 @@ class FinalSink(object):
         else:
             logger.info(f"gracedb upload of '{filename}' failed completely")
 
-    def __do_gracedb_alert(self, trigger, gracedb_upload_attempts=3):
+    def __do_gracedb_alert(self, trigger, gracedb_upload_attempts=3,
+                            final_decision=None):
 
         postcoh_inspiral = trigger.postcoh_inspiral
 
         if self.__need_trigger_control(postcoh_inspiral):
-            return
+            return False
 
         # TODO: Remove conditional bool here and in __init__ after tests
         if self.append_psd_to_coincs_doc:
@@ -1559,8 +1450,7 @@ class FinalSink(object):
             psds=psds,
             return_bytes=self.gracedb_client is not None,
             log_label="normal SPIIR candidate/coinc XML",
-            metadata=self.__candidate_retention_metadata(
-                postcoh_inspiral, ["multi"], "normal_gracedb_candidate"))
+            final_decision=final_decision)
 
         if self.gracedb_client is not None:
             logger.info(f"sending '{filename}' to gracedb ...")
@@ -1574,6 +1464,7 @@ class FinalSink(object):
                       log_message))
             gracedb_upload_thread.start()
             self.threads_gracedb_upload.append(gracedb_upload_thread)
+        return True
 
     def get_output_filename(self, output_prefix, output_name, t_snapshot_start,
                             snapshot_duration):
@@ -1624,7 +1515,8 @@ class FinalSink(object):
         #  NOTE: del may not be necessary, as we unlink after thread completion
         del self.postcoh_table
         del self.postcoh_document
-        self.postcoh_document = PostcohDocument()
+        self.postcoh_document = PostcohDocument(
+            postcoh_schema_mode=self.postcoh_schema_mode)
         self.postcoh_table = postcoh_table_def.PostcohInspiralTable.get_table(
             self.postcoh_document.xmldoc)
 
@@ -1683,6 +1575,7 @@ class CoincsDocFromPostcoh(object):
                  url,
                  process_params,
                  channel_dict,
+                 postcoh_schema_mode,
                  comment=None,
                  verbose=False):
         #
@@ -1691,6 +1584,13 @@ class CoincsDocFromPostcoh(object):
 
         self.channel_dict = channel_dict
         self.url = url
+        self.postcoh_schema_mode = postcoh_schema_mode
+        self.postcoh_columns = (
+            postcoh_table_def.postcoh_columns_for_schema_mode(
+                self.postcoh_schema_mode))
+        self.crashcar_enabled = (
+            self.postcoh_schema_mode ==
+            postcoh_table_def.POSTCOH_SCHEMA_MODE_CRASHCAR_A109)
         self.xmldoc = ligolw.Document()
         self.xmldoc.appendChild(ligolw.LIGO_LW())
         self.process = ligolw_process.register_to_xmldoc(
@@ -1699,10 +1599,6 @@ class CoincsDocFromPostcoh(object):
             process_params,
             comment=comment,
             instruments=channel_dict.keys())
-        (self._template_autocorr_bank_paths,
-         self._template_autocorr_bank_dirs) = self._parse_iir_bank_params(
-             process_params)
-
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(lsctables.SnglInspiralTable,
                           columns=self.sngl_inspiral_columns))
@@ -1717,135 +1613,16 @@ class CoincsDocFromPostcoh(object):
         self.xmldoc.childNodes[-1].appendChild(
             lsctables.New(lsctables.CoincInspiralTable))
         self.xmldoc.childNodes[-1].appendChild(
-            lsctables.New(postcoh_table_def.PostcohInspiralTable))
+            lsctables.New(postcoh_table_def.PostcohInspiralTable,
+                          columns=self.postcoh_columns))
 
     def close(self):
         self.xmldoc.unlink()
 
-    @staticmethod
-    def _process_param_values(process_params, keys):
-        values = []
-        for key in keys:
-            if key not in process_params:
-                continue
-            value = process_params[key]
-            if isinstance(value, (list, tuple)):
-                values.extend(value)
-            else:
-                values.append(value)
-        return values
-
-    @classmethod
-    def _parse_iir_bank_params(cls, process_params):
-        paths = {}
-        dirs = {}
-        for value in cls._process_param_values(process_params,
-                                               ("iir_bank", "--iir-bank")):
-            if value is None:
-                continue
-            for part in str(value).split(","):
-                if ":" not in part:
-                    continue
-                ifo, bank_path = part.split(":", 1)
-                ifo = ifo.strip()
-                bank_path = bank_path.strip()
-                match = re.search(r"GSTLAL_SPLIT_BANK_(\d+)", bank_path)
-                if not ifo or not bank_path or match is None:
-                    continue
-                bankid = int(match.group(1))
-                paths[(ifo, bankid)] = bank_path
-                dirs[ifo] = os.path.dirname(bank_path)
-        return paths, dirs
-
-    def _template_autocorr_bank_path(self, ifo, bankid):
-        path = self._template_autocorr_bank_paths.get((ifo, bankid))
-        if path:
-            return path
-        bank_dir = self._template_autocorr_bank_dirs.get(ifo)
-        if not bank_dir:
-            return None
-        return os.path.join(
-            bank_dir,
-            "iir_%s-GSTLAL_SPLIT_BANK_%04d-a1-0-0.xml.gz" % (ifo, bankid))
-
-    def _template_autocorr_rows(self, ifo, bankid, tmplt_idx):
-        path = self._template_autocorr_bank_path(ifo, bankid)
-        if not path or not os.path.exists(path):
-            raise ValueError("template autocorrelation bank not found for %s bank %d" %
-                             (ifo, bankid))
-        key = (ifo, bankid, path)
-        if key not in _TEMPLATE_AUTOCORR_BANK_CACHE:
-            _TEMPLATE_AUTOCORR_BANK_CACHE[key] = _load_template_autocorr_bank(
-                path)
-        length, ntemplate, real_values, imag_values = _TEMPLATE_AUTOCORR_BANK_CACHE[key]
-        if tmplt_idx < 0 or tmplt_idx >= ntemplate:
-            raise ValueError("template index %d outside autocorrelation bank %s %d" %
-                             (tmplt_idx, ifo, bankid))
-        center = (length - 1) // 2
-        rows = []
-        for sample_index in range(length):
-            offset = sample_index * ntemplate + tmplt_idx
-            real = real_values[offset]
-            imag = imag_values[offset]
-            rows.append((sample_index - center, real, imag))
-        return rows
-
-    def build_template_autocorrelation_xml_elements(self,
-                                                    postcoh_inspiral,
-                                                    metadata=None):
-        elements = []
-        bankid = int(postcoh_inspiral.bankid)
-        tmplt_idx = int(postcoh_inspiral.tmplt_idx)
-        for trigger_ifo_id, ifo in enumerate(
-                re.findall('..', postcoh_inspiral.ifos)):
-            try:
-                rows = self._template_autocorr_rows(ifo, bankid, tmplt_idx)
-            except Exception as exc:
-                logger.warning(
-                    "template autocorrelation unavailable for event_id=%s ifo=%s bankid=%s tmplt_idx=%s: %s",
-                    postcoh_inspiral.event_id, ifo, bankid, tmplt_idx, exc)
-                continue
-            event_id = "sngl_inspiral:event_id:%d" % trigger_ifo_id
-            lines = [
-                '\t<LIGO_LW Name="COMPLEX8TimeSeries">',
-                '\t\t<Time Type="GPS" Name="epoch">0</Time>',
-                '\t\t<Param Name="f0:param" Type="real_8" Unit="s^-1">0</Param>',
-                '\t\t<Array Type="real_8" Name="template_autocorrelation:array" Unit="">',
-                '\t\t\t<Dim Name="Sample" Unit="" Start="%s" Scale="1">%d</Dim>' %
-                (rows[0][0] if rows else 0, len(rows)),
-                '\t\t\t<Dim Name="Sample,Real,Imaginary">3</Dim>',
-                '\t\t\t<Stream Type="Local" Delimiter=" ">',
-            ]
-            for relative_index, real, imag in rows:
-                lines.append("\t\t\t\t%d %.9g %.9g " %
-                             (relative_index, real, imag))
-            lines += [
-                "\t\t\t</Stream>",
-                "\t\t</Array>",
-                '\t\t<Param Name="event_id:param" Type="ilwd:char">%s</Param>' %
-                _xml_text(event_id),
-                '\t\t<Param Name="instrument:param" Type="lstring">%s</Param>' %
-                _xml_text(ifo),
-                '\t\t<Param Name="crashcar_event_id:param" Type="int_8s">%s</Param>' %
-                _xml_text(int(postcoh_inspiral.event_id)),
-                '\t\t<Param Name="bankid:param" Type="int_4s">%d</Param>' %
-                bankid,
-                '\t\t<Param Name="tmplt_idx:param" Type="int_4s">%d</Param>' %
-                tmplt_idx,
-                '\t\t<Param Name="series_kind:param" Type="lstring">template_autocorrelation</Param>',
-            ]
-            if metadata:
-                for key in ("retention_kind", "retention_reasons",
-                            "retention_branches"):
-                    if key in metadata:
-                        lines.append(
-                            '\t\t<Param Name="crashcar_%s:param" Type="lstring">%s</Param>' %
-                            (key, _xml_text(metadata.get(key) or "")))
-            lines.append("\t</LIGO_LW>")
-            elements.append("\n".join(lines) + "\n")
-        return elements
-
-    def assemble_ligolw_xmldoc(self, trigger, psds=None, metadata=None):
+    def assemble_ligolw_xmldoc(self,
+                               trigger,
+                               psds=None,
+                               final_decision=None):
         postcoh_inspiral = trigger.postcoh_inspiral
         self.assemble_snglinspiral_table(postcoh_inspiral)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
@@ -1867,7 +1644,14 @@ class CoincsDocFromPostcoh(object):
         row.instruments = ','.join(re.findall(
             '..',
             postcoh_inspiral.ifos))  #FIXME: for more complex detector names
-        row.nevents = 2
+        if self.crashcar_enabled:
+            active_ifos, final_route = (
+                _crashcar_active_ifos_and_route(postcoh_inspiral.ifos))
+            row.nevents = _crashcar_coinc_nevents_for_route(
+                final_route, active_ifos)
+        else:
+            # Preserve the exact disabled normal SPIIR CoincTable cardinality.
+            row.nevents = 2
         row.process_id = self.process.process_id
         row.coinc_def_id = 3
         row.time_slide_id = 6
@@ -1889,22 +1673,29 @@ class CoincsDocFromPostcoh(object):
                 for ifo in re.findall("..", postcoh_inspiral.ifos)
             ]))
         row.end_time_ns = postcoh_inspiral.end_time_ns
-        row.combined_far = postcoh_inspiral.far
+        if self.crashcar_enabled:
+            if final_decision is None:
+                final_decision = _crashcar_final_far_decision(
+                    postcoh_inspiral)
+            row.combined_far = (
+                final_decision["value"] if final_decision["valid"] else None)
+        else:
+            row.combined_far = postcoh_inspiral.far
         #FIXME: for more complex detector names
         row.ifos = ','.join(re.findall('..', postcoh_inspiral.ifos))
         coinc_inspiral_table.append(row)
 
         self.assemble_coinc_map_table(postcoh_inspiral)
         self.assemble_time_slide_table(postcoh_inspiral)
-        self.assemble_candidate_metadata_params(metadata)
         self.assemble_ligolw_snr_series_arrays(postcoh_inspiral,
-                                               trigger.snr_series_list,
-                                               metadata=metadata)
+                                               trigger.snr_series_list)
 
         if psds is not None:
             self.assemble_ligolw_psd_arrays(psds)
 
-        postcoh_table.append(postcoh_inspiral)
+        postcoh_table.append(
+            _postcoh_row_for_serialization(
+                postcoh_inspiral, self.postcoh_schema_mode))
 
     def assemble_coinc_map_table(self, trigger):
 
@@ -2022,17 +1813,6 @@ class CoincsDocFromPostcoh(object):
             row.event_id = trigger_ifo_id
             sngl_inspiral_table.append(row)
 
-    def assemble_candidate_metadata_params(self, metadata):
-        if not metadata:
-            return
-        for key in sorted(metadata):
-            value = metadata[key]
-            if value is None:
-                value = ""
-            self.xmldoc.childNodes[-1].appendChild(
-                ligolw_param.Param.build(
-                    u"crashcar_%s" % key, u"lstring", str(value)))
-
     def assemble_ligolw_psd_arrays(self, psds):
         """Assembles a LIGO_LW REAL8FrequencySeries Array from a
         dictionary where keys are ifo strings and values are a
@@ -2058,8 +1838,7 @@ class CoincsDocFromPostcoh(object):
         self.xmldoc.childNodes[-1].appendChild(ligolw_psds_container)
 
     def assemble_ligolw_snr_series_arrays(self, postcoh_inspiral,
-                                          snr_series_list,
-                                          metadata=None):
+                                          snr_series_list):
         """Assembles LIGO_LW COMPLEX8TimeSeries arrays that
         contain the SNR series for each ifo at the time
         of the candidate trigger.
@@ -2081,7 +1860,7 @@ class CoincsDocFromPostcoh(object):
             The snr_series of each ifo.
         """
 
-        # Append snr_series data into XML document
+        # Preserve the normal SPIIR CoincsDoc SNR-series path.
         for trigger_ifo_id, snr_series in enumerate(snr_series_list):
             if snr_series:
                 epoch = LIGOTimeGPS(snr_series.epoch_gpsSeconds,
@@ -2098,38 +1877,11 @@ class CoincsDocFromPostcoh(object):
 
                 ligolw_snr_series_element = lal.series.build_COMPLEX8TimeSeries(
                     snr_time_series)
-                # Add event_id into the snr_time_series_element
+                # Preserve the active-position event_id used by SnglInspiral.
                 event_id = "sngl_inspiral:event_id:%d" % trigger_ifo_id
                 ligolw_snr_series_element.appendChild(
                     ligolw_param.Param.build(u"event_id", u"ilwd:char",
                                              event_id))
-                try:
-                    ifo = list(pipe_macro.IFO_MAP)[trigger_ifo_id]
-                except Exception:
-                    ifo = ""
-                ligolw_snr_series_element.appendChild(
-                    ligolw_param.Param.build(u"instrument", u"lstring", ifo))
-                ligolw_snr_series_element.appendChild(
-                    ligolw_param.Param.build(
-                        u"crashcar_event_id", u"int_8s",
-                        int(postcoh_inspiral.event_id)))
-                ligolw_snr_series_element.appendChild(
-                    ligolw_param.Param.build(u"bankid", u"int_4s",
-                                             int(postcoh_inspiral.bankid)))
-                ligolw_snr_series_element.appendChild(
-                    ligolw_param.Param.build(u"tmplt_idx", u"int_4s",
-                                             int(postcoh_inspiral.tmplt_idx)))
-                ligolw_snr_series_element.appendChild(
-                    ligolw_param.Param.build(u"series_kind", u"lstring",
-                                             "matched_filter_snr"))
-                if metadata:
-                    for key in ("retention_kind", "retention_reasons",
-                                "retention_branches"):
-                        if key in metadata:
-                            ligolw_snr_series_element.appendChild(
-                                ligolw_param.Param.build(
-                                    u"crashcar_%s" % key, u"lstring",
-                                    str(metadata.get(key) or "")))
                 self.xmldoc.childNodes[-1].appendChild(
                     ligolw_snr_series_element)
 

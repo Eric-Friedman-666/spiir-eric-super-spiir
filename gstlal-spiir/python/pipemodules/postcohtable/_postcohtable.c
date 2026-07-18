@@ -363,6 +363,12 @@ static PyMemberDef members_postcohinspiral[] = {
       "chisq" },
     { "far_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_sngl),
       READONLY, "far_sngl" },
+    { "H1_LLR", T_DOUBLE,
+      offsetof(PostcohInspiralWrapper, postcohtable.H1_LLR),
+      READONLY, "H1_LLR" },
+    { "L1_LLR", T_DOUBLE,
+      offsetof(PostcohInspiralWrapper, postcohtable.L1_LLR),
+      READONLY, "L1_LLR" },
     { "far_1w_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1w_sngl),
       READONLY, "far_1w_sngl" },
     { "far_1d_sngl", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, far_1d_sngl),
@@ -408,11 +414,15 @@ static PostcohInspiralWrapper *
   new_wrapped_postcohtable(const PostcohInspiralTable *buffer_postcohtable) {
     PyObject *pyModule = PyImport_ImportModule(
       "gstlal_spiir.pipemodules.postcohtable.postcohtable");
+    if (!pyModule) return NULL;
     PyObject *wrapped_postcohtable_class =
       PyObject_GetAttrString(pyModule, "PostcohInspiral");
+    Py_DECREF(pyModule);
+    if (!wrapped_postcohtable_class) return NULL;
 
     PostcohInspiralWrapper *self = (PostcohInspiralWrapper *)PyType_GenericNew(
       (PyTypeObject *)wrapped_postcohtable_class, NULL, NULL);
+    Py_DECREF(wrapped_postcohtable_class);
     if (!self) {
         PyErr_SetString(PyExc_ValueError, "new wrapped_postcohtable error");
         return NULL;
@@ -458,7 +468,10 @@ static PostcohInspiralWrapper *
     self->deff =
       PyArray_SimpleNewFromData(1, dims, NPY_DOUBLE, self->postcohtable.deff);
 
-    if (PyErr_Occurred()) { return NULL; }
+    if (PyErr_Occurred()) {
+        Py_DECREF((PyObject *)self);
+        return NULL;
+    }
 
     return self;
 }

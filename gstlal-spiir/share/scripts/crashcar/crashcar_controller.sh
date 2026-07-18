@@ -108,7 +108,26 @@ PY
     fi
 fi
 : "${SEGMENT_XML:?segment_xml could not be inferred; set segment_xml explicitly}"
-LIVETIME_CSV=${livetime_csv:-${LIVETIME_CSV:-"${ARTIFACTS}/H1L1V1_SEGMENTS_${START_GPS}_${DURATION}_livetime.csv"}}
+LIVETIME_CSV=${livetime_csv:-${LIVETIME_CSV:-"${ARTIFACTS}/H1L1_SEGMENTS_${START_GPS}_${DURATION}_livetime.json"}}
+SEGMENT_XML_CANONICAL=
+SEGMENT_XML_SHA256=
+SEGMENT_LIVETIME_JSON_CANONICAL=
+SEGMENT_LIVETIME_JSON_SHA256=
+SEGMENT_BINDING_RUN_START=
+SEGMENT_BINDING_RUN_END=
+RUNTIME_PROVENANCE_MANIFEST_SHA256=
+SCHEMA4_RUN_NAMESPACE_SHA256=
+SCHEMA4_SOURCE_MANIFEST_SHA256=
+SCHEMA4_RUNTIME_MANIFEST_SHA256=
+SCHEMA4_CONFIG_SHA256=
+SCHEMA4_TEMPLATE_SHAPE_MAP_SHA256=
+SCHEMA4_SOURCE_MANIFEST_PATH=
+SCHEMA4_RUN_NAMESPACE_PATH=
+CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE=${crashcar_internal_live_background_role:-${CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROLE:-}}
+CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE=${crashcar_internal_live_background_root:-${CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROOT:-}}
+CRASHCAR_LIVE_BACKGROUND_HELPER="${SCRIPT_DIR}/crashcar_live_background.py"
+CRASHCAR_LIVE_BACKGROUND_HELPER_SHA256=
+CRASHCAR_LIVE_BACKGROUND_HELPER_CURRENT_SHA256=
 NONINJ_STATS_LOC=${noninj_stats_loc:-${NONINJ_STATS_LOC:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}}
 O3_BANK_DIR=${bank_file:-${o3_bank_dir:-${O3_BANK_DIR:-}}}
 : "${O3_BANK_DIR:?bank_file required in ${CONFIG_FILE}}"
@@ -143,6 +162,12 @@ PY
 )
 fi
 SNR_SERIES_LOG_FAR_THRESHOLD=${SNR_series_logFAR_threshold:-${snr_series_logFAR_threshold:-${SNR_SERIES_LOG_FAR_THRESHOLD:--4}}}
+if [[ ! "${SNR_SERIES_LOG_FAR_THRESHOLD}" =~ ^[+-]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][+-]?[0-9]+)?$ ]] ||
+   ! python3 -c "import math, sys; value = float(sys.argv[1]); raise SystemExit(0 if math.isfinite(value) else 2)" "${SNR_SERIES_LOG_FAR_THRESHOLD}"; then
+    printf "crashcar_controller: SNR_series_logFAR_threshold must be a finite number, got %q\n" \
+        "${SNR_SERIES_LOG_FAR_THRESHOLD}" >&2
+    exit 2
+fi
 CRASHCAR_CODE_VERSION=${crashcar_code_version:-${CRASHCAR_CODE_VERSION:-"spiir-crashcar-${GITHUB_BRANCH}"}}
 SLURM_JOB_NAME=${slurm_job_name:-${SLURM_JOB_NAME:-crashcar}}
 SLURM_PARTITION=${slurm_partition:-${SLURM_PARTITION:-}}
@@ -150,12 +175,15 @@ SLURM_TIME=${slurm_time:-${SLURM_TIME:-7-00:00:00}}
 SLURM_MEM=${slurm_mem:-${SLURM_MEM:-64g}}
 SLURM_CPUS_PER_TASK=${slurm_cpus_per_task:-${SLURM_CPUS_PER_TASK:-4}}
 SLURM_GRES=${slurm_gres:-${SLURM_GRES:-gpu:1}}
+case "$(printf '%s' "${SLURM_GRES}" | tr '[:upper:]' '[:lower:]')" in
+    none|no|false|0) SLURM_GRES="" ;;
+esac
 TMUX_SESSION=${tmux_session:-${TMUX_SESSION:-codex1}}
 CRASHCAR_LOG10_FAR_THRESHOLD=${crashcar_log10_far_threshold:-${CRASHCAR_LOG10_FAR_THRESHOLD:-90}}
-CRASHCAR_PRESERVE_TABLE_SINGLE_FAR=${crashcar_preserve_table_single_far:-${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}}
-CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR=${crashcar_finalsink_preserve_table_single_far:-${CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR:-1}}
 CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP=${crashcar_require_template_shape_map:-${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}}
-CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE=${crashcar_single_ledger_final_update:-${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE:-0}}
+# Production science authority is the live Postcoh row followed by the normal
+# FinalSink/CoincsDoc path.  Post-run ledgers, output patchers, validation
+# archives, and acceptance checkers are intentionally outside this controller.
 
 INJECTION_MODE_RAW=${injection_mode:-${INJECTION_MODE:-False}}
 case "$(printf '%s' "${INJECTION_MODE_RAW}" | tr '[:upper:]' '[:lower:]')" in
@@ -190,39 +218,103 @@ if [ "${INJECTION_MODE}" = "True" ]; then
 fi
 
 SINGLE_BACKGROUND_MODE_VALUE=${single_background_mode:-${SINGLE_BACKGROUND_MODE:-rolling}}
-SINGLE_FROZEN_BACKGROUND_JSON_VALUE=${single_frozen_background_json:-${SINGLE_FROZEN_BACKGROUND_JSON:-}}
-SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE=${single_frozen_background_run_dir:-${SINGLE_FROZEN_BACKGROUND_RUN_DIR:-}}
-SINGLE_FROZEN_BACKGROUND_ID_VALUE=${single_frozen_background_id:-${SINGLE_FROZEN_BACKGROUND_ID:-BG-FROZEN}}
-SINGLE_FROZEN_BACKGROUND_SOURCE_VALUE=${single_frozen_background_source:-${SINGLE_FROZEN_BACKGROUND_SOURCE:-}}
-SINGLE_INPUT_KIND_VALUE=${single_input_kind:-${SINGLE_INPUT_KIND:-crashcarcsv}}
-FINAL_SINGLE_INPUT_KIND_VALUE=${final_single_input_kind:-${FINAL_SINGLE_INPUT_KIND:-singlecsv}}
-PATCH_ZEROLAG_SINGLE_FAR_VALUE=${patch_zerolag_single_far:-${PATCH_ZEROLAG_SINGLE_FAR:-1}}
-PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE=${patch_zerolag_single_far_column:-${PATCH_ZEROLAG_SINGLE_FAR_COLUMN:-assigned_far}}
-PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE=${patch_zerolag_single_snr_series:-${PATCH_ZEROLAG_SINGLE_SNR_SERIES:-1}}
-CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL_VALUE=${crashcar_single_snr_series_preselect_all:-${CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL:-}}
-CRASHCAR_SNR_SERIES_OUTPUT_DIR_VALUE=${crashcar_snr_series_output_dir:-${CRASHCAR_SNR_SERIES_OUTPUT_DIR:-}}
-CRASHCAR_SNR_SERIES_WRITE_CSV_VALUE=${crashcar_snr_series_write_csv:-${CRASHCAR_SNR_SERIES_WRITE_CSV:-0}}
-CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE=${crashcar_frozen_single_support_csv:-${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV:-}}
-CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE=${crashcar_background_required_seconds:-${CRASHCAR_BACKGROUND_REQUIRED_SECONDS:-${BACKGROUND_ACCUMULATION}}}
-if [ -n "${crashcar_build_last_bg_artifacts:-${CRASHCAR_BUILD_LAST_BG_ARTIFACTS:-}}" ]; then
-    CRASHCAR_BUILD_LAST_BG_ARTIFACTS=${crashcar_build_last_bg_artifacts:-${CRASHCAR_BUILD_LAST_BG_ARTIFACTS:-}}
-elif [ "${INJECTION_MODE}" = "True" ]; then
-    CRASHCAR_BUILD_LAST_BG_ARTIFACTS=0
-else
-    CRASHCAR_BUILD_LAST_BG_ARTIFACTS=1
-fi
-case "${SINGLE_BACKGROUND_MODE_VALUE}" in
-    rolling|frozen) ;;
+CRASHCAR_BG_ONLY_VALUE=${crashcar_internal_bg_only:-${CRASHCAR_INTERNAL_BG_ONLY:-0}}
+case "$(printf '%s' "${CRASHCAR_BG_ONLY_VALUE}" | tr '[:upper:]' '[:lower:]')" in
+    ""|0|false|no|off) CRASHCAR_BG_ONLY_VALUE=0 ;;
+    1|true|yes|on) CRASHCAR_BG_ONLY_VALUE=1 ;;
     *)
-        printf 'crashcar_controller: invalid single_background_mode=%s; expected rolling or frozen\n' \
+        printf 'crashcar_controller: internal BG-only value must be boolean\n' >&2
+        exit 2
+        ;;
+esac
+CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE=${crashcar_background_required_seconds:-${CRASHCAR_BACKGROUND_REQUIRED_SECONDS:-${BACKGROUND_ACCUMULATION}}}
+COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE=${cohfar_assignfar_refresh_interval_seconds:-${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS:-}}
+FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE=${finalsink_fapupdater_interval_seconds:-${FINALSINK_FAPUPDATER_INTERVAL_SECONDS:-}}
+FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE=${finalsink_fapupdater_collect_walltime:-${FINALSINK_FAPUPDATER_COLLECT_WALLTIME:-}}
+COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE=${cohfar_accumbackground_snapshot_interval_seconds:-${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS:-${BACKGROUND_UPDATE}}}
+case "${SINGLE_BACKGROUND_MODE_VALUE}" in
+    rolling|live_readonly) ;;
+    *)
+        printf 'crashcar_controller: invalid single_background_mode=%s; expected rolling or live_readonly\n' \
             "${SINGLE_BACKGROUND_MODE_VALUE}" >&2
         exit 2
         ;;
 esac
-if [ "${INJECTION_MODE}" = "True" ] && [ "${SINGLE_BACKGROUND_MODE_VALUE}" != "frozen" ]; then
-    printf 'crashcar_controller: injection_mode=True requires single_background_mode=frozen\n' >&2
+case "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" in
+    ""|producer|consumer) ;;
+    *)
+        printf 'crashcar_controller: internal live background role must be producer or consumer\n' >&2
+        exit 2
+        ;;
+esac
+if [ "${INJECTION_MODE}" = "True" ] &&
+   { [ "${SINGLE_BACKGROUND_MODE_VALUE}" != "live_readonly" ] ||
+     [ "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" != "consumer" ]; }; then
+    printf 'crashcar_controller: injection_mode=True requires the internal live_readonly consumer\n' >&2
     exit 2
 fi
+if [ "${CRASHCAR_BG_ONLY_VALUE}" = "1" ] &&
+   { [ "${INJECTION_MODE}" != "False" ] ||
+     [ "${SINGLE_BACKGROUND_MODE_VALUE}" != "rolling" ] ||
+     [ -n "${INJECTION_FILE}" ]; }; then
+    printf 'crashcar_controller: BG-only requires no injection input and rolling background mode\n' >&2
+    exit 2
+fi
+if [ "${SINGLE_BACKGROUND_MODE_VALUE}" = "live_readonly" ] &&
+   [ "${CRASHCAR_BG_ONLY_VALUE}" != "0" ]; then
+    printf 'crashcar_controller: live read-only assignment cannot be BG-only\n' >&2
+    exit 2
+fi
+if [ "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" = "producer" ] &&
+   { [ "${INJECTION_MODE}" != "False" ] ||
+     [ "${SINGLE_BACKGROUND_MODE_VALUE}" != "rolling" ]; }; then
+    printf 'crashcar_controller: live producer must be a rolling no-injection run\n' >&2
+    exit 2
+fi
+if [ "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" = "consumer" ]; then
+    if [ "${SINGLE_BACKGROUND_MODE_VALUE}" != "live_readonly" ] ||
+       [ "${INJECTION_MODE}" != "True" ] ||
+       [ -z "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" ]; then
+        printf 'crashcar_controller: live consumer requires injection, live_readonly mode, and producer root\n' >&2
+        exit 2
+    fi
+    if [[ "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" != /* ]] ||
+       [ ! -d "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}/run" ]; then
+        printf 'crashcar_controller: live producer root must be absolute and contain run/\n' >&2
+        exit 2
+    fi
+    CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE=$(readlink -f -- "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}")
+    if [ "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" = "$(readlink -f -- "${ROOT}")" ]; then
+        printf 'crashcar_controller: injection consumer must not use its own run as producer root\n' >&2
+        exit 2
+    fi
+    NONINJ_STATS_LOC="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}/run"
+elif [ -n "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" ]; then
+    printf 'crashcar_controller: only the live consumer may receive a producer root\n' >&2
+    exit 2
+fi
+if [ -z "${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE}" ]; then
+    COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE=${BACKGROUND_UPDATE}
+fi
+if [ -z "${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}" ]; then
+    FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE=${BACKGROUND_UPDATE}
+fi
+if [ -z "${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}" ]; then
+    if [ "${INJECTION_MODE}" = "True" ] && [ "${SINGLE_BACKGROUND_MODE_VALUE}" = "live_readonly" ]; then
+        FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE},${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE},${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}"
+    else
+        FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}"
+    fi
+fi
+for positive_name in \
+    COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE \
+    FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE \
+    COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE; do
+    if ! [[ "${!positive_name}" =~ ^[1-9][0-9]*$ ]]; then
+        printf 'crashcar_controller: %s must be a positive integer\n' "${positive_name}" >&2
+        exit 2
+    fi
+done
 H_ONLY_SECONDS=${h_only_seconds:-${H_ONLY_SECONDS:-0}}
 L_ONLY_SECONDS=${l_only_seconds:-${L_ONLY_SECONDS:-0}}
 HL_SECONDS=${hl_seconds:-${HL_SECONDS:-0}}
@@ -234,8 +326,6 @@ FIRST3_H_ONLY_SECONDS=${first3_h_only_seconds:-${FIRST3_H_ONLY_SECONDS:-0}}
 FIRST3_L_ONLY_SECONDS=${first3_l_only_seconds:-${FIRST3_L_ONLY_SECONDS:-0}}
 FIRST3_HL_SECONDS=${first3_hl_seconds:-${FIRST3_HL_SECONDS:-0}}
 FIRST3_HL_NONE_SECONDS=${first3_hl_none_seconds:-${FIRST3_HL_NONE_SECONDS:-0}}
-SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE=${single_output_active_ifo_schedule:-${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE:-}}
-SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE=${single_output_active_ifo_schedule_file:-${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE:-"${ARTIFACTS}/single_output_active_ifo_schedule.txt"}}
 
 mkdir -p "${RUN_DIR}/logs" "${RUN_DIR}/monitor" "${CONTROLLER_DIR}" "${ARTIFACTS}" "${CRASH_RUNTIME_ROOT}" "${ROOT}/provenance"
 
@@ -266,73 +356,196 @@ with open(os.environ["STATUS"], "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 }
+live_background_helper_failure() {
+    local check_phase=$1 failure=$2
+    log "ERROR staged live-background helper integrity failed phase=${check_phase} reason=${failure}"
+    write_status phase=failed reason=live_background_helper_integrity_failed \
+        live_background_helper_check_phase="${check_phase}" \
+        live_background_helper_failure="${failure}" \
+        live_background_helper="${CRASHCAR_LIVE_BACKGROUND_HELPER}" \
+        live_background_helper_sha256="${CRASHCAR_LIVE_BACKGROUND_HELPER_SHA256:-UNPINNED}"
+    return 1
+}
 
-run_summary_json() {
-    RUN_DIR="${RUN_DIR}" python3 - <<'PY'
-import csv
-import json
-import math
+snapshot_live_background_helper() {
+    local check_phase=$1 result
+    if ! result=$(python3 - "${ROOT}" "${SCRIPT_DIR}" "${CRASHCAR_LIVE_BACKGROUND_HELPER}" 2>&1 <<'PY_LIVE_HELPER'
+import hashlib
 import os
 from pathlib import Path
+import stat
+import sys
 
-run_dir = Path(os.environ["RUN_DIR"])
-payload = {
-    "exists": False,
-    "files": [],
-    "rows": 0,
-    "non_boundary_rows": 0,
-    "chunk_boundary_rows": 0,
-    "candidate_counts": {"H1": 0, "L1": 0},
-    "min_end_time": None,
-    "max_end_time": None,
-}
-for path in sorted(run_dir.glob("[0-9][0-9][0-9]/*_single_triggers.csv")):
-    item = {
-        "path": str(path),
-        "rows": 0,
-        "non_boundary_rows": 0,
-        "chunk_boundary_rows": 0,
-        "candidate_counts": {"H1": 0, "L1": 0},
-        "min_end_time": None,
-        "max_end_time": None,
-    }
+root, script_dir, helper = map(Path, sys.argv[1:])
+try:
+    if not root.is_absolute() or not script_dir.is_absolute() or not helper.is_absolute():
+        raise RuntimeError("paths_must_be_absolute")
+    root_real = Path(os.path.realpath(root))
+    script_real = Path(os.path.realpath(script_dir))
+    if script_real != root_real / "scripts":
+        raise RuntimeError("script_dir_outside_run_root")
+    before = os.lstat(helper)
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise RuntimeError("helper_not_regular_non_symlink")
+    if before.st_mode & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH):
+        raise RuntimeError("helper_is_writable")
+    if not before.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
+        raise RuntimeError("helper_is_not_executable")
+    if Path(os.path.realpath(helper)) != script_real / "crashcar_live_background.py":
+        raise RuntimeError("helper_outside_run_scripts")
+    fd = os.open(helper, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     try:
-        handle = path.open(newline="", encoding="utf-8")
-    except FileNotFoundError:
-        continue
-    with handle:
-        for row in csv.DictReader(handle):
-            item["rows"] += 1
-            payload["rows"] += 1
-            try:
-                t = int(float(row.get("end_time") or "nan"))
-            except ValueError:
-                t = None
-            if t is not None:
-                for target in (item, payload):
-                    if target["min_end_time"] is None or t < target["min_end_time"]:
-                        target["min_end_time"] = t
-                    if target["max_end_time"] is None or t > target["max_end_time"]:
-                        target["max_end_time"] = t
-            if (row.get("source_kind") or "").strip() == "chunk_boundary":
-                item["chunk_boundary_rows"] += 1
-                payload["chunk_boundary_rows"] += 1
-                continue
-            item["non_boundary_rows"] += 1
-            payload["non_boundary_rows"] += 1
-            for ifo in ("H1", "L1"):
-                try:
-                    snr = float(row.get(f"snglsnr_{ifo}") or "nan")
-                    chisq = float(row.get(f"chisq_{ifo}") or "nan")
-                except ValueError:
-                    continue
-                if math.isfinite(snr) and math.isfinite(chisq) and snr >= 4.0 and chisq > 0.0:
-                    item["candidate_counts"][ifo] += 1
-                    payload["candidate_counts"][ifo] += 1
-    payload["files"].append(item)
-payload["exists"] = bool(payload["files"])
-print(json.dumps(payload, sort_keys=True))
-PY
+        opened = os.fstat(fd)
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            block = os.read(fd, 1024 * 1024)
+            if not block:
+                break
+            total += len(block)
+            if total > 8 * 1024 * 1024:
+                raise RuntimeError("helper_exceeds_size_limit")
+            digest.update(block)
+    finally:
+        os.close(fd)
+    after = os.lstat(helper)
+    identity = lambda item: (
+        item.st_dev, item.st_ino, item.st_mode, item.st_size,
+        item.st_mtime_ns, item.st_ctime_ns)
+    if identity(before) != identity(opened) or identity(opened) != identity(after):
+        raise RuntimeError("helper_changed_during_snapshot")
+    if total != opened.st_size or total == 0:
+        raise RuntimeError("helper_size_mismatch")
+    print(digest.hexdigest())
+except (OSError, RuntimeError) as exc:
+    print(str(exc), file=sys.stderr)
+    raise SystemExit(2)
+PY_LIVE_HELPER
+    ); then
+        live_background_helper_failure "${check_phase}" "${result:-snapshot_failed}"
+        return 1
+    fi
+    CRASHCAR_LIVE_BACKGROUND_HELPER_CURRENT_SHA256=${result}
+}
+
+pin_live_background_helper() {
+    snapshot_live_background_helper startup || return 1
+    CRASHCAR_LIVE_BACKGROUND_HELPER_SHA256=${CRASHCAR_LIVE_BACKGROUND_HELPER_CURRENT_SHA256}
+    write_status live_background_helper="${CRASHCAR_LIVE_BACKGROUND_HELPER}" \
+        live_background_helper_sha256="${CRASHCAR_LIVE_BACKGROUND_HELPER_SHA256}"
+}
+
+verify_live_background_helper_pin() {
+    local check_phase=$1
+    snapshot_live_background_helper "${check_phase}" || return 1
+    if [ "${CRASHCAR_LIVE_BACKGROUND_HELPER_CURRENT_SHA256}" != \
+         "${CRASHCAR_LIVE_BACKGROUND_HELPER_SHA256}" ]; then
+        live_background_helper_failure "${check_phase}" helper_sha256_drift
+        return 1
+    fi
+}
+
+validate_live_multi_inputs() {
+    python3 - "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" "${WORKER_COUNT}" <<'PY_MULTI_READY'
+import gzip
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+from xml.parsers import expat
+
+root = Path(sys.argv[1]).resolve(strict=True)
+worker_count = int(sys.argv[2])
+if worker_count < 1 or worker_count > 4096:
+    raise SystemExit("invalid worker count")
+records = []
+for worker in range(worker_count):
+    jobno = f"{worker:03d}"
+    worker_records = []
+    for span in ("2w", "1d", "2h"):
+        path = root / "run" / jobno / f"{jobno}_marginalized_stats_{span}.xml.gz"
+        try:
+            before = os.lstat(path)
+        except OSError as exc:
+            raise SystemExit(f"multi {worker}/{span} is unavailable: {exc}")
+        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+            raise SystemExit(f"multi {worker}/{span} is not a regular non-symlink file")
+        if before.st_size < 1:
+            raise SystemExit(f"multi {worker}/{span} is empty")
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            opened = os.fstat(fd)
+            parser = expat.ParserCreate()
+            with os.fdopen(fd, "rb", closefd=False) as raw:
+                with gzip.GzipFile(fileobj=raw, mode="rb") as stream:
+                    while True:
+                        block = stream.read(1024 * 1024)
+                        if not block:
+                            break
+                        parser.Parse(block, False)
+                    parser.Parse(b"", True)
+        except (OSError, EOFError, expat.ExpatError) as exc:
+            raise SystemExit(f"multi {worker}/{span} is not complete gzip/XML: {exc}")
+        finally:
+            os.close(fd)
+        after = os.lstat(path)
+        identity = lambda item: (
+            item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
+        if identity(before) != identity(opened) or identity(opened) != identity(after):
+            raise SystemExit(f"multi {worker}/{span} changed during validation")
+        worker_records.append({
+            "span": span, "path": str(path), "size": opened.st_size,
+            "mtime_ns": opened.st_mtime_ns,
+        })
+    records.append({"worker_id": worker, "files": worker_records})
+print(json.dumps({
+    "kind": "crashcar_live_multi_readiness", "producer_root": str(root),
+    "worker_count": worker_count, "workers": records,
+}, separators=(",", ":"), sort_keys=True))
+PY_MULTI_READY
+}
+
+validate_live_background_inputs() {
+    [ "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" = "consumer" ] || return 0
+    verify_live_background_helper_pin live_background_input_validation || return 2
+    local single_snapshot="${CONTROLLER_DIR}/live_single_readiness.input.json"
+    local multi_snapshot="${CONTROLLER_DIR}/live_multi_readiness.input.json"
+    local single_tmp="${single_snapshot}.tmp.$$" multi_tmp="${multi_snapshot}.tmp.$$"
+    local single_error="${CONTROLLER_DIR}/live_single_readiness.input.err"
+    local multi_error="${CONTROLLER_DIR}/live_multi_readiness.input.err"
+    if [ ! -x "${CRASHCAR_LIVE_BACKGROUND_HELPER}" ]; then
+        log "ERROR live single validator is unavailable: ${CRASHCAR_LIVE_BACKGROUND_HELPER}"
+        write_status phase=failed reason=live_single_validator_unavailable
+        return 2
+    fi
+    if ! "${CRASHCAR_LIVE_BACKGROUND_HELPER}" validate-all-singles \
+        --producer-root "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
+        --worker-count "${WORKER_COUNT}" \
+        --banks-per-worker "${BANKS_PER_WORKER}" \
+        --start-bank "${START_BANK}" >"${single_tmp}" 2>"${single_error}"; then
+        rm -f "${single_tmp}" "${multi_tmp}"
+        log "ERROR no complete valid live single backgrounds are available"
+        write_status phase=failed reason=live_single_backgrounds_invalid \
+            live_single_error="${single_error}"
+        return 2
+    fi
+    if ! validate_live_multi_inputs >"${multi_tmp}" 2>"${multi_error}"; then
+        rm -f "${single_tmp}" "${multi_tmp}"
+        log "ERROR required normal multi inputs are not independently complete"
+        write_status phase=failed reason=live_multi_backgrounds_invalid \
+            live_multi_error="${multi_error}"
+        return 2
+    fi
+    mv "${single_tmp}" "${single_snapshot}"
+    mv "${multi_tmp}" "${multi_snapshot}"
+    write_status phase=live_background_inputs_validated \
+        live_background_role=consumer \
+        live_background_producer_root="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
+        live_single_readiness="${single_snapshot}" \
+        live_single_readiness_sha256="$(sha256sum "${single_snapshot}" | awk '{print $1}')" \
+        live_multi_readiness="${multi_snapshot}" \
+        live_multi_readiness_sha256="$(sha256sum "${multi_snapshot}" | awk '{print $1}')"
 }
 
 detail_summary_json() {
@@ -347,9 +560,9 @@ payload = {
     "exists": False,
     "files": [],
     "rows": 0,
-    "finite_direct_far_rows": 0,
+    "finite_calculated_far_rows": 0,
     "ready_window_rows": 0,
-    "min_direct_far": None,
+    "min_calculated_far": None,
     "max_window_count": 0,
     "max_total_window_count": 0,
 }
@@ -357,9 +570,9 @@ for path in sorted(Path(os.environ["RUN_DIR"]).glob("crashcar_singlefar_detail_w
     item = {
         "path": str(path),
         "rows": 0,
-        "finite_direct_far_rows": 0,
+        "finite_calculated_far_rows": 0,
         "ready_window_rows": 0,
-        "min_direct_far": None,
+        "min_calculated_far": None,
         "max_window_count": 0,
         "max_total_window_count": 0,
     }
@@ -367,10 +580,12 @@ for path in sorted(Path(os.environ["RUN_DIR"]).glob("crashcar_singlefar_detail_w
         for row in csv.DictReader(handle):
             item["rows"] += 1
             payload["rows"] += 1
+            calculated_valid = (
+                str(row.get("far_calculated_valid", "")).strip() == "1")
             try:
-                direct = float(row.get("direct_far", "inf") or "inf")
+                calculated = float(row.get("far_calculated_exact", "") or "nan")
             except ValueError:
-                direct = math.inf
+                calculated = math.nan
             try:
                 window = int(float(row.get("window_count", "0") or 0))
                 total = int(float(row.get("total_window_count", "0") or 0))
@@ -384,13 +599,13 @@ for path in sorted(Path(os.environ["RUN_DIR"]).glob("crashcar_singlefar_detail_w
             if window > 0 and total > 0:
                 item["ready_window_rows"] += 1
                 payload["ready_window_rows"] += 1
-            if math.isfinite(direct):
-                item["finite_direct_far_rows"] += 1
-                payload["finite_direct_far_rows"] += 1
-                if item["min_direct_far"] is None or direct < item["min_direct_far"]:
-                    item["min_direct_far"] = direct
-                if payload["min_direct_far"] is None or direct < payload["min_direct_far"]:
-                    payload["min_direct_far"] = direct
+            if calculated_valid and math.isfinite(calculated) and calculated > 0.0:
+                item["finite_calculated_far_rows"] += 1
+                payload["finite_calculated_far_rows"] += 1
+                if item["min_calculated_far"] is None or calculated < item["min_calculated_far"]:
+                    item["min_calculated_far"] = calculated
+                if payload["min_calculated_far"] is None or calculated < payload["min_calculated_far"]:
+                    payload["min_calculated_far"] = calculated
     payload["files"].append(item)
 payload["exists"] = bool(payload["files"])
 print(json.dumps(payload, sort_keys=True))
@@ -405,112 +620,245 @@ count_stats() {
     find "${RUN_DIR}" -maxdepth 2 -type f -name '*_marginalized_stats_*.xml*' | wc -l | awk '{print $1}'
 }
 
-check_source() {
-    local remote_head source_head dirty config_relpaths config_path config_relpath github_check dirty_count
-    source_head=$(git -C "${SOURCE_ROOT}" rev-parse HEAD)
-    remote_head="${source_head}"
-    github_check=${crashcar_check_github:-${CRASHCAR_CHECK_GITHUB:-0}}
-    if [ "${github_check}" = "1" ]; then
-        log "fetch GitHub ${GITHUB_REMOTE}/${GITHUB_BRANCH}"
-        git -C "${SOURCE_ROOT}" fetch "${GITHUB_REMOTE}" "${GITHUB_BRANCH}"
-        remote_head=$(git -C "${SOURCE_ROOT}" rev-parse FETCH_HEAD)
-        if [ "${source_head}" != "${remote_head}" ]; then
-            log "WARNING source head ${source_head} != GitHub latest ${remote_head}; continuing because GitHub check is non-blocking"
-        fi
-    else
-        log "GitHub freshness check disabled; using local source head ${source_head}"
-    fi
-    dirty=$(git -C "${SOURCE_ROOT}" status --porcelain --untracked-files=no)
-    config_relpaths=
-    for config_path in "${CRASHCAR_SOURCE_CONFIG_FILE:-}" "${CONFIG_FILE}" "${SOURCE_ROOT}/scripts/crashcar.env"; do
-        [ -n "${config_path}" ] || continue
-        config_relpath=$(realpath --relative-to="${SOURCE_ROOT}" "${config_path}" 2>/dev/null || true)
-        if [ -n "${config_relpath}" ]; then
-            config_relpaths="${config_relpaths}${config_relpath}"$'\n'
-        fi
-    done
-    if [ -n "${config_relpaths}" ]; then
-        dirty=$(printf '%s\n' "${dirty}" | awk -v configs="${config_relpaths}" '
-            BEGIN {
-                split(configs, items, "\n")
-                for (idx in items) {
-                    if (items[idx] != "") {
-                        allow[items[idx]] = 1
-                    }
-                }
-            }
-            NF && !allow[substr($0, 4)]
-        ')
-    fi
-    if [ -n "${dirty}" ]; then
-        dirty_count=$(printf '%s\n' "${dirty}" | awk 'NF {count++} END {print count+0}')
-        log "WARNING tracked source worktree has ${dirty_count} dirty path(s); recording provenance and continuing"
-        mkdir -p "${ROOT}/provenance"
-        printf '%s\n' "${dirty}" > "${ROOT}/provenance/source_dirty_status.txt"
-    else
-        dirty_count=0
-    fi
-    if [ ! -x "${SOURCE_ROOT}/install_local/bin/gstlal_inspiral_postcohspiir_online" ]; then
-        log "ERROR missing latest install_local runtime under ${SOURCE_ROOT}"
-        write_status phase=failed reason=missing_install_local source_head="${source_head}" github_head="${remote_head}"
-        exit 2
-    fi
-    printf '%s\n' "${remote_head}" > "${ROOT}/provenance/github_${GITHUB_BRANCH}_head.txt"
-    mkdir -p "${ROOT}/bin"
-    cp "${SOURCE_ROOT}/gstlal-spiir/bin/gstlal_inspiral_postcohspiir_online" \
-        "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"
-    chmod +x "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"
-    finalsink_src="${SOURCE_ROOT}/gstlal-spiir/python/pipemodules/postcoh_finalsink.py"
-    finalsink_dst="${SOURCE_ROOT}/install_local/lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcoh_finalsink.py"
-    if [ -f "${finalsink_src}" ]; then
-        mkdir -p "$(dirname "${finalsink_dst}")"
-        cp "${finalsink_src}" "${finalsink_dst}"
-        log "staged Python finalsink ${finalsink_dst}"
-    else
-        log "ERROR missing source Python finalsink ${finalsink_src}"
-        write_status phase=failed reason=missing_source_finalsink source_head="${source_head}" github_head="${remote_head}"
-        exit 2
-    fi
-    rm -f "${CRASH_RUNTIME_ROOT}/install"
-    ln -s "${SOURCE_ROOT}/install_local" "${CRASH_RUNTIME_ROOT}/install"
-    {
-        printf 'github_remote=%s\n' "$(git -C "${SOURCE_ROOT}" remote get-url "${GITHUB_REMOTE}")"
-        printf 'github_branch=%s\n' "${GITHUB_BRANCH}"
-        printf 'github_head=%s\n' "${remote_head}"
-        printf 'github_check=%s\n' "${github_check}"
-        printf 'root=%s\n' "${SOURCE_ROOT}"
-        printf 'source_head=%s\n' "${source_head}"
-        printf 'source_dirty_tracked_count=%s\n' "${dirty_count}"
-        printf 'source_dirty_status=%s\n' "${ROOT}/provenance/source_dirty_status.txt"
-        printf 'runtime_install_symlink=%s/install\n' "${CRASH_RUNTIME_ROOT}"
-        printf 'single_llr_model=wguo_gaussian_v1\n'
-        printf 'dof=%s\n' "${DOF}"
-    } > "${ROOT}/provenance/source_and_runtime.env"
-    write_status phase=source_ready github_branch="${GITHUB_BRANCH}" github_head="${remote_head}" source_head="${source_head}" source_dirty_tracked_count="${dirty_count}" source_root="${SOURCE_ROOT}" runtime_root="${CRASH_RUNTIME_ROOT}"
+segment_binding_failure() {
+    local check_phase=${1:?segment binding check phase required}
+    local reason=${2:?segment binding failure reason required}
+    log "ERROR segment derivative binding failed phase=${check_phase} reason=${reason}"
+    write_status phase=failed reason=segment_derivative_binding_failed binding_check_phase="${check_phase}" binding_failure_reason="${reason}"
+    return 1
 }
 
+verify_segment_derivative_binding() {
+    local check_phase=${1:?segment binding check phase required}
+    local current_xml_path current_json_path current_xml_sha current_json_sha probe
+
+    for required in \
+        SEGMENT_XML_CANONICAL SEGMENT_XML_SHA256 \
+        SEGMENT_LIVETIME_JSON_CANONICAL SEGMENT_LIVETIME_JSON_SHA256 \
+        SEGMENT_BINDING_RUN_START SEGMENT_BINDING_RUN_END; do
+        if [ -z "${!required:-}" ]; then
+            segment_binding_failure "${check_phase}" "missing_${required}"
+            return 1
+        fi
+    done
+    if ! current_xml_path=$(readlink -f -- "${SEGMENT_XML}"); then
+        segment_binding_failure "${check_phase}" raw_segment_xml_unresolvable
+        return 1
+    fi
+    if ! current_json_path=$(readlink -f -- "${LIVETIME_CSV}"); then
+        segment_binding_failure "${check_phase}" canonical_derivative_unresolvable
+        return 1
+    fi
+    if [ "${current_xml_path}" != "${SEGMENT_XML_CANONICAL}" ]; then
+        segment_binding_failure "${check_phase}" raw_segment_xml_path_drift
+        return 1
+    fi
+    if [ "${current_json_path}" != "${SEGMENT_LIVETIME_JSON_CANONICAL}" ]; then
+        segment_binding_failure "${check_phase}" canonical_derivative_path_drift
+        return 1
+    fi
+    if [ "${START_GPS}" != "${SEGMENT_BINDING_RUN_START}" ] ||
+       [ "${END_GPS}" != "${SEGMENT_BINDING_RUN_END}" ]; then
+        segment_binding_failure "${check_phase}" run_frontier_drift
+        return 1
+    fi
+    current_xml_sha=$(sha256sum "${SEGMENT_XML_CANONICAL}" | awk '{print $1}')
+    current_json_sha=$(sha256sum "${SEGMENT_LIVETIME_JSON_CANONICAL}" | awk '{print $1}')
+    if [ "${current_xml_sha}" != "${SEGMENT_XML_SHA256}" ]; then
+        segment_binding_failure "${check_phase}" raw_segment_xml_sha256_drift
+        return 1
+    fi
+    if [ "${current_json_sha}" != "${SEGMENT_LIVETIME_JSON_SHA256}" ]; then
+        segment_binding_failure "${check_phase}" canonical_derivative_sha256_drift
+        return 1
+    fi
+
+    probe=$(mktemp "${CONTROLLER_DIR}/.segment_livetime.verify.XXXXXX")
+    if ! python3 "${CRASH_SCRIPT_DIR}/dump_segment_livetime_csv.py" \
+        "${SEGMENT_XML_CANONICAL}" \
+        --run-start "${SEGMENT_BINDING_RUN_START}" \
+        --run-end "${SEGMENT_BINDING_RUN_END}" \
+        --output "${probe}" >/dev/null 2>&1; then
+        rm -f -- "${probe}"
+        segment_binding_failure "${check_phase}" canonical_derivative_regeneration_failed
+        return 1
+    fi
+    if ! cmp -s "${probe}" "${SEGMENT_LIVETIME_JSON_CANONICAL}"; then
+        rm -f -- "${probe}"
+        segment_binding_failure "${check_phase}" canonical_derivative_bytes_mismatch
+        return 1
+    fi
+    rm -f -- "${probe}"
+    return 0
+}
+
+runtime_manifest_binding_failure() {
+    local check_phase=${1:?runtime manifest check phase required}
+    local reason=${2:?runtime manifest failure reason required}
+    log "ERROR runtime provenance manifest binding failed phase=${check_phase} reason=${reason}"
+    write_status phase=failed reason=runtime_provenance_manifest_binding_failed binding_check_phase="${check_phase}" binding_failure_reason="${reason}"
+    return 1
+}
+
+verify_runtime_provenance_manifest_pin() {
+    local check_phase=${1:?runtime manifest check phase required}
+    local manifest="${ROOT}/provenance/runtime_snapshot/runtime_manifest.env"
+    local current_sha
+    if [[ ! "${RUNTIME_PROVENANCE_MANIFEST_SHA256:-}" =~ ^[0-9a-f]{64}$ ]]; then
+        runtime_manifest_binding_failure "${check_phase}" invalid_expected_manifest_sha256
+        return 1
+    fi
+    if [ ! -r "${manifest}" ]; then
+        runtime_manifest_binding_failure "${check_phase}" manifest_missing
+        return 1
+    fi
+    current_sha=$(sha256sum "${manifest}" | awk '{print $1}')
+    if [ "${current_sha}" != "${RUNTIME_PROVENANCE_MANIFEST_SHA256}" ]; then
+        runtime_manifest_binding_failure "${check_phase}" manifest_sha256_drift
+        return 1
+    fi
+    return 0
+}
+
+capture_runtime_manifest() {
+    local source_head source_branch dirty dirty_count remote_url remote_tracking_head
+    local source_install runtime_staging runtime_install runtime_files_manifest runtime_manifest_sha
+    local runtime_snapshot_dir required_rel required_path wrapper_sha plugin_sha finalsink_sha postcohtable_sha
+
+    verify_live_background_helper_pin runtime_manifest_capture || exit 2
+    verify_segment_derivative_binding runtime_staging || exit 2
+    runtime_snapshot_dir="${ROOT}/provenance/runtime_snapshot"
+    if [ -e "${runtime_snapshot_dir}" ] || [ -L "${runtime_snapshot_dir}" ]; then
+        log "ERROR immutable runtime snapshot path already exists ${runtime_snapshot_dir}"
+        write_status phase=failed reason=runtime_snapshot_already_exists runtime_snapshot="${runtime_snapshot_dir}"
+        exit 2
+    fi
+    mkdir "${runtime_snapshot_dir}"
+
+    source_head=$(git -C "${SOURCE_ROOT}" rev-parse HEAD)
+    source_branch=$(git -C "${SOURCE_ROOT}" symbolic-ref --quiet --short HEAD 2>/dev/null || printf 'DETACHED')
+    remote_url=$(git -C "${SOURCE_ROOT}" remote get-url "${GITHUB_REMOTE}" 2>/dev/null || true)
+    remote_tracking_head=$(git -C "${SOURCE_ROOT}" rev-parse --verify --quiet "refs/remotes/${GITHUB_REMOTE}/${GITHUB_BRANCH}" 2>/dev/null || true)
+    [ -n "${remote_url}" ] || remote_url=UNAVAILABLE
+    [ -n "${remote_tracking_head}" ] || remote_tracking_head=UNAVAILABLE
+
+    dirty=$(git -C "${SOURCE_ROOT}" status --porcelain=v1 --untracked-files=no)
+    if [ -n "${dirty}" ]; then
+        dirty_count=$(printf '%s\n' "${dirty}" | awk 'NF {count++} END {print count+0}')
+        printf '%s\n' "${dirty}" > "${runtime_snapshot_dir}/source_dirty_tracked.txt"
+    else
+        dirty_count=0
+        : > "${runtime_snapshot_dir}/source_dirty_tracked.txt"
+    fi
+
+    source_install="${SOURCE_ROOT}/install_local"
+    for required_rel in \
+        bin/gstlal_inspiral_postcohspiir_online \
+        lib/gstreamer-1.0/libgstcuda.so.0.0.0 \
+        lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcoh_finalsink.py \
+        lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcohtable/_postcohtable.so; do
+        required_path="${source_install}/${required_rel}"
+        if [ ! -f "${required_path}" ]; then
+            log "ERROR missing installed runtime artifact ${required_path}"
+            write_status phase=failed reason=missing_installed_runtime_artifact source_head="${source_head}" missing_path="${required_path}"
+            exit 2
+        fi
+    done
+    if [ ! -x "${source_install}/bin/gstlal_inspiral_postcohspiir_online" ]; then
+        log "ERROR installed online wrapper is not executable"
+        write_status phase=failed reason=installed_wrapper_not_executable source_head="${source_head}"
+        exit 2
+    fi
+
+    runtime_install="${CRASH_RUNTIME_ROOT}/install"
+    runtime_staging="${CRASH_RUNTIME_ROOT}/.install.staging.$$"
+    if [ -e "${runtime_install}" ] || [ -L "${runtime_install}" ]; then
+        log "ERROR runtime install already exists; refusing to reuse or replace ${runtime_install}"
+        write_status phase=failed reason=runtime_install_already_exists source_head="${source_head}" runtime_install="${runtime_install}"
+        exit 2
+    fi
+    if [ -e "${runtime_staging}" ] || [ -L "${runtime_staging}" ]; then
+        log "ERROR runtime staging path unexpectedly exists ${runtime_staging}"
+        write_status phase=failed reason=runtime_staging_already_exists source_head="${source_head}" runtime_staging="${runtime_staging}"
+        exit 2
+    fi
+    if ! cp -a "${source_install}" "${runtime_staging}"; then
+        rm -rf -- "${runtime_staging}"
+        log "ERROR failed to stage installed runtime"
+        write_status phase=failed reason=runtime_stage_copy_failed source_head="${source_head}"
+        exit 2
+    fi
+    mv "${runtime_staging}" "${runtime_install}"
+    chmod -R a-w "${runtime_install}"
+
+    runtime_files_manifest="${runtime_snapshot_dir}/runtime_files.sha256"
+    (
+        cd "${runtime_install}"
+        find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum
+        find . -type l -printf 'SYMLINK %p -> %l\n' | LC_ALL=C sort
+    ) > "${runtime_files_manifest}"
+    runtime_manifest_sha=$(sha256sum "${runtime_files_manifest}" | awk '{print $1}')
+    wrapper_sha=$(sha256sum "${runtime_install}/bin/gstlal_inspiral_postcohspiir_online" | awk '{print $1}')
+    plugin_sha=$(sha256sum "${runtime_install}/lib/gstreamer-1.0/libgstcuda.so.0.0.0" | awk '{print $1}')
+    finalsink_sha=$(sha256sum "${runtime_install}/lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcoh_finalsink.py" | awk '{print $1}')
+    postcohtable_sha=$(sha256sum "${runtime_install}/lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcohtable/_postcohtable.so" | awk '{print $1}')
+
+    printf '%s\n' "${source_head}" > "${runtime_snapshot_dir}/source_head.txt"
+    {
+        printf 'manifest_kind=passive_runtime_snapshot\n'
+        printf 'acceptance_owner=external_verification_harness\n'
+        printf 'source_root=%s\n' "${SOURCE_ROOT}"
+        printf 'source_branch=%s\n' "${source_branch}"
+        printf 'source_head=%s\n' "${source_head}"
+        printf 'source_remote_name=%s\n' "${GITHUB_REMOTE}"
+        printf 'source_remote_url=%s\n' "${remote_url}"
+        printf 'source_remote_tracking_head_observed_without_fetch=%s\n' "${remote_tracking_head}"
+        printf 'source_dirty_tracked_count=%s\n' "${dirty_count}"
+        printf 'source_dirty_tracked_status=%s\n' "${runtime_snapshot_dir}/source_dirty_tracked.txt"
+        printf 'runtime_install=%s\n' "${runtime_install}"
+        printf 'runtime_files_manifest=%s\n' "${runtime_files_manifest}"
+        printf 'runtime_files_manifest_sha256=%s\n' "${runtime_manifest_sha}"
+        printf 'runtime_wrapper_sha256=%s\n' "${wrapper_sha}"
+        printf 'runtime_plugin_sha256=%s\n' "${plugin_sha}"
+        printf 'runtime_finalsink_sha256=%s\n' "${finalsink_sha}"
+        printf 'runtime_postcohtable_sha256=%s\n' "${postcohtable_sha}"
+        printf 'crashcar_segment_xml_absolute_path=%q\n' "${SEGMENT_XML_CANONICAL}"
+        printf 'crashcar_segment_xml_sha256=%s\n' "${SEGMENT_XML_SHA256}"
+        printf 'crashcar_segment_livetime_json_absolute_path=%q\n' "${SEGMENT_LIVETIME_JSON_CANONICAL}"
+        printf 'crashcar_segment_livetime_json_sha256=%s\n' "${SEGMENT_LIVETIME_JSON_SHA256}"
+        printf 'crashcar_segment_run_start=%s\n' "${SEGMENT_BINDING_RUN_START}"
+        printf 'crashcar_segment_run_end=%s\n' "${SEGMENT_BINDING_RUN_END}"
+        printf 'single_llr_model=wguo_gaussian_v1\n'
+        printf 'legacy_dof_env_value=%s\n' "${DOF}"
+        printf 'dof_authority=bankid_fixed_0_99_120_100_383_600\n'
+        printf 'crashcar_live_background_helper_absolute_path=%q\n' "${CRASHCAR_LIVE_BACKGROUND_HELPER}"
+        printf 'crashcar_live_background_helper_sha256=%s\n' "${CRASHCAR_LIVE_BACKGROUND_HELPER_SHA256}"
+    } > "${runtime_snapshot_dir}/runtime_manifest.env"
+    RUNTIME_PROVENANCE_MANIFEST_SHA256=$(sha256sum "${runtime_snapshot_dir}/runtime_manifest.env" | awk '{print $1}')
+    chmod -R a-w "${runtime_snapshot_dir}"
+    log "staged immutable run-root runtime snapshot ${runtime_install} manifest_sha256=${runtime_manifest_sha}"
+    write_status phase=runtime_staged source_branch="${source_branch}" source_head="${source_head}" source_dirty_tracked_count="${dirty_count}" source_root="${SOURCE_ROOT}" runtime_install="${runtime_install}" runtime_manifest_sha256="${runtime_manifest_sha}" runtime_provenance_manifest_sha256="${RUNTIME_PROVENANCE_MANIFEST_SHA256}" acceptance_owner=external_verification_harness
+}
 validate_inputs() {
     local p worker bank bank_id ifo bank_file
     for p in \
         "${SEGMENT_XML}" \
         "${DETRSP_MAP}" \
         "${FRAME_CACHE}" \
-        "${CRASH_SCRIPT_DIR}/single_detector_far.py" \
         "${CRASH_SCRIPT_DIR}/dump_segment_livetime_csv.py" \
-        "${CRASH_SCRIPT_DIR}/plot_single_llr_far.py" \
         "${CRASH_SCRIPT_DIR}/export_template_shape_map.py" \
-        "${SCRIPT_DIR}/materialize_frozen_single_support.py" \
-        "${SCRIPT_DIR}/materialize_snr_autocorrelation.py" \
         "${WGUO_BANK_STATS_DIR}"; do
         [ -e "${p}" ] || { log "ERROR missing input ${p}"; write_status phase=failed reason="missing ${p}"; exit 2; }
     done
     for worker in $(seq 0 $((WORKER_COUNT - 1))); do
         local jobno
         jobno=$(printf '%03d' "${worker}")
-        for suffix in 2w 1d 2h; do
-            p="${NONINJ_STATS_LOC}/${jobno}/${jobno}_marginalized_stats_${suffix}.xml.gz"
-            [ -e "${p}" ] || { log "ERROR missing input ${p}"; write_status phase=failed reason="missing ${p}"; exit 2; }
-        done
+        if [ "${CRASHCAR_BG_ONLY_VALUE}" != "1" ]; then
+            for suffix in 2w 1d 2h; do
+                p="${NONINJ_STATS_LOC}/${jobno}/${jobno}_marginalized_stats_${suffix}.xml.gz"
+                [ -e "${p}" ] || { log "ERROR missing input ${p}"; write_status phase=failed reason="missing ${p}"; exit 2; }
+            done
+        fi
         for bank in $(seq $((START_BANK + BANKS_PER_WORKER * worker)) $((START_BANK + BANKS_PER_WORKER * (worker + 1) - 1))); do
             bank_id=$(printf '%04d' "${bank}")
             for ifo in H1 L1 V1; do
@@ -519,135 +867,127 @@ validate_inputs() {
             done
         done
     done
-    if [ "${SINGLE_BACKGROUND_MODE_VALUE}" = "frozen" ]; then
-        if [ -n "${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" ]; then
-            [ -f "${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" ] || {
-                log "ERROR missing frozen single background ${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
-                write_status phase=failed reason=missing_frozen_single_background single_frozen_background_json="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
-                exit 2
-            }
-        elif [ -n "${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" ]; then
-            [ -d "${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" ] || {
-                log "ERROR missing frozen single background run dir ${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}"
-                write_status phase=failed reason=missing_frozen_single_background_run_dir single_frozen_background_run_dir="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}"
-                exit 2
-            }
-            SINGLE_FROZEN_BACKGROUND_JSON_VALUE="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}/artifacts/crashcar_day1_last_bg3h_full_background.json"
-            [ -f "${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" ] || {
-                log "ERROR missing frozen single background ${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
-                write_status phase=failed reason=missing_frozen_single_background single_frozen_background_json="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
-                exit 2
-            }
-        else
-            log "ERROR single_background_mode=frozen requires single_frozen_background_json or single_frozen_background_run_dir"
-            write_status phase=failed reason=frozen_single_background_not_configured
-            exit 2
-        fi
-        if [ -z "${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}" ]; then
-            CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE="${ARTIFACTS}/crashcar_frozen_single_support.csv"
-            python3 "${SCRIPT_DIR}/materialize_frozen_single_support.py" \
-                --background "${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
-                --output "${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}" \
-                --summary "${ARTIFACTS}/crashcar_frozen_single_support_summary.json" \
-                > "${CONTROLLER_DIR}/materialize_frozen_single_support.log" \
-                2>&1 || {
-                    log "ERROR failed to materialize frozen single support from ${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
-                    write_status phase=failed reason=frozen_single_support_missing single_frozen_background_json="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}"
-                    exit 2
-                }
-        fi
-        [ -s "${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}" ] || {
-            log "ERROR frozen single support CSV is empty ${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}"
-            write_status phase=failed reason=frozen_single_support_empty crashcar_frozen_single_support_csv="${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}"
-            exit 2
-        }
-    fi
     python3 "${CRASH_SCRIPT_DIR}/dump_segment_livetime_csv.py" \
         "${SEGMENT_XML}" \
+        --run-start "${START_GPS}" \
+        --run-end "${END_GPS}" \
         --output "${LIVETIME_CSV}" \
         > "${CONTROLLER_DIR}/dump_segment_livetime_csv.log" \
         2>&1
-    [ -s "${LIVETIME_CSV}" ] || { log "ERROR livetime CSV not created"; write_status phase=failed reason=livetime_csv_missing; exit 2; }
-    if [ -z "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}" ]; then
-        SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE=$(python3 - "${LIVETIME_CSV}" "${START_GPS}" "${END_GPS}" <<'PY'
-import csv
-import sys
-
-livetime_csv, start_text, end_text = sys.argv[1:4]
-start = float(start_text)
-end = float(end_text)
-segments = {"H1": [], "L1": [], "V1": [], "K1": []}
-with open(livetime_csv, newline="") as handle:
-    for row in csv.DictReader(handle):
-        ifo = (row.get("ifo") or "").strip()
-        if ifo not in segments:
-            continue
-        try:
-            seg_start = max(start, float(row["start"]))
-            seg_end = min(end, float(row["end"]))
-        except (KeyError, TypeError, ValueError):
-            continue
-        if seg_end > seg_start:
-            segments[ifo].append((seg_start, seg_end))
-
-breaks = {start, end}
-for spans in segments.values():
-    for seg_start, seg_end in spans:
-        breaks.add(seg_start)
-        breaks.add(seg_end)
-points = sorted(value for value in breaks if start <= value <= end)
-
-def active_at(midpoint):
-    out = []
-    for ifo in ("H1", "L1", "V1", "K1"):
-        for seg_start, seg_end in segments[ifo]:
-            if seg_start <= midpoint < seg_end:
-                out.append(ifo[0])
-                break
-    return "+".join(out)
-
-def fmt(value):
-    if abs(value - round(value)) < 1.0e-6:
-        return str(int(round(value)))
-    return ("%.9f" % value).rstrip("0").rstrip(".")
-
-windows = []
-for left, right in zip(points, points[1:]):
-    if right <= left:
-        continue
-    mask = active_at((left + right) / 2.0)
-    if windows and windows[-1][2] == mask and abs(windows[-1][1] - left) < 1.0e-6:
-        windows[-1] = (windows[-1][0], right, mask)
-    else:
-        windows.append((left, right, mask))
-print(";".join(f"{fmt(left)}:{fmt(right)}:{mask}" for left, right, mask in windows))
-PY
-)
-    fi
-    printf '%s
-' "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}" > "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}"
-    export SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE
-    export SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE
+    [ -s "${LIVETIME_CSV}" ] || { log "ERROR canonical livetime JSON not created"; write_status phase=failed reason=livetime_json_missing; exit 2; }
+    SEGMENT_XML_CANONICAL=$(readlink -f -- "${SEGMENT_XML}") || { log "ERROR cannot canonicalize segment XML path"; write_status phase=failed reason=segment_xml_path_unresolvable; exit 2; }
+    SEGMENT_LIVETIME_JSON_CANONICAL=$(readlink -f -- "${LIVETIME_CSV}") || { log "ERROR cannot canonicalize segment derivative path"; write_status phase=failed reason=segment_derivative_path_unresolvable; exit 2; }
+    SEGMENT_XML="${SEGMENT_XML_CANONICAL}"
+    LIVETIME_CSV="${SEGMENT_LIVETIME_JSON_CANONICAL}"
+    SEGMENT_XML_SHA256=$(sha256sum "${SEGMENT_XML_CANONICAL}" | awk '{print $1}')
+    SEGMENT_LIVETIME_JSON_SHA256=$(sha256sum "${SEGMENT_LIVETIME_JSON_CANONICAL}" | awk '{print $1}')
+    SEGMENT_BINDING_RUN_START="${START_GPS}"
+    SEGMENT_BINDING_RUN_END="${END_GPS}"
+    verify_segment_derivative_binding post_generation || exit 2
     bash -n "${SCRIPT_DIR}/crashcar_pipeline.sh"
     bash -n "${SCRIPT_DIR}/crashcar_sbatch.sh"
-    write_status phase=inputs_validated segment_xml="${SEGMENT_XML}" crashcar_segment_livetime_csv="${LIVETIME_CSV}" single_output_active_ifo_schedule_file="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}" single_output_active_ifo_schedule_length="${#SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}"
+    write_status phase=inputs_validated segment_xml="${SEGMENT_XML}" crashcar_segment_livetime_json="${LIVETIME_CSV}" crashcar_segment_livetime_sha256="$(sha256sum "${LIVETIME_CSV}" | awk '{print $1}')" final_far_route_authority=row_ifos_exact_mask
 }
 
 export_template_map() {
-    module load gcc/13.3.0 scipy-bundle/2024.05 >/dev/null 2>&1 || true
+    module load gcc/13.3.0 scipy-bundle/2024.05 >/dev/null 2>&1 || {
+        log "ERROR failed to load controlled A_eff exporter runtime"
+        write_status phase=failed reason=template_shape_runtime_module_load_failed
+        exit 2
+    }
     local template_map="${ARTIFACTS}/crashcar_template_shape_map.csv"
-    python3 "${CRASH_SCRIPT_DIR}/export_template_shape_map.py" \
+    local template_map_python template_map_python_version template_map_packages
+    template_map_python=$(command -v python3) || {
+        log "ERROR controlled A_eff exporter python3 is unavailable"
+        write_status phase=failed reason=template_shape_python_missing
+        exit 2
+    }
+    template_map_python_version=$("${template_map_python}" -c 'import sys; print(sys.version.split()[0])') || {
+        log "ERROR cannot query controlled A_eff exporter Python"
+        write_status phase=failed reason=template_shape_python_probe_failed
+        exit 2
+    }
+    template_map_packages=$("${template_map_python}" -c 'import numpy,pandas; print("numpy="+numpy.__version__+",pandas="+pandas.__version__)') || {
+        log "ERROR controlled A_eff exporter requires NumPy and pandas"
+        write_status phase=failed reason=template_shape_python_dependencies_missing
+        exit 2
+    }
+    "${template_map_python}" "${CRASH_SCRIPT_DIR}/export_template_shape_map.py" \
         --bank-stats-dir "${WGUO_BANK_STATS_DIR}" \
         --output "${template_map}" \
         --ifos H1,L1 \
-        --start-bank "${START_BANK}" \
-        --end-bank $((START_BANK + WORKER_COUNT * BANKS_PER_WORKER - 1)) \
-        --dof "${DOF}" \
+        --start-bank 0 \
+        --end-bank 383 \
         > "${CONTROLLER_DIR}/export_template_shape_map.log" \
         2>&1
     [ -s "${template_map}" ] || { log "ERROR template map not created"; write_status phase=failed reason=template_shape_map_missing; exit 2; }
-    write_status phase=template_shape_map_ready template_shape_map="${template_map}"
-    log "template shape map ready ${template_map}"
+    write_status phase=template_shape_map_ready template_shape_map="${template_map}" template_map_python="${template_map_python}" template_map_python_version="${template_map_python_version}" template_map_packages="${template_map_packages}"
+    log "template shape map ready ${template_map} python=${template_map_python} version=${template_map_python_version} ${template_map_packages}"
+}
+
+prepare_schema4_provenance() {
+    local provenance_dir="${ROOT}/provenance/schema4"
+    local runtime_env="${ROOT}/provenance/runtime_snapshot/runtime_manifest.env"
+    local runtime_files_sha current_sha
+    local template_map="${ARTIFACTS}/crashcar_template_shape_map.csv"
+    verify_live_background_helper_pin schema4_provenance || exit 2
+    if [ -e "${provenance_dir}" ] || [ -L "${provenance_dir}" ]; then
+        log "ERROR schema4 provenance path already exists ${provenance_dir}"
+        write_status phase=failed reason=schema4_provenance_already_exists
+        exit 2
+    fi
+    mkdir "${provenance_dir}"
+    SCHEMA4_RUN_NAMESPACE_PATH="${provenance_dir}/run_namespace.txt"
+    SCHEMA4_SOURCE_MANIFEST_PATH="${provenance_dir}/source_manifest.env"
+    printf 'run_root=%s\n' "$(readlink -f -- "${ROOT}")" \
+        > "${SCHEMA4_RUN_NAMESPACE_PATH}"
+    {
+        printf 'manifest_kind=crashcar_source_identity_v1\n'
+        grep -E '^source_(branch|head|remote_name|remote_url|remote_tracking_head_observed_without_fetch|dirty_tracked_count)=' \
+            "${runtime_env}"
+        printf 'source_dirty_tracked_sha256=%s\n' \
+            "$(sha256sum "${ROOT}/provenance/runtime_snapshot/source_dirty_tracked.txt" | awk '{print $1}')"
+    } > "${SCHEMA4_SOURCE_MANIFEST_PATH}"
+    chmod 0444 "${SCHEMA4_RUN_NAMESPACE_PATH}" "${SCHEMA4_SOURCE_MANIFEST_PATH}"
+
+    SCHEMA4_RUN_NAMESPACE_SHA256=$(sha256sum "${SCHEMA4_RUN_NAMESPACE_PATH}" | awk '{print $1}')
+    SCHEMA4_SOURCE_MANIFEST_SHA256=$(sha256sum "${SCHEMA4_SOURCE_MANIFEST_PATH}" | awk '{print $1}')
+    runtime_files_sha=$(awk -F= '$1=="runtime_files_manifest_sha256" {print $2}' "${runtime_env}")
+    if [[ ! "${runtime_files_sha}" =~ ^[0-9a-f]{64}$ ]]; then
+        log "ERROR runtime artifact manifest digest is invalid"
+        write_status phase=failed reason=schema4_runtime_manifest_sha_invalid
+        exit 2
+    fi
+    SCHEMA4_RUNTIME_MANIFEST_SHA256=${runtime_files_sha}
+    SCHEMA4_CONFIG_SHA256=$(sha256sum "${CONFIG_FILE}" | awk '{print $1}')
+    SCHEMA4_TEMPLATE_SHAPE_MAP_SHA256=$(sha256sum "${template_map}" | awk '{print $1}')
+
+    for current_sha in \
+        "${SCHEMA4_RUN_NAMESPACE_SHA256}" \
+        "${SCHEMA4_SOURCE_MANIFEST_SHA256}" \
+        "${SCHEMA4_RUNTIME_MANIFEST_SHA256}" \
+        "${SCHEMA4_CONFIG_SHA256}" \
+        "${SCHEMA4_TEMPLATE_SHAPE_MAP_SHA256}" \
+        "${SEGMENT_XML_SHA256}" \
+        "${SEGMENT_LIVETIME_JSON_SHA256}"; do
+        if [[ ! "${current_sha}" =~ ^[0-9a-f]{64}$ ]]; then
+            log "ERROR schema4 provenance digest is not lowercase64"
+            write_status phase=failed reason=schema4_provenance_digest_invalid
+            exit 2
+        fi
+    done
+
+    write_status \
+        phase=schema4_provenance_ready \
+        schema4_run_namespace_sha256="${SCHEMA4_RUN_NAMESPACE_SHA256}" \
+        schema4_source_manifest_sha256="${SCHEMA4_SOURCE_MANIFEST_SHA256}" \
+        schema4_runtime_manifest_sha256="${SCHEMA4_RUNTIME_MANIFEST_SHA256}" \
+        schema4_config_sha256="${SCHEMA4_CONFIG_SHA256}" \
+        schema4_template_shape_map_sha256="${SCHEMA4_TEMPLATE_SHAPE_MAP_SHA256}" \
+        live_background_role="${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" \
+        live_background_producer_root="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
+        live_background_helper="${CRASHCAR_LIVE_BACKGROUND_HELPER}" \
+        live_background_helper_sha256="${CRASHCAR_LIVE_BACKGROUND_HELPER_SHA256}"
 }
 
 job_snapshot() {
@@ -661,7 +1001,7 @@ job_snapshot() {
 }
 
 write_final_report() {
-    local phase=$1 job=$2 sacct_text=$3 raw_json=$4 detail_json=$5
+    local phase=$1 job=$2 sacct_text=$3 detail_json=$4
     REPORT="${REPORT}" ROOT="${ROOT}" RUN_DIR="${RUN_DIR}" ARTIFACTS="${ARTIFACTS}" SOURCE_ROOT="${SOURCE_ROOT}" \
         START_GPS="${START_GPS}" END_GPS="${END_GPS}" DURATION="${DURATION}" \
         BACKGROUND_ACCUMULATION="${BACKGROUND_ACCUMULATION}" BACKGROUND_UPDATE="${BACKGROUND_UPDATE}" \
@@ -674,23 +1014,20 @@ write_final_report() {
         FIRST3_HL_SECONDS="${FIRST3_HL_SECONDS}" FIRST3_HL_NONE_SECONDS="${FIRST3_HL_NONE_SECONDS}" \
         TAIL_LOG_FAR="${TAIL_LOG_FAR}" FAR_FIT_BOUNDARY="${FAR_FIT_BOUNDARY}" \
         CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}" \
-        CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}" \
-        CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR:-1}" \
         SINGLE_BACKGROUND_MODE_VALUE="${SINGLE_BACKGROUND_MODE_VALUE}" \
-        SINGLE_FROZEN_BACKGROUND_JSON_VALUE="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
-        SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" \
-        CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE="${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE}" \
-        CRASHCAR_BUILD_LAST_BG_ARTIFACTS="${CRASHCAR_BUILD_LAST_BG_ARTIFACTS}" \
+        CRASHCAR_BG_ONLY_VALUE="${CRASHCAR_BG_ONLY_VALUE}" \
+        CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE="${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" \
+        CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
         CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}" \
-        python3 - "${phase}" "${job}" "${sacct_text}" "${raw_json}" "${detail_json}" <<'PY'
+        python3 - "${phase}" "${job}" "${sacct_text}" "${detail_json}" <<'PY'
 import json
 import os
 import sys
 import time
 from pathlib import Path
 
-phase, job, sacct_text, raw_json, detail_json = sys.argv[1:6]
-artifacts = Path(os.environ["ARTIFACTS"])
+phase, job, sacct_text, detail_json = sys.argv[1:5]
+run_dir = Path(os.environ["RUN_DIR"])
 payload = {
     "updated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     "phase": phase,
@@ -726,489 +1063,38 @@ payload = {
     "first3_hl_seconds": float(os.environ["FIRST3_HL_SECONDS"] or 0.0),
     "first3_hl_none_seconds": float(os.environ["FIRST3_HL_NONE_SECONDS"] or 0.0),
     "crashcar_log10_far_threshold": float(os.environ["CRASHCAR_LOG10_FAR_THRESHOLD"]),
-    "crashcar_preserve_table_single_far": int(os.environ["CRASHCAR_PRESERVE_TABLE_SINGLE_FAR"]),
     "crashcar_background_required_seconds": float(os.environ["CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE"]),
-    "crashcar_single_ledger_final_update": os.environ["CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE"],
-    "crashcar_build_last_bg_artifacts": os.environ["CRASHCAR_BUILD_LAST_BG_ARTIFACTS"],
     "single_background_mode": os.environ["SINGLE_BACKGROUND_MODE_VALUE"],
-    "single_frozen_background_json": os.environ["SINGLE_FROZEN_BACKGROUND_JSON_VALUE"] or None,
-    "single_frozen_background_run_dir": os.environ["SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE"] or None,
-    "single_ledger_patch_summary": str(Path(os.environ["RUN_DIR"]) / "monitor" / "patch_zerolag_single_far_summary.json"),
+    "background_only": os.environ["CRASHCAR_BG_ONLY_VALUE"] == "1",
+    "live_background_role": os.environ["CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE"] or None,
+    "live_background_producer_root": os.environ["CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE"] or None,
     "sacct": sacct_text,
-    "raw_stream": json.loads(raw_json),
     "detail": json.loads(detail_json),
-    "all_single_triggers_csv": str(artifacts / "crashcar_day1_all_single_triggers.csv"),
-    "last_bg3h_features_csv": str(artifacts / "crashcar_day1_last_bg3h_single_triggers.csv"),
-    "last_bg3h_background_json": str(artifacts / "crashcar_day1_last_bg3h_full_background.json"),
-    "last_bg3h_plot": str(artifacts / "crashcar_day1_last_bg3h_background.png"),
-    "run_summary": str(artifacts / "crashcar_run_summary.json"),
 }
-for key, rel in [
-    ("background_summary", "crashcar_run_summary.json"),
-    ("plot_summary", "crashcar_day1_last_bg3h_plot_summary.json"),
-    ("snr_series_manifest", "crashcar_snr_series_manifest.json"),
-]:
-    path = artifacts / rel
-    if path.exists():
-        try:
-            payload[key] = json.loads(path.read_text())
-        except Exception as exc:
-            payload[key] = {"error": repr(exc)}
+
+def records(pattern):
+    return [
+        {"path": str(path), "size": path.stat().st_size}
+        for path in sorted(run_dir.glob(pattern))
+        if path.is_file()
+    ]
+
+payload["single_background_files"] = records(
+    "[0-9][0-9][0-9]/single_background.json")
+payload["zerolag_files"] = records(
+    "[0-9][0-9][0-9]/*_zerolag_*.xml*")
+payload["marginalized_stats_files"] = records(
+    "[0-9][0-9][0-9]/*_marginalized_stats_*.xml*")
+payload["single_detail_files"] = records(
+    "crashcar_singlefar_detail_worker*.csv")
 Path(os.environ["REPORT"]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 PY
 }
 
-synthesize_candidate_event_manifest() {
-    local candidate_manifest="${RUN_DIR}/candidate_events_manifest.csv"
-    RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" FINAL_SINGLE_LEDGER="${RUN_DIR}/single_branch/single_final_far_all.csv" python3 - <<'PY'
-import csv
-import json
-import math
-import os
-from pathlib import Path
-
-run_dir = Path(os.environ["RUN_DIR"])
-manifest = Path(os.environ["CANDIDATE_MANIFEST"])
-summary = run_dir / "candidate_event_manifest_summary.json"
-input_manifests = sorted(
-    run_dir.glob("[0-9][0-9][0-9]/candidate_events/manifest.csv"))
-legacy_input_manifests = sorted(
-    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/manifest.csv"))
-input_manifests.extend(path for path in legacy_input_manifests
-                       if path not in input_manifests)
-preselect_input_manifests = []
-
-def norm_int(value):
-    text = "" if value is None else str(value).strip()
-    if text == "":
-        return ""
-    try:
-        return str(int(float(text)))
-    except Exception:
-        return text
-
-def norm_ifo(value):
-    text = "" if value is None else str(value).strip()
-    if text in ("H", "L", "V", "K"):
-        return text + "1"
-    return text
-
-def key_for(row, ifo):
-    ifo = norm_ifo(ifo)
-    return (
-        ifo,
-        norm_int(row.get(f"end_time_sngl_{ifo}") or row.get("end_time")),
-        norm_int(row.get(f"end_time_ns_sngl_{ifo}") or row.get("end_time_ns")),
-        norm_int(row.get("bankid")),
-        norm_int(row.get("tmplt_idx")),
-    )
-
-def split_reasons(row):
-    text = str(row.get("reasons") or "").strip()
-    if not text:
-        return []
-    return [item.strip() for item in text.replace(",", ";").split(";")
-            if item.strip()]
-
-def single_ifos_from_reasons(reasons):
-    out = []
-    for ifo in ("H1", "L1", "V1", "K1"):
-        if any(reason.startswith(f"{ifo}_single") for reason in reasons):
-            out.append(ifo)
-    return out
-
-def positive_float(value):
-    try:
-        out = float(value)
-    except Exception:
-        return None
-    return out if math.isfinite(out) and out > 0.0 else None
-
-ledger = {}
-ledger_path = Path(os.environ.get("FINAL_SINGLE_LEDGER") or "")
-if ledger_path.exists() and ledger_path.stat().st_size > 0:
-    with ledger_path.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            far = positive_float(row.get("direct_far") or row.get("far"))
-            if far is None:
-                continue
-            key = key_for(row, row.get("ifo"))
-            if "" in key:
-                continue
-            old = ledger.get(key)
-            if old is None or far < old:
-                ledger[key] = far
-
-try:
-    far_threshold = 10.0 ** float(os.environ.get("SNR_SERIES_LOG_FAR_THRESHOLD") or "")
-except Exception:
-    far_threshold = None
-fieldnames = [
-            "archive_seq",
-            "filename",
-            "series_file",
-            "xml_file",
-            "candidate_xml_file",
-            "archive_kind",
-            "candidate_schema",
-            "source_manifest",
-            "retention_kind",
-            "reasons",
-            "branches",
-            "event_id",
-            "ifos",
-            "ifo",
-    "end_time",
-    "end_time_ns",
-    "bankid",
-    "tmplt_idx",
-    "far",
-    "far_sngl_H1",
-    "far_sngl_L1",
-    "end_time_sngl_H1",
-    "end_time_ns_sngl_H1",
-    "snglsnr_H1",
-    "chisq_H1",
-    "end_time_sngl_L1",
-    "end_time_ns_sngl_L1",
-    "snglsnr_L1",
-    "chisq_L1",
-    "code_version",
-]
-rows = []
-for input_manifest in input_manifests:
-    with input_manifest.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            xml_file = (row.get("filename") or row.get("xml_file") or "").strip()
-            if not xml_file:
-                continue
-            xml_path = Path(xml_file)
-            if not xml_path.is_absolute():
-                xml_path = input_manifest.parent / xml_path
-            try:
-                xml_file = str(xml_path.resolve().relative_to(run_dir.resolve()))
-            except ValueError:
-                xml_file = str(xml_path)
-            ifos = (row.get("ifos") or "").replace(",", "")
-            row_ifo = norm_ifo(row.get("ifo"))
-            reasons = split_reasons(row)
-            has_multi = "multi" in reasons
-            single_ifos = single_ifos_from_reasons(reasons)
-            if row_ifo and row_ifo not in single_ifos and not has_multi:
-                single_ifos = [row_ifo]
-            if not reasons and not single_ifos:
-                single_ifos = [
-                    ifo for ifo in ("H1", "L1", "V1", "K1") if ifo in ifos]
-            emit_ifos = []
-            if has_multi:
-                emit_ifos.append("")
-            emit_ifos.extend(ifo for ifo in single_ifos if ifo not in emit_ifos)
-            if not emit_ifos:
-                emit_ifos = [""]
-            for ifo in emit_ifos:
-                out = {field: "" for field in fieldnames}
-                for field in row:
-                    if field in out:
-                        out[field] = row.get(field, "")
-                out["filename"] = xml_file
-                out["series_file"] = xml_file
-                out["xml_file"] = xml_file
-                out["candidate_xml_file"] = xml_file
-                out["archive_kind"] = row.get("archive_kind") or (
-                    "candidate_event_xml")
-                out["candidate_schema"] = row.get("candidate_schema") or (
-                    "ligolw_coinc")
-                out["source_manifest"] = str(input_manifest.relative_to(run_dir))
-                out["ifo"] = ifo
-                if ifo == "" and has_multi:
-                    out["reasons"] = "multi"
-                    out["branches"] = "multi"
-                rows.append(out)
-
-if not rows:
-    candidate_xml_paths = sorted(
-        run_dir.glob("[0-9][0-9][0-9]/candidate_events/candidate_*.xml.gz"))
-    candidate_xml_paths.extend(path for path in sorted(
-        run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/crashcar_snr_*.xml.gz"))
-        if path not in candidate_xml_paths)
-    for xml_path in candidate_xml_paths:
-        rel_xml = str(xml_path.relative_to(run_dir))
-        stem = xml_path.name[:-7]
-        parts = stem.split("_")
-        parsed = {}
-        if len(parts) >= 8 and parts[0] == "candidate":
-            parsed = {
-                "archive_seq": parts[1],
-                "ifos": parts[2],
-                "end_time": parts[3],
-                "end_time_ns": parts[4],
-                "bankid": parts[5],
-                "tmplt_idx": parts[6],
-                "event_id": parts[7],
-            }
-        elif len(parts) >= 9 and parts[0] == "crashcar" and parts[1] == "snr":
-            parsed = {
-                "archive_seq": parts[2],
-                "ifos": parts[3],
-                "end_time": parts[4],
-                "end_time_ns": parts[5],
-                "bankid": parts[6],
-                "tmplt_idx": parts[7],
-                "event_id": parts[8],
-            }
-        ifos = parsed.get("ifos", "")
-        active_ifos = [ifo for ifo in ("H1", "L1", "V1", "K1") if ifo in ifos]
-        if not active_ifos:
-            active_ifos = [""]
-        for ifo in active_ifos:
-            out = {field: "" for field in fieldnames}
-            out.update(parsed)
-            out["filename"] = rel_xml
-            out["series_file"] = rel_xml
-            out["xml_file"] = rel_xml
-            out["candidate_xml_file"] = rel_xml
-            out["archive_kind"] = "candidate_event_xml"
-            out["candidate_schema"] = "ligolw_coinc"
-            out["source_manifest"] = ""
-            out["retention_kind"] = "candidate_xml_without_manifest"
-            out["ifo"] = ifo
-            rows.append(out)
-
-if rows:
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    with manifest.open("w", newline="") as output:
-        writer = csv.DictWriter(output, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-elif manifest.exists():
-    manifest.unlink()
-
-summary.write_text(json.dumps({
-    "input_manifests": [str(path.relative_to(run_dir)) for path in input_manifests],
-    "preselect_input_manifests": [str(path.relative_to(run_dir)) for path in preselect_input_manifests],
-    "final_single_ledger": str(ledger_path) if ledger_path.exists() else "",
-    "final_single_ledger_keys": len(ledger),
-    "snr_series_far_threshold": far_threshold,
-    "manifest": str(manifest),
-    "rows": len(rows),
-    "unique_candidate_xml_files": len({row["candidate_xml_file"] for row in rows}),
-}, indent=2, sort_keys=True) + "\n")
-raise SystemExit(0 if rows else 1)
-PY
-}
-
-archive_snr_series() {
-    local candidate_manifest="${RUN_DIR}/candidate_events_manifest.csv"
-    local archive="${ARTIFACTS}/crashcar_snr_series.tar.gz"
-    local manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
-    if [ ! -s "${candidate_manifest}" ]; then
-        if synthesize_candidate_event_manifest; then
-            log "synthesized candidate-event manifest from worker candidate_events"
-        fi
-    fi
-    if [ ! -s "${candidate_manifest}" ]; then
-        log "candidate-event manifest is absent; skipping retained candidate XML archive"
-        RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-run_dir = Path(os.environ["RUN_DIR"])
-candidate_xml_files = []
-for pattern in (
-    "[0-9][0-9][0-9]/candidate_events/*.xml",
-    "[0-9][0-9][0-9]/candidate_events/*.xml.gz",
-    "[0-9][0-9][0-9]/crashcar_candidate_events/*.xml",
-    "[0-9][0-9][0-9]/crashcar_candidate_events/*.xml.gz",
-):
-    for path in sorted(run_dir.glob(pattern)):
-        if path not in candidate_xml_files:
-            candidate_xml_files.append(path)
-payload = {
-    "archive": os.environ["ARCHIVE"],
-    "archive_bytes": 0,
-    "archive_kind": "candidate_coinc_xml",
-    "byte_count": sum(p.stat().st_size for p in candidate_xml_files),
-    "candidate_event_manifest": os.environ["CANDIDATE_MANIFEST"],
-    "candidate_event_xml_files": len(candidate_xml_files),
-    "data_series_files": 0,
-    "exists": False,
-    "file_count": len(candidate_xml_files),
-    "legacy_archive_skipped": True,
-    "manifest_exists": Path(os.environ["CANDIDATE_MANIFEST"]).exists(),
-    "manifest_rows": 0,
-    "reason": "skipped_no_candidate_event_manifest",
-    "removed_csv_files": [],
-    "snr_series_dir": "",
-    "snr_series_log10_far_threshold": os.environ.get("SNR_SERIES_LOG_FAR_THRESHOLD"),
-    "template_autocorrelation_files": 0,
-}
-Path(os.environ["MANIFEST"]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-PY
-        return 0
-    fi
-    python3 "${SCRIPT_DIR}/materialize_snr_autocorrelation.py" \
-        --manifest "${candidate_manifest}" \
-        --snr-dir "${RUN_DIR}" \
-        --bank-dir "${O3_BANK_DIR}" \
-        > "${CONTROLLER_DIR}/materialize_snr_autocorrelation.log" \
-        2>&1 || {
-            log "ERROR failed to materialize SNR template autocorrelation companions"
-            return 1
-        }
-    local tar_paths=(candidate_events_manifest.csv)
-    if [ -f "${RUN_DIR}/candidate_event_manifest_summary.json" ]; then
-        tar_paths+=(candidate_event_manifest_summary.json)
-    fi
-    if [ -f "${RUN_DIR}/autocorrelation_summary.json" ]; then
-        tar_paths+=(autocorrelation_summary.json)
-    fi
-    if [ -f "${RUN_DIR}/crashcar_template_autocorrelation.xml" ]; then
-        tar_paths+=(crashcar_template_autocorrelation.xml)
-    fi
-    local archive_path_list="${RUN_DIR}/monitor/candidate_archive_paths.txt"
-    RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" ARCHIVE_PATH_LIST="${archive_path_list}" python3 - <<'PY'
-import csv
-import os
-from pathlib import Path
-
-run_dir = Path(os.environ["RUN_DIR"]).resolve()
-manifest = Path(os.environ["CANDIDATE_MANIFEST"])
-output = Path(os.environ["ARCHIVE_PATH_LIST"])
-paths = []
-
-def add_path(value):
-    text = str(value or "").strip()
-    if not text:
-        return
-    path = Path(text)
-    if not path.is_absolute():
-        path = run_dir / path
-    try:
-        rel = path.resolve().relative_to(run_dir)
-    except ValueError:
-        return
-    if (run_dir / rel).exists():
-        rel_text = str(rel)
-        if rel_text not in paths:
-            paths.append(rel_text)
-
-with manifest.open(newline="") as handle:
-    for row in csv.DictReader(handle):
-        for field in (
-            "candidate_xml_file",
-            "xml_file",
-            "series_file",
-            "filename",
-            "template_autocorrelation_xml_file",
-        ):
-            add_path(row.get(field))
-output.parent.mkdir(parents=True, exist_ok=True)
-output.write_text("\n".join(paths) + ("\n" if paths else ""))
-PY
-    local rel_candidate_file
-    while IFS= read -r rel_candidate_file; do
-        [ -n "${rel_candidate_file}" ] || continue
-        tar_paths+=("${rel_candidate_file}")
-    done < "${archive_path_list}"
-    tar -C "${RUN_DIR}" -czf "${archive}" "${tar_paths[@]}"
-    RUN_DIR="${RUN_DIR}" CANDIDATE_MANIFEST="${candidate_manifest}" ARCHIVE="${archive}" MANIFEST="${manifest}" SNR_SERIES_LOG_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}" python3 - <<'PY'
-import json
-import os
-from pathlib import Path
-
-run_dir = Path(os.environ["RUN_DIR"]).resolve()
-archive = Path(os.environ["ARCHIVE"])
-candidate_manifest = Path(os.environ["CANDIDATE_MANIFEST"])
-files = []
-for path in (
-    candidate_manifest,
-    run_dir / "candidate_event_manifest_summary.json",
-    run_dir / "autocorrelation_summary.json",
-    run_dir / "crashcar_template_autocorrelation.xml",
-):
-    if path.exists():
-        files.append(path)
-referenced_xml_files = []
-def add_manifest_path(value):
-    text = str(value or "").strip()
-    if not text:
-        return
-    path = Path(text)
-    if not path.is_absolute():
-        path = run_dir / path
-    try:
-        rel = path.resolve().relative_to(run_dir)
-    except ValueError:
-        return
-    path = run_dir / rel
-    if path.exists() and path not in referenced_xml_files:
-        referenced_xml_files.append(path)
-
-manifest_rows = 0
-data_series_files = 0
-template_autocorrelation_files = 0
-template_autocorrelation_xml_files = 0
-if candidate_manifest.exists():
-    import csv
-    with candidate_manifest.open(newline="") as input_file:
-        for row in csv.DictReader(input_file):
-            manifest_rows += 1
-            if row.get("series_file"):
-                data_series_files += 1
-            if row.get("template_autocorrelation_file"):
-                template_autocorrelation_files += 1
-            if row.get("template_autocorrelation_xml_file"):
-                template_autocorrelation_xml_files += 1
-            for field in (
-                "candidate_xml_file",
-                "xml_file",
-                "series_file",
-                "filename",
-                "template_autocorrelation_xml_file",
-            ):
-                add_manifest_path(row.get(field))
-for path in referenced_xml_files:
-    if path not in files:
-        files.append(path)
-candidate_manifests = sorted(
-    run_dir.glob("[0-9][0-9][0-9]/candidate_events/manifest.csv"))
-candidate_manifests.extend(path for path in sorted(
-    run_dir.glob("[0-9][0-9][0-9]/crashcar_candidate_events/manifest.csv"))
-    if path not in candidate_manifests)
-payload = {
-    "archive": str(archive),
-    "archive_bytes": archive.stat().st_size if archive.exists() else 0,
-    "archive_kind": "candidate_coinc_xml",
-    "archive_exists": archive.exists(),
-    "byte_count": sum(p.stat().st_size for p in files),
-    "byte_count_before_compaction": sum(p.stat().st_size for p in files),
-    "candidate_event_manifest": str(candidate_manifest),
-    "compacted_after_archive": True,
-    "data_series_files": data_series_files,
-    "exists": candidate_manifest.exists(),
-    "file_count": len(files),
-    "file_count_before_compaction": len(files),
-    "manifest_rows": manifest_rows,
-    "candidate_event_manifest_count": len(candidate_manifests),
-    "candidate_event_xml_files": len(referenced_xml_files),
-    "removed_small_csv_count": 0,
-    "removed_small_csv_sample": [],
-    "sample_files": [str(p.relative_to(run_dir)) for p in sorted(files)[:20]],
-    "snr_series_dir": "",
-    "snr_series_logFAR_threshold": os.environ["SNR_SERIES_LOG_FAR_THRESHOLD"],
-    "template_autocorrelation_files": template_autocorrelation_files,
-    "template_autocorrelation_xml_files": template_autocorrelation_xml_files,
-}
-Path(os.environ["MANIFEST"]).write_text(
-    json.dumps(payload, indent=2, sort_keys=True) + "\n")
-PY
-    find "${RUN_DIR}" -mindepth 2 -maxdepth 2 -type d \( -name candidate_events -o -name crashcar_candidate_events \) -exec rm -rf {} + 2>/dev/null || true
-    log "archived retained candidate/coinc XML ${archive}"
-}
-
 submit_job() {
     local template_map="${ARTIFACTS}/crashcar_template_shape_map.csv"
+    verify_segment_derivative_binding pre_slurm_submit || exit 2
+    verify_runtime_provenance_manifest_pin pre_slurm_submit || exit 2
     cd "${RUN_DIR}"
     local job
     local sbatch_args=(
@@ -1216,11 +1102,25 @@ submit_job() {
         --job-name="${SLURM_JOB_NAME}"
         --mem="${SLURM_MEM}"
         --cpus-per-task="${SLURM_CPUS_PER_TASK}"
-        --gres="${SLURM_GRES}"
         --array="0-$((WORKER_COUNT - 1))"
-        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",WGUO_O3A_COLLECT_WALLTIME="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}",DOF="${DOF}",CRASHCAR_DOF="${DOF}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${BACKGROUND_UPDATE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_SNR_SERIES_LOG10_FAR_THRESHOLD="${SNR_SERIES_LOG_FAR_THRESHOLD}",CRASHCAR_SNR_SERIES_OUTPUT_DIR="${CRASHCAR_SNR_SERIES_OUTPUT_DIR_VALUE}",CRASHCAR_SNR_SERIES_WRITE_CSV="${CRASHCAR_SNR_SERIES_WRITE_CSV_VALUE}",CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL="${CRASHCAR_SINGLE_SNR_SERIES_PRESELECT_ALL_VALUE}",CRASHCAR_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_PRESERVE_TABLE_SINGLE_FAR:-0}",CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR="${CRASHCAR_FINALSINK_PRESERVE_TABLE_SINGLE_FAR:-1}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",CRASHCAR_SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",SINGLE_FROZEN_BACKGROUND_JSON="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}",CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV="${CRASHCAR_FROZEN_SINGLE_SUPPORT_CSV_VALUE}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}",CRASHCAR_SINGLE_OUTPUT_MODE="all",SINGLE_OUTPUT_MODE="all",CRASHCAR_SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}",SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE="${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE_FILE}"
+        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",CRASHCAR_RUNTIME_PROVENANCE_MANIFEST_SHA256="${RUNTIME_PROVENANCE_MANIFEST_SHA256}",CRASHCAR_CURRENT_WORKER_COUNT="${WORKER_COUNT}",CRASHCAR_CURRENT_BANKS_PER_WORKER="${BANKS_PER_WORKER}",CRASHCAR_CURRENT_START_BANK="${START_BANK}",CRASHCAR_CURRENT_RUN_NAMESPACE_SHA256="${SCHEMA4_RUN_NAMESPACE_SHA256}",CRASHCAR_CURRENT_SOURCE_MANIFEST_SHA256="${SCHEMA4_SOURCE_MANIFEST_SHA256}",CRASHCAR_CURRENT_RUNTIME_MANIFEST_SHA256="${SCHEMA4_RUNTIME_MANIFEST_SHA256}",CRASHCAR_CURRENT_CONFIG_SHA256="${SCHEMA4_CONFIG_SHA256}",CRASHCAR_CURRENT_SEGMENT_XML_SHA256="${SEGMENT_XML_SHA256}",CRASHCAR_CURRENT_SEGMENT_CANONICAL_SHA256="${SEGMENT_LIVETIME_JSON_SHA256}",CRASHCAR_CURRENT_TEMPLATE_SHAPE_MAP_SHA256="${SCHEMA4_TEMPLATE_SHAPE_MAP_SHA256}",CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROLE="${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}",CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROOT="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}",CRASHCAR_LIVE_SINGLE_READINESS_JSON="${CONTROLLER_DIR}/live_single_readiness.input.json",CRASHCAR_LIVE_BG_ORIGIN_GPS="${INJECTION_BG_START_GPS}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",DOF="${DOF}",CRASHCAR_DOF="${DOF}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",CRASHCAR_SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",CRASHCAR_BG_ONLY="${CRASHCAR_BG_ONLY_VALUE}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
         --chdir="${RUN_DIR}"
     )
+    local sbatch_export_bound=0 sbatch_arg_index
+    for sbatch_arg_index in "${!sbatch_args[@]}"; do
+        if [[ "${sbatch_args[sbatch_arg_index]}" == --export=* ]]; then
+            sbatch_args[sbatch_arg_index]+=",SNR_series_logFAR_threshold=${SNR_SERIES_LOG_FAR_THRESHOLD}"
+            sbatch_export_bound=1
+            break
+        fi
+    done
+    if [ "${sbatch_export_bound}" != "1" ]; then
+        printf "crashcar_controller: internal sbatch export binding is missing\n" >&2
+        return 2
+    fi
+    if [ -n "${SLURM_GRES}" ]; then
+        sbatch_args+=(--gres="${SLURM_GRES}")
+    fi
     if [ -n "${SLURM_PARTITION}" ]; then
         sbatch_args+=(--partition="${SLURM_PARTITION}")
     fi
@@ -1230,353 +1130,33 @@ submit_job() {
     sbatch_args+=("${SCRIPT_DIR}/crashcar_sbatch.sh")
     job=$(sbatch "${sbatch_args[@]}")
     printf '%s\n' "${job}" > "${CONTROLLER_DIR}/job_id.txt"
-    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" single_llr_model=wguo_gaussian_v1 dof="${DOF}" background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" zerolag_update_seconds="${ZEROLAG_UPDATE}" tail_log_FAR="${TAIL_LOG_FAR}" tail_FAR="${FAR_FIT_BOUNDARY}" SNR_series_logFAR_threshold="${SNR_SERIES_LOG_FAR_THRESHOLD}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
+    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" single_llr_model=wguo_gaussian_v1 legacy_dof_env_value="${DOF}" dof_authority=bankid_fixed_0_99_120_100_383_600 background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" zerolag_update_seconds="${ZEROLAG_UPDATE}" cohfar_assignfar_refresh_interval_seconds="${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE}" finalsink_fapupdater_interval_seconds="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}" finalsink_fapupdater_collect_walltime="${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}" cohfar_accumbackground_snapshot_interval_seconds="${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE}" tail_log_FAR="${TAIL_LOG_FAR}" tail_FAR="${FAR_FIT_BOUNDARY}" SNR_series_logFAR_threshold="${SNR_SERIES_LOG_FAR_THRESHOLD}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
     log "submitted Slurm job=${job} workers=${WORKER_COUNT} banks_per_worker=${BANKS_PER_WORKER} gps=${START_GPS}-${END_GPS}"
-}
-
-postprocess_last_bg3h() {
-    local combined="${ARTIFACTS}/crashcar_day1_all_single_triggers.csv"
-    local last_window="${ARTIFACTS}/crashcar_day1_last_bg3h_single_triggers.csv"
-    local trigger_inputs=()
-    local worker jobno
-    for worker in $(seq 0 $((WORKER_COUNT - 1))); do
-        jobno=$(printf '%03d' "${worker}")
-        trigger_inputs+=("${RUN_DIR}/${jobno}/${jobno}_single_triggers.csv")
-    done
-    python3 - "${combined}" "${last_window}" "${START_GPS}" "${END_GPS}" "${BACKGROUND_ACCUMULATION}" "${trigger_inputs[@]}" <<'PY'
-import csv
-import pathlib
-import sys
-
-combined = pathlib.Path(sys.argv[1])
-last_window = pathlib.Path(sys.argv[2])
-start = int(sys.argv[3])
-end = int(sys.argv[4])
-accum = int(sys.argv[5])
-inputs = [pathlib.Path(p) for p in sys.argv[6:]]
-window_start = max(start, end - accum)
-
-all_writer = None
-win_writer = None
-total = 0
-window_rows = 0
-with combined.open("w", newline="", encoding="utf-8") as all_handle, last_window.open("w", newline="", encoding="utf-8") as win_handle:
-    for path in inputs:
-        if not path.exists():
-            raise SystemExit(f"missing input {path}")
-        with path.open(newline="", encoding="utf-8") as in_handle:
-            reader = csv.DictReader(in_handle)
-            fields = list(reader.fieldnames or [])
-            if "is_background" not in fields:
-                fields.append("is_background")
-            if all_writer is None:
-                all_writer = csv.DictWriter(all_handle, fieldnames=fields)
-                win_writer = csv.DictWriter(win_handle, fieldnames=fields)
-                all_writer.writeheader()
-                win_writer.writeheader()
-            for row in reader:
-                row["is_background"] = "1"
-                clean = {field: row.get(field, "") for field in all_writer.fieldnames}
-                all_writer.writerow(clean)
-                total += 1
-                try:
-                    t = int(float(row.get("end_time") or "nan"))
-                except ValueError:
-                    continue
-                if window_start <= t <= end:
-                    win_writer.writerow(clean)
-                    window_rows += 1
-print(f"combined_rows={total} last_bg3h_rows={window_rows} window_start={window_start} end={end}")
-PY
-
-    local background="${ARTIFACTS}/crashcar_day1_last_bg3h_full_background.json"
-    local assigned="${ARTIFACTS}/crashcar_day1_last_bg3h_assigned_empty.csv"
-    local support="${ARTIFACTS}/crashcar_day1_last_bg3h_support.csv"
-    python3 "${CRASH_SCRIPT_DIR}/single_detector_far.py" feature-csv \
-        --feature-csv "${last_window}" \
-        --output "${assigned}" \
-        --background-output "${background}" \
-        --support-output "${support}" \
-        --ifos H1,L1 \
-        --min-snr 4 \
-        --foreground-count 1 \
-        --background-livetime "${BACKGROUND_ACCUMULATION}" \
-        --segment-xml "${SEGMENT_XML}" \
-        --background-start-gps "$((END_GPS - BACKGROUND_ACCUMULATION))" \
-        --background-end-gps "${END_GPS}" \
-        --bank-stats-dir "${WGUO_BANK_STATS_DIR}" \
-        --dof "${DOF}" \
-        --noise-beta "${NOISE_BETA}" \
-        --rank-offset "${RANK_OFFSET}" \
-        --background-window-days 7 \
-        --fit-min-points 20 \
-        --far-fit-boundary "${FAR_FIT_BOUNDARY}" \
-        > "${CONTROLLER_DIR}/single_detector_far_last_bg3h.log" \
-        2>&1
-
-    python3 "${CRASH_SCRIPT_DIR}/plot_single_llr_far.py" \
-        --background "${background}" \
-        --assigned "${assigned}" \
-        --output "${ARTIFACTS}/crashcar_day1_last_bg3h_background.png" \
-        --summary "${ARTIFACTS}/crashcar_day1_last_bg3h_plot_summary.json" \
-        --llr-min -20 \
-        --tail-log10-far -2.0 \
-        > "${CONTROLLER_DIR}/plot_single_llr_far_last_bg3h.log" \
-        2>&1
-
-    python3 - "${ARTIFACTS}" "${combined}" "${last_window}" "${background}" "${START_GPS}" "${END_GPS}" "${BACKGROUND_ACCUMULATION}" "${BACKGROUND_UPDATE}" "$(cat "${ROOT}/provenance/github_${GITHUB_BRANCH}_head.txt")" <<'PY'
-import csv
-import json
-import math
-import pathlib
-import sys
-
-artifacts = pathlib.Path(sys.argv[1])
-combined = pathlib.Path(sys.argv[2])
-last_window = pathlib.Path(sys.argv[3])
-background_path = pathlib.Path(sys.argv[4])
-start = int(sys.argv[5])
-end = int(sys.argv[6])
-accum = int(sys.argv[7])
-update = int(float(sys.argv[8]))
-git_head = sys.argv[9]
-
-def count_candidates(path):
-    out = {"rows": 0, "non_boundary_rows": 0, "chunk_boundary_rows": 0, "candidate_counts": {"H1": 0, "L1": 0}}
-    with path.open(newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            out["rows"] += 1
-            if (row.get("source_kind") or "").strip() == "chunk_boundary":
-                out["chunk_boundary_rows"] += 1
-                continue
-            out["non_boundary_rows"] += 1
-            for ifo in ("H1", "L1"):
-                try:
-                    snr = float(row.get(f"snglsnr_{ifo}") or "nan")
-                    chisq = float(row.get(f"chisq_{ifo}") or "nan")
-                except ValueError:
-                    continue
-                if math.isfinite(snr) and math.isfinite(chisq) and snr >= 4.0 and chisq > 0.0:
-                    out["candidate_counts"][ifo] += 1
-    return out
-
-background = json.loads(background_path.read_text())
-summary = {
-    "git_head": git_head,
-    "gps_start": start,
-    "gps_end": end,
-    "duration": end - start,
-    "background_accumulation_seconds": accum,
-    "background_update_seconds": update,
-    "all_stream": count_candidates(combined),
-    "last_bg3h_stream": count_candidates(last_window),
-    "last_bg3h_background_trigger_counts_by_ifo": {
-        ifo: background["backgrounds"][ifo]["background_trigger_count"]
-        for ifo in ("H1", "L1")
-    },
-}
-(artifacts / "crashcar_run_summary.json").write_text(
-    json.dumps(summary, indent=2, sort_keys=True) + "\n")
-PY
-}
-
-run_single_ledger_final_update() {
-    [ "${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE}" = "1" ] || return 0
-
-    local worker worker_log final_status=0
-    log "running final single ledger update mode=${SINGLE_BACKGROUND_MODE_VALUE} input=${FINAL_SINGLE_INPUT_KIND_VALUE}"
-
-    rm -f \
-        "${RUN_DIR}/single_branch/single_final_far_all.csv" \
-        "${RUN_DIR}/single_branch/single_final_far_latest_candidates.csv" \
-        "${RUN_DIR}/monitor/latest_single_background_status.json" \
-        "${RUN_DIR}/monitor/patch_zerolag_single_far_summary.json"
-
-    for worker in $(seq 0 $((WORKER_COUNT - 1))); do
-        worker_log="${RUN_DIR}/logs/final_single_ledger_worker_${worker}.log"
-        SCRIPT_DIR="${CRASH_SCRIPT_DIR}" \
-        RUN_DIR="${RUN_DIR}" \
-        SINGLE_INPUT_KIND="${FINAL_SINGLE_INPUT_KIND_VALUE}" \
-        SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}" \
-        SINGLE_FROZEN_BACKGROUND_JSON="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
-        SINGLE_FROZEN_BACKGROUND_RUN_DIR="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" \
-        SINGLE_FROZEN_BACKGROUND_ID="${SINGLE_FROZEN_BACKGROUND_ID_VALUE}" \
-        SINGLE_FROZEN_BACKGROUND_SOURCE="${SINGLE_FROZEN_BACKGROUND_SOURCE_VALUE}" \
-        SINGLE_WORKER_ID="${worker}" \
-        SINGLE_WORKER_GROUP="${worker}" \
-        SINGLE_WORKER_COUNT="${WORKER_COUNT}" \
-        MAX_GROUP=$((WORKER_COUNT - 1)) \
-        BANKS_PER_GROUP="${BANKS_PER_WORKER}" \
-        DATA_START_TIME="${START_GPS}" \
-        DATA_END_TIME="${END_GPS}" \
-        SINGLE_SEGMENT_XML="${SEGMENT_XML}" \
-        CRASHCAR_FINAL_POSTPROCESS=1 \
-        BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
-        FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
-        BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}" \
-        CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}" \
-        WGUO_BANK_STATS_DIR="${WGUO_BANK_STATS_DIR}" \
-        NOISE_BETA="${NOISE_BETA}" \
-        RANK_OFFSET="${RANK_OFFSET}" \
-        DOF="${DOF}" \
-        CRASHCAR_DOF="${DOF}" \
-        TAIL_LOG10_FAR="${TAIL_LOG_FAR}" \
-        FAR_FIT_BOUNDARY="${FAR_FIT_BOUNDARY}" \
-        ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN="${assignment_max_new_windows_per_run:-${ASSIGNMENT_MAX_NEW_WINDOWS_PER_RUN:-99}}" \
-            bash "${CRASH_SCRIPT_DIR}/update_single_background_once.sh" "${RUN_DIR}" \
-            > "${worker_log}" 2>&1 || final_status=$?
-    done
-
-    BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
-    FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}" \
-    python3 "${CRASH_SCRIPT_DIR}/merge_worker_far_ledgers.py" \
-        --run-dir "${RUN_DIR}" \
-        --worker-count "${WORKER_COUNT}" \
-        --output single_branch/single_final_far_all.csv \
-        --candidate-output single_branch/single_final_far_latest_candidates.csv \
-        --summary monitor/latest_single_background_status.json \
-        --plot-summary monitor/latest_single_plot_summary.json \
-        > "${RUN_DIR}/logs/final_single_ledger_merge.log" \
-        2> "${RUN_DIR}/logs/final_single_ledger_merge.err" || final_status=$?
-
-    local final_ledger_rows=0
-    final_ledger_rows=$(python3 - "${RUN_DIR}/single_branch/single_final_far_all.csv" <<'PY'
-import csv
-import sys
-try:
-    with open(sys.argv[1], newline="") as handle:
-        print(sum(1 for _ in csv.DictReader(handle)))
-except FileNotFoundError:
-    print(0)
-PY
-    )
-
-    if [ "${PATCH_ZEROLAG_SINGLE_FAR_VALUE}" = "1" ] && [ "${final_ledger_rows}" -gt 0 ]; then
-        if [ "${PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE}" = "1" ]; then
-            synthesize_candidate_event_manifest || true
-        fi
-        local patch_args=(
-            --run-dir "${RUN_DIR}"
-            --ledger single_branch/single_final_far_all.csv
-            --far-column "${PATCH_ZEROLAG_SINGLE_FAR_COLUMN_VALUE}"
-            --summary monitor/patch_zerolag_single_far_summary.json
-            --single-output-mode all
-            --active-ifo-schedule "${SINGLE_OUTPUT_ACTIVE_IFO_SCHEDULE}"
-            --clear-existing
-        )
-        if [ "${PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE}" = "1" ]; then
-            patch_args+=(
-                --embed-snr-series
-                --snr-series-manifest "${RUN_DIR}/candidate_events_manifest.csv"
-                --candidate-manifest "${RUN_DIR}/candidate_events_manifest.csv"
-                --candidate-log10-far-threshold "${SNR_SERIES_LOG_FAR_THRESHOLD}"
-            )
-        fi
-        export GST_DEBUG="${GST_DEBUG:-}"
-        export X509_USER_PROXY="${X509_USER_PROXY:-}"
-        export X509_USER_KEY="${X509_USER_KEY:-}"
-        export X509_USER_CERT="${X509_USER_CERT:-}"
-        export KRB5_KTNAME="${KRB5_KTNAME:-}"
-        export PYTHONPATH="${PYTHONPATH:-}"
-        export PKG_CONFIG_PATH="${PKG_CONFIG_PATH:-}"
-        export GST_PLUGIN_PATH="${GST_PLUGIN_PATH:-}"
-        export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
-        # shellcheck source=/dev/null
-        source /fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/bash_helper_functions.sh
-        PYTHONPATH="${CRASH_RUNTIME_ROOT}/install/lib/python3.10/site-packages:${PYTHONPATH:-}" \
-            run_spiir_py3 wguo-single-det-py3 python3 \
-            "${CRASH_SCRIPT_DIR}/patch_zerolag_single_far_from_ledger.py" \
-            "${patch_args[@]}" \
-            > "${RUN_DIR}/logs/final_single_patch_zerolag.out" \
-            2> "${RUN_DIR}/logs/final_single_patch_zerolag.err" || final_status=$?
-    elif [ "${PATCH_ZEROLAG_SINGLE_FAR_VALUE}" = "1" ]; then
-        log "final single ledger has no assigned rows; skipping zerolag single-FAR patch"
-        RUN_DIR="${RUN_DIR}" FINAL_LEDGER_ROWS="${final_ledger_rows}" python3 - <<'PY'
-import json
-import os
-import pathlib
-import time
-
-summary = {
-    "patched_files": 0,
-    "patched_rows": 0,
-    "ledger_rows": int(os.environ.get("FINAL_LEDGER_ROWS") or 0),
-    "skipped": True,
-    "reason": "empty_single_far_ledger",
-    "updated_unix": time.time(),
-}
-path = pathlib.Path(os.environ["RUN_DIR"]) / "monitor" / "patch_zerolag_single_far_summary.json"
-path.parent.mkdir(parents=True, exist_ok=True)
-path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-PY
-    fi
-
-    if [ "${final_status}" -ne 0 ]; then
-        log "ERROR final single ledger update failed; see ${RUN_DIR}/logs/final_single_ledger_worker_*.log"
-    else
-        log "final single ledger update completed"
-    fi
-    return "${final_status}"
 }
 
 monitor_job() {
     local job=$1
     while true; do
-        local snapshot sacct_state squeue_state zerolag stats raw detail
+        local snapshot sacct_state squeue_state zerolag stats detail
         snapshot=$(job_snapshot "${job}")
         sacct_state=${snapshot%%@@@*}
         squeue_state=${snapshot#*@@@}
         zerolag=$(count_zerolag)
         stats=$(count_stats)
-        raw=$(run_summary_json)
         detail=$(detail_summary_json)
-        write_status phase=slurm_running job_id="${job}" squeue="${squeue_state}" sacct="${sacct_state}" zerolag_count="${zerolag}" stats_count="${stats}" raw_stream_summary="${raw}" detail_summary="${detail}"
-        log "job=${job} squeue=${squeue_state} sacct=${sacct_state} zerolag=${zerolag} stats=${stats} raw=${raw} detail=${detail}"
+        write_status phase=slurm_running job_id="${job}" squeue="${squeue_state}" sacct="${sacct_state}" zerolag_count="${zerolag}" stats_count="${stats}" detail_summary="${detail}"
+        log "job=${job} squeue=${squeue_state} sacct=${sacct_state} zerolag=${zerolag} stats=${stats}"
         if [ "${squeue_state}" = "none" ]; then
             local phase=slurm_completed
             if grep -Eq 'FAILED|CANCELLED|TIMEOUT|OUT_OF_MEMORY|NODE_FAIL|PREEMPTED|BOOT_FAIL|DEADLINE|REVOKED' <<<"${sacct_state}"; then
                 phase=failed_slurm
-                write_status phase="${phase}" job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}"
-                write_final_report "${phase}" "${job}" "${sacct_state}" "${raw}" "${detail}"
+                write_status phase="${phase}" job_id="${job}" sacct="${sacct_state}" detail_summary="${detail}"
+                write_final_report "${phase}" "${job}" "${sacct_state}" "${detail}"
                 exit 3
             fi
-            write_status phase=postprocessing_single_ledger job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}"
-            if ! run_single_ledger_final_update; then
-                raw=$(run_summary_json)
-                detail=$(detail_summary_json)
-                write_status phase=failed_postprocess job_id="${job}" reason=single_ledger_final_update_failed sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}"
-                write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
-                exit 4
-            fi
-            if ! archive_snr_series; then
-                raw=$(run_summary_json)
-                detail=$(detail_summary_json)
-                write_status phase=failed_postprocess job_id="${job}" reason=snr_series_archive_failed sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json"
-                write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
-                exit 4
-            fi
-            if [ "${CRASHCAR_BUILD_LAST_BG_ARTIFACTS}" = "1" ]; then
-                write_status phase=postprocessing_last_bg3h job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}"
-                log "slurm completed; building final last-3h background artifacts"
-                if ! postprocess_last_bg3h; then
-                    raw=$(run_summary_json)
-                    detail=$(detail_summary_json)
-                    write_status phase=failed_postprocess job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}"
-                    write_final_report failed_postprocess "${job}" "${sacct_state}" "${raw}" "${detail}"
-                    exit 4
-                fi
-            else
-                log "skipping local background artifact build for this stage"
-            fi
-            raw=$(run_summary_json)
-            detail=$(detail_summary_json)
-            if [ "${CRASHCAR_BUILD_LAST_BG_ARTIFACTS}" = "1" ]; then
-                write_status phase=completed job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}" last_bg3h_background="${ARTIFACTS}/crashcar_day1_last_bg3h_full_background.json" last_bg3h_plot="${ARTIFACTS}/crashcar_day1_last_bg3h_background.png" run_summary="${ARTIFACTS}/crashcar_run_summary.json" snr_series_archive="${ARTIFACTS}/crashcar_snr_series.tar.gz" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json" single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}" patch_zerolag_summary="${RUN_DIR}/monitor/patch_zerolag_single_far_summary.json"
-            else
-                write_status phase=completed job_id="${job}" sacct="${sacct_state}" raw_stream_summary="${raw}" detail_summary="${detail}" final_report="${REPORT}" snr_series_archive="${ARTIFACTS}/crashcar_snr_series.tar.gz" snr_series_manifest="${ARTIFACTS}/crashcar_snr_series_manifest.json" single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}" patch_zerolag_summary="${RUN_DIR}/monitor/patch_zerolag_single_far_summary.json"
-            fi
-            write_final_report completed "${job}" "${sacct_state}" "${raw}" "${detail}"
-            log "completed; report=${REPORT}"
+            write_status phase=completed job_id="${job}" sacct="${sacct_state}" detail_summary="${detail}" final_report="${REPORT}" single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}" background_only="${CRASHCAR_BG_ONLY_VALUE}" live_background_role="${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" live_background_producer_root="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}"
+            write_final_report completed "${job}" "${sacct_state}" "${detail}"
+            log "completed; report=${REPORT}; parity and completeness are external acceptance work"
             exit 0
         fi
         sleep 300
@@ -1584,6 +1164,7 @@ monitor_job() {
 }
 
 main() {
+    pin_live_background_helper || exit 2
     cat > "${REGISTRY}" <<EOF
 | session | server | working directory | model | role | task | start time UTC | latest known status | output/report |
 |---|---|---|---|---|---|---|---|---|
@@ -1609,10 +1190,9 @@ EOF
         injection_mode="${INJECTION_MODE}" \
         injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" \
         single_background_mode="${SINGLE_BACKGROUND_MODE_VALUE}" \
-        single_frozen_background_json="${SINGLE_FROZEN_BACKGROUND_JSON_VALUE}" \
-        single_frozen_background_run_dir="${SINGLE_FROZEN_BACKGROUND_RUN_DIR_VALUE}" \
-        crashcar_single_ledger_final_update="${CRASHCAR_SINGLE_LEDGER_FINAL_UPDATE}" \
-        crashcar_build_last_bg_artifacts="${CRASHCAR_BUILD_LAST_BG_ARTIFACTS}" \
+        background_only="${CRASHCAR_BG_ONLY_VALUE}" \
+        live_background_role="${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" \
+        live_background_producer_root="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
         crashcar_background_required_seconds="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}" \
         injection_bg_start_gps="${INJECTION_BG_START_GPS}" \
         injection_bg_end_gps="${INJECTION_BG_END_GPS}" \
@@ -1626,11 +1206,13 @@ EOF
         first3_hl_seconds="${FIRST3_HL_SECONDS}" \
         first3_hl_none_seconds="${FIRST3_HL_NONE_SECONDS}"
     log "controller start root=${ROOT} gps=${START_GPS}-${END_GPS}"
-    check_source
-    cp "${ROOT}/provenance/source_and_runtime.env" "${CONTROLLER_DIR}/source_and_runtime.env"
-    cp "${ROOT}/provenance/github_${GITHUB_BRANCH}_head.txt" "${CONTROLLER_DIR}/github_head.txt" 2>/dev/null || true
     validate_inputs
+    capture_runtime_manifest
+    cp "${ROOT}/provenance/runtime_snapshot/runtime_manifest.env" "${CONTROLLER_DIR}/runtime_manifest.env"
+    cp "${ROOT}/provenance/runtime_snapshot/source_head.txt" "${CONTROLLER_DIR}/source_head.txt"
     export_template_map
+    prepare_schema4_provenance
+    validate_live_background_inputs
     submit_job
     monitor_job "$(cat "${CONTROLLER_DIR}/job_id.txt")"
 }

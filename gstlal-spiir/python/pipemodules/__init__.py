@@ -251,18 +251,22 @@ def mkcrashcar_singlefar(
     detail_output_fname=None,
     template_shape_map_fname=None,
     log10_far_threshold=-4.0,
-    min_snr=4.0,
-    far_floor_count=1.0,
     livetime_step=1.0,
+    stream_id=0,
+    stream_count=1,
+    stream_bank_id=0,
+    worker_bank_ids="0",
 ):
     properties = {
         "ifos": ifos,
         "enabled": enabled,
         "dof": dof,
         "log10_far_threshold": log10_far_threshold,
-        "min_snr": min_snr,
-        "far_floor_count": far_floor_count,
         "livetime_step": livetime_step,
+        "stream_id": stream_id,
+        "stream_count": stream_count,
+        "stream_bank_id": stream_bank_id,
+        "worker_bank_ids": worker_bank_ids,
     }
     if detail_output_fname is not None:
         properties["detail_output_fname"] = detail_output_fname

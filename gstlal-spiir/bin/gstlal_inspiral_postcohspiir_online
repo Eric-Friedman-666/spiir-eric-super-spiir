@@ -122,6 +122,44 @@ def excepthook(*args):
 sys.excepthook = excepthook
 
 
+class CrashcarPipelineHandler(simplehandler.Handler):
+    """Record a terminal bus ERROR without replacing normal bus handling."""
+
+    def __init__(self, mainloop, pipeline):
+        self.terminal_bus_error = None
+        super().__init__(mainloop, pipeline)
+
+    def do_on_message(self, bus, message):
+        if (message.type == Gst.MessageType.ERROR and
+                self.terminal_bus_error is None):
+            error, debug_message = message.parse_error()
+            self.terminal_bus_error = (
+                getattr(error, "domain", None),
+                getattr(error, "code", None),
+                str(getattr(error, "message", error)),
+                debug_message,
+            )
+        # Let simplehandler emit the original message and stop the mainloop.
+        return False
+
+
+def _flush_remaining_finalsink_output(finalsink, output_prefix, output_name,
+                                      verbose=False):
+    """Flush only when a real timestamp interval has been observed."""
+    start = finalsink.t_snapshot_start
+    end = finalsink.last_buffer_timestamp
+    if start is None or end is None:
+        logger.warning(
+            "FinalSink has no complete timestamp interval; "
+            "skipping remaining zerolag flush")
+        return False
+    finalsink.write_output_file(
+        filename=finalsink.get_output_filename(
+            output_prefix, output_name, start, end - start),
+        verbose=verbose)
+    return True
+
+
 def print_resource():
     print("RLIMIT_STACK {0}".format(resource.getrlimit(resource.RLIMIT_STACK)))
     print("FSIZE {0}".format(resource.getrlimit(resource.RLIMIT_FSIZE)))
@@ -272,6 +310,14 @@ def parse_command_line():
         "The minimum number of events for a background timescale to be considered. Enabled with --feature-best-far."
     )
     parser.add_option(
+        "--snr-series-logfar-threshold",
+        type="float",
+        metavar="log10(FAR)",
+        default=-4,
+        help=
+        "Write the normal CoincsDoc and matched-filter SNR series when a positive finite final FAR has log10(FAR) at or below this threshold."
+    )
+    parser.add_option(
         "--finalsink-fapupdater-collect-walltime",
         metavar="seconds,seconds,seconds",
         default=None,
@@ -288,12 +334,6 @@ def parse_command_line():
                       metavar="filename,filename,filename",
                       default=None,
                       help="Set the filename to read the FAP (optional)")
-    parser.add_option(
-        "--finalsink-single-trigger-stream",
-        metavar="filename",
-        default=None,
-        help=("Append a near-real-time CSV mirror of clustered zerolag rows for "
-              "the single-detector sidecar/crashcar background path."))
     parser.add_option(
         "--reference-psd",
         metavar="filename",
@@ -451,6 +491,12 @@ def parse_command_line():
                       metavar="seconds",
                       default=0,
                       help="Cluster window to cluster zerolags.")
+    parser.add_option(
+        "--finalsink-postcoh-schema-mode",
+        type="choice",
+        choices=("legacy-a107", "crashcar-a109"),
+        default="legacy-a107",
+        help="Explicit immutable Postcoh XML schema for FinalSink outputs.")
     parser.add_option("--finalsink-need-online-perform",
                       type="int",
                       default=0,
@@ -534,6 +580,19 @@ def parse_command_line():
         " set the online data option for online data service to be activated.")
 
     options, filenames = parser.parse_args()
+    crashcar_enable = os.environ.get("CRASHCAR_ENABLE", "0")
+    if crashcar_enable not in ("0", "1"):
+        raise ValueError("CRASHCAR_ENABLE must be exactly 0 or 1")
+    multi_background_frozen = (
+        os.environ.get("CRASHCAR_MULTI_BACKGROUND_FROZEN", "0") == "1")
+    expected_postcoh_schema_mode = {
+        "0": "legacy-a107",
+        "1": "crashcar-a109",
+    }[crashcar_enable]
+    if options.finalsink_postcoh_schema_mode != expected_postcoh_schema_mode:
+        raise ValueError(
+            "CRASHCAR_ENABLE/plugin mode and explicit FinalSink Postcoh "
+            "schema mode disagree")
     if not hasattr(options, "injections"):
         options.injections = None
 
@@ -551,9 +610,17 @@ def parse_command_line():
             "must provide at least finalsink-output-prefix or finalsink-output-name"
         )
 
-    if options.cohfar_accumbackground_output_prefix is None and options.cohfar_accumbackground_output_name is None:
+    if (not multi_background_frozen and
+            options.cohfar_accumbackground_output_prefix is None and
+            options.cohfar_accumbackground_output_name is None):
         raise ValueError(
             "must provide at least cohfar-accumbackground-output-prefix or cohfar-accumbackground-output-name"
+        )
+    if (multi_background_frozen and
+            (options.cohfar_accumbackground_output_prefix is not None or
+             options.cohfar_accumbackground_output_name is not None)):
+        raise ValueError(
+            "frozen crashcar assignment must not instantiate multi background accumulation"
         )
 
     required_options = ["job_tag", "code_version", "mode"]
@@ -667,8 +734,14 @@ def parse_command_line():
         for i_ifo_combo in ifo_combos:
             os.makedirs(f"{i_ifo_combo}_skymap", exist_ok=True)
 
-    if options.finalsink_fapupdater_output_fname is None:
+    if (not multi_background_frozen and
+            options.finalsink_fapupdater_output_fname is None):
         options.finalsink_fapupdater_output_fname = options.cohfar_assignfar_input_fname
+    if (multi_background_frozen and
+            options.finalsink_fapupdater_output_fname is not None):
+        raise ValueError(
+            "frozen crashcar assignment must not configure a multi background updater output"
+        )
 
     return options, filenames, process_params, iir_banks, detectors
 
@@ -899,12 +972,13 @@ finalsink = postcoh_finalsink.FinalSink(
     expected_buffers_per_timestamp=len(postcohsrcs),
     feature_best_far=options.feature_best_far,
     feature_best_far_threshold=options.feature_best_far_threshold,
-    single_trigger_stream_fname=options.finalsink_single_trigger_stream,
+    snr_series_logfar_threshold=options.snr_series_logfar_threshold,
+    postcoh_schema_mode=options.finalsink_postcoh_schema_mode,
     verbose=options.verbose)
 
 logger.info(" output document initialized")
 
-handler = simplehandler.Handler(mainloop, pipeline)
+handler = CrashcarPipelineHandler(mainloop, pipeline)
 
 logger.info(" attaching appsinks to pipeline ...")
 
@@ -969,21 +1043,46 @@ logger.info("Running pipeline ...")
 
 mainloop.run()
 
-#
-# write output file
-#
-logger.info(f"Pipeline completed. Dumping remaining zerolags.")
+terminal_bus_error = handler.terminal_bus_error
+if terminal_bus_error is None:
+    logger.info("Pipeline completed. Dumping remaining zerolags.")
+    _flush_remaining_finalsink_output(
+        finalsink, options.finalsink_output_prefix,
+        options.finalsink_output_name, verbose=options.verbose)
+else:
+    error_domain, error_code, error_message, debug_message = terminal_bus_error
+    logger.error(
+        "Pipeline terminated by GStreamer bus ERROR (%s:%s %r): %s",
+        error_domain, error_code, error_message, debug_message)
+    try:
+        _flush_remaining_finalsink_output(
+            finalsink, options.finalsink_output_prefix,
+            options.finalsink_output_name, verbose=options.verbose)
+    except Exception:
+        logger.exception(
+            "Secondary FinalSink cleanup failed after bus ERROR; "
+            "preserving the primary bus error")
 
-finalsink.write_output_file(filename=finalsink.get_output_filename(
-    options.finalsink_output_prefix, options.finalsink_output_name,
-    finalsink.t_snapshot_start,
-    finalsink.last_buffer_timestamp - finalsink.t_snapshot_start),
-                            verbose=options.verbose)
-
-# Shutdown the web interface servers
-bottle.default_app.pop()
-
-set_state_or_raise(pipeline, Gst.State.NULL, "Gst.State.NULL")
+# Shutdown the web interface servers.  Cleanup failures after a bus ERROR are
+# secondary and must not replace its nonzero process result.
+if terminal_bus_error is None:
+    bottle.default_app.pop()
+    set_state_or_raise(pipeline, Gst.State.NULL, "Gst.State.NULL")
+else:
+    try:
+        bottle.default_app.pop()
+    except Exception:
+        logger.exception(
+            "Secondary web-interface cleanup failed after bus ERROR")
+    try:
+        state_result = pipeline.set_state(Gst.State.NULL)
+        if state_result == Gst.StateChangeReturn.FAILURE:
+            logger.error(
+                "Secondary pipeline NULL transition failed after bus ERROR")
+    except Exception:
+        logger.exception(
+            "Secondary pipeline cleanup failed after bus ERROR")
+    raise SystemExit(1)
 
 #
 # done

@@ -27,3 +27,10 @@ dist_bin_SCRIPTS = \
 	gstlal_periodic_postcohspiir_summarypage \
 	bayestar_plot_allsky_postcohspiir \
 	crashcar_plot.py
+
+crashcarhelpersdir = $(datadir)/scripts/crashcar
+
+# The plotter imports this narrow API and its authoritative numeric sibling.
+dist_crashcarhelpers_DATA = \
+	$(top_srcdir)/share/scripts/crashcar/crashcar_plot_support.py \
+	$(top_srcdir)/share/scripts/crashcar/crashcar_numeric.py
