@@ -96,6 +96,23 @@ def test_controller_has_no_candidate_acceptance_archive():
         assert forbidden not in controller
 
 
+def test_controller_rejects_stale_installed_a141_before_runtime_copy():
+    controller = read("crashcar_controller.sh")
+    validation = controller.index("validate_installed_runtime_contract() {")
+    capture = controller.index("capture_runtime_manifest() {")
+    call = controller.index(
+        'validate_installed_runtime_contract "${source_install}" || exit 2')
+    copy = controller.index('cp -a "${source_install}" "${runtime_staging}"')
+    assert validation < capture < call < copy
+    for required in (
+        'choices=("legacy-a107", "crashcar-a109")',
+        'POSTCOH_SCHEMA_MODE_CRASHCAR_A109 = "crashcar-a109"',
+        "for symbol in H1_LLR L1_LLR",
+        "reason=installed_runtime_schema_contract_mismatch",
+    ):
+        assert required in controller
+
+
 def test_controller_completion_does_not_gate_on_pending_or_unassigned_far():
     controller = read("crashcar_controller.sh")
     monitor = controller[

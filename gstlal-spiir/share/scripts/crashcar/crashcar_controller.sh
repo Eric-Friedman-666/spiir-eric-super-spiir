@@ -878,6 +878,37 @@ verify_runtime_provenance_manifest_pin() {
     return 0
 }
 
+validate_installed_runtime_contract() {
+    local source_install=${1:?installed runtime root required}
+    local wrapper schema_module extension symbol
+    wrapper="${source_install}/bin/gstlal_inspiral_postcohspiir_online"
+    schema_module="${source_install}/lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcohtable/postcoh_table_def.py"
+    extension="${source_install}/lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcohtable/_postcohtable.so"
+
+    if ! grep -Fq 'choices=("legacy-a107", "crashcar-a109")' "${wrapper}"; then
+        log "ERROR installed online wrapper does not accept crashcar-a109: ${wrapper}"
+        write_status phase=failed reason=installed_runtime_schema_contract_mismatch \
+            installed_runtime="${source_install}" failed_artifact="${wrapper}"
+        return 1
+    fi
+    if ! grep -Fq 'POSTCOH_SCHEMA_MODE_CRASHCAR_A109 = "crashcar-a109"' "${schema_module}"; then
+        log "ERROR installed Postcoh schema module is not crashcar-a109: ${schema_module}"
+        write_status phase=failed reason=installed_runtime_schema_contract_mismatch \
+            installed_runtime="${source_install}" failed_artifact="${schema_module}"
+        return 1
+    fi
+    for symbol in H1_LLR L1_LLR; do
+        if ! strings "${extension}" | grep -Fx "${symbol}" >/dev/null; then
+            log "ERROR installed Postcoh extension is missing ${symbol}: ${extension}"
+            write_status phase=failed reason=installed_runtime_schema_contract_mismatch \
+                installed_runtime="${source_install}" failed_artifact="${extension}" \
+                missing_symbol="${symbol}"
+            return 1
+        fi
+    done
+    return 0
+}
+
 capture_runtime_manifest() {
     local source_head source_branch dirty dirty_count remote_url remote_tracking_head
     local source_install runtime_staging runtime_install runtime_files_manifest runtime_manifest_sha
@@ -914,6 +945,7 @@ capture_runtime_manifest() {
         bin/gstlal_inspiral_postcohspiir_online \
         lib/gstreamer-1.0/libgstcuda.so.0.0.0 \
         lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcoh_finalsink.py \
+        lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcohtable/postcoh_table_def.py \
         lib/python3.10/site-packages/gstlal_spiir/pipemodules/postcohtable/_postcohtable.so; do
         required_path="${source_install}/${required_rel}"
         if [ ! -f "${required_path}" ]; then
@@ -927,6 +959,7 @@ capture_runtime_manifest() {
         write_status phase=failed reason=installed_wrapper_not_executable source_head="${source_head}"
         exit 2
     fi
+    validate_installed_runtime_contract "${source_install}" || exit 2
 
     runtime_install="${CRASH_RUNTIME_ROOT}/install"
     runtime_staging="${CRASH_RUNTIME_ROOT}/.install.staging.$$"
