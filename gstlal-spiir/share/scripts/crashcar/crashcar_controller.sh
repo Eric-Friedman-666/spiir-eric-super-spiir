@@ -144,23 +144,29 @@ PY
 NOISE_BETA=${noise_beta:-${NOISE_BETA:--1.0}}
 RANK_OFFSET=${rank_offset:-${RANK_OFFSET:-0.0}}
 TAIL_LOG_FAR=${tail_log_FAR:-${tai_log_FAR:-${TAIL_LOG_FAR:-}}}
-if [ -n "${TAIL_LOG_FAR}" ]; then
-    FAR_FIT_BOUNDARY=$(python3 - "${TAIL_LOG_FAR}" <<'PY'
-import math
-import sys
-print("{:.17g}".format(math.pow(10.0, float(sys.argv[1]))))
-PY
-)
-else
+if [ -z "${TAIL_LOG_FAR}" ]; then
     FAR_FIT_BOUNDARY=${tail_FAR:-${far_fit_boundary:-${FAR_FIT_BOUNDARY:-0.01}}}
     TAIL_LOG_FAR=$(python3 - "${FAR_FIT_BOUNDARY}" <<'PY'
 import math
 import sys
 value = float(sys.argv[1])
-print("{:.17g}".format(math.log10(value))) if value > 0 else print("")
+if not math.isfinite(value) or not 0.0 < value < 1.0:
+    raise SystemExit("tail_FAR must be finite and strictly between zero and one")
+print("{:.17g}".format(math.log10(value)))
 PY
-)
+) || exit 2
 fi
+TAIL_VALUES=$(python3 - "${TAIL_LOG_FAR}" <<'PY'
+import math
+import sys
+value = float(sys.argv[1])
+if not math.isfinite(value) or not value < 0.0:
+    raise SystemExit("tail_log_FAR must be finite and strictly negative")
+print("{:.17g} {:.17g}".format(value, math.pow(10.0, value)))
+PY
+) || exit 2
+read -r TAIL_LOG_FAR FAR_FIT_BOUNDARY <<< "${TAIL_VALUES}"
+unset TAIL_VALUES
 SNR_SERIES_LOG_FAR_THRESHOLD=${SNR_series_logFAR_threshold:-${snr_series_logFAR_threshold:-${SNR_SERIES_LOG_FAR_THRESHOLD:--4}}}
 if [[ ! "${SNR_SERIES_LOG_FAR_THRESHOLD}" =~ ^[+-]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][+-]?[0-9]+)?$ ]] ||
    ! python3 -c "import math, sys; value = float(sys.argv[1]); raise SystemExit(0 if math.isfinite(value) else 2)" "${SNR_SERIES_LOG_FAR_THRESHOLD}"; then
@@ -278,9 +284,18 @@ if [ "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" = "consumer" ]; then
         printf 'crashcar_controller: live consumer requires injection, live_readonly mode, and producer root\n' >&2
         exit 2
     fi
-    if [[ "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" != /* ]] ||
-       [ ! -d "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}/run" ]; then
-        printf 'crashcar_controller: live producer root must be absolute and contain run/\n' >&2
+    if [[ "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" != /* ]]; then
+        printf 'crashcar_controller: live producer root must be absolute\n' >&2
+        exit 2
+    fi
+    # B1 and B2 launch concurrently.  This bounded bootstrap wait is only for
+    # the staged producer root, never for Slurm RUNNING or scientific BG files.
+    for _bootstrap_attempt in $(seq 1 120); do
+        [ -d "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}/run" ] && break
+        sleep 1
+    done
+    if [ ! -d "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}/run" ]; then
+        printf 'crashcar_controller: live producer staged root did not appear\n' >&2
         exit 2
     fi
     CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE=$(readlink -f -- "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}")
@@ -299,13 +314,6 @@ fi
 if [ -z "${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}" ]; then
     FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE=${BACKGROUND_UPDATE}
 fi
-if [ -z "${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}" ]; then
-    if [ "${INJECTION_MODE}" = "True" ] && [ "${SINGLE_BACKGROUND_MODE_VALUE}" = "live_readonly" ]; then
-        FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE},${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE},${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}"
-    else
-        FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE="${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION},${BACKGROUND_ACCUMULATION}"
-    fi
-fi
 for positive_name in \
     COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE \
     FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE \
@@ -315,6 +323,31 @@ for positive_name in \
         exit 2
     fi
 done
+
+validate_fap_collect_walltime() {
+    local raw_value=$1 collect_value
+    local -a collect_values=()
+    IFS=',' read -r -a collect_values <<< "${raw_value}"
+    [ "${#collect_values[@]}" -eq 3 ] || return 1
+    for collect_value in "${collect_values[@]}"; do
+        [[ "${collect_value}" =~ ^[1-9][0-9]*$ ]] || return 1
+    done
+}
+
+if [ -z "${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}" ]; then
+    # FAPUpdater selects bank snapshots with the strict predicate
+    # snapshot_start_gps > event_gps - collect_walltime.  One extra second
+    # includes the just-completed snapshot while excluding the previous period.
+    FAP_COLLECT_WALLTIME_DEFAULT=$(( COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE + 1 ))
+    FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE="${FAP_COLLECT_WALLTIME_DEFAULT},${FAP_COLLECT_WALLTIME_DEFAULT},${FAP_COLLECT_WALLTIME_DEFAULT}"
+    FINALSINK_FAPUPDATER_COLLECT_WALLTIME_SOURCE_VALUE=derived_snapshot_plus_one
+else
+    FINALSINK_FAPUPDATER_COLLECT_WALLTIME_SOURCE_VALUE=explicit_config
+fi
+if ! validate_fap_collect_walltime "${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}"; then
+    printf 'crashcar_controller: finalsink_fapupdater_collect_walltime expected exactly three comma-separated positive integers\n' >&2
+    exit 2
+fi
 H_ONLY_SECONDS=${h_only_seconds:-${H_ONLY_SECONDS:-0}}
 L_ONLY_SECONDS=${l_only_seconds:-${L_ONLY_SECONDS:-0}}
 HL_SECONDS=${hl_seconds:-${HL_SECONDS:-0}}
@@ -356,6 +389,7 @@ with open(os.environ["STATUS"], "w", encoding="utf-8") as handle:
     handle.write("\n")
 PY
 }
+
 live_background_helper_failure() {
     local check_phase=$1 failure=$2
     log "ERROR staged live-background helper integrity failed phase=${check_phase} reason=${failure}"
@@ -445,107 +479,231 @@ verify_live_background_helper_pin() {
     fi
 }
 
-validate_live_multi_inputs() {
-    python3 - "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" "${WORKER_COUNT}" <<'PY_MULTI_READY'
-import gzip
+prepare_live_background_contract() {
+    [ "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" = "consumer" ] || return 0
+    local binding="${CONTROLLER_DIR}/live_single_binding.input.json"
+    local temporary="${binding}.tmp.$$"
+    local error="${CONTROLLER_DIR}/live_single_binding.input.err"
+    local rc
+    if python3 - "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
+        "${WORKER_COUNT}" "${BANKS_PER_WORKER}" "${START_BANK}" \
+        "${INJECTION_BG_START_GPS}" \
+        >"${temporary}" 2>"${error}" <<'PY_LIVE_BINDING'
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
+import re
 import stat
 import sys
-from xml.parsers import expat
+import time
 
-root = Path(sys.argv[1]).resolve(strict=True)
-worker_count = int(sys.argv[2])
-if worker_count < 1 or worker_count > 4096:
-    raise SystemExit("invalid worker count")
-records = []
-for worker in range(worker_count):
-    jobno = f"{worker:03d}"
-    worker_records = []
-    for span in ("2w", "1d", "2h"):
-        path = root / "run" / jobno / f"{jobno}_marginalized_stats_{span}.xml.gz"
-        try:
-            before = os.lstat(path)
-        except OSError as exc:
-            raise SystemExit(f"multi {worker}/{span} is unavailable: {exc}")
-        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
-            raise SystemExit(f"multi {worker}/{span} is not a regular non-symlink file")
-        if before.st_size < 1:
-            raise SystemExit(f"multi {worker}/{span} is empty")
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        try:
-            opened = os.fstat(fd)
-            parser = expat.ParserCreate()
-            with os.fdopen(fd, "rb", closefd=False) as raw:
-                with gzip.GzipFile(fileobj=raw, mode="rb") as stream:
-                    while True:
-                        block = stream.read(1024 * 1024)
-                        if not block:
-                            break
-                        parser.Parse(block, False)
-                    parser.Parse(b"", True)
-        except (OSError, EOFError, expat.ExpatError) as exc:
-            raise SystemExit(f"multi {worker}/{span} is not complete gzip/XML: {exc}")
-        finally:
-            os.close(fd)
-        after = os.lstat(path)
-        identity = lambda item: (
-            item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
-        if identity(before) != identity(opened) or identity(opened) != identity(after):
-            raise SystemExit(f"multi {worker}/{span} changed during validation")
-        worker_records.append({
-            "span": span, "path": str(path), "size": opened.st_size,
-            "mtime_ns": opened.st_mtime_ns,
-        })
-    records.append({"worker_id": worker, "files": worker_records})
-print(json.dumps({
-    "kind": "crashcar_live_multi_readiness", "producer_root": str(root),
-    "worker_count": worker_count, "workers": records,
-}, separators=(",", ":"), sort_keys=True))
-PY_MULTI_READY
-}
+root_text, count_text, bpw_text, start_text, origin_text = sys.argv[1:]
+root = Path(root_text).resolve()
+worker_count = int(count_text)
+banks_per_worker = int(bpw_text)
+start_bank = int(start_text)
+origin_gps = int(origin_text)
+status_path = root / "controller" / "status.json"
+deadline = time.monotonic() + 600.0
+hex64 = re.compile(r"^[0-9a-f]{64}$")
+last_pending = "producer staged provenance has not appeared"
 
-validate_live_background_inputs() {
-    [ "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" = "consumer" ] || return 0
-    verify_live_background_helper_pin live_background_input_validation || return 2
-    local single_snapshot="${CONTROLLER_DIR}/live_single_readiness.input.json"
-    local multi_snapshot="${CONTROLLER_DIR}/live_multi_readiness.input.json"
-    local single_tmp="${single_snapshot}.tmp.$$" multi_tmp="${multi_snapshot}.tmp.$$"
-    local single_error="${CONTROLLER_DIR}/live_single_readiness.input.err"
-    local multi_error="${CONTROLLER_DIR}/live_multi_readiness.input.err"
-    if [ ! -x "${CRASHCAR_LIVE_BACKGROUND_HELPER}" ]; then
-        log "ERROR live single validator is unavailable: ${CRASHCAR_LIVE_BACKGROUND_HELPER}"
-        write_status phase=failed reason=live_single_validator_unavailable
-        return 2
+class Pending(Exception):
+    pass
+
+class Terminal(Exception):
+    pass
+
+def regular(path):
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise Pending(str(exc))
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise Terminal("not a regular non-symlink file: %s" % path)
+
+def sha256(path):
+    regular(path)
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+def env_values(path):
+    regular(path)
+    result = {}
+    with open(path, encoding="utf-8") as handle:
+        for raw in handle:
+            raw = raw.rstrip("\n")
+            if not raw or "=" not in raw:
+                continue
+            key, value = raw.split("=", 1)
+            result[key] = value
+    return result
+
+while True:
+    try:
+        regular(status_path)
+        with open(status_path, encoding="utf-8") as handle:
+            status = json.load(handle)
+        phase = str(status.get("phase", ""))
+        if phase.startswith("failed") or phase == "completed":
+            raise Terminal("producer reached terminal phase %s" % phase)
+        if status.get("root") not in (None, str(root)):
+            raise Terminal("producer root mismatch")
+        if status.get("live_background_role") != "producer":
+            raise Terminal("producer role mismatch")
+        if status.get("single_background_mode") != "rolling":
+            raise Terminal("producer background mode mismatch")
+        if str(status.get("injection_mode")) != "False":
+            raise Terminal("producer is not no-injection")
+        if int(status.get("worker_count", -1)) != worker_count:
+            raise Terminal("producer worker count mismatch")
+        if int(status.get("banks_per_worker", -1)) != banks_per_worker:
+            raise Terminal("producer banks-per-worker mismatch")
+        if int(status.get("start_bank", -1)) != start_bank:
+            raise Terminal("producer start-bank mismatch")
+        if int(status.get("start_gps", -1)) != origin_gps:
+            raise Terminal("producer origin GPS mismatch")
+
+        pin_names = (
+            "schema4_run_namespace_sha256",
+            "schema4_source_manifest_sha256",
+            "schema4_runtime_manifest_sha256",
+            "schema4_config_sha256",
+            "schema4_template_shape_map_sha256",
+        )
+        if any(not hex64.fullmatch(str(status.get(name, "")))
+               for name in pin_names):
+            raise Pending("producer schema4 pins are not complete")
+
+        run_namespace = root / "provenance" / "schema4" / "run_namespace.txt"
+        source_manifest = root / "provenance" / "schema4" / "source_manifest.env"
+        runtime_manifest = root / "provenance" / "runtime_snapshot" / "runtime_manifest.env"
+        config = root / "scripts" / "crashcar.env"
+        template_map = root / "artifacts" / "crashcar_template_shape_map.csv"
+        config_values = env_values(config)
+        tail_text = (
+            config_values.get("tail_log_FAR")
+            or config_values.get("tai_log_FAR")
+            or config_values.get("TAIL_LOG_FAR")
+        )
+        if tail_text:
+            producer_tail_log10_far = float(tail_text)
+        else:
+            boundary_text = (
+                config_values.get("tail_FAR")
+                or config_values.get("far_fit_boundary")
+                or config_values.get("FAR_FIT_BOUNDARY")
+                or "0.01"
+            )
+            boundary = float(boundary_text)
+            if not math.isfinite(boundary) or not 0.0 < boundary < 1.0:
+                raise Terminal("producer tail_FAR is invalid")
+            producer_tail_log10_far = math.log10(boundary)
+        if (not math.isfinite(producer_tail_log10_far)
+                or not producer_tail_log10_far < 0.0):
+            raise Terminal("producer tail_log_FAR is invalid")
+        status_tail = float(status.get(
+            "tail_log_FAR", producer_tail_log10_far))
+        if status_tail != producer_tail_log10_far:
+            raise Terminal("producer tail_log_FAR status/config mismatch")
+        runtime = env_values(runtime_manifest)
+        segment_xml_sha = runtime.get("crashcar_segment_xml_sha256", "")
+        segment_canonical_sha = runtime.get(
+            "crashcar_segment_livetime_json_sha256", "")
+        runtime_files_sha = runtime.get("runtime_files_manifest_sha256", "")
+        if not all(hex64.fullmatch(value) for value in (
+                segment_xml_sha, segment_canonical_sha,
+                runtime_files_sha)):
+            raise Pending("producer runtime segment pins are not complete")
+
+        identities = {
+            "run_namespace_sha256": sha256(run_namespace),
+            "source_manifest_sha256": sha256(source_manifest),
+            "runtime_manifest_sha256": runtime_files_sha,
+            "config_sha256": sha256(config),
+            "segment_xml_sha256": segment_xml_sha,
+            "segment_canonical_sha256": segment_canonical_sha,
+            "template_shape_map_sha256": sha256(template_map),
+        }
+        expected = {
+            "run_namespace_sha256": status["schema4_run_namespace_sha256"],
+            "source_manifest_sha256": status["schema4_source_manifest_sha256"],
+            "runtime_manifest_sha256": status["schema4_runtime_manifest_sha256"],
+            "config_sha256": status["schema4_config_sha256"],
+            "template_shape_map_sha256": status[
+                "schema4_template_shape_map_sha256"],
+        }
+        for key, value in expected.items():
+            if identities[key] != value:
+                raise Terminal("producer %s mismatch" % key)
+        if run_namespace.read_text(encoding="utf-8") != (
+                "run_root=%s\n" % root):
+            raise Terminal("producer run namespace content mismatch")
+        if status.get("crashcar_segment_livetime_sha256") != (
+                segment_canonical_sha):
+            raise Terminal("producer segment canonical SHA mismatch")
+
+        workers = []
+        for worker in range(worker_count):
+            first = start_bank + worker * banks_per_worker
+            workers.append({
+                "worker_id": worker,
+                "worker_count": worker_count,
+                "worker_bank_ids": list(range(first, first + banks_per_worker)),
+                "single_background_path": str(
+                    root / "run" / ("%03d" % worker) /
+                    "single_background.json"),
+            })
+        payload = {
+            "kind": "crashcar_live_single_binding_contract_v1",
+            "producer_root": str(root),
+            "producer_origin_gps": origin_gps,
+            "worker_count": worker_count,
+            "banks_per_worker": banks_per_worker,
+            "start_bank": start_bank,
+            "identities": identities,
+            "tail_log10_far": producer_tail_log10_far,
+            "workers": workers,
+            "background_files_required_at_submit": False,
+        }
+        print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+        break
+    except Pending as exc:
+        last_pending = str(exc)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        last_pending = str(exc)
+    except Terminal as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(2)
+    if time.monotonic() >= deadline:
+        print("timed out waiting only for producer staged provenance: %s" %
+              last_pending, file=sys.stderr)
+        raise SystemExit(3)
+    time.sleep(1.0)
+PY_LIVE_BINDING
+    then
+        chmod 0444 "${temporary}"
+        mv -f "${temporary}" "${binding}"
+        write_status phase=live_background_binding_ready \
+            live_background_role=consumer \
+            live_background_producer_root="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
+            live_single_binding="${binding}" \
+            live_single_binding_sha256="$(sha256sum "${binding}" | awk '{print $1}')" \
+            initial_backgrounds_required=false
+        return 0
+    else
+        rc=$?
+        rm -f "${temporary}"
+        log "ERROR producer staged-provenance binding failed"
+        write_status phase=failed reason=live_producer_binding_invalid \
+            live_binding_error="${error}" live_binding_rc="${rc}"
+        return "${rc}"
     fi
-    if ! "${CRASHCAR_LIVE_BACKGROUND_HELPER}" validate-all-singles \
-        --producer-root "${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
-        --worker-count "${WORKER_COUNT}" \
-        --banks-per-worker "${BANKS_PER_WORKER}" \
-        --start-bank "${START_BANK}" >"${single_tmp}" 2>"${single_error}"; then
-        rm -f "${single_tmp}" "${multi_tmp}"
-        log "ERROR no complete valid live single backgrounds are available"
-        write_status phase=failed reason=live_single_backgrounds_invalid \
-            live_single_error="${single_error}"
-        return 2
-    fi
-    if ! validate_live_multi_inputs >"${multi_tmp}" 2>"${multi_error}"; then
-        rm -f "${single_tmp}" "${multi_tmp}"
-        log "ERROR required normal multi inputs are not independently complete"
-        write_status phase=failed reason=live_multi_backgrounds_invalid \
-            live_multi_error="${multi_error}"
-        return 2
-    fi
-    mv "${single_tmp}" "${single_snapshot}"
-    mv "${multi_tmp}" "${multi_snapshot}"
-    write_status phase=live_background_inputs_validated \
-        live_background_role=consumer \
-        live_background_producer_root="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}" \
-        live_single_readiness="${single_snapshot}" \
-        live_single_readiness_sha256="$(sha256sum "${single_snapshot}" | awk '{print $1}')" \
-        live_multi_readiness="${multi_snapshot}" \
-        live_multi_readiness_sha256="$(sha256sum "${multi_snapshot}" | awk '{print $1}')"
 }
 
 detail_summary_json() {
@@ -853,7 +1011,8 @@ validate_inputs() {
     for worker in $(seq 0 $((WORKER_COUNT - 1))); do
         local jobno
         jobno=$(printf '%03d' "${worker}")
-        if [ "${CRASHCAR_BG_ONLY_VALUE}" != "1" ]; then
+        if [ "${CRASHCAR_BG_ONLY_VALUE}" != "1" ] &&
+           [ "${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}" != "consumer" ]; then
             for suffix in 2w 1d 2h; do
                 p="${NONINJ_STATS_LOC}/${jobno}/${jobno}_marginalized_stats_${suffix}.xml.gz"
                 [ -e "${p}" ] || { log "ERROR missing input ${p}"; write_status phase=failed reason="missing ${p}"; exit 2; }
@@ -1006,6 +1165,9 @@ write_final_report() {
         START_GPS="${START_GPS}" END_GPS="${END_GPS}" DURATION="${DURATION}" \
         BACKGROUND_ACCUMULATION="${BACKGROUND_ACCUMULATION}" BACKGROUND_UPDATE="${BACKGROUND_UPDATE}" \
         ZEROLAG_UPDATE="${ZEROLAG_UPDATE}" \
+        COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE="${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE}" \
+        FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE="${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}" \
+        FINALSINK_FAPUPDATER_COLLECT_WALLTIME_SOURCE_VALUE="${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_SOURCE_VALUE}" \
         WORKER_COUNT="${WORKER_COUNT}" BANKS_PER_WORKER="${BANKS_PER_WORKER}" \
         SINGLE_ONLY_SECONDS="${SINGLE_ONLY_SECONDS}" SINGLE_ONLY_FRACTION="${SINGLE_ONLY_FRACTION}" \
         HL_UNION_FRACTION="${HL_UNION_FRACTION}" H_ONLY_SECONDS="${H_ONLY_SECONDS}" \
@@ -1041,6 +1203,12 @@ payload = {
     "background_accumulation_seconds": float(os.environ["BACKGROUND_ACCUMULATION"]),
     "background_update_seconds": float(os.environ["BACKGROUND_UPDATE"]),
     "zerolag_update_seconds": float(os.environ["ZEROLAG_UPDATE"]),
+    "cohfar_accumbackground_snapshot_interval_seconds": int(
+        os.environ["COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE"]),
+    "finalsink_fapupdater_collect_walltime":
+        os.environ["FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE"],
+    "finalsink_fapupdater_collect_walltime_source":
+        os.environ["FINALSINK_FAPUPDATER_COLLECT_WALLTIME_SOURCE_VALUE"],
     "tail_log_FAR": (
         float(os.environ["TAIL_LOG_FAR"])
         if os.environ.get("TAIL_LOG_FAR") else None),
@@ -1097,13 +1265,16 @@ submit_job() {
     verify_runtime_provenance_manifest_pin pre_slurm_submit || exit 2
     cd "${RUN_DIR}"
     local job
+    # Slurm uses commas as --export token separators.  Keep the complete
+    # three-window value in the parent environment and export only its name.
+    export FINALSINK_FAPUPDATER_COLLECT_WALLTIME="${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}"
     local sbatch_args=(
         --parsable
         --job-name="${SLURM_JOB_NAME}"
         --mem="${SLURM_MEM}"
         --cpus-per-task="${SLURM_CPUS_PER_TASK}"
         --array="0-$((WORKER_COUNT - 1))"
-        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",CRASHCAR_RUNTIME_PROVENANCE_MANIFEST_SHA256="${RUNTIME_PROVENANCE_MANIFEST_SHA256}",CRASHCAR_CURRENT_WORKER_COUNT="${WORKER_COUNT}",CRASHCAR_CURRENT_BANKS_PER_WORKER="${BANKS_PER_WORKER}",CRASHCAR_CURRENT_START_BANK="${START_BANK}",CRASHCAR_CURRENT_RUN_NAMESPACE_SHA256="${SCHEMA4_RUN_NAMESPACE_SHA256}",CRASHCAR_CURRENT_SOURCE_MANIFEST_SHA256="${SCHEMA4_SOURCE_MANIFEST_SHA256}",CRASHCAR_CURRENT_RUNTIME_MANIFEST_SHA256="${SCHEMA4_RUNTIME_MANIFEST_SHA256}",CRASHCAR_CURRENT_CONFIG_SHA256="${SCHEMA4_CONFIG_SHA256}",CRASHCAR_CURRENT_SEGMENT_XML_SHA256="${SEGMENT_XML_SHA256}",CRASHCAR_CURRENT_SEGMENT_CANONICAL_SHA256="${SEGMENT_LIVETIME_JSON_SHA256}",CRASHCAR_CURRENT_TEMPLATE_SHAPE_MAP_SHA256="${SCHEMA4_TEMPLATE_SHAPE_MAP_SHA256}",CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROLE="${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}",CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROOT="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}",CRASHCAR_LIVE_SINGLE_READINESS_JSON="${CONTROLLER_DIR}/live_single_readiness.input.json",CRASHCAR_LIVE_BG_ORIGIN_GPS="${INJECTION_BG_START_GPS}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",DOF="${DOF}",CRASHCAR_DOF="${DOF}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}",ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",CRASHCAR_SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",CRASHCAR_BG_ONLY="${CRASHCAR_BG_ONLY_VALUE}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
+        --export=ALL,TOP_RUN_ROOT="${ROOT}",RUN_DIR="${RUN_DIR}",CRASH_ROOT="${CRASH_RUNTIME_ROOT}",CRASHCAR_RUNTIME_PROVENANCE_MANIFEST_SHA256="${RUNTIME_PROVENANCE_MANIFEST_SHA256}",CRASHCAR_CURRENT_WORKER_COUNT="${WORKER_COUNT}",CRASHCAR_CURRENT_BANKS_PER_WORKER="${BANKS_PER_WORKER}",CRASHCAR_CURRENT_START_BANK="${START_BANK}",CRASHCAR_CURRENT_RUN_NAMESPACE_SHA256="${SCHEMA4_RUN_NAMESPACE_SHA256}",CRASHCAR_CURRENT_SOURCE_MANIFEST_SHA256="${SCHEMA4_SOURCE_MANIFEST_SHA256}",CRASHCAR_CURRENT_RUNTIME_MANIFEST_SHA256="${SCHEMA4_RUNTIME_MANIFEST_SHA256}",CRASHCAR_CURRENT_CONFIG_SHA256="${SCHEMA4_CONFIG_SHA256}",CRASHCAR_CURRENT_SEGMENT_XML_SHA256="${SEGMENT_XML_SHA256}",CRASHCAR_CURRENT_SEGMENT_CANONICAL_SHA256="${SEGMENT_LIVETIME_JSON_SHA256}",CRASHCAR_CURRENT_TEMPLATE_SHAPE_MAP_SHA256="${SCHEMA4_TEMPLATE_SHAPE_MAP_SHA256}",CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROLE="${CRASHCAR_LIVE_BACKGROUND_ROLE_VALUE}",CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROOT="${CRASHCAR_LIVE_BACKGROUND_ROOT_VALUE}",CRASHCAR_LIVE_SINGLE_BINDING_JSON="${CONTROLLER_DIR}/live_single_binding.input.json",CRASHCAR_LIVE_BG_ORIGIN_GPS="${INJECTION_BG_START_GPS}",WGUO_O3A_INJECTION_MODE="${INJECTION_PIPELINE_MODE}",WGUO_O3A_INJECTION_FILE="${INJECTION_FILE}",WGUO_O3A_START_GPS="${START_GPS}",WGUO_O3A_END_GPS="${END_GPS}",WGUO_O3A_DETRSP_MAP="${DETRSP_MAP}",WGUO_O3A_FRAME_CACHE="${FRAME_CACHE}",WGUO_O3A_NONINJ_STATS_LOC="${NONINJ_STATS_LOC}",WGUO_O3A_BANK_DIR="${O3_BANK_DIR}",WGUO_O3A_BANKS_PER_GROUP="${BANKS_PER_WORKER}",WGUO_O3A_START_BANK="${START_BANK}",WGUO_O3A_SNAPSHOT_INTERVAL="${ZEROLAG_UPDATE}",DOF="${DOF}",CRASHCAR_DOF="${DOF}",BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",FORMAL_BACKGROUND_ACCUMULATION_SECONDS="${BACKGROUND_ACCUMULATION}",CRASHCAR_BACKGROUND_REQUIRED_SECONDS="${CRASHCAR_BACKGROUND_REQUIRED_SECONDS_VALUE}",BACKGROUND_UPDATE_TRIGGER_SECONDS="${BACKGROUND_UPDATE}",COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS="${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE}",COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS="${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE}",FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}",FINALSINK_FAPUPDATER_COLLECT_WALLTIME,ZEROLAG_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${ZEROLAG_UPDATE}",CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}",TAIL_LOG_FAR="${TAIL_LOG_FAR}",CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${template_map}",CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}",CRASHCAR_CODE_VERSION="${CRASHCAR_CODE_VERSION}",WGUO_O3A_SEGMENT_XML="${SEGMENT_XML}",SEGMENT_XML="${SEGMENT_XML}",SINGLE_SEGMENT_XML="${SEGMENT_XML}",SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",CRASHCAR_SINGLE_BACKGROUND_MODE="${SINGLE_BACKGROUND_MODE_VALUE}",CRASHCAR_BG_ONLY="${CRASHCAR_BG_ONLY_VALUE}",CRASHCAR_SEGMENT_LIVETIME_CSV="${LIVETIME_CSV}"
         --chdir="${RUN_DIR}"
     )
     local sbatch_export_bound=0 sbatch_arg_index
@@ -1130,7 +1301,7 @@ submit_job() {
     sbatch_args+=("${SCRIPT_DIR}/crashcar_sbatch.sh")
     job=$(sbatch "${sbatch_args[@]}")
     printf '%s\n' "${job}" > "${CONTROLLER_DIR}/job_id.txt"
-    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" single_llr_model=wguo_gaussian_v1 legacy_dof_env_value="${DOF}" dof_authority=bankid_fixed_0_99_120_100_383_600 background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" zerolag_update_seconds="${ZEROLAG_UPDATE}" cohfar_assignfar_refresh_interval_seconds="${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE}" finalsink_fapupdater_interval_seconds="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}" finalsink_fapupdater_collect_walltime="${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}" cohfar_accumbackground_snapshot_interval_seconds="${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE}" tail_log_FAR="${TAIL_LOG_FAR}" tail_FAR="${FAR_FIT_BOUNDARY}" SNR_series_logFAR_threshold="${SNR_SERIES_LOG_FAR_THRESHOLD}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
+    write_status phase=slurm_submitted job_id="${job}" run_dir="${RUN_DIR}" worker_count="${WORKER_COUNT}" banks_per_worker="${BANKS_PER_WORKER}" single_llr_model=wguo_gaussian_v1 legacy_dof_env_value="${DOF}" dof_authority=bankid_fixed_0_99_120_100_383_600 background_accumulation_seconds="${BACKGROUND_ACCUMULATION}" background_update_seconds="${BACKGROUND_UPDATE}" zerolag_update_seconds="${ZEROLAG_UPDATE}" cohfar_assignfar_refresh_interval_seconds="${COHFAR_ASSIGNFAR_REFRESH_INTERVAL_SECONDS_VALUE}" finalsink_fapupdater_interval_seconds="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS_VALUE}" finalsink_fapupdater_collect_walltime="${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_VALUE}" finalsink_fapupdater_collect_walltime_source="${FINALSINK_FAPUPDATER_COLLECT_WALLTIME_SOURCE_VALUE}" cohfar_accumbackground_snapshot_interval_seconds="${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS_VALUE}" tail_log_FAR="${TAIL_LOG_FAR}" tail_FAR="${FAR_FIT_BOUNDARY}" SNR_series_logFAR_threshold="${SNR_SERIES_LOG_FAR_THRESHOLD}" injection_mode="${INJECTION_MODE}" injection_pipeline_mode="${INJECTION_PIPELINE_MODE}" single_only_fraction="${SINGLE_ONLY_FRACTION}" hl_union_fraction="${HL_UNION_FRACTION}"
     log "submitted Slurm job=${job} workers=${WORKER_COUNT} banks_per_worker=${BANKS_PER_WORKER} gps=${START_GPS}-${END_GPS}"
 }
 
@@ -1199,6 +1370,7 @@ EOF
         injection_bg_duration_seconds="${INJECTION_BG_DURATION_SECONDS}" \
         worker_count="${WORKER_COUNT}" \
         banks_per_worker="${BANKS_PER_WORKER}" \
+        start_bank="${START_BANK}" \
         single_only_fraction="${SINGLE_ONLY_FRACTION}" \
         hl_union_fraction="${HL_UNION_FRACTION}" \
         first3_h_only_seconds="${FIRST3_H_ONLY_SECONDS}" \
@@ -1212,7 +1384,7 @@ EOF
     cp "${ROOT}/provenance/runtime_snapshot/source_head.txt" "${CONTROLLER_DIR}/source_head.txt"
     export_template_map
     prepare_schema4_provenance
-    validate_live_background_inputs
+    prepare_live_background_contract
     submit_job
     monitor_job "$(cat "${CONTROLLER_DIR}/job_id.txt")"
 }

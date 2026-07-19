@@ -108,16 +108,18 @@ resolve_crashcar_background_binding() {
                [ "${canonical_root}" = "$(readlink -f -- "${TOP_RUN_ROOT}")" ]; then
                 crashcar_binding_error "live producer root is invalid"; return 2
             fi
-            if [ ! -f "${CRASHCAR_LIVE_SINGLE_READINESS_JSON:-}" ] ||
-               [ -L "${CRASHCAR_LIVE_SINGLE_READINESS_JSON:-}" ]; then
-                crashcar_binding_error "live single readiness snapshot is unavailable"; return 2
+            if [ ! -f "${CRASHCAR_LIVE_SINGLE_BINDING_JSON:-}" ] ||
+               [ -L "${CRASHCAR_LIVE_SINGLE_BINDING_JSON:-}" ]; then
+                crashcar_binding_error "live single producer binding is unavailable"; return 2
             fi
             mapfile -d '' live_values < <(
-                python3 - "${CRASHCAR_LIVE_SINGLE_READINESS_JSON}" "${canonical_root}" \
+                python3 - "${CRASHCAR_LIVE_SINGLE_BINDING_JSON}" "${canonical_root}" \
                     "${worker_id}" "${worker_count}" "${banks_per_worker}" \
-                    "${start_bank}" "${expected_roster}" <<'PY_LIVE'
-import json, os, re, stat, sys
-path, root, worker_text, count_text, bpw_text, start_text, roster_text=sys.argv[1:]
+                    "${start_bank}" "${expected_roster}" \
+                    "${CRASHCAR_LIVE_BG_ORIGIN_GPS:?producer origin GPS required}" <<'PY_LIVE'
+import json, math, os, re, stat, sys
+(path, root, worker_text, count_text, bpw_text, start_text,
+ roster_text, origin_text) = sys.argv[1:]
 def fail(msg): raise SystemExit("crashcar_sbatch live binding: "+msg)
 def strict(pairs):
     out={}
@@ -126,10 +128,12 @@ def strict(pairs):
         out[k]=v
     return out
 info=os.lstat(path)
-if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode): fail("readiness snapshot is not regular")
+if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode): fail("binding contract is not regular")
 with open(path,encoding="utf-8") as h: value=json.load(h,object_pairs_hook=strict)
-worker=int(worker_text); count=int(count_text); bpw=int(bpw_text); start=int(start_text)
-if value.get("kind")!="crashcar_live_single_validation" or value.get("producer_root")!=root: fail("producer mismatch")
+worker=int(worker_text); count=int(count_text); bpw=int(bpw_text); start=int(start_text); origin=int(origin_text)
+if value.get("kind")!="crashcar_live_single_binding_contract_v1" or value.get("producer_root")!=root: fail("producer mismatch")
+if value.get("producer_origin_gps")!=origin: fail("producer origin mismatch")
+if value.get("background_files_required_at_submit") is not False: fail("soft-start contract mismatch")
 if (value.get("worker_count"),value.get("banks_per_worker"),value.get("start_bank"))!=(count,bpw,start): fail("geometry mismatch")
 workers=value.get("workers")
 if type(workers) is not list or len(workers)!=count: fail("worker list mismatch")
@@ -138,15 +142,20 @@ if item.get("worker_id")!=worker or item.get("worker_count")!=count: fail("worke
 if item.get("worker_bank_ids")!=[int(x) for x in roster_text.split(",")]: fail("bank roster mismatch")
 expected=os.path.join(root,"run",f"{worker:03d}","single_background.json")
 if item.get("single_background_path")!=expected: fail("single path mismatch")
-ids=item.get("identities"); keys=("run_namespace_sha256","source_manifest_sha256","runtime_manifest_sha256","config_sha256","segment_xml_sha256","segment_canonical_sha256","template_shape_map_sha256")
+ids=value.get("identities"); keys=("run_namespace_sha256","source_manifest_sha256","runtime_manifest_sha256","config_sha256","segment_xml_sha256","segment_canonical_sha256","template_shape_map_sha256")
 hex64=re.compile(r"^[0-9a-f]{64}$")
 if type(ids) is not dict or any(not hex64.fullmatch(ids.get(k,"")) for k in keys): fail("provenance mismatch")
-items=[expected]+[ids[k] for k in keys]+["OK"]
+tail=value.get("tail_log10_far")
+if (type(tail) not in (int,float) or isinstance(tail,bool)
+        or not math.isfinite(float(tail)) or not float(tail)<0.0):
+    fail("producer tail anchor mismatch")
+tail_text=format(float(tail),".17g")
+items=[expected]+[ids[k] for k in keys]+[tail_text,"OK"]
 sys.stdout.buffer.write(b"\0".join(x.encode() for x in items)+b"\0")
 PY_LIVE
             )
-            if [ "${#live_values[@]}" -ne 9 ] || [ "${live_values[8]}" != OK ]; then
-                crashcar_binding_error "strict live single readiness validation failed"; return 2
+            if [ "${#live_values[@]}" -ne 10 ] || [ "${live_values[9]}" != OK ]; then
+                crashcar_binding_error "strict live single producer binding validation failed"; return 2
             fi
             export CRASHCAR_LIVE_BACKGROUND_ROOT="${canonical_root}"
             export CRASHCAR_LIVE_SINGLE_BACKGROUND_JSON="${live_values[0]}"
@@ -160,10 +169,336 @@ PY_LIVE
             export CRASHCAR_BG_SEGMENT_XML_SHA256="${live_values[5]}"
             export CRASHCAR_BG_SEGMENT_CANONICAL_SHA256="${live_values[6]}"
             export CRASHCAR_TEMPLATE_SHAPE_MAP_SHA256="${live_values[7]}"
+            export TAIL_LOG_FAR="${live_values[8]}"
             ;;
         *) crashcar_binding_error "single background mode must be rolling or live_readonly"; return 2 ;;
     esac
     export CRASHCAR_WORKER_BANK_IDS_EXPECTED="${expected_roster}"
+}
+
+validate_live_multi_worker_inputs() {
+    local root=${CRASHCAR_LIVE_BACKGROUND_ROOT:?live background root required}
+    local worker=${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID required}
+    python3 - "${root}" "${worker}" <<'PY_MULTI_READY'
+import gzip
+import json
+import math
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import xml.etree.ElementTree as ET
+
+root = Path(sys.argv[1]).resolve(strict=True)
+worker = int(sys.argv[2])
+if worker < 0 or worker > 4095:
+    raise SystemExit("invalid worker id")
+jobno = f"{worker:03d}"
+worker_root = root / "run" / jobno
+if worker_root.resolve(strict=True) != worker_root:
+    raise SystemExit(f"multi worker {worker} directory is not direct")
+
+INT = re.compile(r"[+-]?[0-9]+")
+IFOS = ("H1", "L1", "V1", "H1L1V1")
+ARRAYS = (
+    ("background_feature:{ifo}_lgsnr_rate:array", "int_8s", (300,), "count"),
+    ("background_feature:{ifo}_lgchisq_rate:array", "int_8s", (300,), "count"),
+    ("background_feature:{ifo}_lgsnr_lgchisq_rate:array",
+     "int_8s", (300, 300), "count"),
+    ("background_feature:{ifo}_lgsnr_lgchisq_pdf:array",
+     "real_8", (300, 300), "nonnegative"),
+    ("background_rank:{ifo}_rank_map:array",
+     "real_8", (300, 300), "finite"),
+    ("background_rank:{ifo}_rank_rate:array", "int_8s", (300,), "count"),
+    ("background_rank:{ifo}_rank_pdf:array",
+     "real_8", (300,), "nonnegative"),
+    ("background_rank:{ifo}_rank_fap:array",
+     "real_8", (300,), "probability"),
+)
+TABLE_COLUMNS = (
+    ("background_rank:rank_rate:cmin", "real_4"),
+    ("background_rank:rank_rate:cmax", "real_4"),
+    ("background_rank:rank_rate:nbin", "int_4s"),
+)
+
+def fail(message):
+    raise SystemExit(f"multi {worker}: {message}")
+
+def named(parent, tag, name):
+    matches = [
+        child for child in parent.findall(tag)
+        if child.get("Name") == name
+    ]
+    if len(matches) != 1:
+        fail(f"{tag} {name} count is {len(matches)}, expected 1")
+    return matches[0]
+
+def parse_integer(token, label, bits, nonnegative=False):
+    if not INT.fullmatch(token):
+        fail(f"{label} contains a non-integer token")
+    value = int(token)
+    low = -(1 << (bits - 1))
+    high = (1 << (bits - 1)) - 1
+    if value < low or value > high or (nonnegative and value < 0):
+        fail(f"{label} integer is outside its physical/type range")
+    return value
+
+def parse_float(token, label, nonnegative=False, probability=False):
+    try:
+        value = float(token)
+    except ValueError:
+        fail(f"{label} contains a non-numeric token")
+    if not math.isfinite(value):
+        fail(f"{label} contains a non-finite token")
+    if nonnegative and value < 0:
+        fail(f"{label} contains a negative density")
+    if probability and not 0 <= value <= 1.000001:
+        fail(f"{label} contains a value outside probability range")
+    return value
+
+def validate_table(stats):
+    table = named(stats, "Table", "background_rank:rank_rate:table")
+    columns = tuple(
+        (item.get("Name"), item.get("Type"))
+        for item in table.findall("Column")
+    )
+    if columns != TABLE_COLUMNS:
+        fail("background rank-rate table columns/type/order mismatch")
+    stream = named(table, "Stream", "background_rank:rank_rate:table")
+    if stream.get("Type") != "Local" or stream.get("Delimiter") != ",":
+        fail("background rank-rate table Stream attributes mismatch")
+    raw = (stream.text or "").strip()
+    tokens = [token.strip() for token in raw.split(",")]
+    while tokens and tokens[-1] == "":
+        tokens.pop()
+    if len(tokens) != 3 or any(token == "" for token in tokens):
+        fail("background rank-rate table Stream is empty or malformed")
+    try:
+        cmin = float(tokens[0])
+        cmax = float(tokens[1])
+    except ValueError:
+        fail("background rank-rate table bounds are non-numeric")
+    nbin = parse_integer(tokens[2], "background rank-rate nbin", 32)
+    if not math.isfinite(cmin) or not math.isfinite(cmax):
+        fail("background rank-rate table bounds are non-finite")
+    if (cmin, cmax, nbin) != (-30.0, 0.0, 300):
+        fail("background rank-rate table values mismatch loader constants")
+
+def validate_array(stats, name, type_name, dims, value_kind):
+    array = named(stats, "Array", name)
+    if array.get("Type") != type_name:
+        fail(f"{name} Type mismatch")
+    dim_nodes = array.findall("Dim")
+    actual_dims = tuple(
+        parse_integer((node.text or "").strip(), name + " Dim", 32)
+        for node in dim_nodes
+    )
+    if actual_dims != dims:
+        fail(f"{name} Dim mismatch: {actual_dims!r}")
+    streams = array.findall("Stream")
+    if len(streams) != 1:
+        fail(f"{name} Stream count is {len(streams)}, expected 1")
+    stream = streams[0]
+    if stream.get("Type") != "Local" or stream.get("Delimiter") != " ":
+        fail(f"{name} Stream attributes mismatch")
+    tokens = (stream.text or "").split()
+    expected = math.prod(dims)
+    if len(tokens) != expected:
+        fail(f"{name} Stream token count {len(tokens)} != {expected}")
+    if type_name == "int_8s":
+        for token in tokens:
+            parse_integer(token, name, 64, nonnegative=True)
+    else:
+        for token in tokens:
+            parse_float(
+                token, name,
+                nonnegative=value_kind == "nonnegative",
+                probability=value_kind == "probability",
+            )
+
+def validate_param(stats, name, type_name, bits, positive=False):
+    param = named(stats, "Param", name)
+    if param.get("Type") != type_name:
+        fail(f"{name} Type mismatch")
+    token = (param.text or "").strip()
+    value = parse_integer(token, name, bits, nonnegative=True)
+    if positive and value <= 0:
+        fail(f"{name} must be positive")
+    return value
+
+def validate_loader_contract(document):
+    if document.tag != "LIGO_LW":
+        fail("outer LIGO_LW is missing")
+    matches = [
+        child for child in document.findall("LIGO_LW")
+        if child.get("Name") == "gstlal_postcohspiir_stats"
+    ]
+    if len(matches) != 1:
+        fail("nested gstlal_postcohspiir_stats node is missing or duplicated")
+    stats = matches[0]
+    validate_table(stats)
+    for ifo in IFOS:
+        for pattern, type_name, dims, value_kind in ARRAYS:
+            validate_array(
+                stats, pattern.format(ifo=ifo), type_name, dims, value_kind)
+        validate_param(
+            stats, f"background_feature:{ifo}_nevent:param",
+            "int_8s", 64)
+        validate_param(
+            stats, f"background_feature:{ifo}_livetime:param",
+            "int_8s", 64)
+    validate_param(
+        stats, "background_feature:hist_trials:param",
+        "int_4s", 32, positive=True)
+
+records = []
+for span in ("2w", "1d", "2h"):
+    path = worker_root / f"{jobno}_marginalized_stats_{span}.xml.gz"
+    try:
+        before = os.lstat(path)
+    except OSError as exc:
+        raise SystemExit(f"multi {worker}/{span} is unavailable: {exc}")
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise SystemExit(f"multi {worker}/{span} is not a regular non-symlink file")
+    if before.st_size < 1:
+        raise SystemExit(f"multi {worker}/{span} is empty")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        opened = os.fstat(fd)
+        with os.fdopen(fd, "rb", closefd=False) as raw:
+            with gzip.GzipFile(fileobj=raw, mode="rb") as stream:
+                document = ET.parse(stream).getroot()
+        validate_loader_contract(document)
+    except (OSError, EOFError, ET.ParseError) as exc:
+        raise SystemExit(
+            f"multi {worker}/{span} is not complete gzip/XML: {exc}")
+    finally:
+        os.close(fd)
+    after = os.lstat(path)
+    identity = lambda item: (
+        item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
+    if identity(before) != identity(opened) or identity(opened) != identity(after):
+        raise SystemExit(f"multi {worker}/{span} changed during validation")
+    records.append({
+        "span": span, "path": str(path), "size": opened.st_size,
+        "mtime_ns": opened.st_mtime_ns,
+    })
+print(json.dumps({
+    "kind": "crashcar_live_multi_worker_readiness",
+    "producer_root": str(root), "worker_id": worker, "files": records,
+}, separators=(",", ":"), sort_keys=True))
+PY_MULTI_READY
+}
+
+write_live_background_wait_status() {
+    local status_file=$1 phase=$2 attempt=$3
+    local single_ready=$4 multi_ready=$5
+    local single_snapshot=${6:-} multi_snapshot=${7:-}
+    python3 - "${status_file}" "${phase}" "${attempt}" \
+        "${single_ready}" "${multi_ready}" \
+        "${CRASHCAR_LIVE_BACKGROUND_ROOT:?}" \
+        "${SLURM_ARRAY_TASK_ID:?}" \
+        "${CRASHCAR_LIVE_SINGLE_BACKGROUND_JSON:?}" \
+        "${single_snapshot}" "${multi_snapshot}" <<'PY_WAIT_STATUS'
+import datetime
+import json
+import os
+from pathlib import Path
+import sys
+
+(status_text, phase, attempt_text, single_text, multi_text,
+ root, worker_text, single_path, single_snapshot, multi_snapshot) = sys.argv[1:]
+worker = int(worker_text)
+jobno = f"{worker:03d}"
+payload = {
+    "schema_version": 1,
+    "phase": phase,
+    "updated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "attempt": int(attempt_text),
+    "worker_id": worker,
+    "producer_root": root,
+    "single_background_path": single_path,
+    "normal_multi_paths": [
+        os.path.join(root, "run", jobno,
+                     f"{jobno}_marginalized_stats_{span}.xml.gz")
+        for span in ("2w", "1d", "2h")
+    ],
+    "single_ready": single_text == "1",
+    "normal_multi_ready": multi_text == "1",
+}
+if phase == "live_backgrounds_ready":
+    with open(single_snapshot, encoding="utf-8") as handle:
+        single = json.load(handle)
+    with open(multi_snapshot, encoding="utf-8") as handle:
+        multi = json.load(handle)
+    payload["single_background"] = {
+        key: single[key] for key in (
+            "worker_id", "accepted_version", "coverage_end_gps_ns",
+            "single_background_path", "single_background_sha256")
+    }
+    payload["normal_multi"] = multi["files"]
+status = Path(status_text)
+temporary = status.with_name(status.name + ".tmp")
+with open(temporary, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, separators=(",", ":"), sort_keys=True)
+    handle.write("\n")
+os.replace(temporary, status)
+PY_WAIT_STATUS
+}
+
+wait_for_live_background_inputs() {
+    local mode=${CRASHCAR_SINGLE_BACKGROUND_MODE:-${SINGLE_BACKGROUND_MODE:-rolling}}
+    [ "${mode}" = live_readonly ] || return 0
+    local helper="${TOP_RUN_ROOT}/scripts/crashcar_live_background.py"
+    if [ ! -x "${helper}" ] || [ -L "${helper}" ]; then
+        crashcar_binding_error "staged live single validator is unavailable"; return 2
+    fi
+    local worker=${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID required}
+    local worker_jobno status_file single_tmp multi_tmp
+    worker_jobno=$(printf '%03d' "${worker}")
+    status_file="${RUN_DIR}/monitor/live_background_wait_${worker_jobno}.json"
+    single_tmp="${status_file}.single.tmp"
+    multi_tmp="${status_file}.multi.tmp"
+    local attempt=0 single_ready=0 multi_ready=0
+    write_live_background_wait_status \
+        "${status_file}" waiting_live_backgrounds 0 0 0
+    while true; do
+        attempt=$((attempt + 1))
+        single_ready=0
+        multi_ready=0
+        if "${helper}" validate-single \
+            --producer-root "${CRASHCAR_LIVE_BACKGROUND_ROOT}" \
+            --worker "${worker}" \
+            --worker-count "${CRASHCAR_CURRENT_WORKER_COUNT}" \
+            --banks-per-worker "${CRASHCAR_CURRENT_BANKS_PER_WORKER}" \
+            --start-bank "${CRASHCAR_CURRENT_START_BANK}" \
+            >"${single_tmp}" 2>/dev/null; then
+            single_ready=1
+        fi
+        if [ "${single_ready}" = 1 ] &&
+           validate_live_multi_worker_inputs >"${multi_tmp}" 2>/dev/null; then
+            multi_ready=1
+        fi
+        if [ "${single_ready}" = 1 ] && [ "${multi_ready}" = 1 ]; then
+            write_live_background_wait_status \
+                "${status_file}" live_backgrounds_ready "${attempt}" 1 1 \
+                "${single_tmp}" "${multi_tmp}"
+            rm -f -- "${single_tmp}" "${multi_tmp}"
+            printf 'crashcar_sbatch: worker %s live backgrounds are ready; starting pipeline\n' \
+                "${worker_jobno}"
+            return 0
+        fi
+        write_live_background_wait_status \
+            "${status_file}" waiting_live_backgrounds "${attempt}" \
+            "${single_ready}" "${multi_ready}"
+        rm -f -- "${single_tmp}" "${multi_tmp}"
+        if [ "${attempt}" -eq 1 ] || [ $((attempt % 6)) -eq 0 ]; then
+            printf 'crashcar_sbatch: worker %s waiting for live backgrounds single=%s multi=%s\n' \
+                "${worker_jobno}" "${single_ready}" "${multi_ready}"
+        fi
+        sleep 10
+    done
 }
 
 # BEGIN_CRASHCAR_SEGMENT_RUNTIME_BINDING
@@ -299,6 +634,8 @@ source /fred/oz016/gwdc_spiir_pipeline_codebase/scripts_n_things/build/bash_help
   env | grep -E '^(WGUO_O3A|CRASHCAR|BACKGROUND|FORMAL|COHFAR|FINALSINK|DATA_|RUN_DIR|CRASH_ROOT|TOP_RUN_ROOT|SINGLE_)=' | sort
 } > "logs/env_${SLURM_JOB_ID:-manual}_${SLURM_ARRAY_TASK_ID:-0}.env"
 
+wait_for_live_background_inputs
+
 pipeline_exit_status_file="${RUN_DIR}/logs/pipeline_exit_${SLURM_JOB_ID:-manual}_${SLURM_ARRAY_TASK_ID:-0}.status"
 rm -f -- "${pipeline_exit_status_file}"
 
@@ -332,6 +669,7 @@ run_spiir_py3 \
   -e FINALSINK_FAPUPDATER_INTERVAL_SECONDS="${FINALSINK_FAPUPDATER_INTERVAL_SECONDS:-${BACKGROUND_UPDATE_TRIGGER_SECONDS:-3600}}" \
   -e CRASHCAR_SNAPSHOT_INTERVAL_SECONDS="${CRASHCAR_SNAPSHOT_INTERVAL_SECONDS:-3600}" \
   -e CRASHCAR_LOG10_FAR_THRESHOLD="${CRASHCAR_LOG10_FAR_THRESHOLD:-90}" \
+  -e TAIL_LOG_FAR="${TAIL_LOG_FAR:--2}" \
   -e CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME="${CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME:-}" \
   -e CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP="${CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP:-1}" \
   -e CRASHCAR_SEGMENT_LIVETIME_CSV="${CRASHCAR_SEGMENT_LIVETIME_CSV:-}" \

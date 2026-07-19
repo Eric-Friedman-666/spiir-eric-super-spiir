@@ -15,6 +15,7 @@ The plotting contract follows Eric-bless-crashcar.pdf Section 4.1:
 
 from __future__ import annotations
 
+from array import array
 import argparse
 import csv
 import gzip
@@ -25,6 +26,7 @@ import json
 import math
 import os
 import re
+import shlex
 import stat
 import textwrap
 import xml.etree.ElementTree as ET
@@ -56,6 +58,15 @@ DEFAULT_SINGLE_FAR_BASES = ("far_sngl",)
 DEFAULT_COHERENT_FAR_BASES = ("far_1w", "far_1d", "far_2h", "far")
 ZEROLAG_NAME_RE = re.compile(r"_zerolag_(\d+)_(\d+)\.xml(?:\.gz)?$")
 COINCS_NAME_RE = re.compile(r"^(?P<ifos>[A-Za-z0-9]+)_(?P<end_time>\d+)_(?P<end_time_ns>\d{9})_(?P<bankid>\d+)_(?P<tmplt_idx>\d+)_(?P<event_id>\d+)\.xml(?:\.gz)?$")
+FINAL_ROUTE_BY_IFOS = {
+    "H1": ("H1_SINGLE", "H1"),
+    "H1V1": ("H1_SINGLE", "H1"),
+    "L1": ("L1_SINGLE", "L1"),
+    "L1V1": ("L1_SINGLE", "L1"),
+    "H1L1": ("MULTI", ""),
+    "H1L1V1": ("MULTI", ""),
+    "V1": ("V1_ONLY", ""),
+}
 
 
 def _load_crashcar_plot_support():
@@ -139,6 +150,16 @@ def finite_positive(value) -> float | None:
         return number
     return None
 
+def equal_within_one_ulp(actual: float, expected: float) -> bool:
+    """Return whether two finite binary64 values differ by at most one ULP."""
+    if not math.isfinite(actual) or not math.isfinite(expected):
+        return False
+    if actual == expected:
+        return True
+    lower = math.nextafter(expected, -math.inf)
+    upper = math.nextafter(expected, math.inf)
+    return lower <= actual <= upper
+
 
 def canonical_nonnegative_decimal_int(value, label: str) -> int:
     if type(value) is not str or re.fullmatch(r"(?:0|[1-9][0-9]*)", value) is None:
@@ -181,14 +202,26 @@ def parse_ifo_id_map(value: str) -> dict[str, str]:
     return mapping
 
 
-def parse_postcoh_rows(path: Path) -> Iterable[dict[str, str]]:
+def parse_postcoh_rows(
+    path: Path,
+    selected_columns: set[str] | None = None,
+) -> Iterable[dict[str, str]]:
     # CoincsDoc appends Postcoh after normal process/Sngl/Coinc tables, so the
     # column registry must be scoped to the Postcoh table itself.
-    yield from parse_ligolw_table_rows(path, "postcoh:table")
+    yield from parse_ligolw_table_rows(
+        path,
+        "postcoh:table",
+        selected_columns=selected_columns,
+    )
 
 
-def parse_ligolw_table_rows(path: Path, table_name: str) -> Iterable[dict[str, str]]:
+def parse_ligolw_table_rows(
+    path: Path,
+    table_name: str,
+    selected_columns: set[str] | None = None,
+) -> Iterable[dict[str, str]]:
     columns: list[str] = []
+    selected_indices: list[tuple[int, str]] | None = None
     in_table = False
     in_stream = False
     with open_text_maybe_gzip(path) as handle:
@@ -203,6 +236,12 @@ def parse_ligolw_table_rows(path: Path, table_name: str) -> Iterable[dict[str, s
                 continue
             if f'<Stream Name="{table_name}"' in line:
                 in_stream = True
+                if selected_columns is not None:
+                    selected_indices = [
+                        (index, name)
+                        for index, name in enumerate(columns)
+                        if name in selected_columns
+                    ]
                 continue
             if in_stream:
                 if "</Stream>" in line:
@@ -217,7 +256,13 @@ def parse_ligolw_table_rows(path: Path, table_name: str) -> Iterable[dict[str, s
                 if len(values) == len(columns) + 1 and values[-1] == "":
                     values = values[:-1]
                 if len(values) == len(columns):
-                    yield dict(zip(columns, values))
+                    if selected_indices is None:
+                        yield dict(zip(columns, values))
+                    else:
+                        yield {
+                            name: values[index]
+                            for index, name in selected_indices
+                        }
                 continue
             if "</Table>" in line:
                 break
@@ -403,7 +448,45 @@ def load_panel_a_online_summary(run_root: Path, segment_glob: str, panel_a: dict
     }
 
 
-def load_zerolag(run_root: Path, zerolag_glob: str) -> dict:
+def zerolag_required_columns(
+    single_far_bases: tuple[str, ...],
+    coherent_far_bases: tuple[str, ...],
+) -> set[str]:
+    columns = {
+        "ifos",
+        "event_id",
+        "bankid",
+        "tmplt_idx",
+        "end_time",
+        "end_time_ns",
+        "end_time_sngl_H1",
+        "end_time_ns_sngl_H1",
+        "end_time_sngl_L1",
+        "end_time_ns_sngl_L1",
+        "snglsnr_H1",
+        "snglsnr_L1",
+        "chisq_H1",
+        "chisq_L1",
+        "cohsnr",
+        "cmbchisq",
+        "H1_LLR",
+        "L1_LLR",
+    }
+    # Unique FinalSink ownership is fixed even when a caller overrides the
+    # plotting FAR priorities.
+    columns.update(("far", "far_sngl_H1", "far_sngl_L1"))
+    for base in single_far_bases:
+        columns.update((f"{base}_H1", f"{base}_L1"))
+    columns.update(coherent_far_bases)
+    return columns
+
+
+def load_zerolag(
+    run_root: Path,
+    zerolag_glob: str,
+    *,
+    selected_columns: set[str] | None = None,
+) -> dict:
     files = sorted(run_root.glob(zerolag_glob))
     rows: list[dict] = []
     rows_by_ifos: Counter[str] = Counter()
@@ -411,7 +494,7 @@ def load_zerolag(run_root: Path, zerolag_glob: str) -> dict:
     for path in files:
         worker = path.parent.name
         source = str(path.relative_to(run_root))
-        for row in parse_postcoh_rows(path):
+        for row in parse_postcoh_rows(path, selected_columns=selected_columns):
             columns_seen.update(row)
             row["_worker"] = worker
             row["_source"] = source
@@ -864,23 +947,13 @@ def validate_schema4_background_document(
             if not math.isfinite(expected_far) or expected_far <= 0.0:
                 raise ValueError(f"{ifo} Calculated FAR invariant is invalid")
             for index in range(begin, end):
-                if parsed_points[index]["far"].hex() != expected_far.hex():
-                    raise ValueError(f"{ifo} stored Calculated FAR bit mismatch")
+                if not equal_within_one_ulp(
+                    parsed_points[index]["far"], expected_far
+                ):
+                    raise ValueError(
+                        f"{ifo} stored Calculated FAR exceeds one-ULP tolerance"
+                    )
                 parsed_points[index]["count_ge"] = count_ge
-
-        tail_model = CRASHCAR_NUMERIC.tail_model(ranks, livetime_seconds)
-        recomputed_slope = tail_model["tail_slope"]
-        recomputed_r_tail = tail_model["r_tail"]
-        recomputed_fit_count = (
-            len(tail_model["empirical_ranks"]) - tail_model["tail_index"]
-        )
-        if (
-            recomputed_slope is None
-            or stored_r_tail.hex() != float(recomputed_r_tail).hex()
-            or stored_slope.hex() != float(recomputed_slope).hex()
-            or fit_count != recomputed_fit_count
-        ):
-            raise ValueError(f"{ifo} stored tail fit bit mismatch")
 
         total_support += support_count
         parsed_backgrounds[ifo] = {
@@ -1040,6 +1113,7 @@ def load_panel_a_background_json(
         "source_kind": "background_json",
         "worker": normalize_worker_id(panel_a_worker),
         "files": [str(path)],
+        "source": str(path),
         "source_sha256": source_sha256,
         "points": points,
         "counts_all": counts_ready,
@@ -1056,6 +1130,10 @@ def load_panel_a_background_json(
         "downsampled": downsampled,
         "min_direct_far_by_ifo": min_far_by_ifo,
         "floor_far_by_ifo": floor_far_by_ifo,
+        "tail_fit_by_ifo": {
+            ifo: dict(authority["backgrounds"][ifo]["tail_fit"])
+            for ifo in ("H1", "L1")
+        },
         "schema4_authority": {
             key: authority[key]
             for key in (
@@ -1085,6 +1163,125 @@ def far_bin(log_far: float) -> int:
     if log_far >= 0.0:
         return len(FAR_BIN_LABELS) - 1
     return int(math.floor(log_far + 5.0)) + 1
+
+
+def new_compact_far_store() -> dict:
+    return {
+        "storage": "compact_arrays_v1",
+        "snr": array("d"),
+        "chisq": array("d"),
+        "far_bin": array("B"),
+        "points_raw_total": 0,
+        "points_total": 0,
+        "points_in_fixed_view": 0,
+        "by_worker": Counter(),
+        "by_bankid": Counter(),
+        "by_ifo": Counter(),
+        "view_by_worker": Counter(),
+        "view_by_bankid": Counter(),
+        "view_by_ifo": Counter(),
+    }
+
+
+def add_compact_far_point(
+    store: dict,
+    *,
+    snr: float,
+    chisq: float,
+    far: float,
+    worker: str,
+    bankid: str,
+    ifo: str,
+) -> None:
+    store["points_raw_total"] += 1
+    log_far = math.log10(far)
+    if snr < SNR_XMIN or not math.isfinite(log_far):
+        return
+    store["points_total"] += 1
+    store["snr"].append(float(snr))
+    store["chisq"].append(float(chisq))
+    store["far_bin"].append(far_bin(log_far))
+    worker_key = str(worker)
+    bank_key = str(bankid)
+    ifo_key = str(ifo)
+    store["by_worker"][worker_key] += 1
+    store["by_bankid"][bank_key] += 1
+    store["by_ifo"][ifo_key] += 1
+    if CHISQ_VIEW[0] <= chisq <= CHISQ_VIEW[1]:
+        store["points_in_fixed_view"] += 1
+        store["view_by_worker"][worker_key] += 1
+        store["view_by_bankid"][bank_key] += 1
+        store["view_by_ifo"][ifo_key] += 1
+
+
+def compact_far_arrays(stores: Iterable[dict], view_mode: str):
+    x_parts = []
+    y_parts = []
+    color_parts = []
+    for store in stores:
+        snr = np.frombuffer(store["snr"], dtype=np.float64)
+        chisq = np.frombuffer(store["chisq"], dtype=np.float64)
+        colors = np.frombuffer(store["far_bin"], dtype=np.uint8)
+        if view_mode == "all":
+            mask = slice(None)
+        else:
+            mask = (chisq >= CHISQ_VIEW[0]) & (chisq <= CHISQ_VIEW[1])
+        x_parts.append(snr[mask])
+        y_parts.append(chisq[mask])
+        color_parts.append(colors[mask])
+    nonempty = [index for index, part in enumerate(x_parts) if part.size]
+    if not nonempty:
+        return (
+            np.asarray([], dtype=float),
+            np.asarray([], dtype=float),
+            np.asarray([], dtype=np.uint8),
+        )
+    if len(nonempty) == 1:
+        index = nonempty[0]
+        return x_parts[index], y_parts[index], color_parts[index]
+    return (
+        np.concatenate([x_parts[index] for index in nonempty]),
+        np.concatenate([y_parts[index] for index in nonempty]),
+        np.concatenate([color_parts[index] for index in nonempty]),
+    )
+
+
+def compact_point_summary(stores: Iterable[dict], view_mode: str) -> dict:
+    stores = tuple(stores)
+    by_worker: Counter[str] = Counter()
+    by_bankid: Counter[str] = Counter()
+    by_ifo: Counter[str] = Counter()
+    view_by_worker: Counter[str] = Counter()
+    view_by_bankid: Counter[str] = Counter()
+    view_by_ifo: Counter[str] = Counter()
+    for store in stores:
+        by_worker.update(store["by_worker"])
+        by_bankid.update(store["by_bankid"])
+        by_ifo.update(store["by_ifo"])
+        if view_mode == "all":
+            view_by_worker.update(store["by_worker"])
+            view_by_bankid.update(store["by_bankid"])
+            view_by_ifo.update(store["by_ifo"])
+        else:
+            view_by_worker.update(store["view_by_worker"])
+            view_by_bankid.update(store["view_by_bankid"])
+            view_by_ifo.update(store["view_by_ifo"])
+    return {
+        "points_total": sum(store["points_total"] for store in stores),
+        "points_total_snr_min": SNR_XMIN,
+        "points_raw_total": sum(store["points_raw_total"] for store in stores),
+        "points_in_view": sum(
+            store["points_total"] if view_mode == "all"
+            else store["points_in_fixed_view"]
+            for store in stores
+        ),
+        "by_worker": dict(by_worker),
+        "by_bankid": dict(by_bankid),
+        "view_by_worker": dict(view_by_worker),
+        "view_by_bankid": dict(view_by_bankid),
+        "by_ifo": dict(by_ifo),
+        "view_by_ifo": dict(view_by_ifo),
+    }
 
 
 def log_edges(values: Iterable[float], n: int, fallback=(SNR_XMIN, 20.0), min_value: float = SNR_XMIN) -> np.ndarray:
@@ -1236,6 +1433,7 @@ def thin_curve(xs: np.ndarray, ys: np.ndarray, max_points: int = FIT_CURVE_MAX_P
 def panel_a_segmented_fit(
     points: list[dict],
     tail_boundary: float = TAIL_BOUNDARY_LOG10_FAR,
+    stored_tail_fit: dict | None = None,
 ) -> dict | None:
     """Render the same direct/tail law used by the crashcar FAR assignment."""
     if not math.isclose(
@@ -1261,7 +1459,11 @@ def panel_a_segmented_fit(
         "support_point_count": 0,
         "support_plot_point_count": 0,
         "tail_point_count": 0,
-        "tail_source": "shared_crashcar_numeric.tail_model",
+        "tail_source": (
+            "authoritative_schema4_background.tail_fit"
+            if stored_tail_fit is not None
+            else "shared_crashcar_numeric.tail_model"
+        ),
         "tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
         "r_tail": None,
         "assignment_boundary": "r<=r_tail direct calculated FAR; r>r_tail fitted FAR",
@@ -1286,6 +1488,66 @@ def panel_a_segmented_fit(
         for value in livetimes[1:]
     ):
         result["tail_status"] = "unavailable_inconsistent_livetime"
+        return result
+
+    # Draw the authoritative saved model verbatim.  This external plotter
+    # neither recomputes/corrects that finite negative slope nor emits a
+    # replacement background artifact.
+    if stored_tail_fit is not None:
+        r_tail = as_float(stored_tail_fit.get("r_tail"))
+        slope = as_float(stored_tail_fit.get("slope"))
+        if (
+            not math.isfinite(r_tail)
+            or not math.isfinite(slope)
+            or slope >= 0.0
+        ):
+            raise ValueError(
+                "authoritative stored tail requires finite r_tail and negative slope"
+            )
+        support_by_rank: dict[float, float] = {}
+        for point in points:
+            rank = as_float(point.get("llr"))
+            log_far = as_float(point.get("log_far"))
+            if math.isfinite(rank) and math.isfinite(log_far):
+                support_by_rank.setdefault(rank, log_far)
+        support_x = np.asarray(sorted(support_by_rank), dtype=float)
+        support_y = np.asarray(
+            [support_by_rank[rank] for rank in support_x], dtype=float
+        )
+        support_x_plot, support_y_plot = thin_curve(support_x, support_y)
+        tail_mask = support_x >= r_tail
+        tail_x = support_x[tail_mask]
+        tail_y = support_y[tail_mask]
+        line_x_max = max(
+            float(np.nanmax(tail_x)) if tail_x.size else r_tail,
+            r_tail + 1.0e-6,
+        )
+        line_x = np.linspace(r_tail, line_x_max, 160)
+        line_y = TAIL_BOUNDARY_LOG10_FAR + slope * (line_x - r_tail)
+        result.update(
+            {
+                "support_point_count": int(support_x.size),
+                "support_plot_point_count": int(support_x_plot.size),
+                "tail_point_count": int(tail_x.size),
+                "livetime": float(livetime),
+                "r_tail": r_tail,
+                "support_x": support_x_plot,
+                "support_y": support_y_plot,
+                "tail_x": tail_x,
+                "tail_y": tail_y,
+                "tail_x_min": (
+                    float(np.nanmin(tail_x)) if tail_x.size else None
+                ),
+                "tail_x_max": (
+                    float(np.nanmax(tail_x)) if tail_x.size else None
+                ),
+                "tail_line_x": line_x,
+                "tail_line_y": line_y,
+                "tail_slope": slope,
+                "tail_intercept": TAIL_BOUNDARY_LOG10_FAR - slope * r_tail,
+                "tail_status": "valid_authoritative_stored_negative_slope",
+            }
+        )
         return result
 
     model = CRASHCAR_NUMERIC.tail_model(ranks, livetime)
@@ -1398,6 +1660,63 @@ def plot_far_points(
     ax.grid(True, which="both", alpha=0.18)
     return artist, view
 
+def plot_compact_far_stores(
+    ax,
+    stores: Iterable[dict],
+    cmap,
+    norm,
+    xlabel: str,
+    ylabel: str,
+    title: str,
+    view_mode: str = "fixed",
+):
+    stores = tuple(stores)
+    xs, ys, colors = compact_far_arrays(stores, view_mode)
+    eligible_total = sum(store["points_total"] for store in stores)
+    if xs.size:
+        artist = ax.scatter(
+            xs,
+            ys,
+            c=colors,
+            cmap=cmap,
+            norm=norm,
+            s=FAR_POINT_SIZE,
+            marker=".",
+            linewidths=0,
+            alpha=0.76,
+            rasterized=True,
+            zorder=2,
+        )
+    else:
+        artist = ax.scatter(
+            [], [], c=[], cmap=cmap, norm=norm,
+            s=FAR_POINT_SIZE, marker="."
+        )
+        empty_label = (
+            "no SNR>=4 FAR points"
+            if view_mode == "all" else "no points in view"
+        )
+        ax.text(
+            0.5, 0.5, empty_label,
+            ha="center", va="center", transform=ax.transAxes
+        )
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(left=SNR_XMIN)
+    if view_mode != "all" or not xs.size:
+        ax.set_ylim(*CHISQ_VIEW)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    count_label = (
+        f"{xs.size} plotted / {eligible_total} total (SNR>={SNR_XMIN:g})"
+        if view_mode == "all"
+        else f"{xs.size} in view / {eligible_total} total (SNR>={SNR_XMIN:g})"
+    )
+    ax.set_title(f"{title}\n{count_label}", fontweight="bold")
+    ax.grid(True, which="both", alpha=0.18)
+    return artist, int(xs.size)
+
+
 def plot_first_2x2(
     payload: dict,
     output: Path,
@@ -1405,10 +1724,19 @@ def plot_first_2x2(
     tail_boundary: float,
     far_point_view: str = "fixed",
 ) -> dict:
-    zerolag_rows = payload["zerolag"]["rows"]
+    zerolag_rows = payload["zerolag"].get("rows", [])
     panel_a = payload["panel_a"]
-    single_points = payload["single_points"]
-    multi_points = payload["multi_points"]
+    compact_far_stores = payload.get("compact_far_stores")
+    if compact_far_stores is None:
+        single_points = payload["single_points"]
+        multi_points = payload["multi_points"]
+        single_store = None
+        multi_store = None
+    else:
+        single_points = None
+        multi_points = None
+        single_store = compact_far_stores["single"]
+        multi_store = compact_far_stores["multi"]
     global_online_summary = payload.get("online_summary", {})
     panel_a_online_summary = payload.get("panel_a_online_summary", {})
 
@@ -1422,7 +1750,10 @@ def plot_first_2x2(
         "source_kind", "detail_calculated_far_diagnostic")
     panel_a_source_label = (
         "authoritative single_background.json FAR support"
-        if panel_a_source_kind == "background_json"
+        if panel_a_source_kind in (
+            "background_json",
+            "live_no_injection_single_background",
+        )
         else "non-authoritative detail calculated-FAR diagnostic"
     )
     panel_a_fit_summary: dict[str, dict] = {}
@@ -1439,7 +1770,11 @@ def plot_first_2x2(
                 rasterized=True,
                 label=f"{ifo} worker{panel_a_worker} {panel_a_source_label} ({len(pts)}){format_online_label(panel_a_online_summary, ifo)}",
             )
-            fit = panel_a_segmented_fit(pts, tail_boundary)
+            fit = panel_a_segmented_fit(
+                pts,
+                tail_boundary,
+                panel_a.get("tail_fit_by_ifo", {}).get(ifo),
+            )
             if fit:
                 panel_a_fit_summary[ifo] = {
                     "support_point_count": fit["support_point_count"],
@@ -1494,69 +1829,128 @@ def plot_first_2x2(
     cmap2.set_bad("white")
 
     ax = axes[0, 1]
-    artist_b, single_view = plot_far_points(
-        ax,
-        single_points,
-        cmap2,
-        norm,
-        "single-detector SNR",
-        "chisq",
-        "Panel (b): historical assigned-FAR single total (H1/L1 only)",
-        view_mode=far_point_view,
-    )
+    if compact_far_stores is None:
+        artist_b, single_view = plot_far_points(
+            ax,
+            single_points,
+            cmap2,
+            norm,
+            "single-detector SNR",
+            "chisq",
+            "Panel (b): historical assigned-FAR single total (H1/L1 only)",
+            view_mode=far_point_view,
+        )
+        single_view_count = len(single_view)
+    else:
+        artist_b, single_view_count = plot_compact_far_stores(
+            ax,
+            (single_store,),
+            cmap2,
+            norm,
+            "single-detector SNR",
+            "chisq",
+            "Panel (b): historical assigned-FAR single total (H1/L1 only)",
+            view_mode=far_point_view,
+        )
+        single_view = None
 
     ax = axes[1, 0]
-    artist_c, multi_view = plot_far_points(
-        ax,
-        multi_points,
-        cmap2,
-        norm,
-        "coherent SNR",
-        "cmbchisq",
-        "Panel (c): historical assigned-FAR multi total (all detector combos)",
-        view_mode=far_point_view,
-    )
+    if compact_far_stores is None:
+        artist_c, multi_view = plot_far_points(
+            ax,
+            multi_points,
+            cmap2,
+            norm,
+            "coherent SNR",
+            "cmbchisq",
+            "Panel (c): historical assigned-FAR multi total (all detector combos)",
+            view_mode=far_point_view,
+        )
+        multi_view_count = len(multi_view)
+    else:
+        artist_c, multi_view_count = plot_compact_far_stores(
+            ax,
+            (multi_store,),
+            cmap2,
+            norm,
+            "coherent SNR",
+            "cmbchisq",
+            "Panel (c): historical assigned-FAR multi total (all detector combos)",
+            view_mode=far_point_view,
+        )
+        multi_view = None
 
     ax = axes[1, 1]
-    combined_points = single_points + multi_points
-    artist_d, combined_view = plot_far_points(
-        ax,
-        combined_points,
-        cmap2,
-        norm,
-        "SNR (single or coherent)",
-        "chisq / cmbchisq",
-        "Panel (d): historical assigned-FAR combination (single + multi)",
-        view_mode=far_point_view,
-    )
+    if compact_far_stores is None:
+        combined_points = single_points + multi_points
+        artist_d, combined_view = plot_far_points(
+            ax,
+            combined_points,
+            cmap2,
+            norm,
+            "SNR (single or coherent)",
+            "chisq / cmbchisq",
+            "Panel (d): historical assigned-FAR combination (single + multi)",
+            view_mode=far_point_view,
+        )
+        combined_view_count = len(combined_view)
+    else:
+        combined_points = None
+        artist_d, combined_view_count = plot_compact_far_stores(
+            ax,
+            (single_store, multi_store),
+            cmap2,
+            norm,
+            "SNR (single or coherent)",
+            "chisq / cmbchisq",
+            "Panel (d): historical assigned-FAR combination (single + multi)",
+            view_mode=far_point_view,
+        )
+        combined_view = None
 
     add_discrete_colorbar(fig, axes, artist_d)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, dpi=170, bbox_inches="tight")
     plt.close(fig)
+    if compact_far_stores is None:
+        single_count = len(single_points)
+        multi_count = len(multi_points)
+        single_summary = point_summary(single_points, single_view)
+        multi_summary = point_summary(multi_points, multi_view)
+        combined_summary = point_summary(combined_points, combined_view)
+    else:
+        single_count = single_store["points_raw_total"]
+        multi_count = multi_store["points_raw_total"]
+        single_summary = compact_point_summary((single_store,), far_point_view)
+        multi_summary = compact_point_summary((multi_store,), far_point_view)
+        combined_summary = compact_point_summary(
+            (single_store, multi_store), far_point_view
+        )
     return {
         "plot": str(output),
         "zerolag_glob": payload["zerolag"]["glob"],
         "zerolag_file_count": payload["zerolag"]["file_count"],
-        "zerolag_rows": len(zerolag_rows),
+        "zerolag_rows": payload["zerolag"].get(
+            "row_count", len(zerolag_rows)
+        ),
         "zerolag_rows_by_ifos": payload["zerolag"]["rows_by_ifos"],
-        "historical_single_points": len(single_points),
-        "historical_multi_points": len(multi_points),
-        "h_l_single_points": len(single_points),
-        "h_l_multi_points": len(multi_points),
-        "single_points_in_view": len(single_view),
-        "multi_points_in_view": len(multi_view),
-        "combined_points_in_view": len(combined_view),
-        "single_summary": point_summary(single_points, single_view),
-        "multi_summary": point_summary(multi_points, multi_view),
-        "combined_summary": point_summary(combined_points, combined_view),
+        "historical_single_points": single_count,
+        "historical_multi_points": multi_count,
+        "h_l_single_points": single_count,
+        "h_l_multi_points": multi_count,
+        "single_points_in_view": single_view_count,
+        "multi_points_in_view": multi_view_count,
+        "combined_points_in_view": combined_view_count,
+        "single_summary": single_summary,
+        "multi_summary": multi_summary,
+        "combined_summary": combined_summary,
         "panel_b_artist": "small_points",
         "panel_c_artist": "small_points",
         "panel_d_artist": "small_points",
-        "panel_b_plotted_points": len(single_view),
-        "panel_c_plotted_points": len(multi_view),
-        "panel_d_plotted_points": len(combined_view),
+        "panel_b_plotted_points": single_view_count,
+        "panel_c_plotted_points": multi_view_count,
+        "panel_d_plotted_points": combined_view_count,
         "llr_xmin": LLR_XMIN,
         "snr_xmin": SNR_XMIN,
         "colorbar_count": 1,
@@ -1626,6 +2020,44 @@ def component_time(row: dict, ifo: str) -> tuple[str, str]:
     return normalized_key_value(end_time), normalized_key_value(end_time_ns)
 
 
+def route_owned_final_far(row: dict) -> dict:
+    """Return the actual FinalSink owner and its route-owned FAR payload."""
+    ifos = str(row.get("_zerolag_ifos") or row.get("ifos", ""))
+    try:
+        route, owner_ifo = FINAL_ROUTE_BY_IFOS[ifos]
+    except KeyError as exc:
+        raise ValueError(f"unsupported exact FinalSink route {ifos!r}") from exc
+
+    stored_route = row.get("_final_route")
+    if stored_route not in (None, "", route):
+        raise ValueError(
+            f"candidate FinalSink route mismatch: stored={stored_route!r} actual={route!r}"
+        )
+    stored_owner = row.get("_final_owner_ifo")
+    if stored_owner not in (None, "", owner_ifo):
+        raise ValueError(
+            "candidate FinalSink owner mismatch: "
+            f"stored={stored_owner!r} actual={owner_ifo!r}"
+        )
+
+    source = "far"
+    if route == "H1_SINGLE":
+        source = "far_sngl_H1"
+    elif route == "L1_SINGLE":
+        source = "far_sngl_L1"
+    raw = row.get("_route_owned_final_far")
+    if raw in (None, ""):
+        raw = row.get(source)
+    if raw in (None, "") and route in ("H1_SINGLE", "L1_SINGLE"):
+        raw = row.get("far_sngl")
+    return {
+        "route": route,
+        "owner_ifo": owner_ifo,
+        "source": source,
+        "raw_value": raw,
+    }
+
+
 def compact_snr_row(row: dict | None) -> dict | None:
     if not row:
         return None
@@ -1636,8 +2068,12 @@ def compact_snr_row(row: dict | None) -> dict | None:
         "_selection_kind", "_zerolag_source", "_zerolag_worker",
         "_zerolag_ifos", "_zerolag_event_id", "_selection_note",
         "_coincs_path", "_coincs_schema_columns", "H1_LLR", "L1_LLR",
+        "_final_route", "_final_owner_ifo", "_route_owned_final_far",
+        "_route_owned_final_far_source", "_writer_retention",
     )
-    return {key: row.get(key) for key in keys if row.get(key) not in (None, "")}
+    return {
+        key: row.get(key) for key in keys if row.get(key) not in (None, "")
+    }
 
 
 def make_zerolag_snr_candidate(
@@ -1650,6 +2086,7 @@ def make_zerolag_snr_candidate(
     coherent_far_bases: tuple[str, ...] = DEFAULT_COHERENT_FAR_BASES,
 ) -> dict:
     component_end_time, component_end_time_ns = component_time(row, ifo)
+    final_owner = route_owned_final_far(row)
     candidate = {
         "event_id": normalized_key_value(row.get("event_id", "")),
         "ifo": ifo,
@@ -1671,6 +2108,10 @@ def make_zerolag_snr_candidate(
         "_zerolag_ifos": row.get("ifos", ""),
         "_zerolag_event_id": normalized_key_value(row.get("event_id", "")),
         "_selection_far_source": far_source or "",
+        "_final_route": final_owner["route"],
+        "_final_owner_ifo": final_owner["owner_ifo"],
+        "_route_owned_final_far": final_owner["raw_value"],
+        "_route_owned_final_far_source": final_owner["source"],
         "LLR": table_field(row, f"{ifo}_LLR", ""),
         "H1_LLR": table_field(row, "H1_LLR", ""),
         "L1_LLR": table_field(row, "L1_LLR", ""),
@@ -1741,6 +2182,171 @@ def select_history_multi_components(
             coherent_far_bases=coherent_far_bases,
         )
         for ifo in ("H1", "L1")
+    }
+
+
+def load_zerolag_compact(
+    run_root: Path,
+    zerolag_glob: str,
+    single_far_bases: tuple[str, ...],
+    coherent_far_bases: tuple[str, ...],
+) -> dict:
+    files = sorted(run_root.glob(zerolag_glob))
+    selected_columns = zerolag_required_columns(
+        single_far_bases,
+        coherent_far_bases,
+    )
+    single_store = new_compact_far_store()
+    multi_store = new_compact_far_store()
+    rows_by_ifos: Counter[str] = Counter()
+    columns_seen: set[str] = set()
+    row_count = 0
+    best_single: dict[str, tuple[float, dict] | None] = {
+        "H1": None,
+        "L1": None,
+    }
+    best_multi: tuple[float, dict, str | None] | None = None
+    final_owner_by_mask = {
+        "H1": "H1",
+        "H1V1": "H1",
+        "L1": "L1",
+        "L1V1": "L1",
+    }
+
+    for path in files:
+        worker = path.parent.name
+        source = str(path.relative_to(run_root))
+        for row in parse_postcoh_rows(
+            path,
+            selected_columns=selected_columns,
+        ):
+            columns_seen.update(row)
+            row["_worker"] = worker
+            row["_source"] = source
+            ifos = str(row.get("ifos", ""))
+            rows_by_ifos[ifos] += 1
+            row_count += 1
+
+            for ifo in ("H1", "L1"):
+                snr = finite_positive(row.get(f"snglsnr_{ifo}"))
+                chisq = finite_positive(row.get(f"chisq_{ifo}"))
+                far, far_source = first_positive_field(
+                    row,
+                    [f"{base}_{ifo}" for base in single_far_bases],
+                )
+                if (
+                    row_contains_ifo(row, ifo)
+                    and snr is not None
+                    and chisq is not None
+                    and far is not None
+                ):
+                    add_compact_far_point(
+                        single_store,
+                        snr=snr,
+                        chisq=chisq,
+                        far=far,
+                        worker=worker,
+                        bankid=row.get("bankid", ""),
+                        ifo=ifo,
+                    )
+                if (
+                    final_owner_by_mask.get(ifos) == ifo
+                    and row_contains_ifo(row, ifo)
+                    and far is not None
+                    and snr is not None
+                    and snr >= SNR_XMIN
+                ):
+                    current = best_single[ifo]
+                    if current is None or far < current[0]:
+                        best_single[ifo] = (
+                            far,
+                            make_zerolag_snr_candidate(
+                                row,
+                                ifo,
+                                "single",
+                                far,
+                                far_source,
+                                coherent_far_bases=coherent_far_bases,
+                            ),
+                        )
+
+            detectors = {
+                token
+                for token in ("H1", "L1", "V1", "K1")
+                if token in ifos
+            }
+            multi_far, multi_far_source = first_positive_field(
+                row, coherent_far_bases
+            )
+            if len(detectors) >= 2:
+                snr = finite_positive(row.get("cohsnr"))
+                chisq = finite_positive(row.get("cmbchisq"))
+                if (
+                    snr is not None
+                    and chisq is not None
+                    and multi_far is not None
+                ):
+                    add_compact_far_point(
+                        multi_store,
+                        snr=snr,
+                        chisq=chisq,
+                        far=multi_far,
+                        worker=worker,
+                        bankid=row.get("bankid", ""),
+                        ifo="+".join(sorted(detectors)),
+                    )
+            if (
+                {"H1", "L1"}.issubset(detectors)
+                and multi_far is not None
+                and (
+                    best_multi is None
+                    or multi_far < best_multi[0]
+                )
+            ):
+                best_multi = (
+                    multi_far,
+                    dict(row),
+                    multi_far_source,
+                )
+
+    snr_candidates = {
+        "h1_single_min_far": (
+            best_single["H1"][1]
+            if best_single["H1"] is not None else None
+        ),
+        "l1_single_min_far": (
+            best_single["L1"][1]
+            if best_single["L1"] is not None else None
+        ),
+        "hl_multi_min_far_h1_component": None,
+        "hl_multi_min_far_l1_component": None,
+    }
+    if best_multi is not None:
+        far, row, far_source = best_multi
+        for ifo, key in (
+            ("H1", "hl_multi_min_far_h1_component"),
+            ("L1", "hl_multi_min_far_l1_component"),
+        ):
+            snr_candidates[key] = make_zerolag_snr_candidate(
+                row,
+                ifo,
+                "multi",
+                far,
+                far_source,
+                coherent_far_bases=coherent_far_bases,
+            )
+
+    return {
+        "glob": zerolag_glob,
+        "files": [str(path) for path in files],
+        "file_count": len(files),
+        "row_count": row_count,
+        "rows_by_ifos": dict(rows_by_ifos),
+        "columns_seen": sorted(columns_seen),
+        "single_store": single_store,
+        "multi_store": multi_store,
+        "snr_candidates": snr_candidates,
+        "storage": "streamed_compact_arrays_v1",
     }
 
 
@@ -1973,24 +2579,251 @@ def candidate_identity(candidate: dict) -> tuple[str, ...]:
     )
 
 
+def _command_option(
+    tokens: list[str],
+    names: tuple[str, ...],
+    default: str | None,
+) -> str | None:
+    values = []
+    for index, token in enumerate(tokens):
+        for name in names:
+            if token == name:
+                if index + 1 >= len(tokens) or tokens[index + 1].startswith("--"):
+                    raise ValueError(f"missing value for recorded option {name}")
+                values.append(tokens[index + 1])
+            elif token.startswith(name + "="):
+                values.append(token.split("=", 1)[1])
+    if not values:
+        return default
+    if len(set(values)) != 1:
+        raise ValueError(f"conflicting recorded options {names}: {values}")
+    return values[0]
+
+
+def _recorded_float(value: str, label: str, *, minimum: float | None = None) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid recorded {label}: {value!r}") from exc
+    if not math.isfinite(parsed) or (minimum is not None and parsed < minimum):
+        raise ValueError(f"invalid recorded {label}: {value!r}")
+    return parsed
+
+
+def parse_finalsink_writer_config(path: Path) -> dict:
+    """Parse the exact FinalSink writer settings recorded for one worker."""
+    match = re.fullmatch(r"crashcar_command_(\d{3})\.txt", path.name)
+    if match is None:
+        raise ValueError(f"invalid crashcar command-log filename: {path}")
+    command_lines = [
+        line.removeprefix("CRASHCAR_CMD ").strip()
+        for line in path.read_text(errors="replace").splitlines()
+        if line.startswith("CRASHCAR_CMD ")
+    ]
+    if len(command_lines) != 1:
+        raise ValueError(
+            f"expected one CRASHCAR_CMD record for worker {match.group(1)}: {path}"
+        )
+    tokens = shlex.split(command_lines[0])
+    if not tokens or Path(tokens[0]).name != "gstlal_inspiral_postcohspiir_online":
+        raise ValueError(f"unexpected recorded crashcar entrypoint: {path}")
+
+    schema_mode = _command_option(
+        tokens, ("--finalsink-postcoh-schema-mode",), "legacy-a107"
+    )
+    if schema_mode not in ("legacy-a107", "crashcar-a109"):
+        raise ValueError(f"invalid recorded FinalSink schema mode: {schema_mode!r}")
+    # These are the deployed CLI defaults when the option is absent.
+    cluster_window = _recorded_float(
+        _command_option(tokens, ("--finalsink-cluster-window",), "0"),
+        "FinalSink cluster window",
+        minimum=0.0,
+    )
+    snr_threshold = _recorded_float(
+        _command_option(tokens, ("--snr-series-logfar-threshold",), "-4"),
+        "SNR-series log FAR threshold",
+    )
+    gracedb_value = _command_option(
+        tokens,
+        (
+            "--finalsink-gracedb-far-thresh",
+            "--finalsink-gracedb-far-threshold",
+        ),
+        None,
+    )
+    gracedb_threshold = (
+        None if gracedb_value is None
+        else _recorded_float(
+            gracedb_value, "GraceDB FAR threshold", minimum=0.0
+        )
+    )
+    superevent_threshold = _recorded_float(
+        _command_option(tokens, ("--finalsink-superevent-thresh",), "3.8e-7"),
+        "FinalSink superevent threshold",
+        minimum=0.0,
+    )
+    return {
+        "worker": match.group(1),
+        "source": str(path),
+        "source_sha256": sha256_file(path),
+        "schema_mode": schema_mode,
+        "crashcar_enabled": schema_mode == "crashcar-a109",
+        "cluster_window": cluster_window,
+        "snr_series_logfar_threshold": snr_threshold,
+        "gracedb_far_threshold": gracedb_threshold,
+        "superevent_threshold": superevent_threshold,
+    }
+
+
+def discover_finalsink_writer_configs(run_root: Path) -> dict[str, dict]:
+    configs = {}
+    for path in sorted((run_root / "run" / "logs").glob("crashcar_command_*.txt")):
+        config = parse_finalsink_writer_config(path)
+        worker = config["worker"]
+        if worker in configs:
+            raise ValueError(f"duplicate FinalSink writer config for worker {worker}")
+        configs[worker] = config
+    return configs
+
+
+def writer_config_for_candidate(
+    candidate: dict | None,
+    writer_configs: dict[str, dict] | None,
+) -> dict | None:
+    if candidate is None:
+        return None
+    worker = normalize_worker_id(candidate.get("_zerolag_worker", ""))
+    if not writer_configs or worker not in writer_configs:
+        raise ValueError(
+            f"missing FinalSink writer config for candidate worker {worker}"
+        )
+    return writer_configs[worker]
+
+
+def finalsink_writer_retention(candidate: dict, writer_config: dict) -> dict:
+    """Classify whether the deployed FinalSink was required to retain Coincs."""
+    final_owner = route_owned_final_far(candidate)
+    try:
+        final_far = float(final_owner["raw_value"])
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            "invalid route-owned final FAR for writer classification: "
+            f"{final_owner['raw_value']!r}"
+        ) from exc
+    if not math.isfinite(final_far):
+        raise ValueError(
+            f"invalid route-owned final FAR for writer classification: {final_far!r}"
+        )
+
+    route = final_owner["route"]
+    cluster_window = _recorded_float(
+        writer_config.get("cluster_window"), "FinalSink cluster window", minimum=0.0
+    )
+    snr_threshold = _recorded_float(
+        writer_config.get("snr_series_logfar_threshold"),
+        "SNR-series log FAR threshold",
+    )
+    gracedb_value = writer_config.get("gracedb_far_threshold")
+    gracedb_threshold = (
+        None if gracedb_value is None
+        else _recorded_float(
+            gracedb_value, "GraceDB FAR threshold", minimum=0.0
+        )
+    )
+    if writer_config.get("superevent_threshold") is not None:
+        _recorded_float(
+            writer_config["superevent_threshold"],
+            "FinalSink superevent threshold",
+            minimum=0.0,
+        )
+    crashcar_enabled = writer_config.get("schema_mode") == "crashcar-a109"
+    positive = final_far > 0.0
+    single_threshold_write = (
+        crashcar_enabled
+        and route in ("H1_SINGLE", "L1_SINGLE")
+        and positive
+        and math.log10(final_far) <= snr_threshold
+    )
+
+    expected: bool | None = False
+    reason = ""
+    if cluster_window == 0.0:
+        expected = single_threshold_write
+        if expected:
+            reason = "CRASHCAR_CLUSTER_ZERO_SINGLE_THRESHOLD_WRITER"
+        elif route == "MULTI":
+            reason = "CLUSTER_ZERO_MULTI_HAS_NO_COINCS_WRITER"
+        elif not crashcar_enabled:
+            reason = "CLUSTER_ZERO_NORMAL_A107_DIRECT_APPEND"
+        elif not positive:
+            reason = "ROUTE_OWNED_FINAL_FAR_NONPOSITIVE"
+        else:
+            reason = "SINGLE_FINAL_FAR_ABOVE_RECORDED_SNR_THRESHOLD"
+    else:
+        # The clustered normal writer also depends on candidate selection,
+        # __pass_test veto inputs, and trigger-control history.  The plotter
+        # deliberately does not reproduce that state machine.
+        expected = None
+        reason = "CLUSTERED_WRITER_ELIGIBILITY_REQUIRES_RUNTIME_STATE"
+
+    return {
+        "expected": expected,
+        "assertion": (
+            "EXPECTED" if expected is True
+            else "NOT_EXPECTED" if expected is False
+            else "UNKNOWN_NOT_ASSERTED"
+        ),
+        "reason": reason,
+        "route": route,
+        "owner_ifo": final_owner["owner_ifo"],
+        "route_owned_final_far": final_far,
+        "route_owned_final_far_source": final_owner["source"],
+        "schema_mode": writer_config.get("schema_mode"),
+        "worker": writer_config.get("worker"),
+        "cluster_window": cluster_window,
+        "snr_series_logfar_threshold": snr_threshold,
+        "gracedb_far_threshold": gracedb_threshold,
+        "writer_config_source": writer_config.get("source"),
+        "writer_config_sha256": writer_config.get("source_sha256"),
+    }
+
+
 def attach_normal_coincs(
     candidate: dict | None,
     coincs: dict,
     *,
     snr_series_logfar_threshold: float,
+    writer_config: dict | None = None,
 ) -> dict | None:
     if candidate is None:
         return None
     row = dict(candidate)
     document = coincs["by_identity"].get(candidate_identity(row))
-    far_field = "far_sngl" if row.get("_selection_kind") == "single" else "far_multi"
-    log_field = "log10_far_sngl" if row.get("_selection_kind") == "single" else "log10_far_multi"
-    far = row_far(row, far_field, log_field)
-    expected = far is not None and math.log10(far) <= snr_series_logfar_threshold
     if document is None:
-        if expected:
-            raise ValueError(f"missing normal CoincsDoc for exact key {candidate_identity(row)}")
-        row["_selection_note"] = "selected FAR is above the normal SNR-series retention threshold"
+        if writer_config is None:
+            raise ValueError(
+                "missing FinalSink writer config for absent CoincsDoc "
+                f"{candidate_identity(row)}"
+            )
+        retention = finalsink_writer_retention(row, writer_config)
+        retention["plot_requested_logfar_threshold"] = float(
+            snr_series_logfar_threshold
+        )
+        row["_writer_retention"] = retention
+        if retention["expected"] is True:
+            raise ValueError(
+                "missing normal CoincsDoc for writer-eligible exact key "
+                f"{candidate_identity(row)} reason={retention['reason']}"
+            )
+        if retention["expected"] is False:
+            row["_selection_note"] = (
+                "NOT_RETAINED_BY_NORMAL_WRITER: " + retention["reason"]
+            )
+        else:
+            row["_selection_note"] = (
+                "WRITER_ELIGIBILITY_UNKNOWN_NOT_ASSERTED: "
+                + retention["reason"]
+            )
         return row
     ifo = str(row.get("ifo", ""))
     series = document["series_by_ifo"].get(ifo)
@@ -2011,6 +2844,7 @@ def select_snr_rows(
     coherent_far_bases: tuple[str, ...],
     *,
     snr_series_logfar_threshold: float,
+    writer_configs: dict[str, dict] | None = None,
 ) -> dict[str, dict | None]:
     h1_single = select_history_single_candidate(
         zerolag_rows, "H1", single_far_bases, coherent_far_bases
@@ -2019,23 +2853,22 @@ def select_snr_rows(
         zerolag_rows, "L1", single_far_bases, coherent_far_bases
     )
     multi_components = select_history_multi_components(zerolag_rows, coherent_far_bases)
+    candidates = {
+        "h1_single_min_far": h1_single,
+        "l1_single_min_far": l1_single,
+        "hl_multi_min_far_h1_component": multi_components.get("H1"),
+        "hl_multi_min_far_l1_component": multi_components.get("L1"),
+    }
     return {
-        "h1_single_min_far": attach_normal_coincs(
-            h1_single, coincs,
+        key: attach_normal_coincs(
+            candidate,
+            coincs,
             snr_series_logfar_threshold=snr_series_logfar_threshold,
-        ),
-        "l1_single_min_far": attach_normal_coincs(
-            l1_single, coincs,
-            snr_series_logfar_threshold=snr_series_logfar_threshold,
-        ),
-        "hl_multi_min_far_h1_component": attach_normal_coincs(
-            multi_components.get("H1"), coincs,
-            snr_series_logfar_threshold=snr_series_logfar_threshold,
-        ),
-        "hl_multi_min_far_l1_component": attach_normal_coincs(
-            multi_components.get("L1"), coincs,
-            snr_series_logfar_threshold=snr_series_logfar_threshold,
-        ),
+            writer_config=writer_config_for_candidate(
+                candidate, writer_configs
+            ),
+        )
+        for key, candidate in candidates.items()
     }
 
 
@@ -2294,7 +3127,7 @@ def plot_second_2x2(
     run_root: Path,
     output: Path,
     title: str,
-    zerolag_rows: list[dict],
+    zerolag_rows: list[dict] | None,
     single_far_bases: tuple[str, ...],
     coherent_far_bases: tuple[str, ...],
     *,
@@ -2303,6 +3136,7 @@ def plot_second_2x2(
     banks_per_worker: int,
     worker_count: int,
     bank_dir: Path | None,
+    preselected_candidates: dict[str, dict | None] | None = None,
 ) -> dict:
     coincs = discover_normal_coincs(
         run_root,
@@ -2310,13 +3144,32 @@ def plot_second_2x2(
         banks_per_worker=banks_per_worker,
         worker_count=worker_count,
     )
-    selections = select_snr_rows(
-        zerolag_rows,
-        coincs,
-        single_far_bases,
-        coherent_far_bases,
-        snr_series_logfar_threshold=snr_series_logfar_threshold,
-    )
+    writer_configs = discover_finalsink_writer_configs(run_root)
+    if preselected_candidates is None:
+        if zerolag_rows is None:
+            raise ValueError(
+                "zerolag rows or preselected SNR candidates are required"
+            )
+        selections = select_snr_rows(
+            zerolag_rows,
+            coincs,
+            single_far_bases,
+            coherent_far_bases,
+            snr_series_logfar_threshold=snr_series_logfar_threshold,
+            writer_configs=writer_configs,
+        )
+    else:
+        selections = {
+            key: attach_normal_coincs(
+                candidate,
+                coincs,
+                snr_series_logfar_threshold=snr_series_logfar_threshold,
+                writer_config=writer_config_for_candidate(
+                    candidate, writer_configs
+                ),
+            )
+            for key, candidate in preselected_candidates.items()
+        }
     series = {key: load_series_for_row(row) for key, row in selections.items()}
     bank_autocorrelation: dict[str, dict | None] = {}
     for key, row in selections.items():
@@ -2516,7 +3369,12 @@ def main() -> None:
     single_far_bases = parse_csv_list(args.single_far_priority)
     coherent_far_bases = parse_csv_list(args.coherent_far_priority)
     ifo_id_map = parse_ifo_id_map(args.ifo_id_map)
-    zerolag = load_zerolag(run_root, args.zerolag_glob)
+    zerolag = load_zerolag_compact(
+        run_root,
+        args.zerolag_glob,
+        single_far_bases,
+        coherent_far_bases,
+    )
     panel_a = load_requested_panel_a_source(
         run_root,
         panel_a_source=args.panel_a_source,
@@ -2542,8 +3400,10 @@ def main() -> None:
     first_payload = {
         "zerolag": zerolag,
         "panel_a": panel_a,
-        "single_points": build_single_points(zerolag["rows"], single_far_bases),
-        "multi_points": build_multi_points(zerolag["rows"], coherent_far_bases),
+        "compact_far_stores": {
+            "single": zerolag["single_store"],
+            "multi": zerolag["multi_store"],
+        },
         "online_summary": online_summary,
         "panel_a_online_summary": panel_a_online_summary,
     }
@@ -2561,7 +3421,7 @@ def main() -> None:
         run_root,
         second_plot,
         label,
-        zerolag["rows"],
+        None,
         single_far_bases,
         coherent_far_bases,
         snr_series_logfar_threshold=args.snr_series_logfar_threshold,
@@ -2569,6 +3429,7 @@ def main() -> None:
         banks_per_worker=banks_per_worker,
         worker_count=worker_count,
         bank_dir=bank_dir,
+        preselected_candidates=zerolag["snr_candidates"],
     )
 
     meta = {

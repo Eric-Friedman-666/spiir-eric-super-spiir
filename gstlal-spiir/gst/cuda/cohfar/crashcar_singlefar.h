@@ -164,6 +164,7 @@ typedef struct {
     gboolean enabled;
     double dof;
     double log10_far_threshold;
+    double tail_log10_far;
     double livetime_step;
     double background_window_seconds;
     double background_required_seconds;
@@ -253,6 +254,13 @@ gboolean crashcar_singlefar_evaluate_far(
   guint rank_count,
   double livetime,
   double rank,
+  CrashcarSingleFarEvaluation *evaluation);
+gboolean crashcar_singlefar_evaluate_far_with_tail(
+  const double *ranks,
+  guint rank_count,
+  double livetime,
+  double rank,
+  double tail_log10_far,
   CrashcarSingleFarEvaluation *evaluation);
 void crashcar_singlefar_prepare_row_llrs(PostcohInspiralTable *table);
 guint crashcar_singlefar_support_count(int ifo_id);

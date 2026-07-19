@@ -56,7 +56,7 @@
 #define GST_CAT_DEFAULT crashcar_singlefar_debug
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
-#define CRASHCAR_CODE_VERSION "single_live_readonly_lkg_v38_r12b"
+#define CRASHCAR_CODE_VERSION "r24_live_injection_bg_coverage"
 /* Multiple crashcar elements can live in one worker process and append to the
  * same worker-level products.  Serialize each shared write without altering
  * the normal multi/coherent branch. */
@@ -75,6 +75,7 @@ typedef struct {
     gint64 epoch_gps_ns;
     gint64 window_start_gps_ns;
     gint64 window_end_gps_ns;
+    double tail_log10_far;
     gint64 livetime_ns[2];
     GArray *points[2];
     GArray *ranks[2];
@@ -98,6 +99,7 @@ typedef struct {
     gint64 epoch_gps_ns;
     gint64 window_start_gps_ns;
     gint64 window_end_gps_ns;
+    double tail_log10_far;
     gint64 livetime_ns[2];
     GArray *points[2];
     GArray *ranks[2];
@@ -204,6 +206,33 @@ static const char *crashcar_single_background_mode(void) {
 static gboolean crashcar_single_background_mode_is_live_readonly(void) {
     return g_ascii_strcasecmp(
       crashcar_single_background_mode(), "live_readonly") == 0;
+}
+
+static gboolean
+crashcar_single_background_mode_is_live_injection_consumer(void) {
+    const char *injection_mode = g_getenv("WGUO_O3A_INJECTION_MODE");
+    const char *role = g_getenv("CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROLE");
+    return crashcar_single_background_mode_is_live_readonly() &&
+      injection_mode && g_ascii_strcasecmp(injection_mode, "blind") == 0 &&
+      role && g_ascii_strcasecmp(role, "consumer") == 0;
+}
+
+/*
+ * A continuing no-injection producer can be ahead of the injection
+ * foreground GPS.  Only the validated live-readonly injection consumer may
+ * use that complete worker-local snapshot before its coverage endpoint.
+ * Rolling no-injection authority keeps the strict event-time causal rule.
+ */
+static gboolean crashcar_live_coverage_is_eligible(
+  const CrashcarSinglefar *element,
+  gint64 coverage_gps_ns,
+  gint64 event_gps_ns) {
+    if (!element || !element->live_single_background_readonly ||
+        coverage_gps_ns <= 0 || event_gps_ns <= 0) {
+        return FALSE;
+    }
+    return coverage_gps_ns <= event_gps_ns ||
+      crashcar_single_background_mode_is_live_injection_consumer();
 }
 
 static gboolean crashcar_single_background_mode_is_valid(void) {
@@ -1102,6 +1131,7 @@ enum property {
     PROP_DETAIL_OUTPUT_FNAME,
     PROP_TEMPLATE_SHAPE_MAP_FNAME,
     PROP_LOG10_FAR_THRESHOLD,
+    PROP_TAIL_LOG10_FAR,
     PROP_LIVETIME_STEP,
     PROP_STREAM_ID,
     PROP_STREAM_COUNT,
@@ -1641,11 +1671,12 @@ static gboolean crashcar_fit_line_through_fixed_point(const double *xs,
     return TRUE;
 }
 
-gboolean crashcar_singlefar_evaluate_far(
+gboolean crashcar_singlefar_evaluate_far_with_tail(
     const double *input_ranks,
     guint n_all,
     double livetime,
     double rank,
+    double tail_log10_far,
     CrashcarSingleFarEvaluation *evaluation) {
     if (!evaluation) return FALSE;
     evaluation->calculated_far = NAN;
@@ -1655,7 +1686,8 @@ gboolean crashcar_singlefar_evaluate_far(
     evaluation->tail_intercept = NAN;
     evaluation->used_tail_fit = FALSE;
     if (!input_ranks || n_all == 0 || !(livetime > 0.0) ||
-        !isfinite(livetime) || !isfinite(rank)) {
+        !isfinite(livetime) || !isfinite(rank) ||
+        !isfinite(tail_log10_far) || !(tail_log10_far < 0.0)) {
         return FALSE;
     }
 
@@ -1700,11 +1732,10 @@ gboolean crashcar_singlefar_evaluate_far(
     }
     g_free(sorted);
 
-    const double tail_log_far = -2.0;
     guint tail_idx = 0;
-    double best_dist = fabs(raw_log_fars[0] - tail_log_far);
+    double best_dist = fabs(raw_log_fars[0] - tail_log10_far);
     for (guint i = 1; i < n_raw; ++i) {
-        const double dist = fabs(raw_log_fars[i] - tail_log_far);
+        const double dist = fabs(raw_log_fars[i] - tail_log10_far);
         if (dist < best_dist) {
             best_dist = dist;
             tail_idx = i;
@@ -1720,7 +1751,7 @@ gboolean crashcar_singlefar_evaluate_far(
                                                   raw_log_fars + tail_idx,
                                                   n_tail,
                                                   evaluation->r_tail,
-                                                  tail_log_far,
+                                                  tail_log10_far,
                                                   &slope,
                                                   &intercept)) {
             evaluation->tail_slope = slope;
@@ -1735,13 +1766,24 @@ gboolean crashcar_singlefar_evaluate_far(
                isfinite(evaluation->tail_intercept)) {
         evaluation->assigned_far = pow(
           10.0,
-          -2.0 + evaluation->tail_slope * (rank - evaluation->r_tail));
+          tail_log10_far +
+            evaluation->tail_slope * (rank - evaluation->r_tail));
         evaluation->used_tail_fit = TRUE;
     }
 
     g_free(raw_xs);
     g_free(raw_log_fars);
     return crashcar_far_double_is_valid(evaluation->assigned_far);
+}
+
+gboolean crashcar_singlefar_evaluate_far(
+    const double *input_ranks,
+    guint n_all,
+    double livetime,
+    double rank,
+    CrashcarSingleFarEvaluation *evaluation) {
+    return crashcar_singlefar_evaluate_far_with_tail(
+      input_ranks, n_all, livetime, rank, -2.0, evaluation);
 }
 
 static gint64 crashcar_window_ifo_livetime_ns(
@@ -1796,11 +1838,13 @@ static gboolean crashcar_authority_tail_metrics(
   const double *input_ranks,
   guint rank_count,
   double livetime,
+  double tail_log10_far,
   double *r_tail_out,
   double *slope_out,
   guint *fit_unique_rank_count_out) {
     if (!input_ranks || rank_count < 2 || !(livetime > 0.0) ||
-        !isfinite(livetime) || !r_tail_out || !slope_out ||
+        !isfinite(livetime) || !isfinite(tail_log10_far) ||
+        !(tail_log10_far < 0.0) || !r_tail_out || !slope_out ||
         !fit_unique_rank_count_out) {
         return FALSE;
     }
@@ -1834,11 +1878,11 @@ static gboolean crashcar_authority_tail_metrics(
     }
     g_free(sorted);
 
-    const double tail_log_far = -2.0;
     guint tail_index = 0;
-    double best_distance = fabs(unique_log_fars[0] - tail_log_far);
+    double best_distance = fabs(unique_log_fars[0] - tail_log10_far);
     for (guint index = 1; index < unique_count; ++index) {
-        const double distance = fabs(unique_log_fars[index] - tail_log_far);
+        const double distance = fabs(
+          unique_log_fars[index] - tail_log10_far);
         if (distance < best_distance) {
             best_distance = distance;
             tail_index = index;
@@ -1851,7 +1895,7 @@ static gboolean crashcar_authority_tail_metrics(
       fit_count >= 2 &&
       crashcar_fit_line_through_fixed_point(
         unique_ranks + tail_index, unique_log_fars + tail_index,
-        fit_count, unique_ranks[tail_index], tail_log_far,
+        fit_count, unique_ranks[tail_index], tail_log10_far,
         &slope, &intercept) &&
       isfinite(slope) && slope < 0.0 && isfinite(intercept);
     if (valid) {
@@ -1896,6 +1940,53 @@ static gboolean crashcar_format_canonical_binary64(
     }
     g_snprintf(output, 64, "%.13a", value);
     return output[0] != '\0' && strlen(output) < 64;
+}
+
+static gboolean crashcar_format_canonical_json_double(
+  double value,
+  char output[G_ASCII_DTOSTR_BUF_SIZE]) {
+    if (!output || !isfinite(value) || (value == 0.0 && signbit(value))) {
+        return FALSE;
+    }
+    g_ascii_dtostr(output, G_ASCII_DTOSTR_BUF_SIZE, value);
+    return output[0] != '\0' &&
+      strlen(output) < G_ASCII_DTOSTR_BUF_SIZE;
+}
+
+static gboolean crashcar_json_parse_canonical_double_number(
+  CrashcarJsonCursor *input,
+  double *value_out) {
+    if (!input || !value_out || input->cursor >= input->end) {
+        return crashcar_json_fail(input, "missing canonical JSON number");
+    }
+    const char *begin = input->cursor;
+    const char *cursor = begin;
+    while (cursor < input->end &&
+           (g_ascii_isdigit(*cursor) || *cursor == '-' || *cursor == '+' ||
+            *cursor == '.' || *cursor == 'e' || *cursor == 'E')) {
+        ++cursor;
+    }
+    const size_t length = (size_t)(cursor - begin);
+    if (length == 0 || length >= G_ASCII_DTOSTR_BUF_SIZE) {
+        return crashcar_json_fail(input, "canonical JSON number is malformed");
+    }
+    char token[G_ASCII_DTOSTR_BUF_SIZE];
+    memcpy(token, begin, length);
+    token[length] = '\0';
+    errno = 0;
+    char *end = NULL;
+    const double value = g_ascii_strtod(token, &end);
+    char canonical[G_ASCII_DTOSTR_BUF_SIZE];
+    if (!end || *end != '\0' || !isfinite(value) ||
+        (value == 0.0 && signbit(value)) ||
+        !crashcar_format_canonical_json_double(value, canonical) ||
+        strcmp(token, canonical) != 0) {
+        return crashcar_json_fail(
+          input, "JSON number is not unique canonical binary64");
+    }
+    input->cursor = cursor;
+    *value_out = value;
+    return TRUE;
 }
 
 static gboolean crashcar_json_parse_binary64(
@@ -2092,6 +2183,8 @@ static GString *crashcar_build_schema4_bytes(
   gchar **failure) {
     if (!element || !element->background_binding_valid || version == 0 ||
         version > (guint64)G_MAXINT64 || window_start_ns >= window_end_ns ||
+        !isfinite(element->tail_log10_far) ||
+        !(element->tail_log10_far < 0.0) ||
         !support_points[0] || !support_points[1]) {
         crashcar_set_failure(failure, "schema4 candidate binding is invalid");
         return NULL;
@@ -2155,10 +2248,21 @@ static GString *crashcar_build_schema4_bytes(
     crashcar_append_duration_json(output, element->background_window_ns);
     g_string_append(output, ",\"update_period\":");
     crashcar_append_duration_json(output, element->background_update_ns);
-    g_string_append(
+    char tail_log10_far_text[G_ASCII_DTOSTR_BUF_SIZE];
+    if (!crashcar_format_canonical_json_double(
+          element->tail_log10_far, tail_log10_far_text)) {
+        g_array_free(points[0], TRUE);
+        g_array_free(points[1], TRUE);
+        g_string_free(output, TRUE);
+        crashcar_set_failure(
+          failure, "schema4 tail anchor is noncanonical");
+        return NULL;
+    }
+    g_string_append_printf(
       output,
-      ",\"far_floor_count\":1,\"tail_log10_far\":-2"
-      ",\"backgrounds\":{");
+      ",\"far_floor_count\":1,\"tail_log10_far\":%s"
+      ",\"backgrounds\":{",
+      tail_log10_far_text);
 
     for (int ifo_id = 0; ifo_id < 2; ++ifo_id) {
         if (ifo_id > 0) g_string_append_c(output, ',');
@@ -2251,6 +2355,7 @@ static gboolean crashcar_parse_schema4_ifo(
   gint64 window_start_ns,
   gint64 window_end_ns,
   gint64 window_duration_ns,
+  double tail_log10_far,
   CrashcarParsedBackground *background,
   int ifo_id) {
     gint64 livetime_ns = 0;
@@ -2372,7 +2477,8 @@ static gboolean crashcar_parse_schema4_ifo(
     guint recomputed_fit_count = 0;
     if (!crashcar_authority_tail_metrics(
           (const double *)ranks->data, ranks->len,
-          livetime_seconds, &recomputed_r_tail, &recomputed_slope,
+          livetime_seconds, tail_log10_far,
+          &recomputed_r_tail, &recomputed_slope,
           &recomputed_fit_count) ||
         !crashcar_binary64_bits_equal(stored_r_tail, recomputed_r_tail) ||
         !crashcar_binary64_bits_equal(stored_slope, recomputed_slope) ||
@@ -2426,7 +2532,7 @@ static gboolean crashcar_parse_schema4_background(
     gint64 window_duration_ns = 0;
     gint64 update_period_ns = 0;
     gint64 floor_count = 0;
-    gint64 tail_log_far = 0;
+    double tail_log_far = NAN;
 
     gboolean valid =
       crashcar_json_expect(&input, "{\"schema_version\":") &&
@@ -2471,15 +2577,16 @@ static gboolean crashcar_parse_schema4_background(
       crashcar_json_expect(&input, ",\"far_floor_count\":") &&
       crashcar_parse_canonical_nonnegative_int64(&input, &floor_count) &&
       crashcar_json_expect(&input, ",\"tail_log10_far\":") &&
-      crashcar_parse_canonical_int64_cursor(&input, &tail_log_far) &&
+      crashcar_json_parse_canonical_double_number(
+        &input, &tail_log_far) &&
       crashcar_json_expect(&input, ",\"backgrounds\":{\"H1\":") &&
       crashcar_parse_schema4_ifo(
         &input, window_start_ns, window_end_ns, window_duration_ns,
-        background, 0) &&
+        tail_log_far, background, 0) &&
       crashcar_json_expect(&input, ",\"L1\":") &&
       crashcar_parse_schema4_ifo(
         &input, window_start_ns, window_end_ns, window_duration_ns,
-        background, 1) &&
+        tail_log_far, background, 1) &&
       crashcar_json_expect(&input, "}}") && input.cursor == input.end;
 
     guint64 window_span_ns = 0;
@@ -2501,7 +2608,10 @@ static gboolean crashcar_parse_schema4_background(
       window_duration_ns == element->background_window_ns &&
       update_period_ns == element->background_update_ns &&
       window_duration_ns > 0 && update_period_ns > 0 &&
-      floor_count == 1 && tail_log_far == -2 &&
+      floor_count == 1 && isfinite(tail_log_far) &&
+      tail_log_far < 0.0 &&
+      crashcar_binary64_bits_equal(
+        tail_log_far, element->tail_log10_far) &&
       crashcar_ordered_distance_u64(
         window_start_ns, window_end_ns, &window_span_ns) &&
       window_span_ns == (guint64)window_duration_ns &&
@@ -2529,6 +2639,7 @@ static gboolean crashcar_parse_schema4_background(
     }
     g_free(input.failure);
     background->version = (guint64)accepted_version;
+    background->tail_log10_far = tail_log_far;
     background->epoch_gps_ns = epoch_ns;
     background->window_start_gps_ns = window_start_ns;
     background->window_end_gps_ns = window_end_ns;
@@ -2891,6 +3002,8 @@ static gboolean crashcar_live_candidate_valid(
   const CrashcarParsedBackground *candidate) {
     if (!candidate || candidate->version == 0 ||
         candidate->version > (guint64)G_MAXINT64 ||
+        !isfinite(candidate->tail_log10_far) ||
+        !(candidate->tail_log10_far < 0.0) ||
         candidate->epoch_gps_ns <= 0 ||
         candidate->epoch_gps_ns != candidate->window_end_gps_ns ||
         candidate->window_start_gps_ns >= candidate->window_end_gps_ns ||
@@ -2923,7 +3036,8 @@ static gboolean crashcar_live_adopt_candidate(
   gint64 event_gps_ns) {
     if (!element || !candidate ||
         !crashcar_live_candidate_valid(candidate) ||
-        candidate->window_end_gps_ns > event_gps_ns) {
+        !crashcar_live_coverage_is_eligible(
+          element, candidate->window_end_gps_ns, event_gps_ns)) {
         return FALSE;
     }
     for (int ifo_id = 0; ifo_id < 2; ++ifo_id) {
@@ -3083,7 +3197,8 @@ static void crashcar_try_refresh_live_authority(
         crashcar_parsed_background_clear(&candidate);
         return;
     }
-    if (candidate.window_end_gps_ns > event_gps_ns) {
+    if (!crashcar_live_coverage_is_eligible(
+          element, candidate.window_end_gps_ns, event_gps_ns)) {
         crashcar_live_record_refresh(
           element, CRASHCAR_LIVE_REFRESH_REJECTED_FUTURE,
           "schema4 coverage endpoint is later than event GPS",
@@ -3141,7 +3256,8 @@ crashcar_snapshot_live_authority(
     if (!element->live_lkg_valid) {
         return CRASHCAR_AUTHORITY_SELECTION_NONE;
     }
-    if (element->live_lkg_window_end_gps_ns > event_gps_ns) {
+    if (!crashcar_live_coverage_is_eligible(
+          element, element->live_lkg_window_end_gps_ns, event_gps_ns)) {
         return CRASHCAR_AUTHORITY_SELECTION_NONE;
     }
 
@@ -3192,6 +3308,8 @@ static gboolean crashcar_bind_worker_authority(
     if (!crashcar_worker_authority.worker_bound) {
         crashcar_worker_authority.worker_bound = TRUE;
         crashcar_worker_authority.worker_id = element->worker_id;
+        crashcar_worker_authority.tail_log10_far =
+          element->tail_log10_far;
         for (int ifo_id = 0; ifo_id < 2; ++ifo_id) {
             crashcar_worker_authority.points[ifo_id] =
               g_array_new(FALSE, FALSE, sizeof(CrashcarSupportPoint));
@@ -3201,6 +3319,9 @@ static gboolean crashcar_bind_worker_authority(
     }
     const gboolean valid =
       crashcar_worker_authority.worker_id == element->worker_id &&
+      crashcar_binary64_bits_equal(
+        crashcar_worker_authority.tail_log10_far,
+        element->tail_log10_far) &&
       crashcar_worker_authority.points[0] != NULL &&
       crashcar_worker_authority.points[1] != NULL &&
       crashcar_worker_authority.ranks[0] != NULL &&
@@ -3281,6 +3402,7 @@ static gboolean crashcar_try_complete_paired_authority_locked(
         candidate_valid = crashcar_authority_tail_metrics(
           (const double *)candidate_ranks[ifo_id]->data,
           candidate_ranks[ifo_id]->len, livetime_seconds,
+          element->tail_log10_far,
           &candidate_r_tail[ifo_id], &candidate_tail_slope[ifo_id],
           &candidate_fit_count[ifo_id]);
     }
@@ -3379,6 +3501,8 @@ crashcar_snapshot_paired_authority(
           parsed->epoch_gps_ns > 0 &&
           parsed->epoch_gps_ns <= pending->available_after_gps_ns &&
           parsed->window_start_gps_ns < parsed->window_end_gps_ns &&
+          crashcar_binary64_bits_equal(
+            parsed->tail_log10_far, authority->tail_log10_far) &&
           crashcar_sha256_is_lowercase64(parsed->file_sha256);
         for (int ifo_id = 0; ifo_id < 2 && promotable; ++ifo_id) {
             promotable = parsed->points[ifo_id] && parsed->ranks[ifo_id] &&
@@ -3718,7 +3842,9 @@ static gboolean crashcar_singlefar_start(GstBaseTransform *base) {
     if (!element->enabled) return TRUE;
 
     gchar *failure = NULL;
-    if (!crashcar_single_background_mode_is_valid() ||
+    if (!isfinite(element->tail_log10_far) ||
+        !(element->tail_log10_far < 0.0) ||
+        !crashcar_single_background_mode_is_valid() ||
         !crashcar_parse_worker_bank_roster(element, &failure) ||
         !crashcar_load_livetime_segments(element, &failure) ||
         !crashcar_load_exact_window_config(element, &failure) ||
@@ -3799,10 +3925,12 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
     gsize work_count = 0;
 
     /*
-     * Build work only for foreground rows owned by the H/L single extension.
-     * Normal Postcoh background/control rows do not carry a shared event time
-     * (their zero-initialized end_time and event_id are valid), so they and
-     * V-only rows must pass through byte-for-byte without single validation.
+     * Build scoring work only for foreground rows relevant to the H/L single
+     * extension.  Normal Postcoh background/control rows do not carry a shared
+     * event time, so they pass through byte-for-byte.  Invalid detector masks
+     * also remain byte-for-byte after a warning.  Valid V-only rows preserve
+     * every normal A107 byte while the two crashcar-only A109 LLR slots are
+     * canonicalized to zero.
      */
     for (gsize original_ordinal = 0;
          original_ordinal < row_count;
@@ -3821,9 +3949,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
               original_ordinal, (long)table->event_id, table->ifos);
             continue;
         }
-        if (final_route == CRASHCAR_SINGLE_FINAL_ROUTE_V1_ONLY) continue;
-
         crashcar_singlefar_prepare_row_llrs(table);
+        if (final_route == CRASHCAR_SINGLE_FINAL_ROUTE_V1_ONLY) continue;
         const int route_owner_ifo =
           final_route == CRASHCAR_SINGLE_FINAL_ROUTE_H1
             ? 0
@@ -4165,9 +4292,10 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                     bg_livetime_ns > 0 && bg_livetime > 0.0 &&
                     window_count > 0) {
                     CrashcarSingleFarEvaluation evaluation = { 0 };
-                    has_fitted_far = crashcar_singlefar_evaluate_far(
-                      fit_ranks, window_count, bg_livetime, llr,
-                      &evaluation);
+                    has_fitted_far =
+                      crashcar_singlefar_evaluate_far_with_tail(
+                        fit_ranks, window_count, bg_livetime, llr,
+                        element->tail_log10_far, &evaluation);
                     if (crashcar_far_double_is_valid(
                           evaluation.calculated_far)) {
                         calculated_far = evaluation.calculated_far;
@@ -4381,6 +4509,9 @@ static void crashcar_singlefar_set_property(GObject *object,
     case PROP_LOG10_FAR_THRESHOLD:
         element->log10_far_threshold = g_value_get_double(value);
         break;
+    case PROP_TAIL_LOG10_FAR:
+        element->tail_log10_far = g_value_get_double(value);
+        break;
     case PROP_LIVETIME_STEP:
         element->livetime_step = g_value_get_double(value);
         break;
@@ -4452,6 +4583,9 @@ static void crashcar_singlefar_get_property(GObject *object,
         break;
     case PROP_LOG10_FAR_THRESHOLD:
         g_value_set_double(value, element->log10_far_threshold);
+        break;
+    case PROP_TAIL_LOG10_FAR:
+        g_value_set_double(value, element->tail_log10_far);
         break;
     case PROP_LIVETIME_STEP:
         g_value_set_double(value, element->livetime_step);
@@ -4575,6 +4709,14 @@ static void crashcar_singlefar_class_init(CrashcarSinglefarClass *klass) {
         G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
+      gobject_class, PROP_TAIL_LOG10_FAR,
+      g_param_spec_double(
+        "tail-log10-far", "tail log10 FAR anchor",
+        "negative log10 FAR anchor for the single-detector tail fit",
+        -G_MAXDOUBLE, -DBL_MIN, -2.0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
       gobject_class, PROP_LIVETIME_STEP,
       g_param_spec_double("livetime-step", "livetime step",
                           "default livetime increment for FLAG_EMPTY rows",
@@ -4644,6 +4786,7 @@ static void crashcar_singlefar_init(CrashcarSinglefar *element) {
     element->enabled = FALSE;
     element->dof = 120.0;
     element->log10_far_threshold = -4.0;
+    element->tail_log10_far = -2.0;
     element->livetime_step = 1.0;
     element->background_window_seconds =
       crashcar_env_double("BACKGROUND_ACCUMULATION_SECONDS", 10800.0);

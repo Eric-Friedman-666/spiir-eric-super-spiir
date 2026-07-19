@@ -907,6 +907,9 @@ def mkPostcohSPIIROnline(pipeline,
                 log10_far_threshold=float(
                     os.environ.get("CRASHCAR_LOG10_FAR_THRESHOLD", "-4.0"),
                 ),
+                tail_log10_far=float(
+                    os.environ.get("TAIL_LOG_FAR", "-2.0"),
+                ),
                 livetime_step=float(
                     os.environ.get("CRASHCAR_LIVETIME_STEP", "1.0"),
                 ),

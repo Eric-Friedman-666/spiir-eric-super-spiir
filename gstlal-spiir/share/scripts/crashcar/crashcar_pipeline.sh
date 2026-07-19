@@ -40,6 +40,16 @@ if [[ ! "${snr_series_logfar_threshold}" =~ ^[+-]?(([0-9]+([.][0-9]*)?)|([.][0-9
     "${snr_series_logfar_threshold}" >&2
   exit 2
 fi
+TAIL_LOG_FAR=$(python3 - "${TAIL_LOG_FAR:--2}" <<'PY'
+import math
+import sys
+value = float(sys.argv[1])
+if not math.isfinite(value) or not value < 0.0:
+    raise SystemExit("tail_log_FAR must be finite and strictly negative")
+print("{:.17g}".format(value))
+PY
+) || exit 2
+export TAIL_LOG_FAR
 injection_mode=${WGUO_O3A_INJECTION_MODE:-none}
 injection_file=${WGUO_O3A_INJECTION_FILE:-}
 
@@ -100,9 +110,10 @@ case "${single_background_mode}" in
     if [ "${CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROLE:-}" != "consumer" ] ||
        [[ "${CRASHCAR_LIVE_BACKGROUND_ROOT:-}" != /* ]] ||
        [[ "${CRASHCAR_LIVE_SINGLE_BACKGROUND_JSON:-}" != "${CRASHCAR_LIVE_BACKGROUND_ROOT}/run/${jobno}/single_background.json" ]] ||
-       [ ! -f "${CRASHCAR_LIVE_SINGLE_BACKGROUND_JSON:-}" ] ||
-       [ -L "${CRASHCAR_LIVE_SINGLE_BACKGROUND_JSON:-}" ]; then
-      printf 'crashcar_pipeline: live_readonly single input is not the direct producer worker path\n' >&2
+       [ -L "${CRASHCAR_LIVE_SINGLE_BACKGROUND_JSON:-}" ] ||
+       { [ -e "${CRASHCAR_LIVE_SINGLE_BACKGROUND_JSON:-}" ] &&
+         [ ! -f "${CRASHCAR_LIVE_SINGLE_BACKGROUND_JSON:-}" ]; }; then
+      printf 'crashcar_pipeline: live_readonly single binding is not the direct producer worker path\n' >&2
       exit 2
     fi
     if ! [[ "${assignfar_refresh_interval}" =~ ^[1-9][0-9]*$ ]]; then
@@ -149,6 +160,15 @@ fi
 
 verify_scientific_input() {
     local input_path=$1 label=$2
+    if [ "${single_background_mode}" = "live_readonly" ]; then
+        [ ! -L "${input_path}" ] &&
+            { [ ! -e "${input_path}" ] || [ -f "${input_path}" ]; } || {
+            printf 'crashcar_pipeline: %s soft-start path is not a regular producer path: %s\n' \
+              "${label}" "${input_path}" >&2
+            return 2
+        }
+        return 0
+    fi
     [ -f "${input_path}" ] && [ ! -L "${input_path}" ] || {
         printf 'crashcar_pipeline: %s must be a regular non-symlink file: %s\n' \
           "${label}" "${input_path}" >&2

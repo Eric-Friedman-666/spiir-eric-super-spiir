@@ -1,0 +1,593 @@
+{
+  "schema_version": 1,
+  "header": "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+  "cases": [
+    {
+      "name": "valid_h1_l1",
+      "valid": true,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS",
+        "1,100,8,3.25,600,L1,NSBH"
+      ],
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"},
+        {"ifo_id": 1, "ifo": "L1", "bankid": 100, "tmplt_idx": 8, "autocorr_power": 3.25, "dof": 600.0, "source_class": "NSBH"}
+      ]
+    },
+    {
+      "name": "valid_blank_and_comment",
+      "valid": true,
+      "lines": [
+        "# generated test map",
+        "",
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "  # explicit comment",
+        "0,99,3,1e308,120,H1,BNS"
+      ],
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 99, "tmplt_idx": 3, "autocorr_power": 1e308, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "valid_int_max_template",
+      "valid": true,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,2147483647,2.5,120,H1,BNS"
+      ],
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 2147483647, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "valid_exact_header_crlf",
+      "valid": true,
+      "line_ending": "\r\n",
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS"
+      ],
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "valid_ascii_field_whitespace",
+      "valid": true,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        " 0 , 0 , 7 , 2.5 , 120 , H1 , BNS "
+      ],
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "valid_utf8_unicode_comment",
+      "valid": true,
+      "lines": [
+        "# valid π comment",
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS"
+      ],
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "valid_ascii_exponent",
+      "valid": true,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5e+0,1.20e2,H1,BNS"
+      ],
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "valid_smallest_normal_power",
+      "valid": true,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.2250738585072014e-308,120,H1,BNS"
+      ],
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.2250738585072014e-308, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "legacy_five_column_header",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof",
+        "0,0,7,2.5,120"
+      ]
+    },
+    {
+      "name": "repeated_header",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS",
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class"
+      ]
+    },
+    {
+      "name": "missing_header",
+      "valid": false,
+      "lines": ["0,0,7,2.5,120,H1,BNS"]
+    },
+    {
+      "name": "alphabetic_garbage",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "this is not a record"
+      ]
+    },
+    {
+      "name": "numeric_prefix_junk",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0junk,99x,3x,3.2bad,120oops,H1,BNS"
+      ]
+    },
+    {
+      "name": "extra_field",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS,extra"
+      ]
+    },
+    {
+      "name": "missing_field",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "fractional_bank",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,99.9,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "integer_overflow",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "999999999999999999999999,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "ifo_id_int_max_semantic_reject",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "2147483647,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "ifo_id_int_max_plus_one",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "2147483648,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "bank_int_max_semantic_reject",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,2147483647,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "bank_int_max_plus_one",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,2147483648,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "template_int_max_plus_one",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,2147483648,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "unicode_arabic_indic_digit",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,٧,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "unicode_nbsp_integer",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0, 7 ,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "unicode_nbsp_ifo",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120, H1 ,BNS"
+      ]
+    },
+    {
+      "name": "unicode_nbsp_source_class",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1, BNS "
+      ]
+    },
+    {
+      "name": "noncanonical_leading_zero",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,099,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "ifo_id_name_conflict",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "1,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "unsupported_ifo",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "2,0,7,2.5,120,V1,BNS"
+      ]
+    },
+    {
+      "name": "unsupported_bank",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,384,7,2.5,600,H1,NSBH"
+      ]
+    },
+    {
+      "name": "source_class_conflict",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,NSBH"
+      ]
+    },
+    {
+      "name": "dof_conflict",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,681,H1,BNS"
+      ]
+    },
+    {
+      "name": "near_dof_must_not_canonicalize",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120.00000000001,H1,BNS"
+      ]
+    },
+    {
+      "name": "nan_power",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,nan,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "infinite_dof",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,inf,H1,BNS"
+      ]
+    },
+    {
+      "name": "hex_float_power",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,0x1p+1,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "hex_float_dof",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,0x1.ep6,H1,BNS"
+      ]
+    },
+    {
+      "name": "minimum_subnormal_power",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,5e-324,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "subnormal_power",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,1e-320,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "decimal_overflow_power",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,1e9999,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "duplicate_tuple",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS",
+        "0,0,7,3.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "header_trailing_space",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class ",
+        "0,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "header_trailing_tab",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class\t",
+        "0,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "header_surplus_cr_before_crlf",
+      "valid": false,
+      "line_ending": "\r\n",
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class\r",
+        "0,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "data_surplus_cr_before_crlf",
+      "valid": false,
+      "line_ending": "\r\n",
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS\r"
+      ]
+    },
+    {
+      "name": "header_leading_space",
+      "valid": false,
+      "lines": [
+        " ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "header_quoted_field",
+      "valid": false,
+      "lines": [
+        "\"ifo_id\",bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "header_embedded_nul",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class\u0000ignored",
+        "0,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "data_embedded_nul",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS\u0000ignored"
+      ]
+    },
+    {
+      "name": "comment_embedded_nul",
+      "valid": false,
+      "lines": [
+        "# comment\u0000hidden",
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "blank_whitespace_embedded_nul",
+      "valid": false,
+      "lines": [
+        "  \u0000  ",
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "invalid_utf8_comment",
+      "valid": false,
+      "lines": [
+        "# invalid <RAW_FF> comment",
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS"
+      ],
+      "raw_replacements": [
+        {"marker": "<RAW_FF>", "hex": "ff"}
+      ]
+    },
+    {
+      "name": "invalid_utf8_blank_position",
+      "valid": false,
+      "lines": [
+        "  <RAW_FF>  ",
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,BNS"
+      ],
+      "raw_replacements": [
+        {"marker": "<RAW_FF>", "hex": "ff"}
+      ]
+    },
+    {
+      "name": "data_quoted_integer",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "\"0\",0,7,2.5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "data_quoted_embedded_comma",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,120,H1,\"B,NS\""
+      ]
+    },
+    {
+      "name": "float_underscore_power",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2_5,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "unicode_digit_power",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,٢.٥,120,H1,BNS"
+      ]
+    },
+    {
+      "name": "unicode_digit_dof",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class",
+        "0,0,7,2.5,١٢٠,H1,BNS"
+      ]
+    },
+    {
+      "name": "payload_1022_lf",
+      "valid": true,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class"
+      ],
+      "payload_base": "0,0,7,2.5,120,H1,BNS",
+      "payload_target_bytes": 1022,
+      "final_newline": true,
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "payload_1022_eof",
+      "valid": true,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class"
+      ],
+      "payload_base": "0,0,7,2.5,120,H1,BNS",
+      "payload_target_bytes": 1022,
+      "final_newline": false,
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "payload_1023_lf",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class"
+      ],
+      "payload_base": "0,0,7,2.5,120,H1,BNS",
+      "payload_target_bytes": 1023,
+      "final_newline": true
+    },
+    {
+      "name": "payload_1023_eof",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class"
+      ],
+      "payload_base": "0,0,7,2.5,120,H1,BNS",
+      "payload_target_bytes": 1023,
+      "final_newline": false
+    },
+    {
+      "name": "payload_1022_crlf",
+      "valid": true,
+      "line_ending": "\r\n",
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class"
+      ],
+      "payload_base": "0,0,7,2.5,120,H1,BNS",
+      "payload_target_bytes": 1022,
+      "final_newline": true,
+      "expected_rows": [
+        {"ifo_id": 0, "ifo": "H1", "bankid": 0, "tmplt_idx": 7, "autocorr_power": 2.5, "dof": 120.0, "source_class": "BNS"}
+      ]
+    },
+    {
+      "name": "payload_1023_crlf",
+      "valid": false,
+      "line_ending": "\r\n",
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class"
+      ],
+      "payload_base": "0,0,7,2.5,120,H1,BNS",
+      "payload_target_bytes": 1023,
+      "final_newline": true
+    },
+    {
+      "name": "overlong_row",
+      "valid": false,
+      "lines": [
+        "ifo_id,bankid,tmplt_idx,autocorr_power,dof,ifo,source_class"
+      ],
+      "overlong_base": "0,0,7,2.5,120,H1,BNS",
+      "overlong_suffix_character": "x",
+      "overlong_suffix_count": 1100
+    }
+  ]
+}

@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-CONFIG_FILE=${1:-"${SCRIPT_DIR}/crashcar.env"}
+CONFIG_FILE=${1:-${CRASHCAR_CONFIG_FILE:-"${SCRIPT_DIR}/crashcar.env"}}
 LAUNCHER="${REPO_ROOT}/gstlal-spiir/share/scripts/crashcar/crashcar.sh"
 
 if [ ! -x "${LAUNCHER}" ]; then

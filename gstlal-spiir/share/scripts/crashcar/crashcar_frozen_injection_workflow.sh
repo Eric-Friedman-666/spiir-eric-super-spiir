@@ -9,6 +9,9 @@ STATUS="${CONTROLLER_DIR}/workflow_status.json"
 CONFIG_FILE=${CRASHCAR_CONFIG_FILE:-"${SCRIPT_DIR}/crashcar.env"}
 LIVE_HELPER="${SCRIPT_DIR}/crashcar_live_background.py"
 LIVE_HELPER_SHA256=
+WORKFLOW_LOCK="${CONTROLLER_DIR}/workflow.lock"
+B1_JOB_NAME=crashcar_B1_noinj_producer
+B2_JOB_NAME=crashcar_B2_injection_consumer
 LIVE_HELPER_CURRENT_SHA256=
 mkdir -p "${CONTROLLER_DIR}" "${ROOT}/inputs"
 
@@ -43,6 +46,19 @@ with temporary.open("w", encoding="utf-8", newline="\n") as handle:
     os.fsync(handle.fileno())
 os.replace(temporary, path)
 PY_STATUS
+}
+
+acquire_workflow_lock() {
+    if ! command -v flock >/dev/null 2>&1; then
+        printf 'crashcar_live_injection_workflow: flock is required\n' >&2
+        exit 73
+    fi
+    exec 9>"${WORKFLOW_LOCK}"
+    if ! flock -n 9; then
+        printf 'crashcar_live_injection_workflow: duplicate controller rejected for %s\n' \
+            "${ROOT}" >&2
+        exit 73
+    fi
 }
 
 require_file() {
@@ -198,6 +214,7 @@ clear_stage_environment() {
     unset \
         root ROOT source_root SOURCE_ROOT save_dir SAVE_DIR run_parent RUN_PARENT \
         run_id RUN_ID run_slug RUN_SLUG run_root RUN_ROOT run_timestamp RUN_TIMESTAMP \
+        slurm_job_name SLURM_JOB_NAME \
         data_file frame_cache FRAME_CACHE detector_response_file detrsp_map DETRSP_MAP \
         segment_xml SEGMENT_XML start_gps START_GPS end_gps END_GPS duration DURATION \
         duration_hour duration_seconds DURATION_HOUR DURATION_SECONDS \
@@ -225,9 +242,12 @@ start_stage_async() {
         clear_stage_environment
         ROOT="${SOURCE_ROOT_VALUE}" CRASHCAR_CONFIG_FILE="${config}" \
             bash "${SCRIPT_DIR}/crashcar.sh" "${config}"
-    ) >"${output_file}" 2>&1 &
+    ) 9>&- >"${output_file}" 2>&1 &
     local pid=$!
-    printf '%s\n' "${pid}" > "${pid_file}"
+    local temporary="${pid_file}.tmp.$$"
+    printf '%s\n' "${pid}" > "${temporary}"
+    mv -f "${temporary}" "${pid_file}"
+    disown "${pid}" 2>/dev/null || true
     write_status "${label}_launcher_pid=${pid}" "${label}_launcher_log=${output_file}"
 }
 
@@ -246,6 +266,29 @@ stage_job_id() {
     fi
 }
 
+fail_closed_b2_on_b1_loss() {
+    local reason=$1 producer_phase=$2 consumer_phase=$3
+    local consumer_job action
+    consumer_job=$(stage_job_id "${INJ_ROOT}")
+    action=not_requested_no_known_job
+    if [[ "${consumer_job}" =~ ^[0-9]+$ ]]; then
+        if scancel "${consumer_job}"; then
+            action=scancel_requested
+            log "requested cancellation of known injection consumer job ${consumer_job}"
+        else
+            action=scancel_failed
+            log "ERROR could not request cancellation of known injection consumer job ${consumer_job}"
+        fi
+    else
+        consumer_job=""
+        log "no known injection consumer job id; no cancellation requested"
+    fi
+    write_status phase=failed reason="${reason}" \
+        producer_phase="${producer_phase:-unknown}" \
+        consumer_phase="${consumer_phase:-starting}" \
+        consumer_job_id="${consumer_job}" b2_action="${action}"
+}
+
 validate_live_singles() {
     verify_live_helper_pin live_single_validation || exit 2
     "${LIVE_HELPER}" validate-all-singles \
@@ -253,111 +296,6 @@ validate_live_singles() {
         --worker-count "${BG_WORKERS}" \
         --banks-per-worker "${BG_BANKS_PER_WORKER}" \
         --start-bank "${START_BANK_VALUE}"
-}
-
-validate_live_multi_inputs() {
-    python3 - "${BG_RUN_ROOT}" "${BG_WORKERS}" <<'PY_MULTI_READY'
-import gzip
-import json
-import os
-from pathlib import Path
-import stat
-import sys
-from xml.parsers import expat
-
-root = Path(sys.argv[1]).resolve(strict=True)
-worker_count = int(sys.argv[2])
-if worker_count < 1 or worker_count > 4096:
-    raise SystemExit("invalid worker count")
-
-records = []
-for worker in range(worker_count):
-    jobno = f"{worker:03d}"
-    worker_records = []
-    for span in ("2w", "1d", "2h"):
-        path = root / "run" / jobno / f"{jobno}_marginalized_stats_{span}.xml.gz"
-        try:
-            before = os.lstat(path)
-        except OSError as exc:
-            raise SystemExit(f"multi {worker}/{span} is unavailable: {exc}")
-        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
-            raise SystemExit(f"multi {worker}/{span} is not a regular non-symlink file")
-        if before.st_size < 1:
-            raise SystemExit(f"multi {worker}/{span} is empty")
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        try:
-            opened = os.fstat(fd)
-            parser = expat.ParserCreate()
-            with os.fdopen(fd, "rb", closefd=False) as raw:
-                with gzip.GzipFile(fileobj=raw, mode="rb") as stream:
-                    while True:
-                        block = stream.read(1024 * 1024)
-                        if not block:
-                            break
-                        parser.Parse(block, False)
-                    parser.Parse(b"", True)
-        except (OSError, EOFError, expat.ExpatError) as exc:
-            raise SystemExit(f"multi {worker}/{span} is not complete gzip/XML: {exc}")
-        finally:
-            os.close(fd)
-        after = os.lstat(path)
-        identity = lambda item: (
-            item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
-        if identity(before) != identity(opened) or identity(opened) != identity(after):
-            raise SystemExit(f"multi {worker}/{span} changed during validation")
-        worker_records.append({
-            "span": span, "path": str(path), "size": opened.st_size,
-            "mtime_ns": opened.st_mtime_ns,
-        })
-    records.append({"worker_id": worker, "files": worker_records})
-print(json.dumps({
-    "kind": "crashcar_live_multi_readiness", "producer_root": str(root),
-    "worker_count": worker_count, "workers": records,
-}, separators=(",", ":"), sort_keys=True))
-PY_MULTI_READY
-}
-
-wait_for_first_backgrounds() {
-    local producer_pid_file=$1
-    local singles="${CONTROLLER_DIR}/first_single_readiness.json"
-    local multi="${CONTROLLER_DIR}/first_multi_readiness.json"
-    while true; do
-        if validate_live_singles >"${singles}.tmp" 2>"${singles}.err" && \
-           validate_live_multi_inputs >"${multi}.tmp" 2>"${multi}.err"; then
-            if ! stage_pid_active "${producer_pid_file}"; then
-                rm -f "${singles}.tmp" "${multi}.tmp"
-                log "ERROR producer stopped before injection launch"
-                write_status phase=failed reason=producer_not_active_at_first_readiness
-                exit 3
-            fi
-            mv "${singles}.tmp" "${singles}"
-            mv "${multi}.tmp" "${multi}"
-            write_status phase=first_live_backgrounds_ready \
-                producer_job_id="$(stage_job_id "${BG_RUN_ROOT}")" \
-                single_readiness="${singles}" multi_readiness="${multi}" \
-                producer_active=true
-            log "first complete single and independent normal multi inputs are ready; producer remains active"
-            return 0
-        fi
-        rm -f "${singles}.tmp" "${multi}.tmp"
-        local phase
-        phase=$(stage_phase "${BG_RUN_ROOT}")
-        case "${phase}" in
-            failed*|completed)
-                log "ERROR producer reached ${phase:-unknown} before usable backgrounds"
-                write_status phase=failed reason=no_live_background_before_producer_exit \
-                    producer_phase="${phase:-unknown}"
-                exit 3
-                ;;
-        esac
-        if ! stage_pid_active "${producer_pid_file}"; then
-            log "ERROR producer launcher exited before usable backgrounds"
-            write_status phase=failed reason=producer_launcher_exited_before_ready
-            exit 3
-        fi
-        write_status phase=waiting_first_live_backgrounds producer_phase="${phase:-starting}"
-        sleep 10
-    done
 }
 
 single_versions_from_snapshot() {
@@ -371,10 +309,7 @@ PY_VERSIONS
 
 monitor_overlapping_stages() {
     local producer_pid_file=$1 consumer_pid_file=$2
-    local saw_later_single_version=0 first_versions current_versions
-    first_versions=$(single_versions_from_snapshot \
-        "${CONTROLLER_DIR}/first_single_readiness.json")
-    current_versions=${first_versions}
+    local saw_later_single_version=0 first_versions=none current_versions=none
     while true; do
         local bg_phase inj_phase bg_job inj_job
         bg_phase=$(stage_phase "${BG_RUN_ROOT}")
@@ -382,11 +317,13 @@ monitor_overlapping_stages() {
         bg_job=$(stage_job_id "${BG_RUN_ROOT}")
         inj_job=$(stage_job_id "${INJ_ROOT}")
         if validate_live_singles >"${CONTROLLER_DIR}/latest_single_readiness.tmp" 2>/dev/null; then
-            mv "${CONTROLLER_DIR}/latest_single_readiness.tmp" \
+            mv -f "${CONTROLLER_DIR}/latest_single_readiness.tmp" \
                 "${CONTROLLER_DIR}/latest_single_readiness.json"
             current_versions=$(single_versions_from_snapshot \
                 "${CONTROLLER_DIR}/latest_single_readiness.json")
-            if [ "${current_versions}" != "${first_versions}" ]; then
+            if [ "${first_versions}" = none ]; then
+                first_versions=${current_versions}
+            elif [ "${current_versions}" != "${first_versions}" ]; then
                 saw_later_single_version=1
             fi
         else
@@ -396,67 +333,45 @@ monitor_overlapping_stages() {
             producer_phase="${bg_phase:-starting}" consumer_phase="${inj_phase:-starting}" \
             producer_job_id="${bg_job}" consumer_job_id="${inj_job}" \
             observed_single_versions="${current_versions}" \
-            later_single_version_observed="${saw_later_single_version}" \
-            producer_active="$(stage_pid_active "${producer_pid_file}" && printf true || printf false)"
+            later_single_version_observed="${saw_later_single_version}"
         case "${bg_phase}" in
-            failed*)
-                log "ERROR producer failed while consumer phase=${inj_phase:-starting}"
-                write_status phase=failed reason=producer_failed_during_live_consumer
+            failed*|completed)
+                log "ERROR producer ${bg_phase} while consumer phase=${inj_phase:-starting}"
+                fail_closed_b2_on_b1_loss producer_unavailable_during_live_consumer \
+                    "${bg_phase}" "${inj_phase:-starting}"
                 exit 3
                 ;;
         esac
         case "${inj_phase}" in
             failed*)
-                log "ERROR injection consumer failed"
-                write_status phase=failed reason=live_consumer_failed
+                log "ERROR injection consumer failed; controller issues no B1 cancellation"
+                write_status phase=failed reason=live_consumer_failed b1_action=untouched
                 exit 3
                 ;;
             completed)
-                if [ "${bg_phase}" != "completed" ]; then
-                    if ! stage_pid_active "${producer_pid_file}"; then
-                        # Resolve the same status/PID race at producer shutdown.
-                        sleep 1
-                        bg_phase=$(stage_phase "${BG_RUN_ROOT}")
-                        if [ "${bg_phase}" != "completed" ]; then
-                            log "ERROR producer is not active when consumer completed"
-                            write_status phase=failed reason=producer_lost_before_consumer_completion
-                            exit 3
-                        fi
-                    fi
-                    sleep 10
-                    continue
-                fi
-                wait "$(cat "${consumer_pid_file}")"
-                wait "$(cat "${producer_pid_file}")"
                 write_status phase=completed producer_job_id="${bg_job}" \
                     consumer_job_id="${inj_job}" producer_consumer_overlap=true \
+                    b1_action=untouched \
                     later_single_version_observed="${saw_later_single_version}" \
                     background_mode=live_no_injection
-                log "live no-injection producer and injection consumer completed"
+                log "injection consumer completed; controller issues no B1 cancellation"
                 return 0
                 ;;
         esac
-        if [ "${bg_phase}" = "completed" ]; then
-            log "ERROR producer completed before the injection consumer"
-            write_status phase=failed reason=producer_completed_before_consumer
-            exit 3
-        fi
         if ! stage_pid_active "${producer_pid_file}"; then
             log "ERROR producer launcher is no longer active"
-            write_status phase=failed reason=producer_launcher_lost
+            fail_closed_b2_on_b1_loss producer_launcher_lost \
+                "${bg_phase:-starting}" "${inj_phase:-starting}"
             exit 3
         fi
         if ! stage_pid_active "${consumer_pid_file}" && [ -n "${inj_phase}" ]; then
-            # The launcher can exit between the status read and this PID probe.
-            # Re-read once so a just-published terminal status is not mistaken
-            # for an unexplained launcher loss.
             sleep 1
             inj_phase=$(stage_phase "${INJ_ROOT}")
             case "${inj_phase}" in
                 completed|failed*) continue ;;
                 *)
                     log "ERROR consumer launcher exited unexpectedly phase=${inj_phase}"
-                    write_status phase=failed reason=consumer_launcher_lost
+                    write_status phase=failed reason=consumer_launcher_lost b1_action=untouched
                     exit 3
                     ;;
             esac
@@ -469,6 +384,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
     printf 'crashcar_live_injection_workflow: missing config %s\n' "${CONFIG_FILE}" >&2
     exit 2
 fi
+acquire_workflow_lock
 set -a
 # shellcheck source=/dev/null
 source "${CONFIG_FILE}"
@@ -529,6 +445,7 @@ if [ "${BG_WORKERS}" != "${INJ_WORKERS}" ] || \
     exit 2
 fi
 BG_DURATION_SECONDS=$(duration_seconds_from injection_bg_duration_seconds injection_bg_duration_hour injection_bg_duration)
+BG_CONFIGURED_DURATION_SECONDS=${BG_DURATION_SECONDS}
 INJ_TOTAL_SECONDS=$(duration_seconds_from injection_duration_seconds injection_duration_hour injection_duration)
 if [ -n "${BG_accumulation_hour:-}" ]; then
     BG_ACCUM_SECONDS=$((BG_accumulation_hour * 3600))
@@ -545,11 +462,61 @@ if ! [[ "${BG_ACCUM_SECONDS}" =~ ^[1-9][0-9]*$ && "${BG_UPDATE_SECONDS}" =~ ^[1-
     write_status phase=failed reason=invalid_live_background_cadence
     exit 2
 fi
+MULTI_SNAPSHOT_SECONDS=${cohfar_accumbackground_snapshot_interval_seconds:-${COHFAR_ACCUMBACKGROUND_SNAPSHOT_INTERVAL_SECONDS:-${BG_UPDATE_SECONDS}}}
+if ! [[ "${MULTI_SNAPSHOT_SECONDS}" =~ ^[1-9][0-9]*$ ]]; then
+    log "ERROR multi background snapshot cadence must be a positive integer"
+    write_status phase=failed reason=invalid_multi_snapshot_cadence
+    exit 2
+fi
+MULTI_COLLECT_WALLTIME=${finalsink_fapupdater_collect_walltime:-${FINALSINK_FAPUPDATER_COLLECT_WALLTIME:-}}
+if [ -z "${MULTI_COLLECT_WALLTIME}" ]; then
+    MULTI_COLLECT_WALLTIME_DEFAULT=$(( MULTI_SNAPSHOT_SECONDS + 1 ))
+    MULTI_COLLECT_WALLTIME="${MULTI_COLLECT_WALLTIME_DEFAULT},${MULTI_COLLECT_WALLTIME_DEFAULT},${MULTI_COLLECT_WALLTIME_DEFAULT}"
+    MULTI_COLLECT_WALLTIME_SOURCE=derived_snapshot_plus_one
+else
+    MULTI_COLLECT_WALLTIME_SOURCE=explicit_config
+fi
+IFS=',' read -r -a multi_collect_values <<< "${MULTI_COLLECT_WALLTIME}"
+if [ "${#multi_collect_values[@]}" -ne 3 ]; then
+    log "ERROR finalsink collect walltime expected exactly three comma-separated positive integers"
+    write_status phase=failed reason=invalid_fap_collect_walltime
+    exit 2
+fi
+for multi_collect_value in "${multi_collect_values[@]}"; do
+    if ! [[ "${multi_collect_value}" =~ ^[1-9][0-9]*$ ]]; then
+        log "ERROR finalsink collect walltime expected exactly three comma-separated positive integers"
+        write_status phase=failed reason=invalid_fap_collect_walltime
+        exit 2
+    fi
+done
+for integer_value in "${injection_bg_start_gps}" "${injection_start_gps}" \
+    "${BG_DURATION_SECONDS}" "${INJ_TOTAL_SECONDS}"; do
+    if ! [[ "${integer_value}" =~ ^[0-9]+$ ]]; then
+        log "ERROR injection GPS and duration inputs must be integers"
+        write_status phase=failed reason=invalid_injection_duration_geometry
+        exit 2
+    fi
+done
+if [ "${BG_DURATION_SECONDS}" -le 0 ] || [ "${INJ_TOTAL_SECONDS}" -le 0 ] || \
+   [ "${injection_start_gps}" -lt "${injection_bg_start_gps}" ]; then
+    log "ERROR injection interval geometry is invalid"
+    write_status phase=failed reason=invalid_injection_interval
+    exit 2
+fi
+INJECTION_START_OFFSET=$(( injection_start_gps - injection_bg_start_gps ))
+B1_READY_OFFSET=${INJECTION_START_OFFSET}
+if [ "${B1_READY_OFFSET}" -lt "${BG_ACCUM_SECONDS}" ]; then
+    B1_READY_OFFSET=${BG_ACCUM_SECONDS}
+fi
+BG_DURATION_MINIMUM=$(( B1_READY_OFFSET + INJ_TOTAL_SECONDS + BG_UPDATE_SECONDS ))
+if [ "${BG_DURATION_SECONDS}" -lt "${BG_DURATION_MINIMUM}" ]; then
+    BG_DURATION_SECONDS=${BG_DURATION_MINIMUM}
+fi
 ZEROLAG_UPDATE_SECONDS=${zerolag_update_seconds:-${ZEROLAG_UPDATE_SECONDS:-}}
 if [ -z "${ZEROLAG_UPDATE_SECONDS}" ]; then
     ZEROLAG_UPDATE_SECONDS=$(( ${zerolag_update_hour:-1} * 3600 ))
 fi
-TAIL_LOG_FAR=${tail_log_FAR:-${TAIL_LOG_FAR:--2.5}}
+TAIL_LOG_FAR=${tail_log_FAR:-${TAIL_LOG_FAR:--2}}
 SNR_LOG_FAR=${SNR_series_logFAR_threshold:-${snr_series_logFAR_threshold:-${SNR_SERIES_LOG_FAR_THRESHOLD:--4}}}
 INJ_SNR_LOG_FAR=${injection_SNR_series_logFAR_threshold:-${injection_snr_series_logFAR_threshold:-${INJECTION_SNR_SERIES_LOGFAR_THRESHOLD:-90}}}
 RUN_ID=${run_id:-${RUN_ID:-crashcar_live_injection}}
@@ -558,10 +525,10 @@ SLURM_TIME_VALUE=${slurm_time:-${SLURM_TIME:-}}
 SLURM_MEM_VALUE=${slurm_mem:-${SLURM_MEM:-}}
 SLURM_GRES_VALUE=${slurm_gres:-${SLURM_GRES:-}}
 SLURM_CPUS_PER_TASK_VALUE=${slurm_cpus_per_task:-${SLURM_CPUS_PER_TASK:-}}
-BG_RUN_ROOT="${ROOT}/bg_noinj"
-INJ_ROOT="${ROOT}/inj_bns"
-BG_CONFIG="${CONTROLLER_DIR}/bg_noinj.env"
-INJ_CONFIG="${CONTROLLER_DIR}/inj_bns.env"
+BG_RUN_ROOT="${ROOT}/B1_noinj_producer"
+INJ_ROOT="${ROOT}/B2_injection_consumer"
+BG_CONFIG="${CONTROLLER_DIR}/B1_noinj_producer.env"
+INJ_CONFIG="${CONTROLLER_DIR}/B2_injection_consumer.env"
 BG_INITIAL_MULTI_STATS=${noninj_stats_loc:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}
 for fresh_path in "${BG_RUN_ROOT}" "${INJ_ROOT}"; do
     if [ -e "${fresh_path}" ] || [ -L "${fresh_path}" ]; then
@@ -576,12 +543,21 @@ write_status phase=starting workflow=live_no_injection_background_with_concurren
     consumer_root="${INJ_ROOT}" worker_count="${BG_WORKERS}" \
     banks_per_worker="${BG_BANKS_PER_WORKER}" background_mode=live_no_injection \
     background_accumulation_seconds="${BG_ACCUM_SECONDS}" \
-    background_update_seconds="${BG_UPDATE_SECONDS}"
+    background_update_seconds="${BG_UPDATE_SECONDS}" \
+    cohfar_accumbackground_snapshot_interval_seconds="${MULTI_SNAPSHOT_SECONDS}" \
+    finalsink_fapupdater_collect_walltime="${MULTI_COLLECT_WALLTIME}" \
+    finalsink_fapupdater_collect_walltime_source="${MULTI_COLLECT_WALLTIME_SOURCE}" \
+    configured_B1_duration_seconds="${BG_CONFIGURED_DURATION_SECONDS}" \
+    minimum_B1_duration_seconds="${BG_DURATION_MINIMUM}" \
+    effective_B1_duration_seconds="${BG_DURATION_SECONDS}"
 
+PRODUCER_PID_FILE="${CONTROLLER_DIR}/producer_launcher.pid"
+CONSUMER_PID_FILE="${CONTROLLER_DIR}/consumer_launcher.pid"
 write_env_file "${BG_CONFIG}" \
     "root=${SOURCE_ROOT_VALUE}" "run_root=${BG_RUN_ROOT}" \
-    "run_id=${RUN_ID}_bg_noinj" "crashcar_internal_stage=1" \
+    "run_id=${RUN_ID}_B1_noinj_producer" "crashcar_internal_stage=1" \
     "crashcar_internal_bg_only=0" "crashcar_internal_live_background_role=producer" \
+    "slurm_job_name=${B1_JOB_NAME}" \
     "slurm_partition=${SLURM_PARTITION_VALUE}" "slurm_time=${SLURM_TIME_VALUE}" \
     "slurm_mem=${SLURM_MEM_VALUE}" "slurm_gres=${SLURM_GRES_VALUE}" \
     "slurm_cpus_per_task=${SLURM_CPUS_PER_TASK_VALUE}" \
@@ -592,21 +568,19 @@ write_env_file "${BG_CONFIG}" \
     "bank_per_worker=${BG_BANKS_PER_WORKER}" "bank_file=${O3_BANK_DIR}" \
     "background_accumulation=${BG_ACCUM_SECONDS}" \
     "background_update=${BG_UPDATE_SECONDS}" \
+    "cohfar_accumbackground_snapshot_interval_seconds=${MULTI_SNAPSHOT_SECONDS}" \
+    "finalsink_fapupdater_collect_walltime=${MULTI_COLLECT_WALLTIME}" \
     "zerolag_update_seconds=${ZEROLAG_UPDATE_SECONDS}" \
     "tail_log_FAR=${TAIL_LOG_FAR}" "SNR_series_logFAR_threshold=${SNR_LOG_FAR}" \
     "injection_mode=False" "noninj_stats_loc=${BG_INITIAL_MULTI_STATS}" \
     "single_background_mode=rolling"
-PRODUCER_PID_FILE="${CONTROLLER_DIR}/producer_launcher.pid"
-CONSUMER_PID_FILE="${CONTROLLER_DIR}/consumer_launcher.pid"
-start_stage_async "${BG_CONFIG}" producer "${PRODUCER_PID_FILE}" \
-    "${CONTROLLER_DIR}/producer_launcher.log"
-wait_for_first_backgrounds "${PRODUCER_PID_FILE}"
 
 write_env_file "${INJ_CONFIG}" \
     "root=${SOURCE_ROOT_VALUE}" "run_root=${INJ_ROOT}" \
-    "run_id=${RUN_ID}_inj_bns" "crashcar_internal_stage=1" \
+    "run_id=${RUN_ID}_B2_injection_consumer" "crashcar_internal_stage=1" \
     "crashcar_internal_bg_only=0" "crashcar_internal_live_background_role=consumer" \
     "crashcar_internal_live_background_root=${BG_RUN_ROOT}" \
+    "slurm_job_name=${B2_JOB_NAME}" \
     "slurm_partition=${SLURM_PARTITION_VALUE}" "slurm_time=${SLURM_TIME_VALUE}" \
     "slurm_mem=${SLURM_MEM_VALUE}" "slurm_gres=${SLURM_GRES_VALUE}" \
     "slurm_cpus_per_task=${SLURM_CPUS_PER_TASK_VALUE}" \
@@ -619,6 +593,8 @@ write_env_file "${INJ_CONFIG}" \
     "background_update=${BG_UPDATE_SECONDS}" \
     "cohfar_assignfar_refresh_interval_seconds=${BG_UPDATE_SECONDS}" \
     "finalsink_fapupdater_interval_seconds=${BG_UPDATE_SECONDS}" \
+    "cohfar_accumbackground_snapshot_interval_seconds=${MULTI_SNAPSHOT_SECONDS}" \
+    "finalsink_fapupdater_collect_walltime=${MULTI_COLLECT_WALLTIME}" \
     "zerolag_update_seconds=${ZEROLAG_UPDATE_SECONDS}" \
     "tail_log_FAR=${TAIL_LOG_FAR}" "SNR_series_logFAR_threshold=${INJ_SNR_LOG_FAR}" \
     "injection_mode=True" "injection_file=${injection_file}" \
@@ -630,16 +606,25 @@ write_env_file "${INJ_CONFIG}" \
     "noninj_stats_loc=${BG_RUN_ROOT}/run" \
     "single_background_mode=live_readonly" \
     "crashcar_background_required_seconds=${BG_ACCUM_SECONDS}"
+
+# Launch both stage controllers from the same one-click invocation so the B1
+# and B2 Slurm pairs are submitted concurrently; background readiness never
+# delays B2 submission.  Each B2 worker validates B1 staged provenance, then
+# waits in its Slurm wrapper for the same-worker single background and complete
+# 2w/1d/2h normal multi inputs before entering the scientific pipeline.
+start_stage_async "${BG_CONFIG}" producer "${PRODUCER_PID_FILE}" \
+    "${CONTROLLER_DIR}/producer_launcher.log"
 start_stage_async "${INJ_CONFIG}" consumer "${CONSUMER_PID_FILE}" \
     "${CONTROLLER_DIR}/consumer_launcher.log"
 if ! stage_pid_active "${PRODUCER_PID_FILE}"; then
-    log "ERROR producer stopped as injection consumer started"
-    write_status phase=failed reason=producer_not_active_at_consumer_start
+    log "ERROR producer launcher stopped during concurrent stage startup"
+    fail_closed_b2_on_b1_loss producer_launcher_lost_at_concurrent_start \
+        "$(stage_phase "${BG_RUN_ROOT}")" "$(stage_phase "${INJ_ROOT}")"
     exit 3
 fi
-write_status phase=overlap_started producer_active=true \
+write_status phase=concurrent_launchers_started producer_active=true \
     producer_job_id="$(stage_job_id "${BG_RUN_ROOT}")" \
     consumer_job_id="$(stage_job_id "${INJ_ROOT}")" \
-    first_single_readiness="${CONTROLLER_DIR}/first_single_readiness.json" \
-    first_multi_readiness="${CONTROLLER_DIR}/first_multi_readiness.json"
+    initial_backgrounds_required=false \
+    consumer_soft_start_far_semantics=far_sngl_nonpositive_until_refresh
 monitor_overlapping_stages "${PRODUCER_PID_FILE}" "${CONSUMER_PID_FILE}"
