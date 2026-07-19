@@ -113,8 +113,18 @@ NOISE_BETA=${NOISE_BETA:--1.0}
 RANK_OFFSET=${RANK_OFFSET:-0.0}
 DEFAULT_SHAPE_DOF=${DEFAULT_SHAPE_DOF:-74.30962572260326}
 PLOT_LLR_MIN=${PLOT_LLR_MIN:--10}
-TAIL_LOG10_FAR=${TAIL_LOG10_FAR:--2.0}
-FAR_FIT_BOUNDARY=${FAR_FIT_BOUNDARY:-0.01}
+TAIL_LOG10_FAR=${tail_log_FAR:-${tai_log_FAR:-${TAIL_LOG_FAR:-${TAIL_LOG10_FAR:--2.0}}}}
+TAIL_VALUES=$(python3 - "${TAIL_LOG10_FAR}" <<'PY'
+import math
+import sys
+value=float(sys.argv[1])
+if not math.isfinite(value) or not value<0.0:
+    raise SystemExit("sidecar tail_log_FAR must be finite and strictly negative")
+print("{:.17g} {:.17g}".format(value, math.pow(10.0, value)))
+PY
+) || exit 2
+read -r TAIL_LOG10_FAR FAR_FIT_BOUNDARY <<< "${TAIL_VALUES}"
+unset TAIL_VALUES
 SINGLE_BACKGROUND_MODE=${SINGLE_BACKGROUND_MODE:-rolling}
 SINGLE_FROZEN_BACKGROUND_JSON=${SINGLE_FROZEN_BACKGROUND_JSON:-}
 SINGLE_FROZEN_BACKGROUND_RUN_DIR=${SINGLE_FROZEN_BACKGROUND_RUN_DIR:-}

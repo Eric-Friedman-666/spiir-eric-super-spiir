@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -19,26 +21,91 @@ USER_CRASHCAR_ENV = SCRIPT_DIR.parents[2] / "scripts" / "crashcar.env"
 CRASHCAR_SCRIPT_DIR = SCRIPT_DIR.parents[1] / "share" / "scripts" / "crashcar"
 CRASHCAR_SINGLEFAR_C = SCRIPT_DIR.parents[1] / "gst" / "cuda" / "cohfar" / "crashcar_singlefar.c"
 POSTCOHSPIIR_ONLINE = SCRIPT_DIR.parents[1] / "bin" / "gstlal_inspiral_postcohspiir_online"
+CRASHCAR_SPIIRPARTS = SCRIPT_DIR.parents[1] / "python" / "pipemodules" / "spiirparts.py"
+CRASHCAR_PLOT = SCRIPT_DIR.parents[1] / "bin" / "crashcar_plot.py"
 
 
 class EngineeringFlowContractTests(unittest.TestCase):
-    def test_tail_clipping_is_archived_not_active(self) -> None:
-        single_source = (SCRIPT_DIR / "single_detector_far.py").read_text()
-        plot_source = (SCRIPT_DIR / "plot_single_llr_far.py").read_text()
-        self.assertNotIn("_clip_tail_fit_outliers", single_source)
-        self.assertNotIn("RankBackground._clip_tail_fit_outliers", plot_source)
-        self.assertIn("all available tail points", single_source)
-        self.assertIn('"tail_clipping": "disabled"', plot_source)
+    def _causal_case(self):
+        tests_dir = SCRIPT_DIR / "tests"
+        for path in (tests_dir, SCRIPT_DIR):
+            if str(path) not in sys.path:
+                sys.path.insert(0, str(path))
+        import test_sidecar_causal_engine as causal_tests
 
-    def test_o3a_online_frontier_bg_is_no_injection_chunked(self) -> None:
-        source = (SCRIPT_DIR / "run_o3a_bns_online_frontier_bg.sh").read_text()
-        self.assertIn("Online-frontier controller", source)
-        self.assertIn("WGUO_O3A_INJECTION_MODE=none", source)
-        self.assertIn('WGUO_O3A_INJECTION_FILE=""', source)
-        self.assertIn("CHUNK_SECONDS=${CHUNK_SECONDS:-86400}", source)
-        self.assertIn("NUM_CHUNKS=${NUM_CHUNKS:-7}", source)
-        self.assertIn("stats_loc=\"${dir}\"", source)
-        self.assertIn("Future online injection tests must expose injection rows chunk by chunk", source)
+        case = causal_tests.CausalEngineTests(methodName="runTest")
+        case.setUp()
+        self.addCleanup(case.tearDown)
+        return causal_tests, case
+    def test_single_detector_branch_requires_exact_h1_l1(self) -> None:
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
+        from single_detector_far import (
+            SingleDetectorBranch,
+            make_default_likelihood_model,
+        )
+
+        branch = SingleDetectorBranch(
+            make_default_likelihood_model(),
+            ifos=("H1", "L1"),
+            min_snr=4.0,
+            background_window_seconds=3600,
+            fit_min_points=2,
+        )
+        self.assertEqual(branch.ifos, ("H1", "L1"))
+        for invalid_ifos in (("H1",), ("L1",), ("H1", "L1", "V1")):
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "formal single-detector branch requires exactly H1,L1"):
+                SingleDetectorBranch(
+                    make_default_likelihood_model(),
+                    ifos=invalid_ifos,
+                    min_snr=4.0,
+                    background_window_seconds=3600,
+                    fit_min_points=2,
+                )
+
+    def test_tail_clipping_is_archived_not_active(self) -> None:
+        if str(SCRIPT_DIR) not in sys.path:
+            sys.path.insert(0, str(SCRIPT_DIR))
+        import verification_sidecar_numeric as numeric
+
+        ranks = [0.0, 1.0, 1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 100.0]
+        r_tail, slope, points = numeric.build_anchored_tail(ranks, 1000.0)
+        self.assertEqual(len(points), len(set(ranks)))
+        self.assertEqual(points[-1][0], 100.0)
+        self.assertEqual(slope, numeric.fit_anchored_tail(points, r_tail))
+        direct, direct_branch, _count, _floor = numeric.assigned_far(
+            ranks, r_tail, 1000.0, r_tail, slope)
+        expected, _count, _floor = numeric.calculated_far(
+            ranks, r_tail, 1000.0)
+        self.assertEqual(direct_branch, "direct")
+        self.assertEqual(direct.hex(), expected.hex())
+        tail, tail_branch, _count, _floor = numeric.assigned_far(
+            ranks, math.nextafter(r_tail, math.inf),
+            1000.0, r_tail, slope)
+        self.assertEqual(tail_branch, "tail")
+        self.assertTrue(math.isfinite(tail) and tail > 0.0)
+
+    def test_formal_workflow_runs_one_continuous_pipeline_per_stage(self) -> None:
+        workflow = (
+            CRASHCAR_SCRIPT_DIR / "crashcar_frozen_injection_workflow.sh"
+        ).read_text()
+        pipeline = (CRASHCAR_SCRIPT_DIR / "crashcar_pipeline.sh").read_text()
+        self.assertIn(
+            'run_stage "${BG_CONFIG}" "no-injection background"',
+            workflow)
+        self.assertIn(
+            'run_stage "${INJ_CONFIG}" "continuous injection"',
+            workflow)
+        self.assertIn("injection_chunks=disabled", workflow)
+        self.assertNotIn("filter_injection_chunk", workflow)
+        self.assertNotIn('"injection_chunk_seconds=', workflow)
+        self.assertNotIn('"injection_chunk_hour=', workflow)
+        self.assertEqual(
+            [line.strip() for line in pipeline.splitlines()].count(
+                '"${cmd[@]}"'),
+            1)
 
     def test_o3a_py3_wrapper_requires_external_multi_background(self) -> None:
         source = (SCRIPT_DIR / "wguo_o3a_bns_py3_pipeline.sh").read_text()
@@ -152,9 +219,11 @@ class EngineeringFlowContractTests(unittest.TestCase):
             self.assertIn("detector_response_file=/normal/o3/detrsp.xml", staged_config)
             self.assertNotIn("source_root=", staged_config)
 
-    def test_crashcar_frozen_injection_workflow_uses_lower_data_contract(self) -> None:
-        source = (CRASHCAR_SCRIPT_DIR / "crashcar_frozen_injection_workflow.sh").read_text()
-        for required in [
+    def test_crashcar_frozen_injection_workflow_freezes_matching_bundle(self) -> None:
+        source = (
+            CRASHCAR_SCRIPT_DIR / "crashcar_frozen_injection_workflow.sh"
+        ).read_text()
+        for required in (
             "require_var injection_data_file",
             "require_var injection_detector_response_file",
             "require_var injection_start_gps",
@@ -163,375 +232,154 @@ class EngineeringFlowContractTests(unittest.TestCase):
             "require_var injection_bg_detector_response_file",
             "require_var injection_bg_start_gps",
             "require_var injection_bg_segment_xml",
-        ]:
+        ):
             self.assertIn(required, source)
-        self.assertIn("duration_seconds_from injection_bg_duration_seconds injection_bg_duration_hour", source)
-        self.assertIn("duration_seconds_from injection_duration_seconds injection_duration_hour", source)
-        self.assertIn("INJ_CHUNK_SECONDS=${injection_chunk_seconds", source)
-        self.assertIn("COMMON_DATA_FILE=", source)
-        self.assertIn("COMMON_DETECTOR_RESPONSE_FILE=", source)
-        self.assertIn("COMMON_SEGMENT_XML=", source)
-        self.assertIn("injection_data_file=${injection_data_file:-${COMMON_DATA_FILE}}", source)
-        self.assertIn("injection_bg_data_file=${injection_bg_data_file:-${COMMON_DATA_FILE}}", source)
-        self.assertIn("injection_start_gps=${injection_start_gps:-${start_gps", source)
-        self.assertIn("injection_bg_start_gps=${injection_bg_start_gps:-${start_gps", source)
-        self.assertIn('BG_WORKERS=${injection_bg_worker_number:-${INJECTION_BG_WORKER_NUMBER:-${worker_number:-1}}}', source)
-        self.assertIn("data_file=${injection_bg_data_file}", source)
-        self.assertIn("data_file=${injection_data_file}", source)
-        self.assertIn("detector_response_file=${injection_detector_response_file}", source)
-        self.assertNotIn('"data_file=${data_file', source)
-        self.assertNotIn('"detector_response_file=${detector_response_file', source)
-        self.assertIn("SLURM_PARTITION_VALUE=", source)
-        self.assertIn("slurm_partition=${SLURM_PARTITION_VALUE}", source)
-        self.assertIn("slurm_time=${SLURM_TIME_VALUE}", source)
-        self.assertNotIn('"source_root=${SOURCE_ROOT_VALUE}"', source)
-        self.assertIn("duration=${BG_DURATION_SECONDS}", source)
-        self.assertIn("background_accumulation=${BG_ACCUM_SECONDS}", source)
-        self.assertIn("BG_ACCUM_SECONDS=${BG_DURATION_SECONDS}", source)
-        self.assertIn("BG_UPDATE_SECONDS=${BG_DURATION_SECONDS}", source)
-        self.assertIn("filter_injection_chunk", source)
-        self.assertIn("BG_INITIAL_MULTI_STATS=${noninj_stats_loc:-/fred/oz016/wguo/odds_ratio/O3a/chunk2/multi_det-BNS}", source)
-        self.assertIn('materialize_frozen_multi_stats "${BG_RUN_ROOT}/run" "${INJ_WORKERS}" "${BG_WORKERS}" "${FROZEN_MULTI_DIR}"', source)
-        self.assertIn("ensure_frozen_multi_stat()", source)
-        self.assertIn('ensure_frozen_multi_stat "${bg_run_dir}" "${src_jobno}" "${suffix}" "${src}"', source)
-        self.assertIn('find "${worker_dir}" -maxdepth 1 -type f -name \'bank*_stats_*.xml.gz\'', source)
-        self.assertIn('run_cohfar_calc_fap "${inputs}" "${output}" "${FROZEN_MULTI_IFOS}"', source)
-        self.assertIn('require_file "${output}" "frozen_multi_stats_${src_jobno}_${suffix}"', source)
-        self.assertNotIn("injection_bg_seed_noninj_stats_loc", source)
+        self.assertIn(
+            "duration_seconds_from injection_bg_duration_seconds "
+            "injection_bg_duration_hour", source)
+        self.assertIn(
+            "duration_seconds_from injection_duration_seconds "
+            "injection_duration_hour", source)
+        self.assertIn(
+            'freeze_background_bundle "${BG_RUN_ROOT}" "${FROZEN_BUNDLE_DIR}"',
+            source)
+        self.assertIn(
+            'source_single = worker_run / "single_background.json"', source)
+        self.assertIn(
+            'source = worker_run / f"{jobno}_marginalized_stats_{span}.xml.gz"',
+            source)
+        self.assertIn('"background_run_root": str(bg_root)', source)
+        self.assertIn("single_background_mode=frozen", source)
+        self.assertIn("noninj_stats_loc=${FROZEN_MULTI_DIR}", source)
+        self.assertIn("injection_chunks=disabled", source)
+        self.assertIn('"continuous injection"', source)
+        self.assertNotIn("filter_injection_chunk", source)
         self.assertNotIn("FROZEN_MULTI_FALLBACK_DIR", source)
         self.assertNotIn("fallback_src=", source)
-        self.assertIn("noninj_stats_loc=${FROZEN_MULTI_DIR}", source)
-        self.assertIn("single_background_mode=frozen", source)
-        self.assertIn("single_frozen_background_json=${SINGLE_BG_JSON}", source)
-        self.assertIn("crashcar_build_last_bg_artifacts=0", source)
-        self.assertNotIn("injection_bg_BG_accumulation_seconds", source)
-        self.assertNotIn("injection_bg_BG_accumulation_hour", source)
-        self.assertNotIn("injection_bg_BG_update_seconds", source)
-        self.assertNotIn("injection_bg_BG_update_hour", source)
-        self.assertIn("INJ_ACCUM_SECONDS=${BG_ACCUM_SECONDS}", source)
-        self.assertIn("INJ_BG_UPDATE_SECONDS=${BG_UPDATE_SECONDS}", source)
-        self.assertNotIn("INJ_ACCUM_HOUR=${injection_BG_accumulation_hour", source)
-        self.assertNotIn("INJ_ACCUM_SECONDS=${injection_BG_accumulation_seconds", source)
-        self.assertNotIn("INJ_BG_UPDATE_HOUR=${injection_BG_update_hour", source)
-        self.assertIn("ZEROLAG_UPDATE_HOUR=${zerolag_update_hour:-1}", source)
-        self.assertIn("INJ_SNR_LOG_FAR=${injection_SNR_series_logFAR_threshold", source)
-        self.assertIn("crashcar_preserve_table_single_far=0", source)
-        self.assertIn("crashcar_finalsink_preserve_table_single_far=1", source)
 
     def test_crashcar_controller_forbids_unfrozen_injection_backgrounds(self) -> None:
-        source = (CRASHCAR_SCRIPT_DIR / "crashcar_controller.sh").read_text()
-        self.assertIn('injection_mode=True requires single_background_mode=frozen', source)
-        self.assertIn('injection_bg_duration_seconds or injection_bg_duration_hour required when injection_mode=True', source)
-        self.assertIn("single_background_mode=frozen requires", source)
-        self.assertIn("run_single_ledger_final_update", source)
-        self.assertIn("PATCH_ZEROLAG_SINGLE_SNR_SERIES_VALUE", source)
-        self.assertIn('export GST_DEBUG="${GST_DEBUG:-}"', source)
-        self.assertIn('sbatch_args+=(--partition="${SLURM_PARTITION}")', source)
-        self.assertIn("skipping local background artifact build for this stage", source)
-        self.assertIn('mkdir -p "${ROOT}/bin"', source)
-        self.assertIn('cp "${SOURCE_ROOT}/gstlal-spiir/bin/gstlal_inspiral_postcohspiir_online"', source)
-        self.assertIn('chmod +x "${ROOT}/bin/gstlal_inspiral_postcohspiir_online"', source)
-        self.assertIn('CRASHCAR_SINGLE_OUTPUT_MODE="all"', source)
-        self.assertIn('SINGLE_OUTPUT_MODE="all"', source)
-        self.assertIn("--single-output-mode all", source)
-        self.assertNotIn('CRASHCAR_SINGLE_OUTPUT_MODE="single-only"', source)
-        self.assertNotIn("--single-output-mode single-only", source)
+        controller_source = (
+            CRASHCAR_SCRIPT_DIR / "crashcar_controller.sh").read_text()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            controller = scripts / "crashcar_controller.sh"
+            controller.write_text(controller_source)
+            controller.chmod(0o755)
+            for name in (
+                    "frames.cache", "detrsp.xml", "segments.xml",
+                    "injections.xml"):
+                (root / name).write_text("fixture\n")
+            (root / "banks").mkdir()
+            config = scripts / "crashcar.env"
+            config.write_text("\n".join((
+                f"root={SCRIPT_DIR.parents[1]}",
+                "start_gps=100",
+                "duration=10",
+                f"detector_response_file={root / 'detrsp.xml'}",
+                f"data_file={root / 'frames.cache'}",
+                f"segment_xml={root / 'segments.xml'}",
+                f"bank_file={root / 'banks'}",
+                "dof=120",
+                "injection_mode=True",
+                f"injection_file={root / 'injections.xml'}",
+                f"injection_bg_data_file={root / 'frames.cache'}",
+                f"injection_bg_detector_response_file={root / 'detrsp.xml'}",
+                "injection_bg_start_gps=100",
+                "injection_bg_duration_seconds=10",
+                f"injection_bg_segment_xml={root / 'segments.xml'}",
+                "single_background_mode=rolling",
+                "",
+            )))
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            sbatch_marker = root / "sbatch_was_called"
+            fake_sbatch = fake_bin / "sbatch"
+            fake_sbatch.write_text(
+                "#!/bin/sh\nprintf called > \"$SBATCH_MARKER\"\nexit 99\n")
+            fake_sbatch.chmod(0o755)
+            env = dict(os.environ)
+            env.update({
+                "CRASHCAR_CONFIG_FILE": str(config),
+                "PATH": f"{fake_bin}:{env['PATH']}",
+                "SBATCH_MARKER": str(sbatch_marker),
+            })
+            result = subprocess.run(
+                ["bash", str(controller)],
+                cwd=str(root), env=env, check=False,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(
+                "requires single_background_mode=frozen", result.stderr)
+            self.assertFalse(sbatch_marker.exists())
 
     def test_crashcar_pipeline_marks_injection_stats_as_non_background(self) -> None:
         source = (CRASHCAR_SCRIPT_DIR / "crashcar_pipeline.sh").read_text()
         self.assertIn("DO_NOT_USE_AS_BACKGROUND_INJECTION_STATS.txt", source)
         self.assertIn("Do not use local accumulated backgrounds from this injection foreground", source)
 
-    def test_crashcar_can_export_full_snr_series_evidence_surface(self) -> None:
-        source = CRASHCAR_SINGLEFAR_C.read_text()
-        self.assertIn("write_all_snr_series", source)
-        self.assertIn("element->snr_series_log10_far_threshold >= 90.0", source)
-        self.assertIn("write_all_snr_series || snr_series_hit_single_far", source)
+    def test_normal_finalsink_owns_snr_series_evidence(self) -> None:
+        crashcar_c = CRASHCAR_SINGLEFAR_C.read_text()
+        finalsink = (
+            SCRIPT_DIR.parents[1] /
+            "python/pipemodules/postcoh_finalsink.py").read_text()
+        online = POSTCOHSPIIR_ONLINE.read_text()
+        pipeline = (CRASHCAR_SCRIPT_DIR / "crashcar_pipeline.sh").read_text()
+        self.assertIn('"--snr-series-logfar-threshold"', online)
+        self.assertIn(
+            "snr_series_logfar_threshold="
+            "options.snr_series_logfar_threshold", online)
+        self.assertIn(
+            '--snr-series-logfar-threshold "${snr_series_logfar_threshold}"',
+            pipeline)
+        self.assertIn("def __write_cluster_zero_coinc_if_needed", finalsink)
+        self.assertIn("assemble_ligolw_snr_series_arrays", finalsink)
+        self.assertIn("lal.series.build_COMPLEX8TimeSeries", finalsink)
+        self.assertNotIn("write_all_snr_series", crashcar_c)
+        self.assertNotIn("snr_series_output_dir", crashcar_c)
 
-    def test_worker_owns_exactly_one_bank_group(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            helper = tmp_path / "helper.sh"
-            helper.write_text(
-                'run_spiir_py3() { printf "task=%s args=%s\\n" "${SLURM_ARRAY_TASK_ID}" "$#"; }\n'
-            )
-            env = dict(os.environ)
-            env.update({
-                "RUN_DIR": str(tmp_path),
-                "MAX_GROUP": "5",
-                "NODES_AMOUNT": "6",
-                "SPIIR_HELPER_FUNCTIONS": str(helper),
-            })
-            result = subprocess.run(
-                ["bash", str(SCRIPT_DIR / "run_bank_group_worker.sh"), "2", "6"],
-                check=True,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            self.assertIn("owns bank group 002", result.stdout)
-            self.assertIn("task=2", result.stdout)
-            self.assertNotIn("004", result.stdout)
+    def test_causal_worker_bank_mapping_fails_closed(self) -> None:
+        causal, case = self._causal_case()
+        engine = case._engine()
+        results = engine.process_rows([
+            causal.make_row(1, 100, 1, bank=1),
+        ])
+        self.assertEqual(len(results), 2)
+        self.assertTrue(all(
+            item["status"] == causal.subject.STATUS_FAILED_LLR
+            and item["reason"] == "worker_bank_mapping_mismatch"
+            for item in results))
 
-    def test_out_of_range_worker_does_not_run_pipeline(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            helper = tmp_path / "helper.sh"
-            helper.write_text('run_spiir_py3() { printf "SHOULD_NOT_RUN\\n"; }\n')
-            env = dict(os.environ)
-            env.update({
-                "RUN_DIR": str(tmp_path),
-                "MAX_GROUP": "5",
-                "NODES_AMOUNT": "7",
-                "SPIIR_HELPER_FUNCTIONS": str(helper),
-            })
-            result = subprocess.run(
-                ["bash", str(SCRIPT_DIR / "run_bank_group_worker.sh"), "6", "7"],
-                check=True,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            self.assertIn("has no bank group", result.stdout)
-            self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+    def test_causal_live_run_must_complete_one_background_window(self) -> None:
+        causal, case = self._causal_case()
+        with self.assertRaisesRegex(
+                causal.subject.CausalContractError,
+                "run cannot complete one background window"):
+            case._engine(run_end=500, l1_end=500)
 
-    def test_run_config_defaults_to_wguo_py3_frontend(self) -> None:
-        env = dict(os.environ)
-        env.update({
-            "SPIIR_BUILD_NAME": "",
-            "SPIIR_RUN_FUNCTION": "",
-            "SPIIR_SOURCE_DIR": "",
-        })
-        result = subprocess.run(
-            [
-                "bash",
-                "-lc",
-                (
-                    f"source {shlex.quote(str(SCRIPT_DIR / 'run_config.sh'))}; "
-                    'printf "build=%s\\nrunner=%s\\nsource=%s\\n" '
-                    '"${SPIIR_BUILD_NAME}" "${SPIIR_RUN_FUNCTION}" "${SPIIR_SOURCE_DIR}"'
-                ),
-            ],
-            check=True,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        self.assertIn("build=wguo-single-det-py3", result.stdout)
-        self.assertIn("runner=run_spiir_py3", result.stdout)
-        self.assertIn("/build/wguo-single-det-py3/source", result.stdout)
-
-    def test_submit_fails_when_slurm_allocation_has_too_few_nodes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            helper = tmp_path / "helper.sh"
-            helper.write_text("# no-op helper for allocation guard test\n")
-            env = dict(os.environ)
-            env.update({
-                "RUN_DIR": str(tmp_path),
-                "SCRIPT_DIR": str(SCRIPT_DIR),
-                "MAX_GROUP": "1",
-                "NODES_AMOUNT": "2",
-                "SLURM_JOB_NUM_NODES": "1",
-                "SLURM_JOB_ID": "allocation_guard",
-                "SPIIR_HELPER_FUNCTIONS": str(helper),
-                "SPIIR_RUN_FUNCTION": "run_spiir",
-                "AUTO_CLIP_FRAME_CACHE_TO_COMMON_SEGMENT": "0",
-            })
-            result = subprocess.run(
-                ["bash", str(SCRIPT_DIR / "submit.sh")],
-                check=False,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("allocated 1 nodes", result.stderr)
-
-    def test_formal_run_config_rejects_short_background_window(self) -> None:
-        env = dict(os.environ)
-        env.update({
-            "BACKGROUND_ACCUMULATION_SECONDS": "600",
-            "FORMAL_BACKGROUND_ACCUMULATION_SECONDS": "10800",
-            "ALLOW_SHORT_BACKGROUND_DEBUG": "0",
-        })
-        result = subprocess.run(
-            ["bash", "-lc", f"source {shlex.quote(str(SCRIPT_DIR / 'run_config.sh'))}"],
-            check=False,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("BACKGROUND_CONTRACT_ERROR", result.stderr)
-
-    def test_short_background_window_requires_explicit_debug_flag(self) -> None:
-        env = dict(os.environ)
-        env.update({
-            "BACKGROUND_ACCUMULATION_SECONDS": "600",
-            "FORMAL_BACKGROUND_ACCUMULATION_SECONDS": "10800",
-            "ALLOW_SHORT_BACKGROUND_DEBUG": "1",
-        })
-        result = subprocess.run(
-            ["bash", "-lc", f"source {shlex.quote(str(SCRIPT_DIR / 'run_config.sh'))}"],
-            check=False,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_direct_ledger_rejects_short_background_without_debug_flag(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT_DIR / "assign_frozen_far_ledger.py"),
-                    "--feature-csv",
-                    str(tmp_path / "features.csv"),
-                    "--output",
-                    str(tmp_path / "single_final_far_all.csv"),
-                    "--summary",
-                    str(tmp_path / "summary.json"),
-                    "--background-window-seconds",
-                    "600",
-                    "--background-required-seconds",
-                    "600",
-                    "--background-update-seconds",
-                    "600",
-                ],
-                check=False,
-                cwd=str(SCRIPT_DIR),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("BACKGROUND_CONTRACT_ERROR", result.stderr)
-
-    def test_append_only_assignment_records_bg_ids_and_calculated_far(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            feature_csv = tmp_path / "features.csv"
-            fields = [
-                "source_file",
-                "source_row",
-                "ifo",
-                "rho",
-                "chisq",
-                "tmplt_idx",
-                "bankid",
-                "end_time",
-                "end_time_ns",
-                "is_background",
-            ]
-            rows = []
-            for idx in range(70):
-                rows.append({
-                    "source_file": "000/000_zerolag_0_300.xml.gz",
-                    "source_row": idx,
-                    "ifo": "H1",
-                    "rho": 5.0 + (idx % 8) * 0.2,
-                    "chisq": 1.0 + (idx % 6) * 0.1,
-                    "tmplt_idx": idx % 5,
-                    "bankid": 0,
-                    "end_time": 1 + idx * 4,
-                    "end_time_ns": 0,
-                    "is_background": 0,
-                })
-            rows.extend([
-                {
-                    "source_file": "000/000_zerolag_300_100.xml.gz",
-                    "source_row": 1000,
-                    "ifo": "H1",
-                    "rho": 8.5,
-                    "chisq": 1.1,
-                    "tmplt_idx": 2,
-                    "bankid": 0,
-                    "end_time": 320,
-                    "end_time_ns": 0,
-                    "is_background": 0,
-                },
-                {
-                    "source_file": "000/000_zerolag_400_100.xml.gz",
-                    "source_row": 1001,
-                    "ifo": "H1",
-                    "rho": 8.9,
-                    "chisq": 1.2,
-                    "tmplt_idx": 3,
-                    "bankid": 0,
-                    "end_time": 420,
-                    "end_time_ns": 0,
-                    "is_background": 0,
-                },
-            ])
-            with feature_csv.open("w", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=fields)
-                writer.writeheader()
-                writer.writerows(rows)
-
-            output = tmp_path / "single_final_far_all.csv"
-            archive = tmp_path / "backgrounds"
-            summaries = []
-            for run_index in (1, 2):
-                summary = tmp_path / f"summary{run_index}.json"
-                subprocess.run(
-                    [
-                        sys.executable,
-                        str(SCRIPT_DIR / "assign_frozen_far_ledger.py"),
-                        "--feature-csv",
-                        str(feature_csv),
-                        "--output",
-                        str(output),
-                        "--candidate-output",
-                        str(tmp_path / "candidates.csv"),
-                        "--summary",
-                        str(summary),
-                        "--ifos",
-                        "H1,L1",
-                        "--min-snr",
-                        "4",
-                        "--background-window-seconds",
-                        "300",
-                        "--background-required-seconds",
-                        "300",
-                        "--background-update-seconds",
-                        "100",
-                        "--allow-short-background-debug",
-                        "--data-start-gps",
-                        "0",
-                        "--fit-min-points",
-                        "2",
-                        "--background-archive-dir",
-                        str(archive),
-                    ],
-                    check=True,
-                    cwd=str(SCRIPT_DIR),
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                summaries.append(json.loads(summary.read_text()))
-
-            with output.open(newline="") as handle:
-                assigned_rows = list(csv.DictReader(handle))
-            self.assertEqual(summaries[0]["newly_assigned_rows"], 2)
-            self.assertEqual(summaries[1]["newly_assigned_rows"], 0)
-            self.assertEqual(summaries[1]["duplicate_candidate_rows"], 2)
-            self.assertEqual([row["assign_bg_id"] for row in assigned_rows], ["BG-000", "BG-001"])
-            self.assertTrue((archive / "BG-000.json").exists())
-            self.assertTrue((archive / "BG-001.json").exists())
-            for row in assigned_rows:
-                self.assertTrue(row["assigned_far"])
-                self.assertTrue(row["calculated_far"])
-                self.assertTrue(row["assign_bg_file"])
+    def test_causal_epoch_scores_before_same_event_support_commit(self) -> None:
+        causal, case = self._causal_case()
+        engine = case._engine()
+        rows = case._seed_four() + [
+            causal.make_row(5, 1000, 5, rho_h=4.0, rho_l=4.1),
+        ]
+        results = engine.process_rows(rows)
+        at_epoch = [item for item in results if item["event_id"] == 5]
+        self.assertEqual(len(at_epoch), 2)
+        self.assertTrue(all(
+            item["status"] == causal.subject.STATUS_ASSIGNED_DIRECT
+            and item["bg_epoch_seconds"] == 1000
+            and item["calculated_count_ge"] == 4
+            for item in at_epoch))
+        background = json.loads(
+            (case.root / "single_background.json").read_text())
+        self.assertTrue(all(
+            background["backgrounds"][ifo]["support_count"] == 4
+            for ifo in ("H1", "L1")))
+        self.assertEqual(
+            {ifo: len(records) for ifo, records in engine.support.items()},
+            {"H1": 5, "L1": 5})
 
     def test_full_background_triggers_drive_loaded_far_assignment(self) -> None:
         sys.path.insert(0, str(SCRIPT_DIR))
@@ -560,7 +408,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
 
             branch = SingleDetectorBranch(
                 make_default_likelihood_model(),
-                ifos=("H1",),
+                ifos=("H1", "L1"),
                 min_snr=4.0,
                 background_window_seconds=3600,
                 fit_min_points=2,
@@ -581,7 +429,7 @@ class EngineeringFlowContractTests(unittest.TestCase):
 
             loaded = SingleDetectorBranch(
                 make_default_likelihood_model(),
-                ifos=("H1",),
+                ifos=("H1", "L1"),
                 min_snr=4.0,
                 background_window_seconds=3600,
                 fit_min_points=2,
@@ -601,216 +449,42 @@ class EngineeringFlowContractTests(unittest.TestCase):
             result = loaded.assign_feature(query)
             self.assertAlmostEqual(result.direct_far, expected_direct_far)
 
-    def test_fixed_background_assignment_does_not_build_bg_from_injections(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            fields = [
-                "source_file",
-                "source_row",
-                "ifo",
-                "rho",
-                "chisq",
-                "tmplt_idx",
-                "bankid",
-                "end_time",
-                "end_time_ns",
-                "is_background",
-            ]
+    def test_frozen_assignment_keeps_injection_out_of_background(self) -> None:
+        causal, case = self._causal_case()
+        live = case._engine()
+        live.process_rows(case._seed_four() + [
+            causal.make_row(5, 1000, 5, rho_h=4.0, rho_l=4.1),
+        ])
+        background_path = case.root / "single_background.json"
+        before_bytes = background_path.read_bytes()
+        before_sha = hashlib.sha256(before_bytes).hexdigest()
+        before_version = json.loads(before_bytes)["accepted_version"]
 
-            noinj_features = tmp_path / "noinj_features.csv"
-            rows = []
-            for idx in range(80):
-                rows.append({
-                    "source_file": "000/000_zerolag_0_600.xml.gz",
-                    "source_row": idx,
-                    "ifo": "H1",
-                    "rho": 4.5 + (idx % 10) * 0.1,
-                    "chisq": 1.0 + (idx % 7) * 0.05,
-                    "tmplt_idx": idx % 5,
-                    "bankid": 0,
-                    "end_time": 1 + idx * 5,
-                    "end_time_ns": 0,
-                    "is_background": 0,
-                })
-            rows.append({
-                "source_file": "000/000_zerolag_600_100.xml.gz",
-                "source_row": 1000,
-                "ifo": "H1",
-                "rho": 6.2,
-                "chisq": 1.1,
-                "tmplt_idx": 2,
-                "bankid": 0,
-                "end_time": 620,
-                "end_time_ns": 0,
-                "is_background": 0,
-            })
-            with noinj_features.open("w", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=fields)
-                writer.writeheader()
-                writer.writerows(rows)
-
-            fixed_bg = tmp_path / "fixed_noinj_background.json"
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT_DIR / "single_detector_far.py"),
-                    "feature-csv",
-                    "--feature-csv",
-                    str(noinj_features),
-                    "--output",
-                    str(tmp_path / "bootstrap.csv"),
-                    "--background-output",
-                    str(fixed_bg),
-                    "--ifos",
-                    "H1,L1",
-                    "--min-snr",
-                    "4",
-                    "--foreground-count",
-                    "1",
-                    "--bootstrap-background-from-foreground",
-                    "--background-livetime",
-                    "600",
-                    "--fit-min-points",
-                    "2",
-                ],
-                check=True,
-                cwd=str(SCRIPT_DIR),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            self.assertTrue(fixed_bg.exists())
-
-            inj_features = tmp_path / "inj_features.csv"
-            with inj_features.open("w", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=fields)
-                writer.writeheader()
-                writer.writerows([
-                    {
-                        "source_file": "000/000_zerolag_700_100.xml.gz",
-                        "source_row": 2000,
-                        "ifo": "H1",
-                        "rho": 35.0,
-                        "chisq": 0.8,
-                        "tmplt_idx": 1,
-                        "bankid": 0,
-                        "end_time": 720,
-                        "end_time_ns": 0,
-                        "is_background": 0,
-                    },
-                    {
-                        "source_file": "000/000_zerolag_800_100.xml.gz",
-                        "source_row": 2001,
-                        "ifo": "H1",
-                        "rho": 42.0,
-                        "chisq": 0.7,
-                        "tmplt_idx": 2,
-                        "bankid": 0,
-                        "end_time": 830,
-                        "end_time_ns": 0,
-                        "is_background": 0,
-                    },
-                ])
-
-            output = tmp_path / "single_final_far_all.csv"
-            summary = tmp_path / "fixed_summary.json"
-            archive = tmp_path / "should_not_be_created"
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(SCRIPT_DIR / "assign_frozen_far_ledger.py"),
-                    "--feature-csv",
-                    str(inj_features),
-                    "--output",
-                    str(output),
-                    "--candidate-output",
-                    str(tmp_path / "fixed_candidates.csv"),
-                    "--summary",
-                    str(summary),
-                    "--ifos",
-                    "H1,L1",
-                    "--min-snr",
-                    "4",
-                    "--background-window-seconds",
-                    "300",
-                    "--background-required-seconds",
-                    "300",
-                    "--background-update-seconds",
-                    "100",
-                    "--allow-short-background-debug",
-                    "--fit-min-points",
-                    "2",
-                    "--background-archive-dir",
-                    str(archive),
-                    "--fixed-background-input",
-                    str(fixed_bg),
-                    "--fixed-background-id",
-                    "NOINJ-BG",
-                    "--fixed-background-source",
-                    "unit-test-noinj",
-                ],
-                check=True,
-                cwd=str(SCRIPT_DIR),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-
-            fixed_summary = json.loads(summary.read_text())
-            self.assertTrue(fixed_summary["fixed_background"])
-            self.assertTrue(fixed_summary["background_accumulation_disabled"])
-            self.assertEqual(fixed_summary["newly_assigned_rows"], 2)
-            self.assertFalse(archive.exists())
-            with output.open(newline="") as handle:
-                assigned_rows = list(csv.DictReader(handle))
-            self.assertEqual(len(assigned_rows), 2)
-            for row in assigned_rows:
-                self.assertEqual(row["assign_bg_id"], "NOINJ-BG")
-                self.assertEqual(row["assign_bg_file"], str(fixed_bg))
-                self.assertTrue(row["assigned_far"])
-
-    def test_manual_update_uses_script_dir_from_frozen_run_config(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            logs = tmp_path / "logs"
-            logs.mkdir()
-            (logs / "run_config_1.env").write_text(
-                "\n".join([
-                    f"SCRIPT_DIR={shlex.quote(str(SCRIPT_DIR))}",
-                    "NODES_AMOUNT=6",
-                    "MAX_GROUP=5",
-                    "SINGLE_INPUT_KIND=zerolag",
-                    "BANKS_PER_GROUP=6",
-                    "BACKGROUND_ACCUMULATION_SECONDS=300",
-                    "BACKGROUND_UPDATE_TRIGGER_SECONDS=100",
-                    "MERGE_WORKER_FAR_OUTPUTS=0",
-                    "",
-                ])
-            )
-            env = dict(os.environ)
-            env.update({
-                "SINGLE_WORKER_ID": "2",
-                "SINGLE_WORKER_GROUP": "2",
-                "SINGLE_WORKER_COUNT": "6",
-            })
-            subprocess.run(
-                [
-                    "bash",
-                    str(SCRIPT_DIR / "update_single_background_once.sh"),
-                    str(tmp_path),
-                ],
-                check=True,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            status = json.loads(
-                (tmp_path / "monitor/worker_2/latest_single_background_status.json").read_text()
-            )
-            self.assertEqual(status["worker_group"], "2")
-            self.assertFalse(status["background_ready"])
-            self.assertEqual(status["foreground_feature_rows_total"], 0)
+        frozen = case._engine(
+            mode=causal.subject.MODE_FROZEN_ASSIGNMENT_ONLY,
+            frozen_path=background_path,
+            frozen_sha=before_sha,
+            frozen_namespace=causal.SHA,
+        )
+        results = frozen.process_rows([
+            causal.make_row(1, 1100, 99, rho_h=20.0, rho_l=21.0),
+        ])
+        self.assertTrue(all(
+            item["status"] in (
+                causal.subject.STATUS_ASSIGNED_DIRECT,
+                causal.subject.STATUS_ASSIGNED_TAIL)
+            and item["source"] == causal.subject.SOURCE_FROZEN
+            and item["bg_version"] == before_version
+            for item in results))
+        self.assertEqual(
+            {ifo: len(records) for ifo, records in frozen.support.items()},
+            {"H1": 0, "L1": 0})
+        self.assertEqual(frozen.lifecycle["support_candidates"], 0)
+        self.assertEqual(frozen.lifecycle["support_appended"], 0)
+        self.assertEqual(frozen.accepted_version, before_version)
+        self.assertEqual(
+            hashlib.sha256(background_path.read_bytes()).hexdigest(),
+            before_sha)
 
     def test_monitor_reads_shell_quoted_run_config_paths(self) -> None:
         sys.path.insert(0, str(SCRIPT_DIR))
@@ -856,104 +530,103 @@ class EngineeringFlowContractTests(unittest.TestCase):
             self.assertEqual(points.count, 1)
             self.assertAlmostEqual(float(points.z[0]), -3.0)
 
-    def test_crashcar_online_cli_exposes_finalsink_single_trigger_stream(self) -> None:
-        source = (
-            SCRIPT_DIR.parents[1] / "bin/gstlal_inspiral_postcohspiir_online"
-        ).read_text()
-        self.assertIn("--finalsink-single-trigger-stream", source)
-        self.assertIn("single_trigger_stream_fname=options.finalsink_single_trigger_stream", source)
+    def test_crashcar_online_cli_binds_normal_postcoh_schema(self) -> None:
+        source = POSTCOHSPIIR_ONLINE.read_text()
+        pipeline = (CRASHCAR_SCRIPT_DIR / "crashcar_pipeline.sh").read_text()
+        self.assertIn('"--finalsink-postcoh-schema-mode"', source)
+        self.assertIn('choices=("legacy-a107", "crashcar-a109")', source)
+        self.assertIn(
+            "postcoh_schema_mode=options.finalsink_postcoh_schema_mode",
+            source)
+        self.assertIn(
+            '--finalsink-postcoh-schema-mode '
+            '"${finalsink_postcoh_schema_mode}"', pipeline)
+        self.assertNotIn("--finalsink-single-trigger-stream", source)
+        self.assertNotIn("single_trigger_stream_fname", source)
 
-    def test_finalsink_single_trigger_stream_uses_text_csv_writer(self) -> None:
+    def test_finalsink_uses_normal_coincsdoc_snr_series_path(self) -> None:
         source = (
-            SCRIPT_DIR.parents[1] / "python/pipemodules/postcoh_finalsink.py"
-        ).read_text()
-        self.assertIn('open(self.single_trigger_stream_fname, "a", newline="")', source)
-        self.assertNotIn('open(self.single_trigger_stream_fname, "ab")', source)
+            SCRIPT_DIR.parents[1] /
+            "python/pipemodules/postcoh_finalsink.py").read_text()
+        self.assertIn("def __write_cluster_zero_coinc_if_needed", source)
+        self.assertIn("self.__write_candidate_coinc_xml(", source)
+        self.assertIn("def assemble_ligolw_snr_series_arrays", source)
+        self.assertIn("lal.series.build_COMPLEX8TimeSeries", source)
+        self.assertNotIn("single_trigger_stream_fname", source)
 
-    def test_finalsink_boundary_rows_do_not_add_detector_specific_extra_columns(self) -> None:
-        source = (
-            SCRIPT_DIR.parents[1] / "python/pipemodules/postcoh_finalsink.py"
-        ).read_text()
-        boundary_source = source.split("def _append_single_trigger_stream_boundaries", 1)[1]
-        boundary_source = boundary_source.split("def run_snapshot", 1)[0]
-        self.assertNotIn('row["end_time_sngl_%s" % ifo]', boundary_source)
-        self.assertNotIn('row["end_time_ns_sngl_%s" % ifo]', boundary_source)
+    def test_finalsink_a107_a109_serialization_is_registry_driven(self) -> None:
+        finalsink = (
+            SCRIPT_DIR.parents[1] /
+            "python/pipemodules/postcoh_finalsink.py").read_text()
+        registry = (
+            SCRIPT_DIR.parents[1] /
+            "python/pipemodules/postcohtable/postcoh_table_def.py").read_text()
+        self.assertIn("def _postcoh_row_for_serialization", finalsink)
+        self.assertIn("postcoh_columns_for_schema_mode(", finalsink)
+        self.assertIn("POSTCOH_SCHEMA_MODE_CRASHCAR_A109", finalsink)
+        self.assertIn("POSTCOH_SCHEMA_MODE_LEGACY_A107", registry)
+        self.assertIn("POSTCOH_SCHEMA_MODE_CRASHCAR_A109", registry)
+        self.assertIn("len(POSTCOH_A107_COLUMN_PAIRS) != 107", registry)
+        self.assertIn("len(POSTCOH_A109_COLUMN_PAIRS) != 109", registry)
+        self.assertNotIn("_append_single_trigger_stream_boundaries", finalsink)
 
     def test_crashcar_pipeline_requires_template_shape_map_when_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            fake_online = tmp_path / "gstlal_inspiral_postcohspiir_online"
-            fake_online.write_text("#!/bin/sh\nprintf '%s\\n' --finalsink-single-trigger-stream\n")
+            root = Path(tmp)
+            online_marker = root / "online_was_launched"
+            fake_online = root / "gstlal_inspiral_postcohspiir_online"
+            fake_online.write_text(
+                "#!/bin/sh\n"
+                "if [ \"${1:-}\" = --help ]; then\n"
+                "  printf '%s\\n' --finalsink-postcoh-schema-mode "
+                "--snr-series-logfar-threshold\n"
+                "  exit 0\n"
+                "fi\n"
+                "printf launched > \"$ONLINE_MARKER\"\n"
+                "exit 99\n")
             fake_online.chmod(0o755)
             env = dict(os.environ)
             env.update({
                 "SLURM_ARRAY_TASK_ID": "0",
-                "BANK_DIR": str(tmp_path),
+                "BANK_DIR": str(root),
                 "DATA_START_TIME": "1",
                 "DATA_END_TIME": "2",
-                "NONINJ_STATS_LOC": str(tmp_path),
-                "DETRSP_MAP": str(tmp_path / "map.xml"),
-                "FRAME_CACHE_FILE": str(tmp_path / "frames.cache"),
+                "NONINJ_STATS_LOC": str(root),
+                "DETRSP_MAP": str(root / "map.xml"),
+                "FRAME_CACHE_FILE": str(root / "frames.cache"),
                 "START_BANK": "0",
                 "BANKS_PER_GROUP": "1",
                 "ZEROLAG_SNAPSHOT_INTERVAL_SECONDS": "60",
                 "BACKGROUND_STATS_WINDOWS": "1d",
                 "CRASHCAR_ENABLE": "1",
                 "CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP": "1",
-                "CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME": str(tmp_path / "missing.csv"),
+                "CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME": str(
+                    root / "missing.csv"),
                 "SPIIR_ONLINE_BIN": str(fake_online),
+                "ONLINE_MARKER": str(online_marker),
             })
             result = subprocess.run(
                 ["bash", str(SCRIPT_DIR / "pipeline.sh")],
-                check=False,
-                env=env,
-                cwd=str(tmp_path),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
+                check=False, env=env, cwd=str(root),
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             self.assertEqual(result.returncode, 2)
-            self.assertIn("crashcar requires readable CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME", result.stderr)
+            self.assertIn(
+                "crashcar requires readable "
+                "CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME",
+                result.stderr)
+            self.assertFalse(online_marker.exists())
 
-    def test_pipeline_rejects_missing_finalsink_single_trigger_stream_hook(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            fake_online = tmp_path / "gstlal_inspiral_postcohspiir_online"
-            fake_online.write_text("#!/bin/sh\nexit 0\n")
-            fake_online.chmod(0o755)
-            shape_map = tmp_path / "shape.csv"
-            shape_map.write_text("ifo_id,bankid,tmplt_idx,autocorr_power,dof\n")
-            env = dict(os.environ)
-            env.update({
-                "SLURM_ARRAY_TASK_ID": "0",
-                "BANK_DIR": str(tmp_path),
-                "DATA_START_TIME": "1",
-                "DATA_END_TIME": "2",
-                "NONINJ_STATS_LOC": str(tmp_path),
-                "DETRSP_MAP": str(tmp_path / "map.xml"),
-                "FRAME_CACHE_FILE": str(tmp_path / "frames.cache"),
-                "START_BANK": "0",
-                "BANKS_PER_GROUP": "1",
-                "ZEROLAG_SNAPSHOT_INTERVAL_SECONDS": "60",
-                "BACKGROUND_STATS_WINDOWS": "1d",
-                "CRASHCAR_ENABLE": "1",
-                "CRASHCAR_REQUIRE_TEMPLATE_SHAPE_MAP": "1",
-                "CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME": str(shape_map),
-                "SINGLE_TRIGGER_STREAM_ENABLE": "1",
-                "SINGLE_INPUT_KIND": "singlecsv",
-                "SPIIR_ONLINE_BIN": str(fake_online),
-            })
-            result = subprocess.run(
-                ["bash", str(SCRIPT_DIR / "pipeline.sh")],
-                check=False,
-                env=env,
-                cwd=str(tmp_path),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("lacks --finalsink-single-trigger-stream", result.stderr)
+    def test_formal_pipeline_uses_normal_postcoh_without_dedicated_stream(self) -> None:
+        pipeline = (CRASHCAR_SCRIPT_DIR / "crashcar_pipeline.sh").read_text()
+        online = POSTCOHSPIIR_ONLINE.read_text()
+        finalsink = (
+            SCRIPT_DIR.parents[1] /
+            "python/pipemodules/postcoh_finalsink.py").read_text()
+        self.assertIn("--finalsink-postcoh-schema-mode", pipeline)
+        self.assertIn("--snr-series-logfar-threshold", pipeline)
+        for source in (pipeline, online, finalsink):
+            self.assertNotIn("--finalsink-single-trigger-stream", source)
+            self.assertNotIn("single_trigger_stream_fname", source)
 
 
 if __name__ == "__main__":

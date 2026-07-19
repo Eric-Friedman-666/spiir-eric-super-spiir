@@ -20,6 +20,8 @@ import pickle
 import sys
 import time
 
+import verification_sidecar_numeric as _pdf_numeric
+
 try:
     from gstlal.pipemodules import pipe_macro
 except ImportError:
@@ -43,11 +45,12 @@ FLAG_EMPTY = 2
 
 LOG_ZERO = -1.0e300
 
-FAR_SOURCE_FIT_LOOKUP = "fit_lookup"
+FAR_SOURCE_ASSIGNED_DIRECT = "assigned_direct_calculated"
+FAR_SOURCE_ASSIGNED_TAIL = "assigned_tail_fit"
 FAR_SOURCE_BOOTSTRAP_DIRECT = "bootstrap_direct"
-FAR_SOURCE_DIRECT_FALLBACK = "direct_fallback"
 FAR_SOURCE_DIRECT_EMPIRICAL = "direct_empirical_count"
 FAR_SOURCE_UNASSIGNED = "unassigned_no_livetime"
+FAR_SOURCE_PENDING = "pending_no_authoritative_bg"
 
 
 def build_arg_parser():
@@ -1100,71 +1103,24 @@ def load_autocorr_power_map(filename):
 
 def load_template_shape_map(autocorr_power_file=None, bank_stats_dir=None,
                             ifos=None):
-    """Load per-template shape amplitude and effective degrees of freedom.
-
-    The original prototype accepted a simple key -> A_m map.  Wguo's branch also
-    carries template-dependent degrees of freedom in pickle files.  The online
-    single branch can use both without changing the upstream postcoh stream.
-    """
-
-    mapping = {}
-    mapping.update(load_autocorr_power_map(autocorr_power_file))
-    mapping.update(load_wguo_bank_stats_map(bank_stats_dir, ifos=ifos))
-    return mapping
+    """Reject legacy permissive maps; the branch owns the exact WGuo source."""
+    del ifos
+    if autocorr_power_file:
+        raise ValueError(
+            "optional autocorr-power maps are forbidden in formal sidecar")
+    if bank_stats_dir:
+        expected = os.path.realpath(
+            _pdf_numeric.expected_pickle_directory())
+        actual = os.path.realpath(bank_stats_dir)
+        if actual != expected:
+            raise ValueError("bank-stats-dir is not the exact WGuo source")
+    return None
 
 
 def load_wguo_bank_stats_map(directory, ifos=None):
-    if not directory:
-        return {}
-    mapping = {}
-    for ifo in split_ifos(ifos or ("H1", "L1")):
-        filename = os.path.join(
-            directory, "%s_O3_FB_banks_magnitudes_and_dofs.pkl" % ifo)
-        if not os.path.exists(filename):
-            continue
-        with open(filename, "rb") as input_file:
-            try:
-                banks = pickle.load(input_file)
-            except UnicodeDecodeError:
-                input_file.seek(0)
-                banks = pickle.load(input_file, encoding="latin1")
-        for bankid, bank in banks.items():
-            if hasattr(bank, "columns") and "dofs" in bank.columns:
-                dofs = list(bank["dofs"].to_numpy())
-            elif isinstance(bank, dict):
-                dofs = list(bank.get("dofs") or [])
-            else:
-                dofs = []
-            if hasattr(bank, "columns") and "magnitudes" in bank.columns:
-                magnitudes = list(bank["magnitudes"].to_numpy())
-            elif isinstance(bank, dict):
-                magnitudes = list(bank.get("magnitudes") or [])
-            else:
-                magnitudes = []
-            ntemplate = max(len(dofs), len(magnitudes))
-            for tmplt_idx in range(ntemplate):
-                entry = {}
-                if tmplt_idx < len(magnitudes) and is_finite_positive(
-                        magnitudes[tmplt_idx]):
-                    # Wguo stores sqrt(sum_delta |C(delta)|^2).  The
-                    # noncentrality calculation needs sum_delta |C(delta)|^2.
-                    magnitude = float(magnitudes[tmplt_idx])
-                    entry["autocorr_power"] = magnitude * magnitude
-                if tmplt_idx < len(dofs) and is_finite_positive(
-                        dofs[tmplt_idx]):
-                    entry["dof"] = float(dofs[tmplt_idx])
-                if not entry:
-                    continue
-                for key in autocorr_power_keys(ifo, bankid, tmplt_idx):
-                    merged = {}
-                    previous = mapping.get(key)
-                    if isinstance(previous, dict):
-                        merged.update(previous)
-                    elif is_finite_positive(previous):
-                        merged["autocorr_power"] = float(previous)
-                    merged.update(entry)
-                    mapping[key] = merged
-    return mapping
+    del directory, ifos
+    raise RuntimeError(
+        "permissive bank maps are disabled; use ActualPickleShapeSource")
 
 
 def autocorr_power_rows_to_map(rows):
@@ -1224,29 +1180,16 @@ def normalized_index_strings(value, width=None):
 
 
 def lookup_autocorr_power(mapping, ifo, bankid, tmplt_idx):
-    if not mapping:
-        return None
-    for key in autocorr_power_keys(ifo, bankid, tmplt_idx):
-        if key in mapping:
-            value = mapping[key]
-            if isinstance(value, dict):
-                value = (value.get("autocorr_power") or value.get("power")
-                         or value.get("am"))
-            if is_finite_positive(value):
-                return float(value)
+    del ifo, bankid, tmplt_idx
+    if mapping:
+        raise RuntimeError(
+            "permissive autocorr-power lookup is disabled")
     return None
 
 
 def lookup_template_dof(mapping, ifo, bankid, tmplt_idx):
-    if not mapping:
-        return None
-    for key in autocorr_power_keys(ifo, bankid, tmplt_idx):
-        if key in mapping and isinstance(mapping[key], dict):
-            value = (mapping[key].get("dof") or mapping[key].get("nu")
-                     or mapping[key].get("effective_dof"))
-            if is_finite_positive(value):
-                return float(value)
-    return None
+    del mapping, ifo, tmplt_idx
+    return float(_pdf_numeric.fixed_dof(bankid))
 
 
 def is_finite_positive(value):
@@ -1388,7 +1331,7 @@ class SingleDetectorFeature(object):
 
 
 class SingleDetectorBranch(object):
-    """Prototype branch after cuda_postcoh for one or more detectors."""
+    """Independent H1/L1 verification branch after cuda_postcoh."""
 
     def __init__(self,
                  likelihood_model,
@@ -1399,13 +1342,23 @@ class SingleDetectorBranch(object):
                  far_floor_count=1.0,
                  far_fit_boundary=1.0e-2):
         self.likelihood_model = likelihood_model
-        self.ifos = tuple(ifos or pipe_macro.IFO_MAP)
+        self.ifos = tuple(ifos or ("H1", "L1"))
+        if self.ifos != ("H1", "L1"):
+            raise ValueError(
+                "formal single-detector branch requires exactly H1,L1")
         self.min_snr = float(min_snr)
-        self.background_window_seconds = background_window_seconds
-        self.fit_min_points = int(fit_min_points)
         self.far_floor_count = float(far_floor_count)
         self.far_fit_boundary = float(far_fit_boundary)
-        self.use_fitted_far = False
+        if self.min_snr != 4.0:
+            raise ValueError("formal single-detector rho threshold is 4.0")
+        if self.far_floor_count != 1.0:
+            raise ValueError("formal Calculated FAR floor count is 1.0")
+        if self.far_fit_boundary != 1.0e-2:
+            raise ValueError("formal tail anchor FAR is 1e-2")
+        self.shape_source = _pdf_numeric.ActualPickleShapeSource()
+        self.background_window_seconds = background_window_seconds
+        self.fit_min_points = int(fit_min_points)
+        self.use_fitted_far = True
         self.background = dict(
             (ifo, RankBackground(fit_min_points=self.fit_min_points,
                                  far_floor_count=self.far_floor_count,
@@ -1416,11 +1369,15 @@ class SingleDetectorBranch(object):
         return self.llr_feature(feature, autocorr_power)
 
     def llr_feature(self, feature, autocorr_power=None):
-        if autocorr_power is None:
-            autocorr_power = feature.autocorr_power
-        return self.likelihood_model.rank(feature.rho, feature.chisq,
-                                          autocorr_power, ifo=feature.ifo,
-                                          dof=feature.dof)
+        del autocorr_power
+        if feature.ifo not in ("H1", "L1"):
+            raise ValueError("single-detector PDF statistic is H1/L1 only")
+        a_eff, dof = self.shape_source.a_eff_and_dof(
+            feature.ifo, feature.bankid, feature.tmplt_idx)
+        feature.autocorr_power = a_eff
+        feature.dof = dof
+        return _pdf_numeric.pdf_gaussian_llr(
+            feature.rho, feature.chisq, a_eff, dof)
 
     def add_livetime(self, seconds, ifos=None, gps=None):
         for ifo in tuple(ifos or self.ifos):
@@ -1534,8 +1491,8 @@ class SingleDetectorBranch(object):
         bg = self.background[feature.ifo]
         far, far_source = bg.far_with_source(llr, use_fit=self.use_fitted_far)
         direct_far = bg.direct_far(llr)
-        direct_source = (FAR_SOURCE_UNASSIGNED
-                         if direct_far == float("inf")
+        direct_source = (FAR_SOURCE_PENDING
+                         if direct_far is None
                          else FAR_SOURCE_DIRECT_EMPIRICAL)
         return SingleDetectorResult(
             feature, llr, far, far_source,
@@ -1784,21 +1741,12 @@ class SingleFarLlrBackgroundFile(object):
 
 
 class SingleDetectorLikelihoodModel(object):
-    """Likelihood model used to map (rho_m, chisq) to a scalar rank.
+    """PDF Gaussian LLR adapter for the independent verification sidecar.
 
-    The notation follows single_detector_notes.tex:
-
-        d = (rho_m, chi_r^2)
-        r = ln L
-          = ln P(chi_r^2 | rho_m, H1)
-            - ln P(chi_r^2 | rho_m, H0)
-            + 0.5 rho_m^2 + const.
-
-    The H1 term is a beta-mixture of noncentral chi-square distributions with
-    lambda = beta^2 rho_m^2 sum_delta |C_{j,m}(Delta)|^2.
-    The refined H0 term follows Wguo's convention and is also noncentral,
-    with a fixed high-mismatch noise beta.  Large chi-square therefore receives
-    a much stronger penalty in the likelihood ratio.
+    The public constructor/serialization shape is retained for old sidecar
+    JSON, but ranking is fixed by the PDF contract: H1/L1 only, exact keyed
+    A_eff, dof 120/600, and the 64-point Gaussian beta marginalization in
+    verification_sidecar_numeric.py. Legacy tuning fields cannot alter it.
     """
 
     def __init__(self,
@@ -1937,13 +1885,12 @@ class SingleDetectorLikelihoodModel(object):
 
     def log_likelihood_ratio(self, rho, chisq, autocorr_power=None, ifo=None,
                              dof=None):
-        shape_llr = (
-            self.log_signal_shape_pdf(rho, chisq, autocorr_power, ifo=ifo,
-                                      dof=dof)
-            - self.log_noise_shape_pdf(rho, chisq, autocorr_power, ifo=ifo,
-                                       dof=dof))
-        snr_llr = self.snr_log_weight * float(rho) * float(rho)
-        return shape_llr + snr_llr + self.rank_offset
+        if ifo not in ("H1", "L1"):
+            raise ValueError("single-detector PDF statistic is H1/L1 only")
+        if not is_finite_positive(autocorr_power):
+            raise ValueError("exact keyed A_eff is required")
+        return _pdf_numeric.pdf_gaussian_llr(
+            rho, chisq, autocorr_power, dof)
 
     def rank(self, rho, chisq, autocorr_power=None, ifo=None, dof=None):
         return self.log_likelihood_ratio(rho, chisq, autocorr_power, ifo=ifo,
@@ -2106,8 +2053,9 @@ def logsumexp(values):
 class SingleDetectorResult(object):
     """Final single-detector result point for plotting or alert merging."""
 
-    __slots__ = ("ifo", "category", "rho", "chisq", "llr", "rank", "far",
-                 "far_source", "neg_log10_far", "direct_far",
+    __slots__ = ("ifo", "category", "rho", "chisq", "a_eff", "dof", "llr", "rank", "far",
+                 "far_source", "status", "valid", "neg_log10_far",
+                 "direct_far",
                  "direct_far_source", "direct_neg_log10_far",
                  "calculated_far", "calculated_far_source",
                  "calculated_neg_log10_far", "tmplt_idx", "bankid",
@@ -2119,13 +2067,24 @@ class SingleDetectorResult(object):
         self.category = feature.category
         self.rho = feature.rho
         self.chisq = feature.chisq
+        self.a_eff = feature.autocorr_power
+        self.dof = feature.dof
         self.llr = llr
         # Keep rank as a compatibility alias for older plotting scripts.  In
         # the single-detector branch this value is the LLR coordinate.
         self.rank = llr
-        self.far = far
-        self.far_source = far_source or FAR_SOURCE_UNASSIGNED
-        self.neg_log10_far = neg_log10_far(far)
+        requested_source = far_source or FAR_SOURCE_PENDING
+        assigned = (
+            requested_source in (
+                FAR_SOURCE_ASSIGNED_DIRECT, FAR_SOURCE_ASSIGNED_TAIL)
+            and is_finite_positive(far))
+        self.status = (_pdf_numeric.ASSIGNMENT_ASSIGNED
+                       if assigned else _pdf_numeric.ASSIGNMENT_PENDING)
+        self.valid = bool(assigned)
+        self.far = float(far) if assigned else None
+        self.far_source = (requested_source
+                           if assigned else FAR_SOURCE_PENDING)
+        self.neg_log10_far = neg_log10_far(self.far)
         self.direct_far = direct_far
         self.direct_far_source = direct_far_source or FAR_SOURCE_UNASSIGNED
         self.direct_neg_log10_far = (
@@ -2143,13 +2102,12 @@ class SingleDetectorResult(object):
 
 
 class RankBackground(object):
-    """One-dimensional single-detector FAR-LLR calibration model.
+    """Calculated/Assigned FAR model for one detector-local BG snapshot.
 
-    During cold start, the current artificial-shift background ranks provide a
-    direct empirical FAR.  The persistent background file stores the full raw
-    detector-local trigger background, plus derived LLR/FAR support points.  On
-    load, the support curve is rebuilt from the full trigger set so assignment
-    never depends on a thinned plotting proxy.
+    Calculated FAR is support count divided by livetime with a one-count floor.
+    Assigned FAR is direct for r <= r_tail and uses only the negative line
+    anchored at (r_tail, -2) for r > r_tail. An absent or invalid authoritative
+    snapshot produces explicit PENDING, never a zero or fallback.
     """
 
     DEFAULT_FAR_FIT_BOUNDARY = 1.0e-2
@@ -2337,52 +2295,39 @@ class RankBackground(object):
         return self.count_ge(rank) / float(len(self._ranks))
 
     def direct_far(self, rank):
-        if self.livetime <= 0.0:
-            return float("inf")
-        count = max(float(self.count_ge(rank)), self.far_floor_count)
-        return count / self.livetime
+        if self.livetime <= 0.0 or not self._ranks:
+            return None
+        value, _count, _floor = _pdf_numeric.calculated_far(
+            self._ranks, rank, self.livetime)
+        return value
 
     def far(self, rank, use_fit=True):
         return self.far_with_source(rank, use_fit=use_fit)[0]
 
     def far_with_source(self, rank, use_fit=True):
-        if use_fit:
-            fitted = self.fitted_far(rank)
-            if fitted is not None:
-                return fitted, FAR_SOURCE_FIT_LOOKUP
-
-        direct = self.direct_far(rank)
-        if direct == float("inf"):
-            return direct, FAR_SOURCE_UNASSIGNED
-        if use_fit:
-            return direct, FAR_SOURCE_DIRECT_FALLBACK
-        return direct, FAR_SOURCE_BOOTSTRAP_DIRECT
+        if not use_fit:
+            direct = self.direct_far(rank)
+            if direct is None:
+                return None, FAR_SOURCE_PENDING
+            return direct, FAR_SOURCE_BOOTSTRAP_DIRECT
+        decision = _pdf_numeric.assignment_decision(
+            self._ranks, rank, self.livetime)
+        if decision["status"] == _pdf_numeric.ASSIGNMENT_PENDING:
+            return None, FAR_SOURCE_PENDING
+        if decision["branch"] == "direct":
+            source = FAR_SOURCE_ASSIGNED_DIRECT
+        elif decision["branch"] == "tail":
+            source = FAR_SOURCE_ASSIGNED_TAIL
+        else:
+            raise ArithmeticError("unknown Assigned FAR branch")
+        return decision["assigned_far"], source
 
     def fitted_far(self, llr):
-        fit = self._fitted_log10_far_curve()
-        if fit is None:
+        decision = _pdf_numeric.assignment_decision(
+            self._ranks, llr, self.livetime)
+        if decision["status"] == _pdf_numeric.ASSIGNMENT_PENDING:
             return None
-        xs, log_fars, tail_slope, tail_intercept = fit
-        llr = float(llr)
-        idx = bisect.bisect_left(xs, llr)
-        if idx <= 0:
-            log_far = log_fars[0]
-        elif idx >= len(xs):
-            if tail_slope is not None and tail_intercept is not None:
-                log_far = tail_slope * llr + tail_intercept
-            else:
-                log_far = log_fars[-1]
-        else:
-            x0 = xs[idx - 1]
-            x1 = xs[idx]
-            y0 = log_fars[idx - 1]
-            y1 = log_fars[idx]
-            if x1 == x0:
-                log_far = min(y0, y1)
-            else:
-                weight = (llr - x0) / (x1 - x0)
-                log_far = y0 + weight * (y1 - y0)
-        return math.pow(10.0, log_far)
+        return decision["assigned_far"]
 
     @staticmethod
     def _median(values):
@@ -2649,107 +2594,26 @@ class RankBackground(object):
         return final_xs, final_log_fars, tail_slope, tail_intercept
 
     def _fitted_log10_far_curve(self):
+        """Exact curve view used only by the independent sidecar plotter."""
         if self._fit_cache is not None:
             return self._fit_cache
-        points = []
-        for point in self.current_far_llr_points():
-            far = point.get("far")
-            llr = point.get("llr")
-            if is_finite_positive(far) and llr is not None:
-                points.append((float(llr), math.log10(float(far))))
-        if len(points) < self.fit_min_points:
+        try:
+            r_tail, tail_slope, points = _pdf_numeric.build_anchored_tail(
+                self._ranks, self.livetime)
+        except ValueError:
             return None
-        points.sort()
-
-        # Collapse duplicate LLR values and keep the most conservative FAR.
-        raw_xs = []
-        raw_log_fars = []
-        for llr, log_far in points:
-            if raw_xs and llr == raw_xs[-1]:
-                raw_log_fars[-1] = min(raw_log_fars[-1], log_far)
-            else:
-                raw_xs.append(llr)
-                raw_log_fars.append(log_far)
-
-        # Enforce the physical monotonicity: larger LLR cannot imply larger FAR.
-        raw_monotonic = self._monotonic_log_fars(raw_log_fars)
-
-        if len(raw_xs) < self.fit_min_points:
-            self._fit_cache = (raw_xs, raw_monotonic, None, None)
-            return self._fit_cache
-
-        # Wguo-style FAR assignment: use the empirical/interpolated background
-        # curve before the tail, then fit the high-LLR tail as a constrained
-        # line using all available tail points. The old robust tail clipping
-        # path is archived out of the production code.
-        boundary_far = self.far_fit_boundary
-        if not is_finite_positive(boundary_far):
-            boundary_far = self.DEFAULT_FAR_FIT_BOUNDARY
-        pretail_far = self.far_fit_pretail_boundary
-        if not is_finite_positive(pretail_far):
-            pretail_far = 10.0 * boundary_far
-
-        broken_fit = self._wguo_broken_log10_far_curve(
-            raw_xs, raw_monotonic, pretail_far, boundary_far)
-        if broken_fit is not None:
-            self._fit_cache = broken_fit
-            return self._fit_cache
-
-        # Fall back to the smoothed one-boundary fit if the current support does
-        # not contain enough points for the broken-tail path.
-        boundary_log_far = math.log10(boundary_far)
-        boundary_idx = min(
-            range(len(raw_xs)),
-            key=lambda idx: abs(raw_monotonic[idx] - boundary_log_far))
-        x_boundary = raw_xs[boundary_idx]
-        before_tail_points = self._smooth_before_tail_curve(
-            raw_xs, raw_monotonic, raw_xs[0], x_boundary)
-        if before_tail_points:
-            pxs = [point[0] for point in before_tail_points]
-            pys = [point[1] for point in before_tail_points]
-            pys[-1] = boundary_log_far
-            pys = self._monotonic_log_fars(pys)
-            before_tail_points = list(zip(pxs, pys))
-
-        raw_tail_points = [
-            (x, y) for x, y in zip(raw_xs, raw_monotonic)
-            if x >= x_boundary
-        ]
-        tail_points = self._binned_curve_by_x(raw_tail_points, 80)
-        fit_tail_points = [
-            (x, y) for x, y in tail_points
-            if x > x_boundary
-        ]
-
-        tail_slope = None
-        tail_intercept = None
-        min_tail_points = max(2, min(self.fit_min_points, 20,
-                                     len(fit_tail_points)))
-        if len(fit_tail_points) >= min_tail_points:
-            fit_tail_points = list(fit_tail_points)
-            tail_slope, tail_intercept = self._fit_line_through_fixed_point(
-                fit_tail_points, x_boundary, boundary_log_far)
-
         fit_xs = []
         fit_log_fars = []
-        if before_tail_points:
-            for x, y in before_tail_points:
-                fit_xs.append(x)
-                fit_log_fars.append(y)
-        else:
-            fit_xs = list(raw_xs[:boundary_idx + 1])
-            fit_log_fars = list(raw_monotonic[:boundary_idx + 1])
-            if fit_log_fars:
-                fit_log_fars[-1] = boundary_log_far
-        if tail_slope is not None and raw_xs[-1] > x_boundary:
-            fit_xs.append(raw_xs[-1])
-            fit_log_fars.append(tail_slope * raw_xs[-1] + tail_intercept)
-
-        # Remove duplicate x values and enforce monotonicity one last time.
-        final_xs, final_log_fars = self._finalize_log10_fit_curve(
-            fit_xs, fit_log_fars)
-        self._fit_cache = (final_xs, final_log_fars,
-                           tail_slope, tail_intercept)
+        for rank, direct_log_far in points:
+            fit_xs.append(rank)
+            if rank <= r_tail:
+                fit_log_fars.append(direct_log_far)
+            else:
+                fit_log_fars.append(
+                    -2.0 + tail_slope * (rank - r_tail))
+        tail_intercept = -2.0 - tail_slope * r_tail
+        self._fit_cache = (
+            fit_xs, fit_log_fars, tail_slope, tail_intercept)
         return self._fit_cache
 
     def __len__(self):
@@ -2850,10 +2714,12 @@ class RankBackground(object):
 
 
 def neg_log10_far(far):
-    far = float(far)
-    if far <= 0.0:
-        return float("inf")
-    return -math.log10(far)
+    if far is None:
+        return ""
+    value = float(far)
+    if not (math.isfinite(value) and value > 0.0):
+        return ""
+    return -math.log10(value)
 
 
 def detector_index(ifo):
@@ -2895,14 +2761,21 @@ def read_detector_value(row, field, ifo, default=None):
 def write_single_far_to_row(row, ifo, far):
     """Write the assigned single-detector FAR back when the row supports it."""
 
+    if far is None:
+        return False
+    value = float(far)
+    if not (math.isfinite(value) and value > 0.0):
+        return False
     ifo_id = detector_index(ifo)
     if hasattr(row, "far_sngl"):
-        row.far_sngl[ifo_id] = far
-        return
+        row.far_sngl[ifo_id] = value
+        return True
 
     xml_name = "far_sngl_%s" % ifo
     if hasattr(row, xml_name):
-        setattr(row, xml_name, far)
+        setattr(row, xml_name, value)
+        return True
+    return False
 
 
 def row_livetime_seconds(row, default_livetime_step=1.0):
@@ -2951,11 +2824,15 @@ PLOT_ROW_FIELDS = [
     "source_row",
     "feature_csv_row",
     "category",
+    "status",
+    "valid",
     "ifo",
     "rho",
     "chisq",
     "llr",
     "rank",
+    "a_eff",
+    "dof",
     "far",
     "far_source",
     "neg_log10_far",
@@ -2995,11 +2872,15 @@ def results_to_plot_rows(results):
             "source_row": source.get("source_row", ""),
             "feature_csv_row": source.get("_feature_csv_row_index", ""),
             "category": result.category,
+            "status": result.status,
+            "valid": result.valid,
             "ifo": result.ifo,
             "rho": result.rho,
             "chisq": result.chisq,
             "llr": result.llr,
             "rank": result.rank,
+            "a_eff": result.a_eff,
+            "dof": result.dof,
             "far": result.far,
             "far_source": result.far_source,
             "neg_log10_far": result.neg_log10_far,
