@@ -132,13 +132,13 @@ HELPERS = (
     "_crashcar_far_meets_log_threshold",
     "_crashcar_a109_llrs_and_route",
     "_crashcar_final_far_decision",
-    "_crashcar_cluster_zero_dispatch",
+    "_crashcar_candidate_output_dispatch",
     "_postcoh_row_for_serialization",
 )
 METHODS = (
     "cluster_and_process_significant_triggers",
     "__set_far",
-    "__write_crashcar_single_coinc_if_needed",
+    "__process_crashcar_candidate_output",
 )
 
 
@@ -195,6 +195,7 @@ def _compile_harness(source_text, *, current):
         "re": re,
         "pipe_macro": PIPE_MACRO,
         "postcoh_table_def": _Schema,
+        "_postcoh_row_for_serialization": lambda row, unused_mode: row,
         "LIGOTimeGPS": lambda seconds=0, nanoseconds=0:
             seconds + nanoseconds / 1_000_000_000.0,
     }
@@ -280,11 +281,14 @@ def make_sink(cls, *, crashcar_enabled, cluster_window, trace):
     )
     sink.enable_feature_best_far = False
     sink.best_far_threshold = 0
-    sink.gracedb_far_threshold = 1.0
+    sink.gracedb_far_threshold = (None if crashcar_enabled else 1.0)
     sink.gracedb_upload_attempts = 1
     sink.need_online_perform = False
     sink.far_factor = 1.0
     sink.snr_series_logfar_threshold = -4.0
+    sink.append_psd_to_coincs_doc = False
+    sink.gracedb_client = None
+    sink.threads_gracedb_upload = []
     return sink
 
 
@@ -339,7 +343,7 @@ def attach_current_writer(sink, trace):
         sink,
         "_FinalSink__write_candidate_coinc_xml",
         lambda *args, **kwargs:
-            trace.append(("single_owned_coinc", args[0].postcoh_inspiral.event_id)),
+            trace.append(("candidate_coinc", args[0].postcoh_inspiral.event_id)),
     )
 
 
@@ -382,7 +386,7 @@ class FinalSinkSourceBehaviorTests(unittest.TestCase):
         )
         setattr(
             current,
-            "_FinalSink__write_crashcar_single_coinc_if_needed",
+            "_FinalSink__process_crashcar_candidate_output",
             lambda *args, **kwargs:
                 self.fail("disabled cluster-zero must not write Coinc/SNR"),
         )
@@ -470,6 +474,82 @@ class FinalSinkSourceBehaviorTests(unittest.TestCase):
         for ifos, protected in expected.items():
             self.assertEqual(helper(Row(ifos)), protected)
 
+    def test_unified_candidate_selector_uses_one_normal_writer_for_all_routes(self):
+        cases = (
+            ("H1", "H1_SINGLE", 0),
+            ("L1", "L1_SINGLE", 1),
+            ("H1L1", "MULTI", None),
+            ("V1", "V1_ONLY", None),
+        )
+        for index, (ifos, route, owner_index) in enumerate(cases):
+            trace = []
+            row = Row(ifos, 100 + index)
+            if ifos in ("H1", "H1L1"):
+                row.H1_LLR = 8.0
+            if ifos in ("L1", "H1L1"):
+                row.L1_LLR = 9.0
+            if owner_index is None:
+                row.far = 1.0e-6
+            else:
+                row.far_sngl[owner_index] = 1.0e-6
+            sink = make_sink(
+                CURRENT["FinalSink"],
+                crashcar_enabled=True,
+                cluster_window=0,
+                trace=trace,
+            )
+            attach_current_writer(sink, trace)
+            decision = CURRENT["_crashcar_final_far_decision"](row)
+            self.assertEqual(decision["route"], route)
+            wrote = getattr(
+                sink, "_FinalSink__process_crashcar_candidate_output")(
+                    Event(row), final_decision=decision)
+            self.assertTrue(wrote)
+            self.assertEqual(
+                trace, [("candidate_coinc", row.event_id)])
+
+            trace.clear()
+            if owner_index is None:
+                row.far = 1.0e-3
+            else:
+                row.far_sngl[owner_index] = 1.0e-3
+            decision = CURRENT["_crashcar_final_far_decision"](row)
+            wrote = getattr(
+                sink, "_FinalSink__process_crashcar_candidate_output")(
+                    Event(row), final_decision=decision)
+            self.assertFalse(wrote)
+            self.assertEqual(trace, [])
+
+    def test_local_retention_is_not_suppressed_by_gracedb_control(self):
+        trace = []
+        row = Row("H1", 120)
+        row.H1_LLR = 8.0
+        row.far_sngl[0] = 1.0e-6
+        sink = make_sink(
+            CURRENT["FinalSink"],
+            crashcar_enabled=True,
+            cluster_window=0,
+            trace=trace,
+        )
+        sink.gracedb_far_threshold = 1.0
+        setattr(
+            sink,
+            "_FinalSink__pass_test",
+            lambda *args, **kwargs: True,
+        )
+        setattr(
+            sink,
+            "_FinalSink__need_trigger_control",
+            lambda *args, **kwargs: True,
+        )
+        attach_current_writer(sink, trace)
+        decision = CURRENT["_crashcar_final_far_decision"](row)
+        wrote = getattr(
+            sink, "_FinalSink__process_crashcar_candidate_output")(
+                Event(row), final_decision=decision)
+        self.assertTrue(wrote)
+        self.assertEqual(trace, [("candidate_coinc", row.event_id)])
+
     def test_cluster_zero_enabled_never_sets_far_and_has_typed_a107_oracle(self):
         routes = (
             ("H1", 0, "far_sngl_H1"),
@@ -549,7 +629,7 @@ class FinalSinkSourceBehaviorTests(unittest.TestCase):
                 self.assertEqual(
                     trace,
                     [
-                        ("single_owned_coinc", current_row.event_id),
+                        ("candidate_coinc", current_row.event_id),
                         ("extend", (current_row.event_id,)),
                     ],
                 )
@@ -557,6 +637,46 @@ class FinalSinkSourceBehaviorTests(unittest.TestCase):
                 self.assertEqual(
                     trace, [("extend", (current_row.event_id,))]
                 )
+
+    def test_clustered_multi_sets_normal_far_before_one_normal_writer(self):
+        trace = []
+        row = Row("H1L1V1", 130)
+        row.H1_LLR = 8.25
+        row.L1_LLR = 54.4
+        row.far = 0.0
+        row.far_1w = 1.0e-6
+        row.far_1d = 2.0e-6
+        row.far_2h = 3.0e-6
+        llrs_before = (row.H1_LLR, row.L1_LLR)
+        sink = make_sink(
+            CURRENT["FinalSink"],
+            crashcar_enabled=True,
+            cluster_window=1.0,
+            trace=trace,
+        )
+        sink.snr_series_logfar_threshold = 0.0
+        attach_cluster_hooks(sink, row, trace, baseline=False)
+        attach_current_writer(sink, trace)
+
+        sink.cluster_and_process_significant_triggers(10.0, 0, [])
+
+        decision = CURRENT["_crashcar_final_far_decision"](row)
+        self.assertEqual(decision["route"], "MULTI")
+        self.assertEqual(decision["value"], 3.0e-6)
+        self.assertGreater(row.far, 0.0)
+        self.assertEqual((row.H1_LLR, row.L1_LLR), llrs_before)
+        self.assertEqual(
+            [entry for entry in trace if entry[0] == "candidate_coinc"],
+            [("candidate_coinc", row.event_id)],
+        )
+        self.assertLess(
+            trace.index(("set_far", ())),
+            trace.index(("candidate_coinc", row.event_id)),
+        )
+        self.assertEqual(
+            [item.event_id for item in sink.postcoh_table],
+            [row.event_id],
+        )
 
     def test_clustered_enabled_uses_normal_set_far_except_one_owner(self):
         for ifos, owner_index, protected in (
@@ -589,10 +709,10 @@ class FinalSinkSourceBehaviorTests(unittest.TestCase):
             self.assertEqual(set_calls, [("set_far", protected)])
             if owner_index is not None:
                 self.assertEqual(row.far_sngl[owner_index], 1.0e-6)
-                self.assertIn(("single_owned_coinc", row.event_id), trace)
+                self.assertIn(("candidate_coinc", row.event_id), trace)
             else:
                 self.assertNotEqual(snapshot(row), before)
-                self.assertNotIn(("single_owned_coinc", row.event_id), trace)
+                self.assertNotIn(("candidate_coinc", row.event_id), trace)
             self.assertEqual([item.event_id for item in sink.postcoh_table], [row.event_id])
 
 

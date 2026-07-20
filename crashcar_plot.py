@@ -6,8 +6,10 @@ Run from /fred/oz016/qliang/Eric_bless_SPIIR, for example:
     python3 crashcar_plot.py --run_id crashcar_noinj_24h_2node_diag_r23
 
 The wrapper resolves an exact run_id from immutable run-local env snapshots
-below smoke_runs/.  Identical run_root values are deduplicated, while zero or
-multiple distinct roots fail explicitly; no newest-run fallback is used.
+below smoke_runs/ or runs/.  Injection workflow parent IDs resolve to their
+B2 live-readonly consumer, whose existing provenance identifies the B1
+background producer.  Identical run_root values are deduplicated, while zero
+or multiple distinct roots fail explicitly; no newest-run fallback is used.
 The public interface intentionally exposes only --run_id/--run-id plus the
 backward-compatible --run-root selector.  Inputs and the output directory are
 inferred from run-local evidence.
@@ -48,11 +50,17 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def exact_smoke_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
-    """Resolve one run root from exact run_id values in smoke env snapshots."""
-    smoke_root = (root / "smoke_runs").resolve()
-    if not smoke_root.is_dir():
-        raise SystemExit(f"Smoke-run directory not found: {smoke_root}")
+def exact_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
+    """Resolve one run root from exact run_id values in run env snapshots."""
+    search_roots = tuple(
+        candidate.resolve()
+        for candidate in (root / "smoke_runs", root / "runs")
+        if candidate.is_dir()
+    )
+    if not search_roots:
+        raise SystemExit(
+            f"Neither smoke_runs/ nor runs/ exists below repository root: {root}"
+        )
     patterns = (
         "*/*/launch.env",
         "*/*/scripts/crashcar.env",
@@ -63,8 +71,9 @@ def exact_smoke_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
         "*/*/*/provenance/*.env",
     )
     candidates: set[Path] = set()
-    for pattern in patterns:
-        candidates.update(smoke_root.glob(pattern))
+    for search_root in search_roots:
+        for pattern in patterns:
+            candidates.update(search_root.glob(pattern))
 
     roots: dict[Path, list[Path]] = {}
     invalid: list[str] = []
@@ -73,21 +82,39 @@ def exact_smoke_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
         if values.get("run_id") != run_id:
             continue
         raw_root = values.get("run_root", "").strip()
-        if not raw_root:
+        if raw_root:
+            candidate = Path(os.path.expandvars(raw_root)).expanduser()
+            if not candidate.is_absolute():
+                candidate = env_path.parent / candidate
+        elif env_path.parent.name == "scripts":
+            candidate = env_path.parent.parent
+        else:
             invalid.append(f"{env_path}: missing run_root")
             continue
-        candidate = Path(os.path.expandvars(raw_root)).expanduser()
-        if not candidate.is_absolute():
-            candidate = env_path.parent / candidate
         try:
             resolved = candidate.resolve(strict=True)
-            resolved.relative_to(smoke_root)
+            if not any(
+                resolved == search_root or search_root in resolved.parents
+                for search_root in search_roots
+            ):
+                raise ValueError("resolved path is outside smoke_runs/ and runs/")
         except (FileNotFoundError, ValueError) as exc:
             invalid.append(f"{env_path}: invalid run_root {candidate} ({exc})")
             continue
+
         if not resolved.is_dir() or not (resolved / "run").is_dir():
-            invalid.append(f"{env_path}: run_root has no run/ directory: {resolved}")
-            continue
+            consumer_root = resolved / "B2_injection_consumer"
+            if (
+                is_truthy(values.get("injection_mode", ""))
+                and consumer_root.is_dir()
+                and (consumer_root / "run").is_dir()
+            ):
+                resolved = consumer_root.resolve(strict=True)
+            else:
+                invalid.append(
+                    f"{env_path}: run_root has no run/ directory: {resolved}"
+                )
+                continue
         roots.setdefault(resolved, []).append(env_path.resolve())
 
     if invalid:
@@ -96,8 +123,9 @@ def exact_smoke_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
             + "\n  ".join(invalid)
         )
     if not roots:
+        searched = ", ".join(str(path) for path in search_roots)
         raise SystemExit(
-            f"No env snapshot below {smoke_root} has exact run_id={run_id!r}"
+            f"No env snapshot below [{searched}] has exact run_id={run_id!r}"
         )
     if len(roots) != 1:
         details = []
@@ -389,7 +417,7 @@ def main() -> int:
     selector = parser.add_mutually_exclusive_group(required=True)
     selector.add_argument(
         "--run_id", "--run-id", dest="run_id",
-        help="Exact run_id found in an env snapshot below ROOT/smoke_runs.",
+        help="Exact run_id found below ROOT/smoke_runs or ROOT/runs.",
     )
     selector.add_argument(
         "--run-root", type=Path,
@@ -401,7 +429,7 @@ def main() -> int:
     matched_env_files: list[Path] = []
     if args.run_id is not None:
         run_id = clean_run_id(args.run_id)
-        run_root, matched_env_files = exact_smoke_run_root(root, run_id)
+        run_root, matched_env_files = exact_run_root(root, run_id)
         resolution_method = "exact_env_run_id_deduplicated"
     else:
         run_root = args.run_root.resolve(strict=True)

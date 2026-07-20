@@ -286,7 +286,7 @@ SLURM_CPUS_PER_TASK=1
 SLURM_GRES=
 SLURM_PARTITION=
 SLURM_TIME=
-SNR_SERIES_LOG_FAR_THRESHOLD=-4
+SNR_SERIES_LOG_FAR_THRESHOLD=0
 verify_segment_derivative_binding() { :; }
 verify_runtime_provenance_manifest_pin() { :; }
 write_status() { :; }
@@ -327,6 +327,7 @@ def test_submit_job_exports_comma_collect_value_without_slurm_token_splitting(tm
             value for value in captured_args if value.startswith("--export="))
         export_tokens = export_arg.removeprefix("--export=").split(",")
         assert "FINALSINK_FAPUPDATER_COLLECT_WALLTIME" in export_tokens
+        assert "SNR_series_logFAR_threshold=0" in export_tokens
         assert not any(value.startswith(
             "FINALSINK_FAPUPDATER_COLLECT_WALLTIME=")
             for value in export_tokens)
@@ -460,7 +461,7 @@ def test_finalsink_uses_exact_route_union_and_normal_output_path_without_multi_m
     controller = read("crashcar_controller.sh")
     sbatch = read("crashcar_sbatch.sh")
 
-    assert '--finalsink-cluster-window' not in pipeline
+    assert pipeline.count("--finalsink-cluster-window 1") == 1
     assert '"H1V1": "H1_SINGLE"' in finalsink
     assert '"L1V1": "L1_SINGLE"' in finalsink
     assert '"H1L1V1": "MULTI"' in finalsink
@@ -1469,7 +1470,7 @@ def test_a109_route_owned_far_projection_fails_closed_when_real4_cannot_hold_it(
 
     decision = finalsink[
         finalsink.index("def _crashcar_final_far_decision("):
-        finalsink.index("def _crashcar_cluster_zero_dispatch(")]
+        finalsink.index("def _crashcar_candidate_output_dispatch(")]
     assert 'if route == "H1_SINGLE":' in decision
     assert 'elif route == "L1_SINGLE":' in decision
     assert "raw_value = postcoh_inspiral.far" in decision

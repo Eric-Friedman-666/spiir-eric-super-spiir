@@ -97,7 +97,7 @@ def test_nonpositive_route_far_is_explicitly_invalid_without_backfill():
         "valid": 0,
         "active_ifos": ("H1",),
     }
-    dispatch = postcoh_finalsink._crashcar_cluster_zero_dispatch(
+    dispatch = postcoh_finalsink._crashcar_candidate_output_dispatch(
         row, decision, -4.0)
     assert dispatch["write"] is False
 

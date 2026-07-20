@@ -226,10 +226,10 @@ def _crashcar_final_far_decision(postcoh_inspiral,
     }
 
 
-def _crashcar_cluster_zero_dispatch(postcoh_inspiral,
-                                    final_decision,
-                                    log10_threshold):
-    """Apply the existing normal threshold to the one route-owned FAR."""
+def _crashcar_candidate_output_dispatch(postcoh_inspiral,
+                                        final_decision,
+                                        log10_threshold):
+    """Apply the local Coinc/SNR threshold to the route-owned final FAR."""
     active_ifos, route, unused_llrs = _crashcar_a109_llrs_and_route(
         postcoh_inspiral)
     del unused_llrs
@@ -971,17 +971,13 @@ class FinalSink(object):
                     # Preserve the normal SPIIR clustered FAR path exactly.
                     self.__set_far(postcoh_inspiral)
 
-                candidate_written = False
-                if self.gracedb_far_threshold and self.__pass_test(
-                        postcoh_inspiral,
-                        final_decision=final_decision):
-                    self.__do_gracedb_alert(
-                        self.candidate, self.gracedb_upload_attempts,
-                        final_decision=final_decision)
-                    candidate_written = True
-                if self.crashcar_enabled and not candidate_written:
-                    self.__write_crashcar_single_coinc_if_needed(
+                if self.crashcar_enabled:
+                    self.__process_crashcar_candidate_output(
                         self.candidate, final_decision=final_decision)
+                elif self.gracedb_far_threshold and self.__pass_test(
+                        postcoh_inspiral):
+                    self.__do_gracedb_alert(
+                        self.candidate, self.gracedb_upload_attempts)
 
                 self.postcoh_table.append(
                     _postcoh_row_for_serialization(
@@ -1023,7 +1019,7 @@ class FinalSink(object):
                     enable_feature_best_far=(
                         self.enable_feature_best_far),
                     best_far_threshold=self.best_far_threshold)
-                self.__write_crashcar_single_coinc_if_needed(
+                self.__process_crashcar_candidate_output(
                     event, final_decision=final_decision)
                 output_rows.append(
                     _postcoh_row_for_serialization(
@@ -1198,43 +1194,74 @@ class FinalSink(object):
                 continue
             postcoh_inspiral.far_sngl[ifo_id] = far_sngl[ifo_id]
 
-    def __write_crashcar_single_coinc_if_needed(self,
-                                                trigger,
-                                                final_decision=None):
-        """Reuse the normal writer only for a crashcar single-owned event."""
+    def __process_crashcar_candidate_output(self,
+                                            trigger,
+                                            final_decision=None):
+        """Select one FinalSink output and reuse the normal CoincsDoc writer.
+
+        The crashcar element only enriches the authoritative Postcoh row.
+        FinalSink alone applies the route-owned FAR threshold, performs local
+        Coinc/SNR retention, and optionally uploads the same serialized
+        candidate to GraceDB.  H/L single ownership never creates a separate
+        writer or output stream.
+        """
         if not self.crashcar_enabled:
             raise RuntimeError(
-                "DISABLED_CRASHCAR_SINGLE_COINC_WRITE_ATTEMPT")
+                "DISABLED_CRASHCAR_CANDIDATE_OUTPUT_ATTEMPT")
         postcoh_inspiral = trigger.postcoh_inspiral
         if final_decision is None:
             raise RuntimeError(
                 "MISSING_FINAL_FAR_DECISION event_id=%s" %
                 postcoh_inspiral.event_id)
-        if final_decision.get("route") not in (
-                "H1_SINGLE", "L1_SINGLE"):
-            return False
-        dispatch = _crashcar_cluster_zero_dispatch(
+        dispatch = _crashcar_candidate_output_dispatch(
             postcoh_inspiral,
             final_decision,
             self.snr_series_logfar_threshold)
-        if not dispatch["write"]:
+
+        retain_local = dispatch["write"]
+        upload_selected = bool(
+            self.gracedb_far_threshold and self.__pass_test(
+                postcoh_inspiral, final_decision=final_decision))
+        upload_allowed = False
+        if upload_selected:
+            upload_allowed = not self.__need_trigger_control(
+                postcoh_inspiral,
+                final_far=final_decision["value"])
+        if not retain_local and not upload_allowed:
             return False
 
-        filename = "%s_%d_%09d_%d_%d_%d.xml" % (
-            postcoh_inspiral.ifos,
-            postcoh_inspiral.end_time,
-            postcoh_inspiral.end_time_ns,
-            postcoh_inspiral.bankid,
-            postcoh_inspiral.tmplt_idx,
-            postcoh_inspiral.event_id,
-        )
-        self.__write_candidate_coinc_xml(
+        if upload_allowed and self.append_psd_to_coincs_doc:
+            psds = {
+                ifo: self.get_current_lal_psd_frequency_series(ifo)
+                for ifo in re.findall("..", postcoh_inspiral.ifos)
+            }
+        else:
+            psds = None
+
+        filename = "%s_%s_%d_%d.xml" % (
+            postcoh_inspiral.ifos, postcoh_inspiral.end_time,
+            postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx)
+        return_bytes = upload_allowed and self.gracedb_client is not None
+        coinc_message = self.__write_candidate_coinc_xml(
             trigger,
             filename,
-            psds=None,
-            return_bytes=False,
-            log_label="crashcar single-owned candidate/coinc XML",
+            psds=psds,
+            return_bytes=return_bytes,
+            log_label="normal SPIIR candidate/coinc XML",
             final_decision=final_decision)
+
+        if return_bytes:
+            logger.info("sending '%s' to gracedb ...", filename)
+            log_message = (
+                "Optimal ra and dec from this coherent pipeline: "
+                "(%s, %s) in degrees" %
+                (postcoh_inspiral.ra, postcoh_inspiral.dec))
+            gracedb_upload_thread = threading.Thread(
+                target=self.upload_to_gracedb,
+                args=(self.gracedb_upload_attempts, filename,
+                      coinc_message, log_message))
+            gracedb_upload_thread.start()
+            self.threads_gracedb_upload.append(gracedb_upload_thread)
         return True
 
     def __write_candidate_coinc_xml(self,
@@ -1279,7 +1306,18 @@ class FinalSink(object):
                 return float(last_time), float(last_far)
         return self.last_trigger[-1][0], self.last_trigger[-1][1]
 
-    def __need_trigger_control(self, trigger):
+    def __need_trigger_control(self, trigger, final_far=None):
+        trigger_far = trigger.far if final_far is None else final_far
+        try:
+            trigger_far = float(trigger_far)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise RuntimeError(
+                "INVALID_TRIGGER_CONTROL_FAR event_id=%s error=%s" %
+                (trigger.event_id, exc))
+        if not (trigger_far > 0.0 and math.isfinite(trigger_far)):
+            raise RuntimeError(
+                "INVALID_TRIGGER_CONTROL_FAR event_id=%s far=%r" %
+                (trigger.event_id, trigger_far))
         # Suppress the trigger if a recent, better upload has been completed.
         # FIXME: implement a sql solution for node communication ?
         last_time = 0
@@ -1312,17 +1350,17 @@ class FinalSink(object):
         # trigger or if it not more significant the last submitted trigger
         # FIXME: what if there are two adjacent significant events
         trigger_control_log = f"time {float(trigger.end)}, " \
-            f"FAR {trigger.far}, " \
+            f"FAR {trigger_far}, " \
             f"last_submitted time {last_submitted_time}, " \
             f"last_submitted far {last_submitted_far}"
         if ((abs(float(trigger.end) - last_time) < 50
-             and abs(trigger.far / last_far) > 0.5)) or (
+             and abs(trigger_far / last_far) > 0.5)) or (
                  abs(float(trigger.end) - float(last_submitted_time)) < 100
-                 and trigger.far > last_submitted_far * 0.5):
+                 and trigger_far > last_submitted_far * 0.5):
             trigger_is_submitted = 0
             logger.info(f"trigger controlled, {trigger_control_log}")
-            self.last_trigger.append((trigger.end, trigger.far))
-            line = f"{float(trigger.end)},{trigger.far},{trigger_is_submitted}\n"
+            self.last_trigger.append((trigger.end, trigger_far))
+            line = f"{float(trigger.end)},{trigger_far},{trigger_is_submitted}\n"
             with open(self.trigger_control_doc, "a") as f:
                 f.write(line)
             return True
@@ -1330,9 +1368,9 @@ class FinalSink(object):
         logger.info(f"trigger passed, {trigger_control_log}")
 
         trigger_is_submitted = 1
-        #self.last_trigger.append((trigger.end, trigger.far))
+        #self.last_trigger.append((trigger.end, trigger_far))
         #self.last_submitted_trigger.append((trigger.end, trigger.far))
-        line = f"{float(trigger.end)},{trigger.far},{trigger_is_submitted}\n"
+        line = f"{float(trigger.end)},{trigger_far},{trigger_is_submitted}\n"
         with open(self.trigger_control_doc, "a") as f:
             f.write(line)
 

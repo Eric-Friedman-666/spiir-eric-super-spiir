@@ -230,6 +230,7 @@ cmd+=(
   --cuda-postcoh-detrsp-fname "${map}"
   --cuda-postcoh-output-skymap 100
   --check-time-stamp
+  --finalsink-cluster-window 1
   --finalsink-output-prefix "${jobno}/${jobno}_zerolag"
   --finalsink-snapshot-interval "${zerolag_snapshot_interval}"
 )

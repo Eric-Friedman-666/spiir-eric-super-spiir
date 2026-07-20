@@ -179,7 +179,7 @@ def test_nonpositive_owner_far_is_not_a_formal_output(far):
     decision = finalsink._crashcar_final_far_decision(row)
     assert decision["valid"] == 0
     assert decision["value"] == 0.0
-    dispatch = finalsink._crashcar_cluster_zero_dispatch(
+    dispatch = finalsink._crashcar_candidate_output_dispatch(
         row, decision, -4.0)
     assert dispatch == {
         "write": False,
@@ -194,13 +194,48 @@ def test_hl_normal_far_alone_controls_threshold_dispatch():
     set_single(row, "L1", llr=12.0, far=2.0e-12)
     row.far = 3.0e-5
     decision = finalsink._crashcar_final_far_decision(row)
-    assert finalsink._crashcar_cluster_zero_dispatch(
+    assert finalsink._crashcar_candidate_output_dispatch(
         row, decision, -4.0)["write"] is True
     row.far = 3.0e-3
     decision = finalsink._crashcar_final_far_decision(row)
-    assert finalsink._crashcar_cluster_zero_dispatch(
+    assert finalsink._crashcar_candidate_output_dispatch(
         row, decision, -4.0)["write"] is False
 
+
+
+@pytest.mark.parametrize(
+    ("ifos", "route", "owner_ifo"),
+    (
+        ("H1", "H1_SINGLE", "H1"),
+        ("L1", "L1_SINGLE", "L1"),
+        ("H1L1", "MULTI", ""),
+        ("V1", "V1_ONLY", ""),
+    ),
+)
+def test_unified_output_dispatch_uses_each_route_owned_far(
+        ifos, route, owner_ifo):
+    row = FakePostcohRow(ifos)
+    if ifos == "H1":
+        set_single(row, "H1", llr=8.0, far=1.0e-5)
+    elif ifos == "L1":
+        set_single(row, "L1", llr=9.0, far=1.0e-5)
+    else:
+        row.far = 1.0e-5
+    decision = finalsink._crashcar_final_far_decision(row)
+    assert decision["route"] == route
+    assert decision["owner_ifo"] == owner_ifo
+    assert finalsink._crashcar_candidate_output_dispatch(
+        row, decision, -4.0)["write"] is True
+
+    if route == "H1_SINGLE":
+        row.far_sngl[pipe_macro.get_ifo_id("H1")] = 1.0e-3
+    elif route == "L1_SINGLE":
+        row.far_sngl[pipe_macro.get_ifo_id("L1")] = 1.0e-3
+    else:
+        row.far = 1.0e-3
+    decision = finalsink._crashcar_final_far_decision(row)
+    assert finalsink._crashcar_candidate_output_dispatch(
+        row, decision, -4.0)["write"] is False
 
 def test_rho_equal_four_is_eligible_and_v1_is_not_a_single_owner():
     assert finalsink._crashcar_single_snr_eligible(4.0)
