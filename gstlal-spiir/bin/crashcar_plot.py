@@ -48,6 +48,7 @@ FAR_BIN_COLORS = ["#08306b", "#2166ac", "#4393c3", "#92c5de", "#fee08b", "#f46d4
 IFO_COLORS = {"H1": "#1f77b4", "L1": "#ff7f0e", "V1": "#2ca02c", "K1": "#9467bd"}
 CHISQ_VIEW = (0.5, 1.5)
 LLR_XMIN = -10.0
+LLR_XMAX = 200.0
 SNR_XMIN = 4.0
 FAR_POINT_SIZE = 16.0
 TAIL_POINT_SIZE = 26.0
@@ -849,11 +850,16 @@ def validate_schema4_background_document(
     far_floor_count = _schema4_exact_int(
         doc["far_floor_count"], "far_floor_count"
     )
-    tail_log10_far = _schema4_exact_int(
-        doc["tail_log10_far"], "tail_log10_far"
-    )
-    if far_floor_count != 1 or tail_log10_far != -2:
-        raise ValueError("authoritative background FAR floor/tail boundary mismatch")
+    raw_tail_log10_far = doc["tail_log10_far"]
+    if (
+        type(raw_tail_log10_far) not in (int, float)
+        or not math.isfinite(float(raw_tail_log10_far))
+        or float(raw_tail_log10_far) >= 0.0
+    ):
+        raise ValueError("authoritative background tail boundary must be finite and negative")
+    tail_log10_far = float(raw_tail_log10_far)
+    if far_floor_count != 1:
+        raise ValueError("authoritative background FAR floor mismatch")
 
     backgrounds = doc["backgrounds"]
     if not isinstance(backgrounds, dict):
@@ -987,7 +993,7 @@ def validate_schema4_background_document(
         "update_period": dict(doc["update_period"]),
         "update_period_ns": update_period_ns,
         "far_floor_count": 1,
-        "tail_log10_far": -2,
+        "tail_log10_far": tail_log10_far,
         "provenance": {key: doc[key] for key in provenance_keys},
         "backgrounds": parsed_backgrounds,
     }
@@ -1436,12 +1442,9 @@ def panel_a_segmented_fit(
     stored_tail_fit: dict | None = None,
 ) -> dict | None:
     """Render the same direct/tail law used by the crashcar FAR assignment."""
-    if not math.isclose(
-        float(tail_boundary), TAIL_BOUNDARY_LOG10_FAR, rel_tol=0.0, abs_tol=1.0e-12
-    ):
-        raise ValueError(
-            "crashcar tail boundary is fixed by the numeric contract at log10(FAR)=-2"
-        )
+    tail_boundary = float(tail_boundary)
+    if not math.isfinite(tail_boundary) or tail_boundary >= 0.0:
+        raise ValueError("tail boundary must be finite and negative")
     ranks = [
         as_float(point.get("llr"))
         for point in points
@@ -1464,7 +1467,7 @@ def panel_a_segmented_fit(
             if stored_tail_fit is not None
             else "shared_crashcar_numeric.tail_model"
         ),
-        "tail_boundary_log10_far": TAIL_BOUNDARY_LOG10_FAR,
+        "tail_boundary_log10_far": tail_boundary,
         "r_tail": None,
         "assignment_boundary": "r<=r_tail direct calculated FAR; r>r_tail fitted FAR",
         "tail_status": "unavailable_missing_livetime",
@@ -1523,7 +1526,7 @@ def panel_a_segmented_fit(
             r_tail + 1.0e-6,
         )
         line_x = np.linspace(r_tail, line_x_max, 160)
-        line_y = TAIL_BOUNDARY_LOG10_FAR + slope * (line_x - r_tail)
+        line_y = tail_boundary + slope * (line_x - r_tail)
         result.update(
             {
                 "support_point_count": int(support_x.size),
@@ -1544,12 +1547,18 @@ def panel_a_segmented_fit(
                 "tail_line_x": line_x,
                 "tail_line_y": line_y,
                 "tail_slope": slope,
-                "tail_intercept": TAIL_BOUNDARY_LOG10_FAR - slope * r_tail,
+                "tail_intercept": tail_boundary - slope * r_tail,
                 "tail_status": "valid_authoritative_stored_negative_slope",
             }
         )
         return result
 
+    if not math.isclose(
+        tail_boundary, TAIL_BOUNDARY_LOG10_FAR, rel_tol=0.0, abs_tol=1.0e-12
+    ):
+        raise ValueError(
+            "diagnostic tail recomputation requires the current numeric boundary"
+        )
     model = CRASHCAR_NUMERIC.tail_model(ranks, livetime)
     support_x = np.asarray(model["empirical_ranks"], dtype=float)
     support_y = np.asarray(model["empirical_log10_fars"], dtype=float)
@@ -1594,7 +1603,7 @@ def panel_a_segmented_fit(
 
     line_x_max = max(float(np.nanmax(tail_x)), r_tail + 1.0e-6)
     line_x = np.linspace(r_tail, line_x_max, 160)
-    line_y = TAIL_BOUNDARY_LOG10_FAR + slope * (line_x - r_tail)
+    line_y = tail_boundary + slope * (line_x - r_tail)
     result.update(
         {
             "tail_line_x": line_x,
@@ -1811,14 +1820,14 @@ def plot_first_2x2(
                         linewidth=2.0,
                         linestyle="-",
                         alpha=0.96,
-                        label=f"{ifo} tail fit (r > r_tail, anchored at -2)",
+                        label=f"{ifo} tail fit (r > r_tail, anchored at {tail_boundary:g})",
                     )
         else:
             ax.text(0.03, 0.90 if ifo == "H1" else 0.82, f"{ifo}: no worker{panel_a_worker} BG support rows", transform=ax.transAxes, color=IFO_COLORS[ifo])
     ax.axhline(tail_boundary, color="0.25", linestyle="-.", linewidth=1.1, label=f"tail boundary {tail_boundary:g}")
     ax.set_xlabel("LLR")
     ax.set_ylabel("log10(Calculated FAR)")
-    ax.set_xlim(left=LLR_XMIN)
+    ax.set_xlim(LLR_XMIN, LLR_XMAX)
     ax.set_title(f"Panel (a): worker{panel_a_worker} H/L {panel_a_policy} BG support\n{panel_a_source_label}", fontweight="bold")
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best", fontsize=7)
@@ -1952,6 +1961,7 @@ def plot_first_2x2(
         "panel_c_plotted_points": multi_view_count,
         "panel_d_plotted_points": combined_view_count,
         "llr_xmin": LLR_XMIN,
+        "llr_xmax": LLR_XMAX,
         "snr_xmin": SNR_XMIN,
         "colorbar_count": 1,
         "colorbar_location": "right",
@@ -3333,13 +3343,11 @@ def main() -> None:
         help="Use the fixed publication view or plot every finite assigned-FAR point with SNR>=4 in panels (b)-(d).",
     )
     args = parser.parse_args()
-    if not math.isclose(
-        args.tail_boundary_log10_far,
-        TAIL_BOUNDARY_LOG10_FAR,
-        rel_tol=0.0,
-        abs_tol=1.0e-12,
+    if (
+        not math.isfinite(args.tail_boundary_log10_far)
+        or args.tail_boundary_log10_far >= 0.0
     ):
-        parser.error("--tail-boundary-log10-far is fixed at -2 by crashcar_numeric")
+        parser.error("--tail-boundary-log10-far must be finite and negative")
 
     run_root = args.run_root.resolve()
     start_bank = 0 if args.start_bank is None else args.start_bank

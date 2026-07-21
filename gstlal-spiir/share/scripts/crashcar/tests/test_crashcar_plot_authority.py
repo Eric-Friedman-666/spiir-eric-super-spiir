@@ -294,10 +294,11 @@ def test_live_background_coverage_contract_fails_closed(tmp_path, case, message)
         ("schema_version", 4.0, "exact integer"),
         ("schema_version", True, "exact integer"),
         ("far_floor_count", 1.0, "exact integer"),
-        ("tail_log10_far", -2.0, "exact integer"),
+        ("tail_log10_far", True, "finite and negative"),
+        ("tail_log10_far", 0.0, "finite and negative"),
+        ("tail_log10_far", float("nan"), "finite and negative"),
         ("schema_version", 3, "schema/kind mismatch"),
-        ("far_floor_count", 2, "floor/tail boundary"),
-        ("tail_log10_far", -3, "floor/tail boundary"),
+        ("far_floor_count", 2, "FAR floor mismatch"),
     ],
 )
 def test_schema4_contract_constants_are_exact_integers(
@@ -308,6 +309,19 @@ def test_schema4_contract_constants_are_exact_integers(
     doc[field] = value
     with pytest.raises(ValueError, match=message):
         load_schema4(path, doc)
+
+
+@pytest.mark.parametrize("tail_log10_far", [-2, -2.5, -1.0e-6])
+def test_schema4_accepts_authoritative_finite_negative_tail_boundary(
+    tmp_path, tail_log10_far
+):
+    path = tmp_path / "single_background.json"
+    doc = schema4_background_doc()
+    doc["tail_log10_far"] = tail_log10_far
+    panel = load_schema4(path, doc)
+    assert panel["schema4_authority"]["tail_log10_far"] == pytest.approx(
+        float(tail_log10_far), rel=0.0, abs=0.0
+    )
 
 
 @pytest.mark.parametrize(
@@ -322,7 +336,7 @@ def test_schema4_contract_constants_are_exact_integers(
         ("bad_llr", "canonical binary64"),
         ("legacy_triggers", "keys mismatch"),
         ("tail_method", "tail method mismatch"),
-        ("floor", "floor/tail boundary"),
+        ("floor", "FAR floor mismatch"),
         ("occupancy", "occupancy/livetime"),
         ("unsorted", "not canonically sorted"),
     ],
