@@ -23,6 +23,7 @@
  *
  * ============================================================================
  */
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -85,7 +86,19 @@ enum property {
     PROP_IFOS,
     PROP_REFRESH_INTERVAL,
     PROP_SILENT_TIME,
-    PROP_INPUT_FNAME
+    PROP_INPUT_FNAME,
+    PROP_ASSIGN_MULTI_FAR,
+    PROP_SINGLE_ENABLED,
+    PROP_SINGLE_DOF,
+    PROP_SINGLE_DETAIL_OUTPUT_FNAME,
+    PROP_SINGLE_TEMPLATE_SHAPE_MAP_FNAME,
+    PROP_SINGLE_LOG10_FAR_THRESHOLD,
+    PROP_SINGLE_TAIL_LOG10_FAR,
+    PROP_SINGLE_LIVETIME_STEP,
+    PROP_SINGLE_STREAM_ID,
+    PROP_SINGLE_STREAM_COUNT,
+    PROP_SINGLE_STREAM_BANK_ID,
+    PROP_SINGLE_WORKER_BANK_IDS
 };
 
 static void cohfar_assignfar_set_property(GObject *object,
@@ -99,6 +112,7 @@ static void cohfar_assignfar_get_property(GObject *object,
                                           GParamSpec *pspec);
 
 /* vmethods */
+static gboolean cohfar_assignfar_start(GstBaseTransform *base);
 static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *base,
                                                    GstBuffer *buf);
 static void cohfar_assignfar_dispose(GObject *object);
@@ -282,9 +296,9 @@ static void _set_background_stats(PostcohInspiralTable *table,
  * transform_ip()
  */
 
-static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
-                                                   GstBuffer *buf) {
-    CohfarAssignfar *element = COHFAR_ASSIGNFAR(trans);
+static GstFlowReturn cohfar_assignfar_transform_multi(
+  CohfarAssignfar *element,
+  GstBuffer *buf) {
     GstFlowReturn result     = GST_FLOW_OK;
 
     GstClockTime t_cur = GST_BUFFER_PTS(buf);
@@ -387,6 +401,35 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
     return result;
 }
 
+static gboolean cohfar_assignfar_start(GstBaseTransform *base) {
+    CohfarAssignfar *element = COHFAR_ASSIGNFAR(base);
+    return crashcar_singlefar_engine_start(&element->single);
+}
+
+static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *base,
+                                                   GstBuffer *buf) {
+    CohfarAssignfar *element = COHFAR_ASSIGNFAR(base);
+    GstFlowReturn result = GST_FLOW_OK;
+
+    /*
+     * Before unification, GstBaseTransform bypassed the normal multi element
+     * for GAP buffers, then the gap-aware single element passed them through
+     * unchanged.  The unified element is gap-aware for the single engine, so
+     * reproduce that two-element behaviour explicitly before either engine
+     * observes or advances state from the GAP timestamp.
+     */
+    if (GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_GAP)) {
+        return GST_FLOW_OK;
+    }
+
+    /* Preserve the old serial order exactly: multi first, then single. */
+    if (element->assign_multi_far) {
+        result = cohfar_assignfar_transform_multi(element, buf);
+        if (result != GST_FLOW_OK) return result;
+    }
+    return crashcar_singlefar_engine_transform_ip(&element->single, buf);
+}
+
 /*
  * ============================================================================
  *
@@ -463,6 +506,84 @@ static void cohfar_assignfar_set_property(GObject *object,
         element->refresh_interval = g_value_get_int(value);
         break;
 
+    case PROP_ASSIGN_MULTI_FAR:
+        element->assign_multi_far = g_value_get_boolean(value);
+        break;
+
+    case PROP_SINGLE_ENABLED:
+        element->single.enabled = g_value_get_boolean(value);
+        break;
+
+    case PROP_SINGLE_DOF:
+        element->single.dof = g_value_get_double(value);
+        break;
+
+    case PROP_SINGLE_DETAIL_OUTPUT_FNAME:
+        g_free(element->single.detail_output_fname);
+        element->single.detail_output_fname = g_value_dup_string(value);
+        break;
+
+    case PROP_SINGLE_TEMPLATE_SHAPE_MAP_FNAME:
+        g_free(element->single.template_shape_map_fname);
+        element->single.template_shape_map_fname = g_value_dup_string(value);
+        if (element->single.template_shape_map) {
+            g_hash_table_remove_all(element->single.template_shape_map);
+        }
+        element->single.template_shape_map_loaded = FALSE;
+        break;
+
+    case PROP_SINGLE_LOG10_FAR_THRESHOLD:
+        element->single.log10_far_threshold = g_value_get_double(value);
+        break;
+
+    case PROP_SINGLE_TAIL_LOG10_FAR:
+        element->single.tail_log10_far = g_value_get_double(value);
+        break;
+
+    case PROP_SINGLE_LIVETIME_STEP:
+        element->single.livetime_step = g_value_get_double(value);
+        break;
+
+    case PROP_SINGLE_STREAM_ID:
+        if (element->single.graph_binding_locked) {
+            GST_ERROR_OBJECT(element,
+                             "ignored immutable graph property stream-id");
+            break;
+        }
+        element->single.stream_id = g_value_get_int(value);
+        break;
+
+    case PROP_SINGLE_STREAM_COUNT:
+        if (element->single.graph_binding_locked) {
+            GST_ERROR_OBJECT(element,
+                             "ignored immutable graph property stream-count");
+            break;
+        }
+        element->single.stream_count = g_value_get_int(value);
+        break;
+
+    case PROP_SINGLE_STREAM_BANK_ID:
+        if (element->single.graph_binding_locked) {
+            GST_ERROR_OBJECT(element,
+                             "ignored immutable graph property stream-bank-id");
+            break;
+        }
+        element->single.stream_bank_id = g_value_get_int(value);
+        break;
+
+    case PROP_SINGLE_WORKER_BANK_IDS:
+        if (element->single.graph_binding_locked) {
+            GST_ERROR_OBJECT(element,
+                             "ignored immutable graph property worker-bank-ids");
+            break;
+        }
+        g_free(element->single.worker_bank_ids);
+        element->single.worker_bank_ids = g_value_dup_string(value);
+        if (element->single.worker_bank_id_values) {
+            g_array_set_size(element->single.worker_bank_id_values, 0);
+        }
+        break;
+
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec); break;
     }
 
@@ -488,10 +609,13 @@ static void cohfar_assignfar_get_property(GObject *object,
     case PROP_IFOS: g_value_set_string(value, element->ifos); break;
 
     case PROP_INPUT_FNAME:
-        serialized_input_fnames =
-          g_strjoin(",", element->input_fnames[STATS_FNAME_1W_IDX],
-                    element->input_fnames[STATS_FNAME_1D_IDX],
-                    element->input_fnames[STATS_FNAME_2H_IDX], NULL);
+        serialized_input_fnames = NULL;
+        if (element->input_fnames && element->ninput == 3) {
+            serialized_input_fnames =
+              g_strjoin(",", element->input_fnames[STATS_FNAME_1W_IDX],
+                        element->input_fnames[STATS_FNAME_1D_IDX],
+                        element->input_fnames[STATS_FNAME_2H_IDX], NULL);
+        }
         g_value_set_string(value, serialized_input_fnames);
         g_free(serialized_input_fnames);
         break;
@@ -500,6 +624,42 @@ static void cohfar_assignfar_get_property(GObject *object,
 
     case PROP_REFRESH_INTERVAL:
         g_value_set_int(value, element->refresh_interval);
+        break;
+    case PROP_ASSIGN_MULTI_FAR:
+        g_value_set_boolean(value, element->assign_multi_far);
+        break;
+    case PROP_SINGLE_ENABLED:
+        g_value_set_boolean(value, element->single.enabled);
+        break;
+    case PROP_SINGLE_DOF:
+        g_value_set_double(value, element->single.dof);
+        break;
+    case PROP_SINGLE_DETAIL_OUTPUT_FNAME:
+        g_value_set_string(value, element->single.detail_output_fname);
+        break;
+    case PROP_SINGLE_TEMPLATE_SHAPE_MAP_FNAME:
+        g_value_set_string(value, element->single.template_shape_map_fname);
+        break;
+    case PROP_SINGLE_LOG10_FAR_THRESHOLD:
+        g_value_set_double(value, element->single.log10_far_threshold);
+        break;
+    case PROP_SINGLE_TAIL_LOG10_FAR:
+        g_value_set_double(value, element->single.tail_log10_far);
+        break;
+    case PROP_SINGLE_LIVETIME_STEP:
+        g_value_set_double(value, element->single.livetime_step);
+        break;
+    case PROP_SINGLE_STREAM_ID:
+        g_value_set_int(value, element->single.stream_id);
+        break;
+    case PROP_SINGLE_STREAM_COUNT:
+        g_value_set_int(value, element->single.stream_count);
+        break;
+    case PROP_SINGLE_STREAM_BANK_ID:
+        g_value_set_int(value, element->single.stream_bank_id);
+        break;
+    case PROP_SINGLE_WORKER_BANK_IDS:
+        g_value_set_string(value, element->single.worker_bank_ids);
         break;
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec); break;
     }
@@ -517,9 +677,13 @@ static void cohfar_assignfar_dispose(GObject *object) {
         trigger_stats_xml_destroy(element->bgstats_1w);
         trigger_stats_xml_destroy(element->bgstats_1d);
         trigger_stats_xml_destroy(element->bgstats_2h);
+        element->bgstats_1w = NULL;
+        element->bgstats_1d = NULL;
+        element->bgstats_2h = NULL;
     }
+    crashcar_singlefar_engine_clear(&element->single);
+    g_clear_pointer(&element->input_fnames, g_strfreev);
     G_OBJECT_CLASS(cohfar_assignfar_parent_class)->dispose(object);
-    g_strfreev(element->input_fnames);
 }
 
 /*
@@ -561,11 +725,103 @@ static void cohfar_assignfar_class_init(CohfarAssignfarClass *klass) {
                        0, G_MAXINT, G_MAXINT,
                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+    g_object_class_install_property(
+      gobject_class, PROP_ASSIGN_MULTI_FAR,
+      g_param_spec_boolean(
+        "assign-multi-far", "assign multi FAR",
+        "run the normal multi/coherent FAR assignment before the single engine",
+        TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_ENABLED,
+      g_param_spec_boolean(
+        "single-enabled", "single enabled",
+        "enable the internal crashcar single-detector engine", FALSE,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_DOF,
+      g_param_spec_double(
+        "dof", "effective degrees of freedom",
+        "legacy single metadata only; runtime dof is derived from bankid",
+        1.0e-12, G_MAXDOUBLE, 120.0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_DETAIL_OUTPUT_FNAME,
+      g_param_spec_string(
+        "detail-output-fname", "detail output filename",
+        "CSV file for significant crashcar single-trigger details", NULL,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_TEMPLATE_SHAPE_MAP_FNAME,
+      g_param_spec_string(
+        "template-shape-map-fname", "template shape map filename",
+        "canonical CSV with ifo_id,bankid,tmplt_idx,a_eff,dof,ifo,source_class",
+        NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_LOG10_FAR_THRESHOLD,
+      g_param_spec_double(
+        "log10-far-threshold", "single log10 FAR threshold",
+        "write detailed single rows when log10(FAR) is at or below this value",
+        -G_MAXDOUBLE, G_MAXDOUBLE, -4.0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_TAIL_LOG10_FAR,
+      g_param_spec_double(
+        "tail-log10-far", "single tail log10 FAR anchor",
+        "negative log10 FAR anchor for the single-detector tail fit",
+        -G_MAXDOUBLE, -DBL_MIN, -2.0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_LIVETIME_STEP,
+      g_param_spec_double(
+        "livetime-step", "single livetime step",
+        "default single livetime increment for FLAG_EMPTY rows",
+        0.0, G_MAXDOUBLE, 1.0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_STREAM_ID,
+      g_param_spec_int(
+        "stream-id", "single stream id",
+        "zero-based Postcoh stream ordinal in this worker",
+        0, CRASHCAR_SINGLE_BANK_COUNT - 1, 0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_STREAM_COUNT,
+      g_param_spec_int(
+        "stream-count", "single stream count",
+        "exact number of Postcoh bank streams in this worker",
+        1, CRASHCAR_SINGLE_BANK_COUNT, 1,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_STREAM_BANK_ID,
+      g_param_spec_int(
+        "stream-bank-id", "single stream bank id",
+        "bank id derived from this Postcoh graph stream",
+        0, CRASHCAR_SINGLE_BANK_COUNT - 1, 0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+      gobject_class, PROP_SINGLE_WORKER_BANK_IDS,
+      g_param_spec_string(
+        "worker-bank-ids", "single worker bank ids",
+        "canonical graph-ordered bank id roster", "0",
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
     GstElementClass *gst_element_class = GST_ELEMENT_CLASS(klass);
 
     gst_element_class_set_metadata(
-      gst_element_class, "assign FAR to postcoh triggers", "assign FAR",
-      "assign FAR to postcoh triggers according to a given stats file.\n",
+      gst_element_class, "unified FAR assignment for postcoh triggers",
+      "assign FAR",
+      "assign normal multi/coherent FAR and optional crashcar single FAR in-place.\n",
       "Qi Chu <qi.chu at ligo dot org>");
 
     GstCaps *template_caps = gst_caps_from_string("application/x-lal-postcoh");
@@ -586,6 +842,7 @@ static void cohfar_assignfar_class_init(CohfarAssignfarClass *klass) {
 
     GstBaseTransformClass *transform_class = GST_BASE_TRANSFORM_CLASS(klass);
 
+    transform_class->start = GST_DEBUG_FUNCPTR(cohfar_assignfar_start);
     transform_class->transform_ip =
       GST_DEBUG_FUNCPTR(cohfar_assignfar_transform_ip);
     transform_class->sink_event =
@@ -596,6 +853,7 @@ static void cohfar_assignfar_class_init(CohfarAssignfarClass *klass) {
  */
 
 static void cohfar_assignfar_init(CohfarAssignfar *element) {
+    gst_base_transform_set_gap_aware(GST_BASE_TRANSFORM(element), TRUE);
     element->ifos             = NULL;
     element->bgstats_2h       = NULL;
     element->bgstats_1d       = NULL;
@@ -605,4 +863,6 @@ static void cohfar_assignfar_init(CohfarAssignfar *element) {
     element->t_roll_start     = GST_CLOCK_TIME_NONE;
     element->pass_silent_time = FALSE;
     element->ninput           = -1;
+    element->assign_multi_far = TRUE;
+    crashcar_singlefar_engine_init(&element->single, GST_ELEMENT(element));
 }

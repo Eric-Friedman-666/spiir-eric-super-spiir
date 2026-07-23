@@ -212,41 +212,8 @@ def mkcohfar_assignfar(
     assignfar_refresh_interval=14400,
     silent_time=2147483647,
     input_fname=None,
-):
-    properties = {
-        "ifos": ifos,
-        "refresh_interval": assignfar_refresh_interval,
-        "silent_time": silent_time,
-    }
-    if input_fname is not None:
-        properties["input_fname"] = input_fname
-
-    if "name" in properties:
-        elem = Gst.ElementFactory.make("cohfar_assignfar",
-                                       properties.pop("name"))
-    else:
-        elem = Gst.ElementFactory.make("cohfar_assignfar")
-    # make sure ifos go first
-    for name, value in properties.items():
-        if name == "ifos":
-            elem.set_property(name.replace("_", "-"), value)
-    for name, value in properties.items():
-        if name != "ifos":
-            elem.set_property(name.replace("_", "-"), value)
-
-    pipeline.add(elem)
-    if isinstance(src, Gst.Pad):
-        src.get_parent_element().link_pads(src, elem, None)
-    elif src is not None:
-        src.link(elem)
-    return elem
-
-
-def mkcrashcar_singlefar(
-    pipeline,
-    src,
-    ifos="H1L1",
-    enabled=True,
+    assign_multi_far=True,
+    single_enabled=False,
     dof=120.0,
     detail_output_fname=None,
     template_shape_map_fname=None,
@@ -260,25 +227,35 @@ def mkcrashcar_singlefar(
 ):
     properties = {
         "ifos": ifos,
-        "enabled": enabled,
-        "dof": dof,
-        "log10_far_threshold": log10_far_threshold,
-        "tail_log10_far": tail_log10_far,
-        "livetime_step": livetime_step,
-        "stream_id": stream_id,
-        "stream_count": stream_count,
-        "stream_bank_id": stream_bank_id,
-        "worker_bank_ids": worker_bank_ids,
+        "refresh_interval": assignfar_refresh_interval,
+        "silent_time": silent_time,
+        "assign_multi_far": assign_multi_far,
+        "single_enabled": single_enabled,
     }
-    if detail_output_fname is not None:
-        properties["detail_output_fname"] = detail_output_fname
-    if template_shape_map_fname is not None:
-        properties["template_shape_map_fname"] = template_shape_map_fname
+    if input_fname is not None:
+        properties["input_fname"] = input_fname
+    if single_enabled:
+        properties.update({
+            "dof": dof,
+            "log10_far_threshold": log10_far_threshold,
+            "tail_log10_far": tail_log10_far,
+            "livetime_step": livetime_step,
+            "stream_id": stream_id,
+            "stream_count": stream_count,
+            "stream_bank_id": stream_bank_id,
+            "worker_bank_ids": worker_bank_ids,
+        })
+        if detail_output_fname is not None:
+            properties["detail_output_fname"] = detail_output_fname
+        if template_shape_map_fname is not None:
+            properties["template_shape_map_fname"] = template_shape_map_fname
 
     if "name" in properties:
-        elem = Gst.ElementFactory.make("crashcar_singlefar", properties.pop("name"))
+        elem = Gst.ElementFactory.make("cohfar_assignfar",
+                                       properties.pop("name"))
     else:
-        elem = Gst.ElementFactory.make("crashcar_singlefar")
+        elem = Gst.ElementFactory.make("cohfar_assignfar")
+    # make sure ifos go first
     for name, value in properties.items():
         if name == "ifos":
             elem.set_property(name.replace("_", "-"), value)

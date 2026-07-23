@@ -583,7 +583,7 @@ def test_detail_csv_keeps_full_science_off_the_authoritative_a109_row():
         assert column in source
     signature = source[
         source.index("static void crashcar_write_detail("):
-        source.index("static void crashcar_singlefar_set_property",
+        source.index("void crashcar_singlefar_engine_clear",
                      source.index("static void crashcar_write_detail("))]
     assert "calculated_far" in signature
     assert "assigned_far" in signature
@@ -633,6 +633,13 @@ def test_exact_a_eff_export_call_and_tail_anchor_uses_existing_runtime_knob():
         / "cohfar"
         / "crashcar_singlefar.c"
     ).read_text(encoding="utf-8")
+    unified = (
+        CRASHCAR_DIR.parents[2]
+        / "gst"
+        / "cuda"
+        / "cohfar"
+        / "cohfar_assignfar.c"
+    ).read_text(encoding="utf-8")
     wrapper = (
         CRASHCAR_DIR.parents[2]
         / "python"
@@ -657,7 +664,7 @@ def test_exact_a_eff_export_call_and_tail_anchor_uses_existing_runtime_knob():
     assert 'import numpy,pandas' in export_call
     assert 'template_map_python=' in export_call
     assert '"${template_map_python}" "${CRASH_SCRIPT_DIR}/export_template_shape_map.py"' in export_call
-    assert '"tail-log10-far"' in source
+    assert '"tail-log10-far"' in unified
     assert "element->tail_log10_far = -2.0;" in source
     assert "tail_log10_far +" in source
     assert "evaluation->tail_slope * rank + evaluation->tail_intercept" not in source
@@ -1381,7 +1388,7 @@ def test_c_source_uses_direct_science_order_without_validation_commit_state():
         / "crashcar_singlefar.h"
     ).read_text(encoding="utf-8")
     transform = source[source.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip"
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip"
     ):]
     publish_locked = source[
         source.index("crashcar_try_complete_paired_authority_locked("):

@@ -3,14 +3,12 @@
 #endif
 
 /*
- * Crashcar low-latency single-detector FAR stream hook.
+ * Crashcar low-latency single-detector FAR engine.
  *
- * This element runs in-place on application/x-lal-postcoh buffers after the
- * coherent FAR assignment element. It is the C/GStreamer insertion point for
- * the eventual exact port of the Python single-detector sidecar. The current
- * implementation deliberately keeps the behaviour conservative: it exposes the
- * detector-local trigger fields and already-assigned single-FAR columns without
- * changing the coherent branch.
+ * This file is an internal module of the unified cohfar_assignfar element.  It
+ * owns the single-detector state and mutates the same Postcoh buffer only after
+ * the unchanged multi/coherent FAR step.  It registers no GStreamer type and
+ * owns no pads, so the graph contains one FAR element per Postcoh bank stream.
  */
 
 #include <errno.h>
@@ -57,7 +55,7 @@
 GST_DEBUG_CATEGORY_STATIC(GST_CAT_DEFAULT);
 
 #define CRASHCAR_CODE_VERSION "r24_live_injection_bg_coverage"
-/* Multiple crashcar elements can live in one worker process and append to the
+/* Multiple per-bank engine instances can live in one worker process and append to the
  * same worker-level products.  Serialize each shared write without altering
  * the normal multi/coherent branch. */
 static GMutex crashcar_detail_file_mutex;
@@ -86,7 +84,7 @@ typedef struct {
 } CrashcarParsedBackground;
 
 /*
- * One Slurm worker owns one process.  Every per-bank crashcar element in that
+ * One Slurm worker owns one process.  Every per-bank crashcar engine in that
  * process consumes the normal Postcoh delivery order and shares this single
  * paired H1/L1 authority.  This is scientific state only: it neither waits for
  * bank streams nor handles GAP/EOS, scheduling, buffers, or pipeline control.
@@ -224,7 +222,7 @@ crashcar_single_background_mode_is_live_injection_consumer(void) {
  * Rolling no-injection authority keeps the strict event-time causal rule.
  */
 static gboolean crashcar_live_coverage_is_eligible(
-  const CrashcarSinglefar *element,
+  const CrashcarSingleFarEngine *element,
   gint64 coverage_gps_ns,
   gint64 event_gps_ns) {
     if (!element || !element->live_single_background_readonly ||
@@ -664,7 +662,7 @@ static gboolean crashcar_parse_duration_ns(const char *text,
 }
 
 static gboolean crashcar_load_exact_window_config(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gchar **failure) {
     const char *background =
       g_getenv("BACKGROUND_ACCUMULATION_SECONDS");
@@ -771,7 +769,7 @@ static gboolean crashcar_read_single_fd_snapshot(
     return TRUE;
 }
 
-static gboolean crashcar_load_livetime_segments(CrashcarSinglefar *element,
+static gboolean crashcar_load_livetime_segments(CrashcarSingleFarEngine *element,
                                                 gchar **failure) {
     const char *fname = g_getenv("CRASHCAR_SEGMENT_LIVETIME_CSV");
     const char *expected_json_sha =
@@ -902,8 +900,7 @@ static gboolean crashcar_load_livetime_segments(CrashcarSinglefar *element,
         : (crashcar_single_background_mode_is_bg_only()
              ? CRASHCAR_SINGLE_AUTHORITY_MODE_BG_ONLY
              : CRASHCAR_SINGLE_AUTHORITY_MODE_CAUSAL_NOINJ);
-    GST_INFO_OBJECT(
-      element,
+    GST_INFO_OBJECT(element->owner,
       "loaded pinned segment JSON schema=%d H1_intervals=%u L1_intervals=%u "
       "H1_livetime_ns=%" G_GINT64_FORMAT " L1_livetime_ns=%" G_GINT64_FORMAT
       " worker=%d",
@@ -929,7 +926,7 @@ static gboolean crashcar_copy_required_sha_env(
 }
 
 static gboolean crashcar_load_background_binding(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gchar **failure) {
     if (!element || element->worker_id < 0) {
         return crashcar_set_failure(
@@ -1038,7 +1035,7 @@ static const LIGOTimeGPS *crashcar_component_end_time(
 }
 
 static gboolean crashcar_assignment_window_end_ns(
-  const CrashcarSinglefar *element,
+  const CrashcarSingleFarEngine *element,
   gint64 row_assignment_gps_ns,
   gint64 *end_gps_ns_out) {
     if (!element || !end_gps_ns_out ||
@@ -1114,43 +1111,7 @@ gboolean crashcar_singlefar_beta_at(guint index, double *beta_out) {
     return TRUE;
 }
 
-G_DEFINE_TYPE_WITH_CODE(CrashcarSinglefar,
-                        crashcar_singlefar,
-                        GST_TYPE_BASE_TRANSFORM,
-                        GST_DEBUG_CATEGORY_INIT(
-                          GST_CAT_DEFAULT,
-                          "crashcar_singlefar",
-                          0,
-                          "crashcar single-detector FAR stream hook"))
-
-enum property {
-    PROP_0,
-    PROP_IFOS,
-    PROP_ENABLED,
-    PROP_DOF,
-    PROP_DETAIL_OUTPUT_FNAME,
-    PROP_TEMPLATE_SHAPE_MAP_FNAME,
-    PROP_LOG10_FAR_THRESHOLD,
-    PROP_TAIL_LOG10_FAR,
-    PROP_LIVETIME_STEP,
-    PROP_STREAM_ID,
-    PROP_STREAM_COUNT,
-    PROP_STREAM_BANK_ID,
-    PROP_WORKER_BANK_IDS
-};
-
-static void crashcar_singlefar_set_property(GObject *object,
-                                            guint prop_id,
-                                            const GValue *value,
-                                            GParamSpec *pspec);
-static void crashcar_singlefar_get_property(GObject *object,
-                                            guint prop_id,
-                                            GValue *value,
-                                            GParamSpec *pspec);
-static void crashcar_singlefar_dispose(GObject *object);
-static gboolean crashcar_singlefar_start(GstBaseTransform *base);
-static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
-                                                     GstBuffer *buf);
+static gsize crashcar_singlefar_debug_initialized = 0;
 
 static gchar *crashcar_template_shape_key(int ifo_id,
                                           int bankid,
@@ -1190,7 +1151,7 @@ static gboolean crashcar_parse_canonical_nonnegative_int(const char *token,
 }
 
 static gboolean crashcar_parse_worker_bank_roster(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gchar **failure) {
     if (!element || !element->worker_bank_id_values ||
         !element->worker_bank_ids || !element->worker_bank_ids[0] ||
@@ -1246,7 +1207,7 @@ static gboolean crashcar_parse_worker_bank_roster(
 }
 
 static gboolean crashcar_row_bank_matches_graph(
-  const CrashcarSinglefar *element,
+  const CrashcarSingleFarEngine *element,
   int bank_id) {
     return element && element->graph_binding_locked &&
            element->worker_bank_id_values &&
@@ -1347,7 +1308,7 @@ gboolean crashcar_singlefar_parse_template_shape_row(
     return valid;
 }
 
-static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
+static void crashcar_load_template_shape_map(CrashcarSingleFarEngine *element) {
     if (element->template_shape_map_loaded) return;
     element->template_shape_map_loaded = TRUE;
     if (!element->template_shape_map) {
@@ -1356,13 +1317,13 @@ static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
     }
     if (!element->template_shape_map_fname ||
         !element->template_shape_map_fname[0]) {
-        GST_ERROR_OBJECT(element, "canonical A_eff map is not configured");
+        GST_ERROR_OBJECT(element->owner, "canonical A_eff map is not configured");
         g_error("canonical crashcar A_eff map is required");
     }
 
     FILE *input = fopen(element->template_shape_map_fname, "rb");
     if (!input) {
-        GST_ERROR_OBJECT(element, "failed to open canonical A_eff map %s",
+        GST_ERROR_OBJECT(element->owner, "failed to open canonical A_eff map %s",
                          element->template_shape_map_fname);
         g_error("canonical crashcar A_eff map cannot be opened");
     }
@@ -1453,7 +1414,7 @@ static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
         valid = FALSE;
     }
     if (!valid) {
-        GST_ERROR_OBJECT(element,
+        GST_ERROR_OBJECT(element->owner,
                          "invalid canonical A_eff map %s at line %u; loaded %u/%u",
                          element->template_shape_map_fname, line_number, loaded,
                          (guint)CRASHCAR_TEMPLATE_SHAPE_EXPECTED_ROWS);
@@ -1461,18 +1422,18 @@ static void crashcar_load_template_shape_map(CrashcarSinglefar *element) {
         g_error("invalid canonical crashcar A_eff map");
     }
     g_checksum_free(shape_checksum);
-    GST_INFO_OBJECT(element, "loaded %u canonical crashcar A_eff rows from %s",
+    GST_INFO_OBJECT(element->owner, "loaded %u canonical crashcar A_eff rows from %s",
                     loaded, element->template_shape_map_fname);
 }
 
 static gboolean crashcar_lookup_template_shape(
-    const CrashcarSinglefar *element_const,
+    const CrashcarSingleFarEngine *element_const,
     int ifo_id,
     int bankid,
     int tmplt_idx,
     double *a_eff,
     double *dof) {
-    CrashcarSinglefar *element = (CrashcarSinglefar *)element_const;
+    CrashcarSingleFarEngine *element = (CrashcarSingleFarEngine *)element_const;
     if (!a_eff || !dof) return FALSE;
     *a_eff = NAN;
     *dof = NAN;
@@ -1593,7 +1554,7 @@ gboolean crashcar_singlefar_compute_llr(double rho,
     return TRUE;
 }
 
-static gboolean crashcar_singlefar_open_detail(CrashcarSinglefar *element) {
+static gboolean crashcar_singlefar_open_detail(CrashcarSingleFarEngine *element) {
     if (element->detail_output_file) return TRUE;
     if (!element->detail_output_fname || !element->detail_output_fname[0]) {
         return FALSE;
@@ -1603,7 +1564,7 @@ static gboolean crashcar_singlefar_open_detail(CrashcarSinglefar *element) {
     if (!element->detail_output_file) {
         element->detail_output_file = fopen(element->detail_output_fname, "a");
         if (!element->detail_output_file) {
-            GST_WARNING_OBJECT(element, "failed to open crashcar detail output %s",
+            GST_WARNING_OBJECT(element->owner, "failed to open crashcar detail output %s",
                                element->detail_output_fname);
             g_mutex_unlock(&crashcar_detail_file_mutex);
             return FALSE;
@@ -1787,7 +1748,7 @@ gboolean crashcar_singlefar_evaluate_far(
 }
 
 static gint64 crashcar_window_ifo_livetime_ns(
-  const CrashcarSinglefar *element,
+  const CrashcarSingleFarEngine *element,
   int ifo_id,
   gint64 start_ns,
   gint64 end_ns) {
@@ -2171,7 +2132,7 @@ static GArray *crashcar_build_background_points(
 }
 
 static GString *crashcar_build_schema4_bytes(
-  const CrashcarSinglefar *element,
+  const CrashcarSingleFarEngine *element,
   guint64 version,
   gint64 window_start_ns,
   gint64 window_end_ns,
@@ -2329,7 +2290,7 @@ static GString *crashcar_build_schema4_bytes(
 
 static gboolean crashcar_parse_schema4_worker_banks(
   CrashcarJsonCursor *input,
-  const CrashcarSinglefar *element) {
+  const CrashcarSingleFarEngine *element) {
     if (!input || !element || !element->worker_bank_id_values ||
         element->worker_bank_id_values->len == 0 ||
         !crashcar_json_expect(input, "[")) {
@@ -2498,7 +2459,7 @@ static gboolean crashcar_parse_schema4_ifo(
 }
 
 static gboolean crashcar_parse_schema4_background(
-  const CrashcarSinglefar *element,
+  const CrashcarSingleFarEngine *element,
   const gchar *bytes,
   gsize size,
   CrashcarParsedBackground *background,
@@ -2764,7 +2725,7 @@ static gboolean crashcar_read_schema4_file(
 }
 
 static gboolean crashcar_publish_schema4_candidate(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   guint64 version,
   gint64 window_start_ns,
   gint64 window_end_ns,
@@ -2945,7 +2906,7 @@ static gboolean crashcar_publish_schema4_candidate(
 }
 
 static void crashcar_live_record_refresh(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   CrashcarLiveRefreshStatus status,
   const char *reason,
   guint64 candidate_version,
@@ -2979,7 +2940,7 @@ static void crashcar_live_record_refresh(
 }
 
 static gboolean crashcar_live_refresh_due(
-  const CrashcarSinglefar *element,
+  const CrashcarSingleFarEngine *element,
   gint64 event_gps_ns) {
     if (!element || !element->live_single_background_readonly ||
         event_gps_ns <= 0 || element->background_update_ns <= 0) {
@@ -3031,7 +2992,7 @@ static gboolean crashcar_live_candidate_valid(
 }
 
 static gboolean crashcar_live_adopt_candidate(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   const CrashcarParsedBackground *candidate,
   gint64 event_gps_ns) {
     if (!element || !candidate ||
@@ -3084,7 +3045,7 @@ static gboolean crashcar_live_adopt_candidate(
 }
 
 static void crashcar_try_refresh_live_authority(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gint64 event_gps_ns) {
     if (!crashcar_live_refresh_due(element, event_gps_ns)) return;
     element->live_last_refresh_attempt_gps_ns = event_gps_ns;
@@ -3100,8 +3061,7 @@ static void crashcar_try_refresh_live_authority(
           element, CRASHCAR_LIVE_REFRESH_REJECTED_READ,
           failure ? failure : "stable schema4 read failed",
           0, 0, NULL);
-        GST_WARNING_OBJECT(
-          element,
+        GST_WARNING_OBJECT(element->owner,
           "live single refresh rejected read worker=%d event_gps_ns=%"
           G_GINT64_FORMAT " lkg_version=%" G_GUINT64_FORMAT
           " reason=%s",
@@ -3118,8 +3078,7 @@ static void crashcar_try_refresh_live_authority(
           element, CRASHCAR_LIVE_REFRESH_REJECTED_SCHEMA,
           failure ? failure : "schema4 candidate validation failed",
           0, 0, file_sha);
-        GST_WARNING_OBJECT(
-          element,
+        GST_WARNING_OBJECT(element->owner,
           "live single refresh rejected schema worker=%d event_gps_ns=%"
           G_GINT64_FORMAT " candidate_sha=%s lkg_version=%"
           G_GUINT64_FORMAT " reason=%s",
@@ -3150,8 +3109,7 @@ static void crashcar_try_refresh_live_authority(
           element, CRASHCAR_LIVE_REFRESH_REJECTED_VERSION,
           "schema4 candidate version rollback",
           candidate.version, candidate.window_end_gps_ns, file_sha);
-        GST_WARNING_OBJECT(
-          element,
+        GST_WARNING_OBJECT(element->owner,
           "live single refresh rejected rollback worker=%d candidate=%"
           G_GUINT64_FORMAT " lkg=%" G_GUINT64_FORMAT,
           element->worker_id, candidate.version,
@@ -3184,8 +3142,7 @@ static void crashcar_try_refresh_live_authority(
           element, CRASHCAR_LIVE_REFRESH_REJECTED_VERSION,
           "schema4 candidate coverage rollback",
           candidate.version, candidate.window_end_gps_ns, file_sha);
-        GST_WARNING_OBJECT(
-          element,
+        GST_WARNING_OBJECT(element->owner,
           "live single refresh rejected coverage rollback worker=%d "
           "candidate_version=%" G_GUINT64_FORMAT
           " candidate_coverage=%" G_GINT64_FORMAT
@@ -3203,8 +3160,7 @@ static void crashcar_try_refresh_live_authority(
           element, CRASHCAR_LIVE_REFRESH_REJECTED_FUTURE,
           "schema4 coverage endpoint is later than event GPS",
           candidate.version, candidate.window_end_gps_ns, file_sha);
-        GST_INFO_OBJECT(
-          element,
+        GST_INFO_OBJECT(element->owner,
           "live single candidate not yet event-eligible worker=%d version=%"
           G_GUINT64_FORMAT " coverage=%" G_GINT64_FORMAT
           " event=%" G_GINT64_FORMAT " lkg_version=%"
@@ -3228,8 +3184,7 @@ static void crashcar_try_refresh_live_authority(
     crashcar_live_record_refresh(
       element, CRASHCAR_LIVE_REFRESH_ADOPTED, "",
       candidate.version, candidate.window_end_gps_ns, file_sha);
-    GST_INFO_OBJECT(
-      element,
+    GST_INFO_OBJECT(element->owner,
       "live single authority adopted worker=%d version=%"
       G_GUINT64_FORMAT " coverage=%" G_GINT64_FORMAT
       " file_sha256=%s",
@@ -3240,7 +3195,7 @@ static void crashcar_try_refresh_live_authority(
 
 static CrashcarAuthoritySelection
 crashcar_snapshot_live_authority(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gint64 event_gps_ns,
   guint64 *version_out,
   gint64 *epoch_out,
@@ -3298,7 +3253,7 @@ crashcar_snapshot_live_authority(
 }
 
 static gboolean crashcar_bind_worker_authority(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gchar **failure) {
     if (!element || element->worker_id < 0) {
         return crashcar_set_failure(
@@ -3335,7 +3290,7 @@ static gboolean crashcar_bind_worker_authority(
 }
 
 static gboolean crashcar_try_complete_paired_authority_locked(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gint64 window_start_ns,
   gint64 window_end_ns,
   gint64 available_after_gps_ns,
@@ -3449,8 +3404,7 @@ static gboolean crashcar_try_complete_paired_authority_locked(
           pending->parsed.file_sha256,
           sizeof(element->background_file_sha256));
     } else if (publication_failure) {
-        GST_WARNING_OBJECT(
-          element,
+        GST_WARNING_OBJECT(element->owner,
           "schema4 candidate rejected; prior paired authority retained: %s",
           publication_failure);
     }
@@ -3469,7 +3423,7 @@ static gboolean crashcar_try_complete_paired_authority_locked(
 
 static CrashcarAuthoritySelection
 crashcar_snapshot_paired_authority(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gint64 group_gps_ns,
   guint64 *version_out,
   gint64 *epoch_out,
@@ -3563,8 +3517,7 @@ crashcar_snapshot_paired_authority(
         pending->available_after_gps_ns = 0;
     } else if (pending->valid &&
                pending->available_after_gps_ns > group_gps_ns) {
-        GST_DEBUG_OBJECT(
-          element,
+        GST_DEBUG_OBJECT(element->owner,
           "paired authority pending coverage is not event-eligible "
           "group_gps_ns=%" G_GINT64_FORMAT " available_after_ns=%"
           G_GINT64_FORMAT,
@@ -3630,7 +3583,7 @@ crashcar_snapshot_paired_authority(
 }
 
 static guint crashcar_total_completed_authority_support(
-  const CrashcarSinglefar *element) {
+  const CrashcarSingleFarEngine *element) {
     guint total = 0;
     if (!element) return 0;
     for (int ifo_id = 0; ifo_id < 2; ++ifo_id) {
@@ -3643,7 +3596,7 @@ static guint crashcar_total_completed_authority_support(
     return total;
 }
 
-static void crashcar_add_foreground_support_locked(CrashcarSinglefar *element,
+static void crashcar_add_foreground_support_locked(CrashcarSingleFarEngine *element,
                                             int ifo_id,
                                             double rank,
                                             gint64 gps_ns,
@@ -3692,7 +3645,7 @@ static void crashcar_add_foreground_support_locked(CrashcarSinglefar *element,
 }
 
 
-static gboolean crashcar_row_has_ifo(const CrashcarSinglefar *element,
+static gboolean crashcar_row_has_ifo(const CrashcarSingleFarEngine *element,
                                      const PostcohInspiralTable *table,
                                      int ifo_id) {
     if (!ifo_set__contains(element->enabled_ifos, ifo_id)) return FALSE;
@@ -3745,7 +3698,7 @@ static gboolean crashcar_hits_threshold(float far, double log10_far_threshold) {
 }
 
 static void crashcar_write_detail(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   const PostcohInspiralTable *table,
   int ifo_id,
   double llr,
@@ -3837,8 +3790,9 @@ static void crashcar_write_detail(
     g_mutex_unlock(&crashcar_detail_file_mutex);
 }
 
-static gboolean crashcar_singlefar_start(GstBaseTransform *base) {
-    CrashcarSinglefar *element = CRASHCAR_SINGLEFAR(base);
+gboolean crashcar_singlefar_engine_start(CrashcarSingleFarEngine *element) {
+    g_return_val_if_fail(element != NULL, FALSE);
+    g_return_val_if_fail(element->owner != NULL, FALSE);
     if (!element->enabled) return TRUE;
 
     gchar *failure = NULL;
@@ -3852,7 +3806,7 @@ static gboolean crashcar_singlefar_start(GstBaseTransform *base) {
         (!element->live_single_background_readonly &&
          !crashcar_bind_worker_authority(element, &failure))) {
         GST_ELEMENT_ERROR(
-          element, RESOURCE, READ,
+          element->owner, RESOURCE, READ,
           ("crashcar graph/segment authority failed closed"),
           ("%s", failure ? failure : "unknown segment authority error"));
         g_free(failure);
@@ -3862,7 +3816,7 @@ static gboolean crashcar_singlefar_start(GstBaseTransform *base) {
     if (!element->segment_livetime_binding_valid ||
         !element->have_livetime_segments) {
         GST_ELEMENT_ERROR(
-          element, RESOURCE, READ,
+          element->owner, RESOURCE, READ,
           ("crashcar pinned segment authority is not valid"),
           ("schema=%d", CRASHCAR_SEGMENT_JSON_SCHEMA_VERSION));
         return FALSE;
@@ -3871,9 +3825,11 @@ static gboolean crashcar_singlefar_start(GstBaseTransform *base) {
     return TRUE;
 }
 
-static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
-                                                     GstBuffer *buf) {
-    CrashcarSinglefar *element = CRASHCAR_SINGLEFAR(base);
+GstFlowReturn crashcar_singlefar_engine_transform_ip(
+  CrashcarSingleFarEngine *element,
+  GstBuffer *buf) {
+    g_return_val_if_fail(element != NULL, GST_FLOW_ERROR);
+    g_return_val_if_fail(element->owner != NULL, GST_FLOW_ERROR);
 
     if (!element->enabled) return GST_FLOW_OK;
     if (GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_GAP)) {
@@ -3887,7 +3843,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
     GstMapInfo mapInfo = GST_MAP_INFO_INIT;
     if (!gst_buffer_map(buf, &mapInfo, GST_MAP_WRITE)) {
         GST_ELEMENT_ERROR(
-          element, STREAM, FAILED,
+          element->owner, STREAM, FAILED,
           ("crashcar could not map the Postcoh row buffer"),
           ("required_access=GST_MAP_WRITE"));
         return GST_FLOW_ERROR;
@@ -3908,7 +3864,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
         mapInfo.size < postcoh_row_size ||
         mapInfo.size % postcoh_row_size != 0) {
         GST_ELEMENT_ERROR(
-          element, STREAM, FAILED,
+          element->owner, STREAM, FAILED,
           ("crashcar Postcoh row buffer has incompatible ABI shape"),
           ("buffer_size=%" G_GSIZE_FORMAT " row_size=%" G_GSIZE_FORMAT
            " data_nonnull=%d",
@@ -3941,8 +3897,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
         const CrashcarSingleFinalRoute final_route =
           crashcar_singlefar_final_route_from_ifos(table->ifos);
         if (final_route == CRASHCAR_SINGLE_FINAL_ROUTE_INVALID) {
-            GST_WARNING_OBJECT(
-              element,
+            GST_WARNING_OBJECT(element->owner,
               "single processing skipped for foreground row with invalid "
               "detector mask: ordinal=%" G_GSIZE_FORMAT
               " event_id=%ld ifos=%s",
@@ -3964,8 +3919,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
               &table->end_time, &row_assignment_gps_ns) ||
             row_assignment_gps_ns < element->segment_run_start_gps_ns ||
             row_assignment_gps_ns >= element->segment_run_end_gps_ns) {
-            GST_WARNING_OBJECT(
-              element,
+            GST_WARNING_OBJECT(element->owner,
               "single processing skipped for foreground row without a usable "
               "shared event time: ordinal=%" G_GSIZE_FORMAT
               " event_id=%ld",
@@ -3976,8 +3930,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
         gint64 row_bg_end_ns = 0;
         if (!crashcar_assignment_window_end_ns(
               element, row_assignment_gps_ns, &row_bg_end_ns)) {
-            GST_WARNING_OBJECT(
-              element,
+            GST_WARNING_OBJECT(element->owner,
               "single processing skipped because the foreground event time "
               "has no causal assignment window: ordinal=%" G_GSIZE_FORMAT
               " event_id=%ld gps_ns=%" G_GINT64_FORMAT,
@@ -3997,8 +3950,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
         guint64 row_bg_span_ns = 0;
         if (!crashcar_ordered_distance_u64(
               row_bg_start_ns, row_bg_end_ns, &row_bg_span_ns)) {
-            GST_WARNING_OBJECT(
-              element,
+            GST_WARNING_OBJECT(element->owner,
               "single processing skipped because the causal background "
               "window is not ordered: ordinal=%" G_GSIZE_FORMAT
               " event_id=%ld",
@@ -4010,8 +3962,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
               element->segment_run_start_gps_ns,
               (guint64)element->background_required_ns,
               &required_end_ns)) {
-            GST_WARNING_OBJECT(
-              element,
+            GST_WARNING_OBJECT(element->owner,
               "single processing skipped because the configured background "
               "readiness interval overflows: ordinal=%" G_GSIZE_FORMAT
               " event_id=%ld",
@@ -4212,8 +4163,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                 }
                 if (!crashcar_row_bank_matches_graph(
                       element, table->bankid)) {
-                    GST_DEBUG_OBJECT(
-                      element,
+                    GST_DEBUG_OBJECT(element->owner,
                       "crashcar component rejected "
                       "reason=worker_bank_mapping_mismatch "
                       "ifo_id=%d row_bank_id=%d stream_id=%d "
@@ -4417,8 +4367,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                 !authority->points[0] || !authority->points[1] ||
                 !authority->ranks[0] || !authority->ranks[1]) {
                 g_mutex_unlock(&crashcar_support_mutex);
-                GST_WARNING_OBJECT(
-                  element,
+                GST_WARNING_OBJECT(element->owner,
                   "single future-support update skipped because worker-local "
                   "storage is unavailable: worker_id=%d shared_gps_ns=%"
                   G_GINT64_FORMAT,
@@ -4432,8 +4381,7 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
                   support_work->row_bg_end_ns,
                   group_gps_ns,
                   candidate_window_ready)) {
-                GST_WARNING_OBJECT(
-                  element,
+                GST_WARNING_OBJECT(element->owner,
                   "single background candidate was not published; prior "
                   "authority retained: worker_id=%d shared_gps_ns=%"
                   G_GINT64_FORMAT,
@@ -4468,149 +4416,8 @@ static GstFlowReturn crashcar_singlefar_transform_ip(GstBaseTransform *base,
     return GST_FLOW_OK;
 }
 
-static void crashcar_singlefar_set_property(GObject *object,
-                                            guint prop_id,
-                                            const GValue *value,
-                                            GParamSpec *pspec) {
-    CrashcarSinglefar *element = CRASHCAR_SINGLEFAR(object);
-
-    GST_OBJECT_LOCK(element);
-    switch (prop_id) {
-    case PROP_IFOS:
-        g_free(element->ifos);
-        element->ifos = g_value_dup_string(value);
-        if (!crashcar_singlefar_ifos_valid(element->ifos)) {
-            GST_ERROR_OBJECT(element,
-                             "crashcar single-detector IFOs must contain only H1/L1, got %s",
-                             element->ifos ? element->ifos : "(null)");
-            g_error("crashcar single-detector IFO contract violation");
-        }
-        element->nifo = element->ifos ? strlen(element->ifos) / IFO_LEN : 0;
-        element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);
-        break;
-    case PROP_ENABLED:
-        element->enabled = g_value_get_boolean(value);
-        break;
-    case PROP_DOF:
-        element->dof = g_value_get_double(value);
-        break;
-    case PROP_DETAIL_OUTPUT_FNAME:
-        g_free(element->detail_output_fname);
-        element->detail_output_fname = g_value_dup_string(value);
-        break;
-    case PROP_TEMPLATE_SHAPE_MAP_FNAME:
-        g_free(element->template_shape_map_fname);
-        element->template_shape_map_fname = g_value_dup_string(value);
-        if (element->template_shape_map) {
-            g_hash_table_remove_all(element->template_shape_map);
-        }
-        element->template_shape_map_loaded = FALSE;
-        break;
-    case PROP_LOG10_FAR_THRESHOLD:
-        element->log10_far_threshold = g_value_get_double(value);
-        break;
-    case PROP_TAIL_LOG10_FAR:
-        element->tail_log10_far = g_value_get_double(value);
-        break;
-    case PROP_LIVETIME_STEP:
-        element->livetime_step = g_value_get_double(value);
-        break;
-    case PROP_STREAM_ID:
-        if (element->graph_binding_locked) {
-            GST_ERROR_OBJECT(
-              element, "ignored immutable graph property stream-id");
-            break;
-        }
-        element->stream_id = g_value_get_int(value);
-        break;
-    case PROP_STREAM_COUNT:
-        if (element->graph_binding_locked) {
-            GST_ERROR_OBJECT(
-              element, "ignored immutable graph property stream-count");
-            break;
-        }
-        element->stream_count = g_value_get_int(value);
-        break;
-    case PROP_STREAM_BANK_ID:
-        if (element->graph_binding_locked) {
-            GST_ERROR_OBJECT(
-              element, "ignored immutable graph property stream-bank-id");
-            break;
-        }
-        element->stream_bank_id = g_value_get_int(value);
-        break;
-    case PROP_WORKER_BANK_IDS:
-        if (element->graph_binding_locked) {
-            GST_ERROR_OBJECT(
-              element, "ignored immutable graph property worker-bank-ids");
-            break;
-        }
-        g_free(element->worker_bank_ids);
-        element->worker_bank_ids = g_value_dup_string(value);
-        if (element->worker_bank_id_values) {
-            g_array_set_size(element->worker_bank_id_values, 0);
-        }
-        break;
-    default:
-        G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
-        break;
-    }
-    GST_OBJECT_UNLOCK(element);
-}
-
-static void crashcar_singlefar_get_property(GObject *object,
-                                            guint prop_id,
-                                            GValue *value,
-                                            GParamSpec *pspec) {
-    CrashcarSinglefar *element = CRASHCAR_SINGLEFAR(object);
-
-    GST_OBJECT_LOCK(element);
-    switch (prop_id) {
-    case PROP_IFOS:
-        g_value_set_string(value, element->ifos);
-        break;
-    case PROP_ENABLED:
-        g_value_set_boolean(value, element->enabled);
-        break;
-    case PROP_DOF:
-        g_value_set_double(value, element->dof);
-        break;
-    case PROP_DETAIL_OUTPUT_FNAME:
-        g_value_set_string(value, element->detail_output_fname);
-        break;
-    case PROP_TEMPLATE_SHAPE_MAP_FNAME:
-        g_value_set_string(value, element->template_shape_map_fname);
-        break;
-    case PROP_LOG10_FAR_THRESHOLD:
-        g_value_set_double(value, element->log10_far_threshold);
-        break;
-    case PROP_TAIL_LOG10_FAR:
-        g_value_set_double(value, element->tail_log10_far);
-        break;
-    case PROP_LIVETIME_STEP:
-        g_value_set_double(value, element->livetime_step);
-        break;
-    case PROP_STREAM_ID:
-        g_value_set_int(value, element->stream_id);
-        break;
-    case PROP_STREAM_COUNT:
-        g_value_set_int(value, element->stream_count);
-        break;
-    case PROP_STREAM_BANK_ID:
-        g_value_set_int(value, element->stream_bank_id);
-        break;
-    case PROP_WORKER_BANK_IDS:
-        g_value_set_string(value, element->worker_bank_ids);
-        break;
-    default:
-        G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
-        break;
-    }
-    GST_OBJECT_UNLOCK(element);
-}
-
-static void crashcar_singlefar_dispose(GObject *object) {
-    CrashcarSinglefar *element = CRASHCAR_SINGLEFAR(object);
+void crashcar_singlefar_engine_clear(CrashcarSingleFarEngine *element) {
+    if (!element) return;
 
     if (element->detail_output_file) {
         g_mutex_lock(&crashcar_detail_file_mutex);
@@ -4656,124 +4463,23 @@ static void crashcar_singlefar_dispose(GObject *object) {
         }
     }
 
-    G_OBJECT_CLASS(crashcar_singlefar_parent_class)->dispose(object);
+    element->owner = NULL;
 }
 
-static void crashcar_singlefar_class_init(CrashcarSinglefarClass *klass) {
-    GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
-
-    gobject_class->set_property =
-      GST_DEBUG_FUNCPTR(crashcar_singlefar_set_property);
-    gobject_class->get_property =
-      GST_DEBUG_FUNCPTR(crashcar_singlefar_get_property);
-    gobject_class->dispose = GST_DEBUG_FUNCPTR(crashcar_singlefar_dispose);
-
-    g_object_class_install_property(
-      gobject_class, PROP_IFOS,
-      g_param_spec_string("ifos", "ifo names",
-                          "ifos that participate in the pipeline", "H1L1",
-                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_ENABLED,
-      g_param_spec_boolean("enabled", "enabled",
-                           "enable crashcar single-detector processing", FALSE,
-                           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_DOF,
-      g_param_spec_double("dof", "effective degrees of freedom",
-                          "legacy metadata only; runtime dof is derived from bankid",
-                          1.0e-12, G_MAXDOUBLE, 120.0,
-                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_DETAIL_OUTPUT_FNAME,
-      g_param_spec_string("detail-output-fname", "detail output filename",
-                          "CSV file for significant crashcar trigger details",
-                          NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_TEMPLATE_SHAPE_MAP_FNAME,
-      g_param_spec_string("template-shape-map-fname",
-                          "template shape map filename",
-                          "canonical CSV with ifo_id,bankid,tmplt_idx,a_eff,dof,ifo,source_class",
-                          NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_LOG10_FAR_THRESHOLD,
-      g_param_spec_double(
-        "log10-far-threshold", "log10 FAR threshold",
-        "write detailed rows when log10(FAR) is at or below this value",
-        -G_MAXDOUBLE, G_MAXDOUBLE, -4.0,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_TAIL_LOG10_FAR,
-      g_param_spec_double(
-        "tail-log10-far", "tail log10 FAR anchor",
-        "negative log10 FAR anchor for the single-detector tail fit",
-        -G_MAXDOUBLE, -DBL_MIN, -2.0,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_LIVETIME_STEP,
-      g_param_spec_double("livetime-step", "livetime step",
-                          "default livetime increment for FLAG_EMPTY rows",
-                          0.0, G_MAXDOUBLE, 1.0,
-                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_STREAM_ID,
-      g_param_spec_int("stream-id", "stream id",
-                       "zero-based Postcoh stream ordinal in this worker",
-                       0, CRASHCAR_TEMPLATE_SHAPE_BANK_COUNT - 1, 0,
-                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_STREAM_COUNT,
-      g_param_spec_int("stream-count", "stream count",
-                       "exact number of Postcoh bank streams in this worker",
-                       1, CRASHCAR_TEMPLATE_SHAPE_BANK_COUNT, 1,
-                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_STREAM_BANK_ID,
-      g_param_spec_int("stream-bank-id", "stream bank id",
-                       "bank id derived from this Postcoh graph stream",
-                       0, CRASHCAR_TEMPLATE_SHAPE_BANK_COUNT - 1, 0,
-                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_WORKER_BANK_IDS,
-      g_param_spec_string("worker-bank-ids", "worker bank ids",
-                          "canonical graph-ordered bank id roster", "0",
-                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    GstElementClass *gst_element_class = GST_ELEMENT_CLASS(klass);
-    gst_element_class_set_metadata(
-      gst_element_class, "crashcar single-detector FAR stream hook",
-      "single-detector FAR", "low-latency single-detector FAR stream hook",
-      "Eric Qingyuan Liang");
-
-    GstCaps *template_caps = gst_caps_from_string("application/x-lal-postcoh");
-    gst_element_class_add_pad_template(
-      gst_element_class,
-      gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-                           template_caps));
-    gst_element_class_add_pad_template(
-      gst_element_class,
-      gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, template_caps));
-    gst_caps_unref(template_caps);
-
-    GstBaseTransformClass *transform_class = GST_BASE_TRANSFORM_CLASS(klass);
-    transform_class->start = GST_DEBUG_FUNCPTR(crashcar_singlefar_start);
-    transform_class->transform_ip =
-      GST_DEBUG_FUNCPTR(crashcar_singlefar_transform_ip);
-}
-
-static void crashcar_singlefar_init(CrashcarSinglefar *element) {
-    gst_base_transform_set_gap_aware(GST_BASE_TRANSFORM(element), TRUE);
+void crashcar_singlefar_engine_init(CrashcarSingleFarEngine *element,
+                                    GstElement *owner) {
+    g_return_if_fail(element != NULL);
+    g_return_if_fail(owner != NULL);
+    memset(element, 0, sizeof(*element));
+    element->owner = owner;
+    if (g_once_init_enter(&crashcar_singlefar_debug_initialized)) {
+        GST_DEBUG_CATEGORY_INIT(
+          GST_CAT_DEFAULT,
+          "cohfar_assignfar.single",
+          0,
+          "single-detector FAR engine inside cohfar_assignfar");
+        g_once_init_leave(&crashcar_singlefar_debug_initialized, 1);
+    }
     element->ifos = g_strdup("H1L1");
     element->nifo = strlen(element->ifos) / IFO_LEN;
     element->enabled_ifos = ifo_set__parse_or_empty(element->ifos);

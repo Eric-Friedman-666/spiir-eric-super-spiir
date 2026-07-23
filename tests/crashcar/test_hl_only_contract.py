@@ -2,7 +2,6 @@ from pathlib import Path
 import ast
 import ctypes
 import math
-import re
 
 import pytest
 
@@ -10,6 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SPIIRPARTS = ROOT / "gstlal-spiir/python/pipemodules/spiirparts.py"
 SINGLEFAR = ROOT / "gstlal-spiir/gst/cuda/cohfar/crashcar_singlefar.c"
+ASSIGNFAR = ROOT / "gstlal-spiir/gst/cuda/cohfar/cohfar_assignfar.c"
 PLUGIN = (
     ROOT / "gstlal-spiir/gst/cuda/.libs/libgstcuda.so.0.0.0"
 )
@@ -19,15 +19,19 @@ def _text(path):
     return path.read_text(encoding="utf-8")
 
 
-def test_pipeline_enables_only_h1_l1_for_crashcar():
-    text = _text(SPIIRPARTS)
-    call = re.search(
-        r"mkcrashcar_singlefar\((?P<body>.*?)\n\s*\)",
-        text,
-        flags=re.DOTALL,
-    )
-    assert call, "mkcrashcar_singlefar call not found"
-    assert re.search(r'\bifos\s*=\s*["\']H1L1["\']', call.group("body"))
+def test_pipeline_keeps_single_authority_h1_l1_inside_unified_element():
+    graph = _text(SPIIRPARTS)
+    unified = _text(ASSIGNFAR)
+    engine = _text(SINGLEFAR)
+
+    # The graph now creates one public FAR element.  The internal single
+    # module remains explicitly enabled there and never widens its authority
+    # beyond the first two canonical H1/L1 slots.
+    assert graph.count("pipemodules.mkcohfar_assignfar(") == 1
+    assert "pipemodules.mkcrashcar_singlefar(" not in graph
+    assert "single_enabled=crashcar_enabled" in graph
+    assert "crashcar_singlefar_engine_transform_ip(&element->single, buf)" in unified
+    assert "for (int ifo_id = 0; ifo_id < 2; ++ifo_id)" in engine
 
 
 def test_exported_singlefar_ifo_validator_accepts_only_canonical_h1l1():

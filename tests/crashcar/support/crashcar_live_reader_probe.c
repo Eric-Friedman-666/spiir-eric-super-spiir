@@ -18,6 +18,25 @@
 #endif
 #include CRASHCAR_SINGLEFAR_SOURCE
 
+/*
+ * Compile this probe against either side of the element-boundary refactor.
+ * The legacy implementation embeds the same state in a GstBaseTransform;
+ * the unified implementation exposes it as an internal engine owned by
+ * cohfar_assignfar.  Keeping the compatibility shim here lets one deterministic
+ * Postcoh buffer exercise the exact same scientific implementation on both
+ * sides without involving GPU/node-dependent upstream floating-point work.
+ */
+#ifdef CRASHCAR_LEGACY_ELEMENT_SOURCE
+typedef CrashcarSinglefar CrashcarSingleFarEngine;
+
+static GstFlowReturn crashcar_singlefar_engine_transform_ip(
+  CrashcarSingleFarEngine *element,
+  GstBuffer *buffer) {
+    return crashcar_singlefar_transform_ip(
+      GST_BASE_TRANSFORM(element), buffer);
+}
+#endif
+
 static const char *replace_hook_path = NULL;
 static const char *replace_hook_candidate = NULL;
 static int replace_hook_enabled = 0;
@@ -62,9 +81,17 @@ static void set_gps(LIGOTimeGPS *output, gint64 gps) {
     output->gpsNanoSeconds = (INT4)(gps % NS_PER_SECOND);
 }
 
-static CrashcarSinglefar *make_element(const char *background_path) {
-    CrashcarSinglefar *element = g_object_new(CRASHCAR_SINGLEFAR_TYPE, NULL);
+static CrashcarSingleFarEngine *make_element(const char *background_path) {
+#ifdef CRASHCAR_LEGACY_ELEMENT_SOURCE
+    CrashcarSingleFarEngine *element = CRASHCAR_SINGLEFAR(
+      g_object_new(CRASHCAR_SINGLEFAR_TYPE, NULL));
     if (!element) return NULL;
+#else
+    GstElement *owner = gst_element_factory_make("identity", NULL);
+    if (!owner) return NULL;
+    CrashcarSingleFarEngine *element = g_new0(CrashcarSingleFarEngine, 1);
+    crashcar_singlefar_engine_init(element, owner);
+#endif
 
     element->enabled = TRUE;
     element->live_single_background_readonly = TRUE;
@@ -116,6 +143,18 @@ static CrashcarSinglefar *make_element(const char *background_path) {
     return element;
 }
 
+static void free_element(CrashcarSingleFarEngine *element) {
+    if (!element) return;
+#ifdef CRASHCAR_LEGACY_ELEMENT_SOURCE
+    gst_object_unref(element);
+#else
+    GstElement *owner = element->owner;
+    crashcar_singlefar_engine_clear(element);
+    g_free(element);
+    if (owner) gst_object_unref(owner);
+#endif
+}
+
 static gboolean write_all(int fd, const char *bytes, gsize length) {
     gsize offset = 0;
     while (offset < length) {
@@ -143,7 +182,7 @@ static gboolean atomic_replace_bytes(const char *path,
     return valid;
 }
 
-static GString *build_candidate(CrashcarSinglefar *element,
+static GString *build_candidate(CrashcarSingleFarEngine *element,
                                 guint64 version,
                                 gint64 window_end_ns,
                                 double rank_shift) {
@@ -181,6 +220,7 @@ static GString *build_candidate(CrashcarSinglefar *element,
         }
         valid = valid && crashcar_authority_tail_metrics(
           ifo_ranks, G_N_ELEMENTS(ifo_ranks), 800.0,
+          element->tail_log10_far,
           &r_tail[ifo_id], &slope[ifo_id], &fit_count[ifo_id]);
     }
 
@@ -201,7 +241,7 @@ static GString *build_candidate(CrashcarSinglefar *element,
     return document;
 }
 
-static gboolean publish_candidate(CrashcarSinglefar *element,
+static gboolean publish_candidate(CrashcarSingleFarEngine *element,
                                   guint64 version,
                                   gint64 coverage_ns,
                                   double rank_shift,
@@ -216,7 +256,7 @@ static gboolean publish_candidate(CrashcarSinglefar *element,
 }
 
 static CrashcarAuthoritySelection snapshot(
-  CrashcarSinglefar *element,
+  CrashcarSingleFarEngine *element,
   gint64 event_gps_ns,
   guint64 *version_out) {
     gint64 epoch = 0;
@@ -226,7 +266,7 @@ static CrashcarAuthoritySelection snapshot(
 }
 
 static gboolean selected_far_is_positive(
-  const CrashcarSinglefar *element,
+  const CrashcarSingleFarEngine *element,
   int ifo_id) {
     if (!element || ifo_id < 0 || ifo_id >= 2) return FALSE;
     const CrashcarCompletedAuthorityIfo *selected =
@@ -253,7 +293,7 @@ static int test_nonconsumer_future_coverage_rejected(
       directory, "nonconsumer_future_background.json", NULL);
     g_setenv("CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROLE", "producer", TRUE);
     g_setenv("WGUO_O3A_INJECTION_MODE", "none", TRUE);
-    CrashcarSinglefar *element = make_element(path);
+    CrashcarSingleFarEngine *element = make_element(path);
     CHECK(element != NULL, "nonconsumer future element");
     CHECK(publish_candidate(
             element, 1, gps_ns(2300), 0.0, path),
@@ -266,7 +306,7 @@ static int test_nonconsumer_future_coverage_rejected(
             element->live_last_refresh_status ==
               CRASHCAR_LIVE_REFRESH_REJECTED_FUTURE,
           "nonconsumer future coverage remains rejected");
-    g_object_unref(element);
+    free_element(element);
     unlink(path);
     g_free(path);
     g_setenv("CRASHCAR_INTERNAL_LIVE_BACKGROUND_ROLE", "consumer", TRUE);
@@ -277,7 +317,7 @@ static int test_nonconsumer_future_coverage_rejected(
 static int test_coverage_growth(const char *directory) {
     gchar *path = g_build_filename(
       directory, "coverage_growth_background.json", NULL);
-    CrashcarSinglefar *element = make_element(path);
+    CrashcarSingleFarEngine *element = make_element(path);
     CHECK(element != NULL, "coverage growth element");
 
     guint64 selected = 0;
@@ -303,7 +343,7 @@ static int test_coverage_growth(const char *directory) {
               CRASHCAR_LIVE_REFRESH_ADOPTED,
           "higher coverage v4 accepted");
 
-    g_object_unref(element);
+    free_element(element);
     unlink(path);
     g_free(path);
     return 0;
@@ -313,7 +353,7 @@ static int test_pending_transform(const char *directory,
                                   guint support_before) {
     gchar *path = g_build_filename(directory, "cold_background.json", NULL);
     CHECK(atomic_replace_bytes(path, "{}\n", 3), "cold corrupt write");
-    CrashcarSinglefar *element = make_element(path);
+    CrashcarSingleFarEngine *element = make_element(path);
     CHECK(element != NULL, "cold element");
 
     PostcohInspiralTable rows[2];
@@ -361,8 +401,8 @@ static int test_pending_transform(const char *directory,
     CHECK(buffer != NULL, "pending buffer");
     CHECK(gst_buffer_fill(buffer, 0, rows, sizeof(rows)) == sizeof(rows),
           "pending buffer fill");
-    CHECK(crashcar_singlefar_transform_ip(
-            GST_BASE_TRANSFORM(element), buffer) == GST_FLOW_OK,
+    CHECK(crashcar_singlefar_engine_transform_ip(
+            element, buffer) == GST_FLOW_OK,
           "pending transform");
     CHECK(gst_buffer_extract(buffer, 0, rows, sizeof(rows)) == sizeof(rows),
           "pending buffer extract");
@@ -389,7 +429,7 @@ static int test_pending_transform(const char *directory,
           "multi row no backfill");
 
     gst_buffer_unref(buffer);
-    g_object_unref(element);
+    free_element(element);
     g_free(path);
     return 0;
 }
@@ -443,7 +483,7 @@ static int test_route_transform_contract(const char *directory,
       "route_contract_%ld.json", event_id);
     gchar *path = g_build_filename(directory, basename, NULL);
     g_free(basename);
-    CrashcarSinglefar *element = make_element(path);
+    CrashcarSingleFarEngine *element = make_element(path);
     CHECK(element != NULL, "route contract element");
     element->log10_far_threshold = -INFINITY;
 
@@ -469,8 +509,8 @@ static int test_route_transform_contract(const char *directory,
     CHECK(buffer != NULL, "route contract buffer");
     CHECK(gst_buffer_fill(buffer, 0, rows, sizeof(rows)) == sizeof(rows),
           "route contract buffer fill");
-    CHECK(crashcar_singlefar_transform_ip(
-            GST_BASE_TRANSFORM(element), buffer) == GST_FLOW_OK,
+    CHECK(crashcar_singlefar_engine_transform_ip(
+            element, buffer) == GST_FLOW_OK,
           "route contract transform");
     CHECK(gst_buffer_extract(buffer, 0, rows, sizeof(rows)) == sizeof(rows),
           "route contract buffer extract");
@@ -502,7 +542,7 @@ static int test_route_transform_contract(const char *directory,
           "live injection route never mutates support");
 
     gst_buffer_unref(buffer);
-    g_object_unref(element);
+    free_element(element);
     unlink(path);
     g_free(path);
     return 0;
@@ -533,9 +573,10 @@ static void reset_paired_test_state(void) {
     g_mutex_unlock(&crashcar_support_mutex);
 }
 
-static CrashcarSinglefar *make_paired_element(const char *background_path,
-                                               int stream_bank_id) {
-    CrashcarSinglefar *element = make_element(background_path);
+static CrashcarSingleFarEngine *make_paired_element(
+  const char *background_path,
+  int stream_bank_id) {
+    CrashcarSingleFarEngine *element = make_element(background_path);
     if (!element) return NULL;
     element->live_single_background_readonly = FALSE;
     element->authority_mode = CRASHCAR_SINGLE_AUTHORITY_MODE_CAUSAL_NOINJ;
@@ -606,8 +647,8 @@ static int test_paired_out_of_order_pending(const char *directory) {
     reset_paired_test_state();
     gchar *path = g_build_filename(
       directory, "paired_background.json", NULL);
-    CrashcarSinglefar *bank_a = make_paired_element(path, 0);
-    CrashcarSinglefar *bank_b = make_paired_element(path, 1);
+    CrashcarSingleFarEngine *bank_a = make_paired_element(path, 0);
+    CrashcarSingleFarEngine *bank_b = make_paired_element(path, 1);
     CHECK(bank_a && bank_b, "paired elements");
 
     gchar *failure = NULL;
@@ -623,8 +664,8 @@ static int test_paired_out_of_order_pending(const char *directory) {
     GstBuffer *gps7 = make_paired_pending_buffer(
       0, gps_ns(1907), 7100);
     CHECK(gps7 != NULL, "paired gps7 buffer");
-    CHECK(crashcar_singlefar_transform_ip(
-            GST_BASE_TRANSFORM(bank_a), gps7) == GST_FLOW_OK,
+    CHECK(crashcar_singlefar_engine_transform_ip(
+            bank_a, gps7) == GST_FLOW_OK,
           "paired gps7 transform");
     CHECK(check_paired_pending_row(gps7, "paired gps7 pending") == 0,
           "paired gps7 row");
@@ -640,8 +681,8 @@ static int test_paired_out_of_order_pending(const char *directory) {
     GstBuffer *gps5 = make_paired_pending_buffer(
       1, gps_ns(1905), 5100);
     CHECK(gps5 != NULL, "paired gps5 buffer");
-    CHECK(crashcar_singlefar_transform_ip(
-            GST_BASE_TRANSFORM(bank_b), gps5) == GST_FLOW_OK,
+    CHECK(crashcar_singlefar_engine_transform_ip(
+            bank_b, gps5) == GST_FLOW_OK,
           "paired gps5 out of order transform");
     CHECK(check_paired_pending_row(gps5, "paired gps5 pending") == 0,
           "paired gps5 row");
@@ -663,8 +704,87 @@ static int test_paired_out_of_order_pending(const char *directory) {
 
     gst_buffer_unref(gps5);
     gst_buffer_unref(gps7);
-    g_object_unref(bank_b);
-    g_object_unref(bank_a);
+    free_element(bank_b);
+    free_element(bank_a);
+    g_free(path);
+    reset_paired_test_state();
+    return 0;
+}
+
+static int exact_replay_digest(
+  const char *directory,
+  char row_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1],
+  char authority_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1]) {
+    reset_paired_test_state();
+    gchar *path = g_build_filename(
+      directory, "exact_replay_background.json", NULL);
+    CrashcarSingleFarEngine *element = make_element(path);
+    CHECK(element != NULL, "exact replay element");
+    element->log10_far_threshold = -INFINITY;
+    CHECK(publish_candidate(
+            element, 1, gps_ns(2000), 0.0, path),
+          "exact replay authority");
+
+    gchar *authority_bytes = NULL;
+    gsize authority_length = 0;
+    CHECK(g_file_get_contents(
+            path, &authority_bytes, &authority_length, NULL),
+          "exact replay authority read");
+    GChecksum *authority_checksum = g_checksum_new(G_CHECKSUM_SHA256);
+    CHECK(authority_checksum != NULL, "exact replay authority checksum");
+    g_checksum_update(
+      authority_checksum, (const guchar *)authority_bytes, authority_length);
+    g_strlcpy(
+      authority_sha256, g_checksum_get_string(authority_checksum),
+      CRASHCAR_SHA256_HEX_LENGTH + 1);
+    g_checksum_free(authority_checksum);
+    g_free(authority_bytes);
+
+    static const char *const routes[] = {
+      "H1", "H1V1", "L1", "L1V1", "H1L1", "H1L1V1", "V1"
+    };
+    PostcohInspiralTable rows[G_N_ELEMENTS(routes) + 1];
+    memset(rows, 0, sizeof(rows));
+    rows[0].is_background = FLAG_EMPTY;
+    for (guint index = 0; index < G_N_ELEMENTS(routes); ++index) {
+        PostcohInspiralTable *row = &rows[index + 1];
+        seed_route_contract_row(
+          row, routes[index], 9001 + (long)index);
+        set_gps(&row->end_time, gps_ns(2000) + (gint64)index);
+        for (int ifo_id = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+            set_gps(
+              &row->end_time_sngl[ifo_id],
+              gps_ns(2000) + (gint64)index);
+            row->snglsnr[ifo_id] =
+              4.125f + 0.25f * (float)index + 0.0625f * (float)ifo_id;
+            row->chisq[ifo_id] =
+              0.875f + 0.03125f * (float)index +
+              0.015625f * (float)ifo_id;
+        }
+    }
+
+    GstBuffer *buffer = gst_buffer_new_allocate(NULL, sizeof(rows), NULL);
+    CHECK(buffer != NULL, "exact replay buffer");
+    CHECK(gst_buffer_fill(buffer, 0, rows, sizeof(rows)) == sizeof(rows),
+          "exact replay buffer fill");
+    CHECK(crashcar_singlefar_engine_transform_ip(
+            element, buffer) == GST_FLOW_OK,
+          "exact replay transform");
+    CHECK(gst_buffer_extract(buffer, 0, rows, sizeof(rows)) == sizeof(rows),
+          "exact replay buffer extract");
+
+    GChecksum *row_checksum = g_checksum_new(G_CHECKSUM_SHA256);
+    CHECK(row_checksum != NULL, "exact replay row checksum");
+    g_checksum_update(
+      row_checksum, (const guchar *)rows, sizeof(rows));
+    g_strlcpy(
+      row_sha256, g_checksum_get_string(row_checksum),
+      CRASHCAR_SHA256_HEX_LENGTH + 1);
+    g_checksum_free(row_checksum);
+
+    gst_buffer_unref(buffer);
+    free_element(element);
+    unlink(path);
     g_free(path);
     reset_paired_test_state();
     return 0;
@@ -682,7 +802,7 @@ int main(int argc, char **argv) {
           "future coverage is scoped to injection consumer");
 
     gchar *path = g_build_filename(argv[1], "single_background.json", NULL);
-    CrashcarSinglefar *element = make_element(path);
+    CrashcarSingleFarEngine *element = make_element(path);
     CHECK(element != NULL, "element");
 
     const guint support_h_before = crashcar_singlefar_support_count(0);
@@ -946,6 +1066,14 @@ int main(int argc, char **argv) {
     CHECK(test_paired_out_of_order_pending(argv[1]) == 0,
           "paired out of order pending");
 
+    char exact_replay_row_sha256[CRASHCAR_SHA256_HEX_LENGTH + 1] = { 0 };
+    char exact_replay_authority_sha256[
+      CRASHCAR_SHA256_HEX_LENGTH + 1] = { 0 };
+    CHECK(exact_replay_digest(
+            argv[1], exact_replay_row_sha256,
+            exact_replay_authority_sha256) == 0,
+          "exact old/new replay digest");
+
     printf("{\"schema\":1,\"coverage_lt_eq_gt_positive\":true,"
            "\"future_scope_guard\":true,\"corrupt_lkg\":true,"
            "\"same_row_hl\":true,"
@@ -960,12 +1088,16 @@ int main(int argc, char **argv) {
            "\"arbitrary_a107_prefix\":true,"
            "\"injection_no_support\":true,"
            "\"out_of_order_pending\":true,"
+           "\"exact_replay_row_sha256\":\"%s\","
+           "\"exact_replay_authority_sha256\":\"%s\","
            "\"postcoh_row_size\":%zu,"
            "\"reject_count\":%" G_GUINT64_FORMAT "}\n",
+           exact_replay_row_sha256,
+           exact_replay_authority_sha256,
            sizeof(PostcohInspiralTable),
            element->live_refresh_reject_count);
 
-    g_object_unref(element);
+    free_element(element);
     g_free(target);
     g_free(replacement);
     g_free(path);

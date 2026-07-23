@@ -864,15 +864,7 @@ def mkPostcohSPIIROnline(pipeline,
                     output_name=None,
                     snapshot_interval=cohfar_accumbackground_snapshot_interval,
                 )
-        if assign_multi_far:
-            postcoh = pipemodules.mkcohfar_assignfar(
-                pipeline,
-                postcoh,
-                ifos=ifos,
-                assignfar_refresh_interval=cohfar_assignfar_refresh_interval,
-                silent_time=cohfar_assignfar_silent_time,
-                input_fname=cohfar_assignfar_input_fname,
-            )
+        unified_single_properties = {}
         if crashcar_enabled:
             crashcar_worker_id = int(os.environ.get(
                 "SINGLE_WORKER_GROUP",
@@ -888,18 +880,7 @@ def mkPostcohSPIIROnline(pipeline,
                 stream=i_dict,
                 stream03d="%03d" % i_dict,
             )
-            # Assignment modes run after normal coherent FAR assignment.
-            # BG-only deliberately omits assignfar but keeps the normal
-            # accumulator before this same-row single-background update.
-            # FinalSink then receives the same Postcoh stream in every mode.
-            postcoh = pipemodules.mkcrashcar_singlefar(
-                pipeline,
-                postcoh,
-                # The crashcar single-detector branch is intentionally H/L
-                # only.  Keep V/K available to the unchanged coherent branch,
-                # but never enable them in crashcar_singlefar.
-                ifos="H1L1",
-                enabled=True,
+            unified_single_properties = dict(
                 detail_output_fname=crashcar_detail_output_fname,
                 template_shape_map_fname=(
                     os.environ.get("CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME") or None
@@ -917,6 +898,23 @@ def mkPostcohSPIIROnline(pipeline,
                 stream_count=len(crashcar_worker_bank_ids),
                 stream_bank_id=crashcar_worker_bank_ids[i_dict],
                 worker_bank_ids=crashcar_worker_bank_ids_csv,
+            )
+        if assign_multi_far or crashcar_enabled:
+            # One public GstBaseTransform now preserves the old serial order:
+            # unchanged multi/coherent FAR first, then the internal H/L single
+            # engine on the same Postcoh row buffer.  BG-only disables only the
+            # multi assignment step; FinalSink still receives the same stream.
+            postcoh = pipemodules.mkcohfar_assignfar(
+                pipeline,
+                postcoh,
+                ifos=ifos,
+                assignfar_refresh_interval=cohfar_assignfar_refresh_interval,
+                silent_time=cohfar_assignfar_silent_time,
+                input_fname=(cohfar_assignfar_input_fname
+                             if assign_multi_far else None),
+                assign_multi_far=assign_multi_far,
+                single_enabled=crashcar_enabled,
+                **unified_single_properties,
             )
         # head = mkpostcohfilesink(pipeline, postcoh, location = output_prefix[i_dict], compression = 1, snapshot_interval = snapshot_interval)
         triggersrcs.append(postcoh)

@@ -29,6 +29,7 @@
 #define __COHFAR_ASSIGNFAR_H__
 
 #include <cohfar/background_stats.h>
+#include <cohfar/crashcar_singlefar.h>
 #include <glib.h>
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
@@ -66,6 +67,10 @@ typedef struct {
     int refresh_interval;
     gchar **input_fnames;
     int ninput;
+    gboolean assign_multi_far;
+
+    /* Optional single-detector engine; owns no GStreamer object or pads. */
+    CrashcarSingleFarEngine single;
 
     /*
      * timestamp book-keeping

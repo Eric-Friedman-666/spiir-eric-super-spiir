@@ -19,6 +19,7 @@ def source(path):
 def test_checked_int64_gps_and_fatal_start_contract():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
     header = source("gst/cuda/cohfar/crashcar_singlefar.h")
+    unified = source("gst/cuda/cohfar/cohfar_assignfar.c")
 
     checked_start = implementation.index(
         "static gboolean crashcar_checked_gps_ns")
@@ -69,12 +70,12 @@ def test_checked_int64_gps_and_fatal_start_contract():
     ):
         assert token in implementation or token in header
     assert (
-        "transform_class->start = GST_DEBUG_FUNCPTR(crashcar_singlefar_start);"
-        in implementation)
+        "transform_class->start = GST_DEBUG_FUNCPTR(cohfar_assignfar_start);"
+        in unified)
     start_index = implementation.rindex(
-        "static gboolean crashcar_singlefar_start(GstBaseTransform *base) {")
+        "gboolean crashcar_singlefar_engine_start(CrashcarSingleFarEngine *element) {")
     start = implementation[start_index:implementation.index(
-        "static GstFlowReturn crashcar_singlefar_transform_ip",
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip",
         start_index)]
     assert "!crashcar_load_livetime_segments(element, &failure)" in start
     assert "!crashcar_load_exact_window_config(element, &failure)" in start
@@ -135,11 +136,11 @@ def test_single_relevant_foreground_rows_get_a109_llrs_and_unique_owner():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
     header = source("include/postcohtable.h")
     transform = implementation[implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip"):
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip"):
         implementation.index(
-            "static void crashcar_singlefar_set_property",
+            "void crashcar_singlefar_engine_clear",
             implementation.rindex(
-                "static GstFlowReturn crashcar_singlefar_transform_ip"))]
+                "GstFlowReturn crashcar_singlefar_engine_transform_ip"))]
 
     preflight = transform.index("for (gsize original_ordinal = 0;")
     stable_sort = transform.index(
@@ -308,18 +309,22 @@ def test_complete_far_llr_points_shape_remains_required():
 
 def test_gap_and_empty_control_passthrough_keep_nongap_payload_strict():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
+    unified = source("gst/cuda/cohfar/cohfar_assignfar.c")
     init_start = implementation.index(
-        "static void crashcar_singlefar_init")
+        "void crashcar_singlefar_engine_init")
     init = implementation[init_start:implementation.index(
         'element->ifos = g_strdup("H1L1");', init_start)]
     assert (
         "gst_base_transform_set_gap_aware(GST_BASE_TRANSFORM(element), TRUE);"
-        in init)
+        not in init)
+    assert (
+        "gst_base_transform_set_gap_aware(GST_BASE_TRANSFORM(element), TRUE);"
+        in unified)
 
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     end = implementation.index(
-        "static void crashcar_singlefar_set_property", start)
+        "void crashcar_singlefar_engine_clear", start)
     transform = implementation[start:end]
     disabled = transform.index(
         "if (!element->enabled) return GST_FLOW_OK;")
@@ -420,9 +425,9 @@ def test_exact_support_time_and_equal_time_direct_science_order():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
     header = source("gst/cuda/cohfar/crashcar_singlefar.h")
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
 
     assert "gint64 gps_ns;" in header
     assert "double gps;" not in header
@@ -469,9 +474,9 @@ def test_shared_row_authority_and_cadence_independence():
         implementation.index(
             "#define CRASHCAR_BINARY64_EXACT_INTEGER_LIMIT")]
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
 
     assert "snapshot" not in assignment.lower()
     assert "zerolag" not in assignment.lower()
@@ -489,9 +494,9 @@ def test_eligibility_local_input_and_binary64_boundary_contract():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
     crashcar_header = source("gst/cuda/cohfar/crashcar_singlefar.h")
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
 
     rho = transform.index("table->snglsnr[ifo_id] >= CRASHCAR_MIN_SNR")
     deferred = transform.index("if (table->bankid >= 384)")
@@ -585,9 +590,9 @@ def test_canonical_zero_target_and_empty_append_contract():
 def test_opposite_local_times_cannot_select_different_authorities():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
     assert "&table->end_time, &row_assignment_gps_ns" in transform
     assert (
         "element, row_assignment_gps_ns, &row_bg_end_ns"
@@ -615,9 +620,9 @@ def test_opposite_local_times_cannot_select_different_authorities():
 def test_component_status_precedence_for_deferred_bank_scope():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
     rho = transform.index("table->snglsnr[ifo_id] >= CRASHCAR_MIN_SNR")
     deferred = transform.index("if (table->bankid >= 384)")
     local_time = transform.index("crashcar_component_end_time(table, ifo_id)")
@@ -670,9 +675,9 @@ def test_component_status_precedence_for_deferred_bank_scope():
 def test_single_failures_are_local_and_never_abort_the_normal_buffer():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
 
     for removed_gate in (
         "group_failed_bg",
@@ -792,9 +797,9 @@ def test_graph_derived_worker_bank_ownership_is_explicit_and_fail_closed():
         assert token in graph
 
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
     local_time = transform.index("crashcar_component_end_time(table, ifo_id)")
     chisq = transform.index("table->chisq[ifo_id] > 0.0f")
     ownership = transform.index("crashcar_row_bank_matches_graph(")
@@ -838,9 +843,9 @@ def test_completed_authority_selection_is_route_gated_and_unique_owner_only():
         assert token in selector
 
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
     route = transform.index("const CrashcarSingleFinalRoute route =")
     gate = transform.index(
         "if (support_work && group_needs_single_far)", route)
@@ -874,9 +879,9 @@ def test_completed_authority_selection_is_route_gated_and_unique_owner_only():
 def test_detector_local_gps_precedence_fixtures_for_h_and_l():
     implementation = source("gst/cuda/cohfar/crashcar_singlefar.c")
     start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[start:implementation.index(
-        "static void crashcar_singlefar_set_property", start)]
+        "void crashcar_singlefar_engine_clear", start)]
 
     rho_index = transform.index(
         "table->snglsnr[ifo_id] >= CRASHCAR_MIN_SNR")
@@ -994,9 +999,9 @@ def test_o3_adjacent_nanoseconds_remain_exact_half_open_support():
     assert "point.available_after_gps_ns >= available_after_gps_ns" in authority
 
     transform_start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform = implementation[transform_start:implementation.index(
-        "static void crashcar_singlefar_set_property", transform_start)]
+        "void crashcar_singlefar_engine_clear", transform_start)]
     snapshot = transform.index("crashcar_snapshot_paired_authority(")
     evaluated_llr = transform.index("*llr_slot = llr;", snapshot)
     future_support = transform.index(
@@ -1069,9 +1074,9 @@ def test_r24_live_injection_coverage_scope_preserves_rolling_causality():
     assert "pending->available_after_gps_ns > group_gps_ns" in paired
 
     transform_start = implementation.rindex(
-        "static GstFlowReturn crashcar_singlefar_transform_ip")
+        "GstFlowReturn crashcar_singlefar_engine_transform_ip")
     transform_end = implementation.index(
-        "static void crashcar_singlefar_set_property", transform_start)
+        "void crashcar_singlefar_engine_clear", transform_start)
     transform = implementation[transform_start:transform_end]
     assert "crashcar_snapshot_live_authority(" in transform
     assert "crashcar_snapshot_paired_authority(" in transform

@@ -1,9 +1,9 @@
 /*
- * Crashcar low-latency single-detector FAR element.
+ * Crashcar low-latency single-detector FAR engine.
  *
- * This element lives inside the same postcoh/cohfar GStreamer stream as the
- * multi-detector FAR assignment, so the single-detector branch can be moved out
- * of the Python sidecar and into the synchronized pipeline.
+ * This is an internal module of cohfar_assignfar.  It deliberately owns no
+ * GStreamer type, pads, or factory: the unified cohfar_assignfar element calls
+ * this engine in-place after the unchanged multi/coherent FAR step.
  */
 
 #ifndef __CRASHCAR_SINGLEFAR_H__
@@ -25,18 +25,12 @@
 #pragma diag_default 1217
 #endif
 
-// Suppresses a warning from gstreamer using deprecated mutexes.
-// Should be revisited after the gstreamer upgrade.
-// See #15
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
-#pragma GCC diagnostic pop
 
 G_BEGIN_DECLS
 
 #define CRASHCAR_SHA256_HEX_LENGTH 64
+#define CRASHCAR_SINGLE_BANK_COUNT 384
 
 typedef enum {
     CRASHCAR_SINGLE_FAR_SOURCE_NONE = 0,
@@ -70,22 +64,6 @@ typedef enum {
     CRASHCAR_SINGLE_AUTHORITY_MODE_FROZEN_ASSIGNMENT = 3,
     CRASHCAR_SINGLE_AUTHORITY_MODE_LIVE_READONLY = 4
 } CrashcarSingleAuthorityMode;
-
-#define CRASHCAR_SINGLEFAR_TYPE (crashcar_singlefar_get_type())
-#define CRASHCAR_SINGLEFAR(obj)                                                \
-    (G_TYPE_CHECK_INSTANCE_CAST((obj), CRASHCAR_SINGLEFAR_TYPE,                \
-                                CrashcarSinglefar))
-#define CRASHCAR_SINGLEFAR_CLASS(klass)                                        \
-    (G_TYPE_CHECK_CLASS_CAST((klass), CRASHCAR_SINGLEFAR_TYPE,                 \
-                             CrashcarSinglefarClass))
-#define GST_IS_CRASHCAR_SINGLEFAR(obj)                                         \
-    (G_TYPE_CHECK_INSTANCE_TYPE((obj), CRASHCAR_SINGLEFAR_TYPE))
-#define GST_IS_CRASHCAR_SINGLEFAR_CLASS(klass)                                 \
-    (G_TYPE_CHECK_CLASS_TYPE((klass), CRASHCAR_SINGLEFAR_TYPE))
-
-typedef struct {
-    GstBaseTransformClass parent_class;
-} CrashcarSinglefarClass;
 
 typedef struct {
     double a_eff;
@@ -148,7 +126,8 @@ typedef enum {
 } CrashcarLiveRefreshStatus;
 
 typedef struct {
-    GstBaseTransform element;
+    /* Non-owning logging/error owner: the unified cohfar_assignfar element. */
+    GstElement *owner;
 
     char *ifos;
     int nifo;
@@ -225,9 +204,15 @@ typedef struct {
     char *detail_output_fname;
     FILE *detail_output_file;
     gboolean detail_output_header_written;
-} CrashcarSinglefar;
+} CrashcarSingleFarEngine;
 
-GType crashcar_singlefar_get_type(void);
+void crashcar_singlefar_engine_init(CrashcarSingleFarEngine *engine,
+                                    GstElement *owner);
+void crashcar_singlefar_engine_clear(CrashcarSingleFarEngine *engine);
+gboolean crashcar_singlefar_engine_start(CrashcarSingleFarEngine *engine);
+GstFlowReturn crashcar_singlefar_engine_transform_ip(
+  CrashcarSingleFarEngine *engine,
+  GstBuffer *buf);
 gboolean crashcar_singlefar_ifos_valid(const char *ifos);
 CrashcarSingleFinalRoute crashcar_singlefar_final_route_from_ifos(
   const char *ifos);
