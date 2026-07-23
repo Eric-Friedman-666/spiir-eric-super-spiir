@@ -75,7 +75,7 @@ def coincs_xml(*, post_columns=None, post_values=None, series=("0", "1"), map_ev
     )
 
 
-def write_doc(root: Path, xml: str, name="H1L1_100_000000005_3_7_9.xml") -> Path:
+def write_doc(root: Path, xml: str, name="H1L1_100_3_7.xml") -> Path:
     run = root / "run"
     run.mkdir(parents=True, exist_ok=True)
     path = run / name
@@ -119,6 +119,103 @@ def test_direct_discovery_and_nonpositive_single_far(tmp_path):
     )
     assert joined["_normal_series"]["ifo"] == "H1"
     assert joined["_coincs_path"] == str(path)
+
+
+def single_owned_xml(
+    *,
+    ifo: str = "H1",
+    far: str = "1e-6",
+    series=("0",),
+    map_events=("0",),
+) -> str:
+    columns = [
+        "ifos", "end_time", "end_time_ns", "bankid", "tmplt_idx",
+        "event_id", "far", "far_sngl_H1", "far_sngl_L1",
+        "snglsnr_H1", "snglsnr_L1", "H1_LLR", "L1_LLR",
+    ]
+    values = {
+        "ifos": ifo,
+        "end_time": "100",
+        "end_time_ns": "5",
+        "bankid": "3",
+        "tmplt_idx": "7",
+        "event_id": "9",
+        "far": "0",
+        "far_sngl_H1": far if ifo == "H1" else "0",
+        "far_sngl_L1": far if ifo == "L1" else "0",
+        "snglsnr_H1": "8" if ifo == "H1" else "0",
+        "snglsnr_L1": "8" if ifo == "L1" else "0",
+        "H1_LLR": "12.5" if ifo == "H1" else "0",
+        "L1_LLR": "12.5" if ifo == "L1" else "0",
+    }
+    return coincs_xml(
+        post_columns=columns,
+        post_values=[values[column] for column in columns],
+        series=series,
+        map_events=map_events,
+    )
+
+
+def test_single_selection_reads_current_normal_coincs_without_zerolag(tmp_path):
+    path = write_doc(
+        tmp_path,
+        single_owned_xml(),
+        name="H1_100_3_7.xml",
+    )
+    found = plot.discover_normal_coincs(
+        tmp_path, start_bank=0, banks_per_worker=8, worker_count=2
+    )
+    selected = plot.select_snr_rows(
+        [],
+        found,
+        plot.DEFAULT_SINGLE_FAR_BASES,
+        plot.DEFAULT_COHERENT_FAR_BASES,
+        snr_series_logfar_threshold=-4.0,
+    )
+    h1 = selected["h1_single_min_far"]
+    assert h1 is not None
+    assert h1["_selection_source"] == "normal_coincs"
+    assert h1["_coincs_path"] == str(path)
+    assert h1["_normal_series"]["ifo"] == "H1"
+    assert float(h1["log10_far_sngl"]) == pytest.approx(-6.0)
+    assert selected["l1_single_min_far"] is None
+
+
+def test_single_selection_honors_recorded_threshold(tmp_path):
+    write_doc(
+        tmp_path,
+        single_owned_xml(far="1e-3"),
+        name="H1_100_3_7.xml",
+    )
+    found = plot.discover_normal_coincs(
+        tmp_path, start_bank=0, banks_per_worker=8, worker_count=2
+    )
+    selected = plot.select_normal_coincs_single_candidates(
+        found,
+        plot.DEFAULT_COHERENT_FAR_BASES,
+        snr_series_logfar_threshold=-4.0,
+    )
+    assert selected == {"H1": None, "L1": None}
+
+
+def test_threshold_eligible_single_without_owner_series_fails_closed(tmp_path):
+    write_doc(
+        tmp_path,
+        single_owned_xml(series=("1",), map_events=("1",)),
+        name="H1_100_3_7.xml",
+    )
+    found = plot.discover_normal_coincs(
+        tmp_path, start_bank=0, banks_per_worker=8, worker_count=2
+    )
+    with pytest.raises(
+        ValueError,
+        match="threshold-eligible normal single-owned CoincsDoc lacks H1 COMPLEX8",
+    ):
+        plot.select_normal_coincs_single_candidates(
+            found,
+            plot.DEFAULT_COHERENT_FAR_BASES,
+            snr_series_logfar_threshold=-4.0,
+        )
 
 
 def test_a107_absent_worker_uses_exact_bank_roster_fallback(tmp_path):
@@ -242,7 +339,7 @@ def test_duplicate_sngl_event_or_ifo_fails_closed(tmp_path, old_rows, new_rows):
 
 def test_filename_and_exact_zerolag_key_fail_closed(tmp_path):
     path = write_doc(
-        tmp_path, coincs_xml(), name="H1L1_101_000000005_3_7_9.xml"
+        tmp_path, coincs_xml(), name="H1L1_101_3_7.xml"
     )
     with pytest.raises(ValueError, match="filename/Postcoh identity mismatch"):
         plot.parse_normal_coincs_document(

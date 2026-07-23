@@ -58,7 +58,7 @@ DEFAULT_SEGMENT_GLOB = "run/[0-9][0-9][0-9]/H1L1V1_SEGMENTS_*.xml.gz"
 DEFAULT_SINGLE_FAR_BASES = ("far_sngl",)
 DEFAULT_COHERENT_FAR_BASES = ("far_1w", "far_1d", "far_2h", "far")
 ZEROLAG_NAME_RE = re.compile(r"_zerolag_(\d+)_(\d+)\.xml(?:\.gz)?$")
-COINCS_NAME_RE = re.compile(r"^(?P<ifos>[A-Za-z0-9]+)_(?P<end_time>\d+)_(?P<end_time_ns>\d{9})_(?P<bankid>\d+)_(?P<tmplt_idx>\d+)_(?P<event_id>\d+)\.xml(?:\.gz)?$")
+COINCS_NAME_RE = re.compile(r"^(?P<ifos>[A-Za-z0-9]+)_(?P<end_time>\d+)_(?P<bankid>\d+)_(?P<tmplt_idx>\d+)\.xml(?:\.gz)?$")
 FINAL_ROUTE_BY_IFOS = {
     "H1": ("H1_SINGLE", "H1"),
     "H1V1": ("H1_SINGLE", "H1"),
@@ -2492,17 +2492,15 @@ def parse_normal_coincs_document(
     postcoh = postcoh_rows[0]
     filename_key = (
         match.group("ifos"), match.group("end_time"),
-        normalized_key_value(match.group("end_time_ns")), match.group("bankid"),
-        match.group("tmplt_idx"), match.group("event_id"),
+        match.group("bankid"), match.group("tmplt_idx"),
     )
     row_key = (
         str(postcoh.get("ifos", "")), normalized_key_value(postcoh.get("end_time")),
-        normalized_key_value(postcoh.get("end_time_ns")), normalized_key_value(postcoh.get("bankid")),
-        normalized_key_value(postcoh.get("tmplt_idx")), normalized_key_value(postcoh.get("event_id")),
+        normalized_key_value(postcoh.get("bankid")), normalized_key_value(postcoh.get("tmplt_idx")),
     )
     if filename_key != row_key:
         raise ValueError(f"Coincs filename/Postcoh identity mismatch: {path}")
-    bankid = int(row_key[3])
+    bankid = int(row_key[2])
     # A109 intentionally serializes no worker column.  Worker ownership is
     # reconstructed from the formal bank roster used by this run.
     worker = worker_from_bankid(bankid, start_bank, banks_per_worker, worker_count)
@@ -2575,6 +2573,68 @@ def discover_normal_coincs(
             raise ValueError(f"duplicate normal CoincsDoc identity: {key}")
         by_identity[key] = document
     return {"files": [str(path) for path in files], "by_identity": by_identity}
+
+
+def select_normal_coincs_single_candidates(
+    coincs: dict,
+    coherent_far_bases: tuple[str, ...],
+    *,
+    snr_series_logfar_threshold: float,
+) -> dict[str, dict | None]:
+    """Select retained single-owner events directly from normal CoincsDocs.
+
+    A normal CoincsDoc is the authoritative source for a retained matched-filter
+    series.  In particular, it may be written after the latest completed
+    zerolag snapshot, so single-panel discovery must not depend on zerolag
+    landing cadence.
+    """
+    threshold = float(snr_series_logfar_threshold)
+    if not math.isfinite(threshold):
+        raise ValueError("SNR-series log FAR threshold must be finite")
+
+    selected: dict[str, tuple[float, str, dict] | None] = {
+        "H1": None,
+        "L1": None,
+    }
+    for document in coincs["by_identity"].values():
+        row = dict(document["postcoh"])
+        row["_worker"] = document["worker"]
+        row["_source"] = document["path"]
+        final_owner = route_owned_final_far(row)
+        if final_owner["route"] not in ("H1_SINGLE", "L1_SINGLE"):
+            continue
+        ifo = final_owner["owner_ifo"]
+        far = finite_positive(final_owner["raw_value"])
+        if far is None or math.log10(far) > threshold:
+            continue
+        snr = finite_positive(row.get(f"snglsnr_{ifo}"))
+        if snr is None or snr < SNR_XMIN:
+            continue
+        if ifo not in document["series_by_ifo"]:
+            raise ValueError(
+                "threshold-eligible normal single-owned CoincsDoc lacks "
+                f"{ifo} COMPLEX8 series: {document['path']}"
+            )
+        candidate = make_zerolag_snr_candidate(
+            row,
+            ifo,
+            "single",
+            far,
+            final_owner["source"],
+            coherent_far_bases=coherent_far_bases,
+        )
+        candidate["_selection_source"] = "normal_coincs"
+        candidate.pop("_zerolag_source", None)
+        candidate["_selection_note"] = (
+            "threshold-eligible normal single-owned CoincsDoc selected directly"
+        )
+        ranked = (far, document["path"], candidate)
+        if selected[ifo] is None or ranked[:2] < selected[ifo][:2]:
+            selected[ifo] = ranked
+    return {
+        ifo: ranked[2] if ranked is not None else None
+        for ifo, ranked in selected.items()
+    }
 
 
 def candidate_identity(candidate: dict) -> tuple[str, ...]:
@@ -2839,7 +2899,8 @@ def attach_normal_coincs(
     series = document["series_by_ifo"].get(ifo)
     if series is None:
         raise ValueError(f"normal CoincsDoc lacks {ifo} COMPLEX8 series: {document['path']}")
-    row["_selection_source"] = "zerolag_history+normal_coincs"
+    if row.get("_selection_source") != "normal_coincs":
+        row["_selection_source"] = "zerolag_history+normal_coincs"
     row["_coincs_path"] = document["path"]
     row["_coincs_schema_columns"] = document["schema_columns"]
     row["_normal_series"] = series
@@ -2856,16 +2917,15 @@ def select_snr_rows(
     snr_series_logfar_threshold: float,
     writer_configs: dict[str, dict] | None = None,
 ) -> dict[str, dict | None]:
-    h1_single = select_history_single_candidate(
-        zerolag_rows, "H1", single_far_bases, coherent_far_bases
-    )
-    l1_single = select_history_single_candidate(
-        zerolag_rows, "L1", single_far_bases, coherent_far_bases
+    single_candidates = select_normal_coincs_single_candidates(
+        coincs,
+        coherent_far_bases,
+        snr_series_logfar_threshold=snr_series_logfar_threshold,
     )
     multi_components = select_history_multi_components(zerolag_rows, coherent_far_bases)
     candidates = {
-        "h1_single_min_far": h1_single,
-        "l1_single_min_far": l1_single,
+        "h1_single_min_far": single_candidates["H1"],
+        "l1_single_min_far": single_candidates["L1"],
         "hl_multi_min_far_h1_component": multi_components.get("H1"),
         "hl_multi_min_far_l1_component": multi_components.get("L1"),
     }
@@ -2874,8 +2934,11 @@ def select_snr_rows(
             candidate,
             coincs,
             snr_series_logfar_threshold=snr_series_logfar_threshold,
-            writer_config=writer_config_for_candidate(
-                candidate, writer_configs
+            writer_config=(
+                None
+                if candidate is not None
+                and candidate.get("_selection_source") == "normal_coincs"
+                else writer_config_for_candidate(candidate, writer_configs)
             ),
         )
         for key, candidate in candidates.items()
@@ -3076,11 +3139,21 @@ def plot_series_panel(
             ax.text(0.5, 0.47, detail, ha="center", va="center", transform=ax.transAxes, fontsize=9, color="0.25", wrap=True)
             ax.text(0.5, 0.36, display_note, ha="center", va="center", transform=ax.transAxes, fontsize=8, color="0.45", wrap=False)
         else:
-            ax.text(0.5, 0.46, "No historical assigned FAR candidate found", ha="center", va="center", transform=ax.transAxes, fontsize=9, color="0.4")
+            missing_text = (
+                "No threshold-eligible normal single-owned CoincsDoc found"
+                if panel_key.startswith("single")
+                else "No historical assigned FAR candidate found"
+            )
+            ax.text(0.5, 0.46, missing_text, ha="center", va="center", transform=ax.transAxes, fontsize=9, color="0.4")
         ax.set_title(title, fontweight="bold")
         ax.set_xticks([])
         ax.set_yticks([])
-        return {"available": False, "reason": "missing selected normal CoincsDoc series", "selected_row": compact_snr_row(row)}
+        reason = (
+            "no threshold-eligible normal single-owned CoincsDoc"
+            if not row and panel_key.startswith("single")
+            else "missing selected normal CoincsDoc series"
+        )
+        return {"available": False, "reason": reason, "selected_row": compact_snr_row(row)}
 
     t = np.asarray(series["t"], dtype=float)
     y = np.asarray(series["abs_snr"], dtype=float)
@@ -3169,16 +3242,27 @@ def plot_second_2x2(
             writer_configs=writer_configs,
         )
     else:
+        direct_single = select_normal_coincs_single_candidates(
+            coincs,
+            coherent_far_bases,
+            snr_series_logfar_threshold=snr_series_logfar_threshold,
+        )
+        candidates = dict(preselected_candidates)
+        candidates["h1_single_min_far"] = direct_single["H1"]
+        candidates["l1_single_min_far"] = direct_single["L1"]
         selections = {
             key: attach_normal_coincs(
                 candidate,
                 coincs,
                 snr_series_logfar_threshold=snr_series_logfar_threshold,
-                writer_config=writer_config_for_candidate(
-                    candidate, writer_configs
+                writer_config=(
+                    None
+                    if candidate is not None
+                    and candidate.get("_selection_source") == "normal_coincs"
+                    else writer_config_for_candidate(candidate, writer_configs)
                 ),
             )
-            for key, candidate in preselected_candidates.items()
+            for key, candidate in candidates.items()
         }
     series = {key: load_series_for_row(row) for key, row in selections.items()}
     bank_autocorrelation: dict[str, dict | None] = {}
@@ -3212,7 +3296,7 @@ def plot_second_2x2(
         "normal_coincs_files": coincs["files"],
         "normal_coincs_count": len(coincs["files"]),
         "panels": panels,
-        "selection_policy": "Historical zerolag FAR selects an exact event; its series is read only from the matching normal CoincsDoc using worker/ifos/time/bank/template/event identity and standard event_id-to-SnglInspiral IFO mapping.",
+        "selection_policy": "Single panels select threshold-eligible single-owned events directly from current-run normal CoincsDocs, independent of zerolag landing cadence. Multi panels use the historical zerolag FAR minimum and join its exact normal CoincsDoc. All series use worker/ifos/time/bank/template/event identity and standard event_id-to-SnglInspiral IFO mapping.",
         "selected_rows": {key: compact_snr_row(row) for key, row in selections.items()},
         "bank_autocorrelation": {
             key: ({
@@ -3224,7 +3308,7 @@ def plot_second_2x2(
             } if value else None)
             for key, value in bank_autocorrelation.items()
         },
-        "caveat": "A selected event below the normal retention threshold must have an exact CoincsDoc series or plotting fails closed; no substitute is synthesized.",
+        "caveat": "A threshold-eligible single-owned CoincsDoc must contain its owner IFO series, and a selected multi event required by the normal writer must contain its exact series; otherwise plotting fails closed. No substitute is synthesized.",
     }
 
 def resolve_panel_a_background_path(
