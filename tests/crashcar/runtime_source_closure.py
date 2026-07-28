@@ -23,8 +23,6 @@ LAUNCH_RUNTIME = (
     "gstlal-spiir/share/scripts/crashcar/crashcar.env",
     "gstlal-spiir/share/scripts/crashcar/crashcar.sh",
     "gstlal-spiir/share/scripts/crashcar/crashcar_controller.sh",
-    "gstlal-spiir/share/scripts/crashcar/crashcar_frozen_injection_workflow.sh",
-    "gstlal-spiir/share/scripts/crashcar/crashcar_live_background.py",
     "gstlal-spiir/share/scripts/crashcar/crashcar_sbatch.sh",
     "gstlal-spiir/share/scripts/crashcar/crashcar_pipeline.sh",
     "gstlal-spiir/share/scripts/crashcar/dump_segment_livetime_csv.py",
@@ -140,12 +138,8 @@ TEST_PROBE_EVIDENCE = (
     "tests/crashcar/test_hl_only_contract.py",
     "tests/crashcar/test_postcoh_schema_roundtrip.py",
     "tests/crashcar/test_template_shape_map_contract.py",
-    "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_authority_contract.py",
-    "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_b4a_row_json_contract.py",
-    "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_bg_only_seed_gate.py",
     "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_finalsink_pending_normal_path.py",
     "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_finalsink_source_behavior.py",
-    "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_graph_modes.py",
     "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_plot_authority.py",
     "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_plot_live_source_behavior.py",
     "gstlal-spiir/share/scripts/crashcar/tests/test_crashcar_plot_normal_coincs.py",
@@ -164,8 +158,6 @@ EVIDENCE_RUNTIME = tuple(sorted(set(
 STAGED_HELPERS = (
     "crashcar.sh",
     "crashcar_controller.sh",
-    "crashcar_frozen_injection_workflow.sh",
-    "crashcar_live_background.py",
     "crashcar_sbatch.sh",
     "crashcar_pipeline.sh",
     "dump_segment_livetime_csv.py",
@@ -178,15 +170,9 @@ SHELL_BINDINGS = {
     ),
     "gstlal-spiir/share/scripts/crashcar/crashcar.sh": STAGED_HELPERS,
     "gstlal-spiir/share/scripts/crashcar/crashcar_controller.sh": (
-        "crashcar_live_background.py",
         "crashcar_sbatch.sh",
-        "crashcar_pipeline.sh",
         "dump_segment_livetime_csv.py",
         "export_template_shape_map.py",
-    ),
-    "gstlal-spiir/share/scripts/crashcar/crashcar_frozen_injection_workflow.sh": (
-        "crashcar_live_background.py",
-        "crashcar.sh",
     ),
     "gstlal-spiir/share/scripts/crashcar/crashcar_sbatch.sh": (
         "crashcar_pipeline.sh",
@@ -317,17 +303,13 @@ def staged_from_launcher():
         ROOT / "gstlal-spiir/share/scripts/crashcar/crashcar.sh"
     ).read_text(encoding="utf-8")
     match = re.search(
-        r"for script in \\\n(.*?); do\n\s*copy_crashcar_script",
+        r"for helper in (.*?); do\n\s*copy_helper",
         text,
         re.DOTALL,
     )
     if not match:
         return ()
-    return tuple(re.findall(
-        r"^\s*([A-Za-z0-9_.-]+)\s*\\?\s*$",
-        match.group(1),
-        re.MULTILINE,
-    ))
+    return tuple(match.group(1).replace("\\", " ").split())
 
 
 def local_c_include(source, include_name):

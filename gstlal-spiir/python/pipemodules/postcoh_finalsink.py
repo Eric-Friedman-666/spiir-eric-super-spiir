@@ -785,16 +785,14 @@ class FinalSink(object):
         self.t_snapshot_start = None
         self.last_buffer_timestamp = None
 
-        # Normal SPIIR owns the updater.  Frozen injection assignment keeps the
-        # same FinalSink but disables only its background mutation timers.
-        multi_background_frozen = (
-            os.environ.get("CRASHCAR_MULTI_BACKGROUND_FROZEN", "0") == "1")
-        if multi_background_frozen and (
+        # Role B keeps the normal FinalSink but never mutates background.
+        read_only_background = os.environ.get("CRASHCAR_ROLE", "") == "B"
+        if read_only_background and (
                 cohfar_accumbackground_output_prefix is not None or
                 cohfar_accumbackground_output_name is not None or
                 fapupdater_output_fname is not None):
             raise ValueError(
-                "frozen crashcar assignment received a mutable multi background output")
+                "role B received a mutable multi background output")
         self.fapupdater = FAPUpdater(
             path=path,
             input_prefix_list=cohfar_accumbackground_output_prefix,
@@ -802,9 +800,9 @@ class FinalSink(object):
             collect_walltime_string=fapupdater_collect_walltime_string,
             ifos=self.ifos,
             calcfap_interval=(
-                None if multi_background_frozen else calcfap_interval),
+                None if read_only_background else calcfap_interval),
             combine_stats_interval=(
-                None if multi_background_frozen else snapshot_interval),
+                None if read_only_background else snapshot_interval),
             verbose=verbose)
 
         # online information performer

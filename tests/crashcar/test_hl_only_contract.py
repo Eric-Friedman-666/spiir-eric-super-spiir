@@ -1,6 +1,5 @@
 from pathlib import Path
 import ast
-import ctypes
 import math
 
 import pytest
@@ -10,11 +9,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SPIIRPARTS = ROOT / "gstlal-spiir/python/pipemodules/spiirparts.py"
 SINGLEFAR = ROOT / "gstlal-spiir/gst/cuda/cohfar/crashcar_singlefar.c"
 ASSIGNFAR = ROOT / "gstlal-spiir/gst/cuda/cohfar/cohfar_assignfar.c"
-PLUGIN = (
-    ROOT / "gstlal-spiir/gst/cuda/.libs/libgstcuda.so.0.0.0"
-)
-
-
 def _text(path):
     return path.read_text(encoding="utf-8")
 
@@ -29,40 +23,26 @@ def test_pipeline_keeps_single_authority_h1_l1_inside_unified_element():
     # beyond the first two canonical H1/L1 slots.
     assert graph.count("pipemodules.mkcohfar_assignfar(") == 1
     assert "pipemodules.mkcrashcar_singlefar(" not in graph
-    assert "single_enabled=crashcar_enabled" in graph
+    assert 'engine->enabled = !strcmp(cfg("CRASHCAR_ENABLE", "0"), "1")' in engine
+    assert 'state.producer = !strcmp(role, "A")' in engine
+    assert 'if (!state.producer && strcmp(role, "B")) return FALSE' in engine
     assert "crashcar_singlefar_engine_transform_ip(&element->single, buf)" in unified
-    assert "for (int ifo_id = 0; ifo_id < 2; ++ifo_id)" in engine
+    assert "for (int ifo = 0; ifo < 2; ++ifo)" in engine
 
 
-def test_exported_singlefar_ifo_validator_accepts_only_canonical_h1l1():
-    if not PLUGIN.is_file():
-        pytest.skip("requires built OzSTAR crashcar plugin")
-    library = ctypes.CDLL(str(PLUGIN), mode=ctypes.RTLD_GLOBAL)
-    validator = library.crashcar_singlefar_ifos_valid
-    validator.argtypes = [ctypes.c_char_p]
-    validator.restype = ctypes.c_int
-    expected = {
-        "H1L1": True,
-        "H1": False,
-        "L1": False,
-        "H1H1": False,
-        "H1L1H1": False,
-        "L1H1": False,
-        "H1L1V1": False,
-        "H1V1": False,
-        "H1K1": False,
-        "V1": False,
-        "K1": False,
-    }
-    for ifos, accepted in expected.items():
-        assert bool(validator(ifos.encode("ascii"))) is accepted
+def test_single_routes_are_h1_l1_parameterized_and_multi_owned_is_separate():
+    text = _text(SINGLEFAR)
+    assert '!strcmp(ifos, "H1") || !strcmp(ifos, "H1V1")' in text
+    assert '!strcmp(ifos, "L1") || !strcmp(ifos, "L1V1")' in text
+    assert '!strcmp(ifos, "H1L1") || !strcmp(ifos, "H1L1V1")' in text
+    assert 'return !strcmp(ifos, "V1") ? 3 : -1' in text
 
 
 def test_snr_boundary_is_finite_and_includes_four():
     text = _text(SINGLEFAR)
-    assert "#define CRASHCAR_MIN_SNR 0x1.0000000000000p+2" in text
-    assert "table->snglsnr[ifo_id] >= CRASHCAR_MIN_SNR" in text
-    assert "!isfinite(table->snglsnr[ifo_id])" in text
+    assert "#define MIN_SNR 0x1p+2" in text
+    assert "rho < MIN_SNR" in text
+    assert "!isfinite(rho)" in text
 
 
 def _load_finalsink_snr_predicate():

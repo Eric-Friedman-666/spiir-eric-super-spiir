@@ -40,8 +40,6 @@ class RuntimeSourceClosureTests(unittest.TestCase):
             "gstlal-spiir/python/pipemodules/postcoh_finalsink.py",
             "gstlal-spiir/share/scripts/crashcar/crashcar.sh",
             "gstlal-spiir/share/scripts/crashcar/crashcar_controller.sh",
-            "gstlal-spiir/share/scripts/crashcar/crashcar_frozen_injection_workflow.sh",
-            "gstlal-spiir/share/scripts/crashcar/crashcar_live_background.py",
             "gstlal-spiir/share/scripts/crashcar/crashcar_sbatch.sh",
             "gstlal-spiir/share/scripts/crashcar/crashcar_numeric.py",
         )
@@ -51,8 +49,8 @@ class RuntimeSourceClosureTests(unittest.TestCase):
             required[-1], self.report["evidence_runtime_hashes"]
         )
         self.assertIn(
-            "gstlal-spiir/share/scripts/crashcar/crashcar_live_background.py",
-            self.report["production_git_state"]["untracked"],
+            "gstlal-spiir/share/scripts/crashcar/crashcar.sh",
+            self.report["production_git_state"]["dirty"],
         )
 
     def test_dynamic_import_copy_exec_and_build_bindings_are_exact(self):

@@ -231,6 +231,35 @@ def calculated_far(sorted_background_ranks, event_rank, livetime_seconds):
     return far, count, count == 0
 
 
+def nearest_background_far(sorted_background_ranks, event_rank,
+                           livetime_seconds, r_tail=None):
+    """Look up the empirical FAR at the background LLR nearest the event.
+
+    The lower LLR wins an exact-distance tie, preserving the conservative
+    larger FAR of the monotone empirical background curve.
+    """
+    ranks = [float(value) for value in sorted_background_ranks]
+    if (not ranks or any(not math.isfinite(value) for value in ranks)
+            or ranks != sorted(ranks)):
+        raise ValueError("need finite sorted background ranks")
+    rank = float(event_rank)
+    if not math.isfinite(rank):
+        raise ValueError("event rank nonfinite")
+    candidates = sorted(set(ranks))
+    if r_tail is not None:
+        anchor = float(r_tail)
+        if not math.isfinite(anchor):
+            raise ValueError("r_tail nonfinite")
+        candidates = [value for value in candidates if value <= anchor]
+    if not candidates:
+        raise ValueError("no eligible background LLR points")
+    nearest_rank = min(
+        candidates, key=lambda value: (abs(value - rank), value))
+    far, _count, _floor = calculated_far(
+        ranks, nearest_rank, livetime_seconds)
+    return far, nearest_rank
+
+
 def empirical_tail_point(
         sorted_background_ranks, livetime_seconds, tail_log10_far=-2.0):
     """Choose r_tail from empirical Calculated-FAR points only."""
@@ -308,7 +337,9 @@ def assigned_far(sorted_background_ranks, event_rank, livetime_seconds,
     if not math.isfinite(anchor):
         raise ValueError("r_tail nonfinite")
     if rank <= anchor:
-        return direct, "direct", count, floor
+        nearest, _nearest_rank = nearest_background_far(
+            sorted_background_ranks, rank, livetime_seconds, anchor)
+        return nearest, "direct", count, floor
     try:
         tail_slope = float(slope)
     except (TypeError, ValueError):
@@ -367,12 +398,16 @@ def assignment_decision(sorted_background_ranks, event_rank,
     calculated, count, floor = calculated_far(ranks, rank, livetime)
     r_tail, points = empirical_tail_point(ranks, livetime)
     if rank <= r_tail:
+        assigned, branch, assigned_count, assigned_floor = assigned_far(
+            ranks, rank, livetime, r_tail, None)
+        if assigned_count != count or assigned_floor != floor:
+            raise ArithmeticError("Calculated/Assigned support metadata drift")
         return {
             "status": ASSIGNMENT_ASSIGNED,
             "reason": None,
             "calculated_far": calculated,
-            "assigned_far": calculated,
-            "branch": "direct",
+            "assigned_far": assigned,
+            "branch": branch,
             "support_count": count,
             "one_count_floor": floor,
             "r_tail": r_tail,

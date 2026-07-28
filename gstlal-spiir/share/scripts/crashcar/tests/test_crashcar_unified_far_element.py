@@ -40,7 +40,6 @@ def test_unified_element_runs_unchanged_multi_then_internal_single():
         "GST_BUFFER_FLAG_IS_SET(buf, GST_BUFFER_FLAG_GAP)")
     assert gap < multi < single
     assert transform[gap:multi].count("return GST_FLOW_OK;") == 1
-    assert "if (element->assign_multi_far)" in transform
     assert "if (result != GST_FLOW_OK) return result;" in transform
     assert "CrashcarSingleFarEngine single;" in header
     assert "crashcar_singlefar_engine_start(&element->single)" in unified
@@ -54,37 +53,25 @@ def test_python_graph_constructs_one_configurable_far_element_per_stream():
     assert "def mkcrashcar_singlefar(" not in wrapper
     assert 'Gst.ElementFactory.make("crashcar_singlefar")' not in wrapper
     assert wrapper.count('Gst.ElementFactory.make("cohfar_assignfar"') == 2
-    assert '"assign_multi_far": assign_multi_far' in wrapper
-    assert '"single_enabled": single_enabled' in wrapper
-    assert "if single_enabled:" in wrapper
 
     assert graph.count("pipemodules.mkcohfar_assignfar(") == 1
     assert "pipemodules.mkcrashcar_singlefar(" not in graph
-    assert "if assign_multi_far or crashcar_enabled:" in graph
-    assert "assign_multi_far=assign_multi_far" in graph
-    assert "single_enabled=crashcar_enabled" in graph
-    assert "input_fname=(cohfar_assignfar_input_fname" in graph
-    assert "if assign_multi_far else None)" in graph
+    assert 'crashcar_role = os.environ.get("CRASHCAR_ROLE", "")' in graph
+    assert 'accumulate_multi_background = crashcar_role != "B"' in graph
+    assert "if accumulate_multi_background:" in graph
+    assert "input_fname=cohfar_assignfar_input_fname" in graph
 
 
 def test_unified_properties_keep_multi_and_single_authorities_independent():
     unified = source("gst/cuda/cohfar/cohfar_assignfar.c")
     engine = source("gst/cuda/cohfar/crashcar_singlefar.c")
 
-    for token in (
-        '"assign-multi-far"',
-        '"single-enabled"',
-        '"input-fname"',
-        '"detail-output-fname"',
-        '"template-shape-map-fname"',
-        '"stream-id"',
-        '"stream-count"',
-        '"stream-bank-id"',
-        '"worker-bank-ids"',
-    ):
-        assert token in unified
-    assert "element->assign_multi_far = TRUE;" in unified
-    assert "element->enabled = FALSE;" in engine
-    assert "crashcar_single_background_mode_is_live_readonly()" in engine
-    assert "if (!element->live_single_background_readonly" in engine
-    assert "!crashcar_bind_worker_authority(element, &failure)" in engine
+    assert '"input-fname"' in unified
+    assert '"refresh-interval"' in unified
+    assert "engine->enabled = FALSE;" in engine
+    assert 'state.producer = !strcmp(role, "A")' in engine
+    assert 'strcmp(role, "B")' in engine
+    assert 'cfg("CRASHCAR_SINGLE_BACKGROUND_JSON", "")' in engine
+    assert "write_background(&next)" in engine
+    assert "read_background(&next)" in engine
+    assert "if (!state.producer) refresh(group_gps);" in engine

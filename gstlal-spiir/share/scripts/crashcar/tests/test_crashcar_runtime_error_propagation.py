@@ -138,13 +138,14 @@ def test_finalsink_and_wrappers_remain_normal_owned_and_direct():
     pipeline = PIPELINE_WRAPPER.read_text()
     sbatch = SBATCH_WRAPPER.read_text()
     assert pipeline.startswith("#!/usr/bin/env bash\nset -euo pipefail\n")
-    assert 'if "${cmd[@]}"; then' in pipeline
+    assert '"${CMD[@]}" || PIPELINE_RC=$?' in pipeline
     assert "CRASHCAR_PIPELINE_EXIT_STATUS_FILE" in pipeline
-    assert 'exit "${pipeline_rc}"' in pipeline
+    assert 'exit "${PIPELINE_RC}"' in pipeline
     assert "run_spiir_py3" in sbatch
     assert "wguo-single-det-py3 bash" in sbatch
-    assert "crashcar_finish_pipeline_status" in sbatch
     assert "-e CRASHCAR_PIPELINE_EXIT_STATUS_FILE=" in sbatch
+    assert '[ -s "${STATUS_FILE}" ]' in sbatch
+    assert 'exit "${PIPELINE_RC}"' in sbatch
 
 
 def _fake_pipeline_env(tmp_path, exit_code):
@@ -155,25 +156,33 @@ def _fake_pipeline_env(tmp_path, exit_code):
     executable.write_text(
         "#!/usr/bin/env bash\nexit \"\u0024{SYNTHETIC_PIPELINE_EXIT:?}\"\n")
     executable.chmod(0o755)
+    bank_dir = tmp_path / "banks"
+    bank_dir.mkdir()
+    for ifo in ("H1", "L1", "V1"):
+        (bank_dir / f"iir_{ifo}-GSTLAL_SPLIT_BANK_0008-a1-0-0.xml.gz").touch()
+    detector_response = tmp_path / "detrsp.xml"
+    frame_cache = tmp_path / "frames.cache"
+    detector_response.touch()
+    frame_cache.touch()
+    stats_root = tmp_path / "stats"
+    stats_root.mkdir()
     env = os.environ.copy()
     env.update({
         "CRASH_ROOT": str(crash_root),
         "TOP_RUN_ROOT": str(tmp_path),
+        "CRASHCAR_ROLE": "A",
+        "CRASHCAR_ENABLE": "1",
         "SLURM_ARRAY_TASK_ID": "0",
         "WGUO_O3A_START_GPS": "1252193967",
         "WGUO_O3A_END_GPS": "1252193968",
         "WGUO_O3A_START_BANK": "8",
         "WGUO_O3A_BANKS_PER_GROUP": "1",
         "CRASHCAR_WORKER_BANK_IDS_EXPECTED": "8",
-        "CRASHCAR_BG_ONLY": "1",
-        "CRASHCAR_SINGLE_BACKGROUND_MODE": "rolling",
-        "WGUO_O3A_INJECTION_MODE": "none",
         "WGUO_O3A_INJECTION_FILE": "",
-        "WGUO_O3A_DETRSP_MAP": (
-            "/fred/oz016/wguo/odds_ratio/O3a/chunk20/"
-            "multi_det-BNS-LVK_inj/H1L1V1_1252333296_detrsp_map.xml"),
-        "WGUO_O3A_FRAME_CACHE": (
-            "/fred/oz016/sunil/run_utils/frames_chache/frame_O3a.cache"),
+        "WGUO_O3A_BANK_DIR": str(bank_dir),
+        "WGUO_O3A_NONINJ_STATS_LOC": str(stats_root),
+        "WGUO_O3A_DETRSP_MAP": str(detector_response),
+        "WGUO_O3A_FRAME_CACHE": str(frame_cache),
         "SYNTHETIC_PIPELINE_EXIT": str(exit_code),
     })
     return env
@@ -203,34 +212,10 @@ def test_production_pipeline_wrapper_propagates_nonzero_and_clean_exit(tmp_path)
     assert clean_status.read_text() == "0\n"
 
 
-def _run_actual_sbatch_status_function(tmp_path, pipeline_rc):
-    tmp_path.mkdir()
+def test_sbatch_propagates_pipeline_status_directly():
     source = SBATCH_WRAPPER.read_text()
-    start = source.index("crashcar_finish_pipeline_status() {")
-    end = source.index("\n}\n", start) + 3
-    function_source = source[start:end]
-    status = tmp_path / "pipeline.status"
-    done = tmp_path / "done.txt"
-    status.write_text(f"{pipeline_rc}\n")
-    harness = tmp_path / "status_harness.sh"
-    harness.write_text(
-        "#!/usr/bin/env bash\nset -euo pipefail\n" +
-        function_source +
-        f'crashcar_finish_pipeline_status "{status}" "{done}"\n')
-    result = subprocess.run(
-        ["bash", str(harness)], text=True, capture_output=True)
-    return result, status, done
-
-
-def test_sbatch_status_function_preserves_error_and_success_semantics(tmp_path):
-    failed, failed_status, failed_done = _run_actual_sbatch_status_function(
-        tmp_path / "failed", 23)
-    assert failed.returncode == 23
-    assert failed_status.read_text() == "23\n"
-    assert not failed_done.exists()
-
-    clean, clean_status, clean_done = _run_actual_sbatch_status_function(
-        tmp_path / "clean", 0)
-    assert clean.returncode == 0
-    assert not clean_status.exists()
-    assert clean_done.read_text().startswith("DONE ")
+    assert '[ -s "${STATUS_FILE}" ]' in source
+    assert 'IFS= read -r PIPELINE_RC < "${STATUS_FILE}"' in source
+    assert 'rm -f -- "${STATUS_FILE}"' in source
+    assert '[[ "${PIPELINE_RC}" =~ ^(0|[1-9][0-9]{0,2})$ ]]' in source
+    assert source.rstrip().endswith('exit "${PIPELINE_RC}"')

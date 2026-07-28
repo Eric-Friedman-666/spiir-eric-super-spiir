@@ -212,43 +212,14 @@ def mkcohfar_assignfar(
     assignfar_refresh_interval=14400,
     silent_time=2147483647,
     input_fname=None,
-    assign_multi_far=True,
-    single_enabled=False,
-    dof=120.0,
-    detail_output_fname=None,
-    template_shape_map_fname=None,
-    log10_far_threshold=-4.0,
-    tail_log10_far=-2.0,
-    livetime_step=1.0,
-    stream_id=0,
-    stream_count=1,
-    stream_bank_id=0,
-    worker_bank_ids="0",
 ):
     properties = {
         "ifos": ifos,
         "refresh_interval": assignfar_refresh_interval,
         "silent_time": silent_time,
-        "assign_multi_far": assign_multi_far,
-        "single_enabled": single_enabled,
     }
     if input_fname is not None:
         properties["input_fname"] = input_fname
-    if single_enabled:
-        properties.update({
-            "dof": dof,
-            "log10_far_threshold": log10_far_threshold,
-            "tail_log10_far": tail_log10_far,
-            "livetime_step": livetime_step,
-            "stream_id": stream_id,
-            "stream_count": stream_count,
-            "stream_bank_id": stream_bank_id,
-            "worker_bank_ids": worker_bank_ids,
-        })
-        if detail_output_fname is not None:
-            properties["detail_output_fname"] = detail_output_fname
-        if template_shape_map_fname is not None:
-            properties["template_shape_map_fname"] = template_shape_map_fname
 
     if "name" in properties:
         elem = Gst.ElementFactory.make("cohfar_assignfar",

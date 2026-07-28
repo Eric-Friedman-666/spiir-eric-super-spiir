@@ -52,14 +52,6 @@ def _env_bool(name, default=False):
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
-def _cohfar_graph_stage_policy(multi_background_frozen, background_only):
-    """Select normal cohfar stages for rolling, BG-only, and frozen modes."""
-    if multi_background_frozen and background_only:
-        raise ValueError(
-            "background-only mode cannot use frozen multi/coherent background")
-    return (not multi_background_frozen, not background_only)
-
-
 def _crashcar_worker_bank_layout(banks):
     """Return the exact graph stream-to-bank mapping for one worker."""
 
@@ -711,13 +703,10 @@ def mkPostcohSPIIROnline(pipeline,
         ifos += str(instrument)
 
     crashcar_enabled = _env_bool("CRASHCAR_ENABLE", False)
-    multi_background_frozen = _env_bool(
-        "CRASHCAR_MULTI_BACKGROUND_FROZEN", False)
-    crashcar_bg_only = _env_bool("CRASHCAR_BG_ONLY", False)
-    (accumulate_multi_background,
-     assign_multi_far) = _cohfar_graph_stage_policy(
-         multi_background_frozen,
-         crashcar_bg_only)
+    crashcar_role = os.environ.get("CRASHCAR_ROLE", "")
+    if crashcar_role not in ("", "A", "B"):
+        raise ValueError("CRASHCAR_ROLE must be A or B")
+    accumulate_multi_background = crashcar_role != "B"
     crashcar_worker_bank_ids = (
         _crashcar_worker_bank_layout(banks)
         if crashcar_enabled else ())
@@ -864,58 +853,14 @@ def mkPostcohSPIIROnline(pipeline,
                     output_name=None,
                     snapshot_interval=cohfar_accumbackground_snapshot_interval,
                 )
-        unified_single_properties = {}
-        if crashcar_enabled:
-            crashcar_worker_id = int(os.environ.get(
-                "SINGLE_WORKER_GROUP",
-                os.environ.get("SLURM_ARRAY_TASK_ID", i_dict),
-            ))
-            crashcar_detail_output_fname = (
-                os.environ.get("CRASHCAR_DETAIL_OUTPUT_FNAME")
-                or "crashcar_singlefar_detail_worker%03d.csv" % crashcar_worker_id
-            )
-            crashcar_detail_output_fname = crashcar_detail_output_fname.format(
-                worker=crashcar_worker_id,
-                worker03d="%03d" % crashcar_worker_id,
-                stream=i_dict,
-                stream03d="%03d" % i_dict,
-            )
-            unified_single_properties = dict(
-                detail_output_fname=crashcar_detail_output_fname,
-                template_shape_map_fname=(
-                    os.environ.get("CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME") or None
-                ),
-                log10_far_threshold=float(
-                    os.environ.get("CRASHCAR_LOG10_FAR_THRESHOLD", "-4.0"),
-                ),
-                tail_log10_far=float(
-                    os.environ.get("TAIL_LOG_FAR", "-2.0"),
-                ),
-                livetime_step=float(
-                    os.environ.get("CRASHCAR_LIVETIME_STEP", "1.0"),
-                ),
-                stream_id=i_dict,
-                stream_count=len(crashcar_worker_bank_ids),
-                stream_bank_id=crashcar_worker_bank_ids[i_dict],
-                worker_bank_ids=crashcar_worker_bank_ids_csv,
-            )
-        if assign_multi_far or crashcar_enabled:
-            # One public GstBaseTransform now preserves the old serial order:
-            # unchanged multi/coherent FAR first, then the internal H/L single
-            # engine on the same Postcoh row buffer.  BG-only disables only the
-            # multi assignment step; FinalSink still receives the same stream.
-            postcoh = pipemodules.mkcohfar_assignfar(
-                pipeline,
-                postcoh,
-                ifos=ifos,
-                assignfar_refresh_interval=cohfar_assignfar_refresh_interval,
-                silent_time=cohfar_assignfar_silent_time,
-                input_fname=(cohfar_assignfar_input_fname
-                             if assign_multi_far else None),
-                assign_multi_far=assign_multi_far,
-                single_enabled=crashcar_enabled,
-                **unified_single_properties,
-            )
+        postcoh = pipemodules.mkcohfar_assignfar(
+            pipeline,
+            postcoh,
+            ifos=ifos,
+            assignfar_refresh_interval=cohfar_assignfar_refresh_interval,
+            silent_time=cohfar_assignfar_silent_time,
+            input_fname=cohfar_assignfar_input_fname,
+        )
         # head = mkpostcohfilesink(pipeline, postcoh, location = output_prefix[i_dict], compression = 1, snapshot_interval = snapshot_interval)
         triggersrcs.append(postcoh)
     return triggersrcs

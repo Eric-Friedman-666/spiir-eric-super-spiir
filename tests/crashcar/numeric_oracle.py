@@ -66,7 +66,13 @@ def evaluate_far(ranks, livetime, rank):
     assigned = None
     used_tail = False
     if float(rank) <= r_tail:
-        assigned = direct
+        # Necessary independent oracle for the authoritative-background rule:
+        # midpoint ties select the lower LLR and therefore the larger FAR.
+        nearest_index = min(
+            range(tail_index + 1),
+            key=lambda idx: (abs(xs[idx] - float(rank)), xs[idx]),
+        )
+        assigned = calculated_far(ranks, livetime, xs[nearest_index])
     elif slope is not None:
         candidate = 10.0 ** (slope * float(rank) + intercept)
         if math.isfinite(candidate) and candidate > 0.0:

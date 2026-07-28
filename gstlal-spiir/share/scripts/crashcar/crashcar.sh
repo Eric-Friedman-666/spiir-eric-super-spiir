@@ -3,136 +3,161 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SOURCE_ROOT_DEFAULT=$(cd "${SCRIPT_DIR}/../../../.." && pwd)
-CONFIG_FILE=${CRASHCAR_CONFIG_FILE:-"${SCRIPT_DIR}/crashcar.env"}
+DEFAULT_CONFIG=${CRASHCAR_CONFIG_FILE:-"${SCRIPT_DIR}/crashcar.env"}
+ROLE_OVERRIDE=${crashcar_role:-}
+BACKGROUND_OVERRIDE=${background_run_root:-}
 
-usage() {
-    cat <<EOF
-Usage:
-  bash scripts/crashcar.sh [path/to/crashcar.env]
-
-The config defaults to scripts/crashcar.env.  The launcher creates a fresh
-run root under save_dir/run_id/<UTC timestamp>, copies the fixed crashcar
-scripts into that root, snapshots the config, then runs
-scripts/crashcar_controller.sh there.
-EOF
+die() { printf 'crashcar: %s\n' "$*" >&2; exit 2; }
+require_file() { [ -f "$2" ] || die "missing $1: $2"; }
+positive_integer() { [[ "$1" =~ ^[1-9][0-9]*$ ]]; }
+env_last() {
+    awk -v key="$2" 'index($0,key "=")==1 {v=substr($0,length(key)+2)} END {print v}' "$1"
+}
+duration_seconds() {
+    local seconds=$1 hours=$2 label=$3
+    if [ -n "${seconds}" ]; then
+        positive_integer "${seconds}" || die "${label} duration must be a positive integer"
+        printf '%s\n' "${seconds}"
+    elif [ -n "${hours}" ]; then
+        positive_integer "${hours}" || die "${label} duration_hour must be a positive integer"
+        printf '%s\n' "$((hours * 3600))"
+    else
+        die "${label} duration is required"
+    fi
+}
+copy_helper() {
+    [ -f "${SCRIPT_DIR}/$1" ] || die "missing helper ${SCRIPT_DIR}/$1"
+    cp "${SCRIPT_DIR}/$1" "${RUN_ROOT}/scripts/$1"
 }
 
-if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-    usage
-    exit 0
-fi
-if [ $# -gt 0 ]; then
-    CONFIG_FILE=$1
-fi
-if [ ! -f "${CONFIG_FILE}" ]; then
-    printf 'crashcar: missing config file %s\n' "${CONFIG_FILE}" >&2
-    exit 2
-fi
-
+CONFIG_FILE=${1:-${DEFAULT_CONFIG}}
+[ "$#" -le 1 ] || die "usage: bash scripts/crashcar.sh [path/to/crashcar.env]"
+require_file config "${CONFIG_FILE}"
+CONFIG_FILE=$(readlink -f -- "${CONFIG_FILE}")
 set -a
 # shellcheck source=/dev/null
 source "${CONFIG_FILE}"
 set +a
 
-ROOT_VALUE=${root:-${ROOT:-${source_root:-${SOURCE_ROOT:-"${SOURCE_ROOT_DEFAULT}"}}}}
-SAVE_DIR=${save_dir:-${SAVE_DIR:-${run_parent:-${RUN_PARENT:-"${ROOT_VALUE}/runs"}}}}
-RUN_ID=${run_id:-${RUN_ID:-${run_slug:-${RUN_SLUG:-crashcar}}}}
-RUN_TIMESTAMP=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
-RUN_ROOT=${run_root:-${RUN_ROOT:-"${SAVE_DIR}/${RUN_ID}/${RUN_TIMESTAMP}"}}
-SOURCE_ROOT_VALUE=${ROOT_VALUE}
-
-copy_crashcar_script() {
-    local script=$1
-    local src="${SCRIPT_DIR}/${script}"
-    if [ ! -f "${src}" ]; then
-        printf 'crashcar: missing crashcar-owned helper %s under %s; sidecar fallback is forbidden\n' \
-            "${script}" "${SCRIPT_DIR}" >&2
-        exit 2
-    fi
-    cp "${src}" "${RUN_ROOT}/scripts/${script}"
-}
-
-if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-${CRASHCAR_ALLOW_EXISTING_RUN_ROOT:-0}}" != "1" ]; then
-    printf 'crashcar: run root already exists: %s\n' "${RUN_ROOT}" >&2
-    printf 'Set CRASHCAR_ALLOW_EXISTING_RUN_ROOT=1 only if you know it is safe.\n' >&2
-    exit 2
+ROLE=${ROLE_OVERRIDE:-${crashcar_role:-}}
+ROLE=${ROLE^^}
+case "${ROLE}" in A|B) ;; *) die "crashcar_role must be A or B" ;; esac
+SOURCE_ROOT_VALUE=${root:-${ROOT:-${SOURCE_ROOT_DEFAULT}}}
+SAVE_DIR=${save_dir:-${SAVE_DIR:-"${SOURCE_ROOT_VALUE}/runs"}}
+RUN_ID_VALUE=${run_id:-${RUN_ID:-crashcar}}
+RUN_TIMESTAMP_VALUE=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
+SOURCE_ROOT_VALUE=$(readlink -f -- "${SOURCE_ROOT_VALUE}")
+RUN_ROOT_VALUE=${run_root:-${RUN_ROOT:-}}
+RUN_ROOT=${RUN_ROOT_VALUE:-}
+if [ -n "${RUN_ROOT}" ]; then
+    RUN_ROOT=$(readlink -m -- "${RUN_ROOT}")
+elif [ "${ROLE}" = A ]; then
+    RUN_ROOT=$(readlink -m -- "${SAVE_DIR}/${RUN_ID_VALUE}/${RUN_TIMESTAMP_VALUE}/A")
 fi
 
-mkdir -p "${RUN_ROOT}/scripts"
-for script in \
-    crashcar.sh \
-    crashcar_controller.sh \
-    crashcar_frozen_injection_workflow.sh \
-    crashcar_live_background.py \
-    crashcar_sbatch.sh \
-    crashcar_pipeline.sh \
-    dump_segment_livetime_csv.py \
-    export_template_shape_map.py; do
-    copy_crashcar_script "${script}"
+WORKERS=${worker_number:-${worker_count:-2}}
+BANKS_PER_WORKER_VALUE=${bank_per_worker:-${banks_per_worker:-8}}
+START_BANK_VALUE=${start_bank:-0}
+BANK_DIR=${bank_file:-${o3_bank_dir:-}}
+DOF_VALUE=${dof:-120}
+TAIL_VALUE=${tail_log_FAR:-${tai_log_FAR:--2}}
+SNR_VALUE=${SNR_series_logFAR_threshold:-${snr_series_logFAR_threshold:--4}}
+BG_ACCUM=$(duration_seconds "${background_accumulation_seconds:-}" "${single_BG_accumulation_hour:-${BG_accumulation_hour:-3}}" background)
+BG_UPDATE=$(duration_seconds "${background_update_trigger_seconds:-}" "${BG_update_hour:-1}" background_update)
+ZEROLAG_UPDATE=$(duration_seconds "${zerolag_update_seconds:-}" "${zerolag_update_hour:-1}" zerolag_update)
+MULTI_SNAPSHOT=${cohfar_accumbackground_snapshot_interval_seconds:-${BG_UPDATE}}
+ASSIGN_REFRESH=${cohfar_assignfar_refresh_interval_seconds:-${BG_UPDATE}}
+FAP_REFRESH=${finalsink_fapupdater_interval_seconds:-${BG_UPDATE}}
+FAP_COLLECT=${finalsink_fapupdater_collect_walltime:-$((MULTI_SNAPSHOT + 1)),$((MULTI_SNAPSHOT + 1)),$((MULTI_SNAPSHOT + 1))}
+for value in "${WORKERS}" "${BANKS_PER_WORKER_VALUE}" "${BG_ACCUM}" "${BG_UPDATE}" "${ZEROLAG_UPDATE}" "${MULTI_SNAPSHOT}"; do
+    positive_integer "${value}" || die "worker counts and update periods must be positive integers"
 done
-cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.env"
-chmod +x \
-    "${RUN_ROOT}/scripts/crashcar.sh" \
-    "${RUN_ROOT}/scripts/crashcar_controller.sh" \
-    "${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh" \
-    "${RUN_ROOT}/scripts/crashcar_sbatch.sh" \
-    "${RUN_ROOT}/scripts/crashcar_pipeline.sh" \
-    "${RUN_ROOT}/scripts/dump_segment_livetime_csv.py" \
-    "${RUN_ROOT}/scripts/export_template_shape_map.py"
-chmod 0555 "${RUN_ROOT}/scripts/crashcar_live_background.py"
+[[ "${START_BANK_VALUE}" =~ ^[0-9]+$ ]] || die "start_bank must be non-negative"
+[ -n "${BANK_DIR}" ] || die "bank_file is required"
 
-INJECTION_MODE_RAW=${injection_mode:-${INJECTION_MODE:-False}}
-case "$(printf '%s' "${INJECTION_MODE_RAW}" | tr '[:upper:]' '[:lower:]')" in
-    true|1|yes|on) INJECTION_MODE_NORMALIZED=True ;;
-    false|0|no|off|"") INJECTION_MODE_NORMALIZED=False ;;
-    *)
-        printf 'crashcar: invalid injection_mode=%s; expected True or False\n' "${INJECTION_MODE_RAW}" >&2
-        exit 2
-        ;;
-esac
-INTERNAL_STAGE=${crashcar_internal_stage:-${CRASHCAR_INTERNAL_STAGE:-0}}
-if [ "${INJECTION_MODE_NORMALIZED}" = "True" ] && [ "${INTERNAL_STAGE}" != "1" ]; then
-    CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_frozen_injection_workflow.sh"
-    CONTROLLER_NAME="live background injection workflow"
+BACKGROUND_ROOT=
+if [ "${ROLE}" = A ]; then
+    ROLE_DATA=${data_file:-}
+    ROLE_DETRSP=${detector_response_file:-}
+    ROLE_SEGMENT=${segment_xml:-}
+    ROLE_START=${start_gps:-}
+    ROLE_DURATION=$(duration_seconds "${duration_seconds:-${duration:-}}" "${duration_hour:-}" A)
+    ROLE_INJECTION=
 else
-    CONTROLLER_SCRIPT="${RUN_ROOT}/scripts/crashcar_controller.sh"
-    CONTROLLER_NAME="single-stage controller"
+    ROLE_DATA=${injection_data_file:-}
+    ROLE_DETRSP=${injection_detector_response_file:-}
+    ROLE_SEGMENT=${injection_segment_xml:-}
+    ROLE_START=${injection_start_gps:-}
+    ROLE_DURATION=$(duration_seconds "${injection_duration_seconds:-}" "${injection_duration_hour:-}" B)
+    ROLE_INJECTION=${injection_file:-}
+    SNR_VALUE=90
+    BACKGROUND_ROOT=${BACKGROUND_OVERRIDE:-${background_run_root:-}}
+    [[ "${BACKGROUND_ROOT}" = /* ]] || die "B requires an absolute background_run_root"
+    [ -d "${BACKGROUND_ROOT}" ] || die "background_run_root does not exist: ${BACKGROUND_ROOT}"
+    BACKGROUND_ROOT=$(readlink -f -- "${BACKGROUND_ROOT}")
+    if [ -z "${RUN_ROOT}" ]; then
+        RUN_ROOT=$(readlink -m -- "$(dirname "${BACKGROUND_ROOT}")/B")
+    fi
+    [ "${BACKGROUND_ROOT}" != "${RUN_ROOT}" ] || die "B cannot read its own run root"
+    A_CONFIG=${BACKGROUND_ROOT}/scripts/crashcar.env
+    require_file A_config "${A_CONFIG}"
+    [ "$(env_last "${A_CONFIG}" crashcar_role)" = A ] || die "background_run_root is not an A run"
+    A_ROOT=$(readlink -f -- "$(env_last "${A_CONFIG}" run_root)")
+    [ "${A_ROOT}" = "${BACKGROUND_ROOT}" ] || die "A config/run root mismatch"
+    [ "$(env_last "${A_CONFIG}" worker_number)" = "${WORKERS}" ] || die "B worker_number differs from A"
+    [ "$(env_last "${A_CONFIG}" bank_per_worker)" = "${BANKS_PER_WORKER_VALUE}" ] || die "B bank_per_worker differs from A"
+    [ "$(env_last "${A_CONFIG}" start_bank)" = "${START_BANK_VALUE}" ] || die "B start_bank differs from A"
 fi
+[[ "${ROLE_START}" =~ ^[0-9]+$ ]] || die "start GPS must be non-negative"
+require_file data_file "${ROLE_DATA}"
+require_file detector_response_file "${ROLE_DETRSP}"
+require_file segment_xml "${ROLE_SEGMENT}"
+[ "${ROLE}" = A ] || require_file injection_file "${ROLE_INJECTION}"
 
-cat > "${RUN_ROOT}/README.crashcar_launch.txt" <<EOF
-Crashcar launch root
+if [ -e "${RUN_ROOT}" ] && [ "${crashcar_allow_existing_run_root:-0}" != 1 ]; then
+    die "run root already exists: ${RUN_ROOT}"
+fi
+mkdir -p "${RUN_ROOT}/scripts"
+for helper in crashcar.sh crashcar_controller.sh crashcar_sbatch.sh crashcar_pipeline.sh \
+              dump_segment_livetime_csv.py export_template_shape_map.py; do
+    copy_helper "${helper}"
+done
+cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.user.env"
+awk -F= '
+BEGIN {
+ split("root run_root run_id slurm_job_name crashcar_role background_run_root data_file detector_response_file segment_xml start_gps duration duration_seconds duration_hour worker_number bank_per_worker start_bank bank_file dof background_accumulation background_accumulation_seconds background_update background_update_trigger_seconds zerolag_update_seconds cohfar_accumbackground_snapshot_interval_seconds cohfar_assignfar_refresh_interval_seconds finalsink_fapupdater_interval_seconds finalsink_fapupdater_collect_walltime tail_log_FAR SNR_series_logFAR_threshold injection_file",a," ");
+ for(i in a) drop[a[i]]=1
+}
+/^[A-Za-z_][A-Za-z0-9_]*=/ && drop[$1] {next} {print}
+' "${RUN_ROOT}/scripts/crashcar.user.env" > "${RUN_ROOT}/scripts/crashcar.env"
+{
+    printf '\n# Effective immutable values generated by crashcar.sh.\n'
+    printf 'root=%s\nrun_root=%s\nrun_id=%s_%s\nslurm_job_name=crashcar_%s\n' \
+        "${SOURCE_ROOT_VALUE}" "${RUN_ROOT}" "${RUN_ID_VALUE}" "${ROLE}" "${ROLE}"
+    printf 'crashcar_role=%s\nbackground_run_root=%s\n' "${ROLE}" "${BACKGROUND_ROOT}"
+    printf 'data_file=%s\ndetector_response_file=%s\nsegment_xml=%s\n' \
+        "${ROLE_DATA}" "${ROLE_DETRSP}" "${ROLE_SEGMENT}"
+    printf 'start_gps=%s\nduration=%s\ninjection_file=%s\n' \
+        "${ROLE_START}" "${ROLE_DURATION}" "${ROLE_INJECTION}"
+    printf 'worker_number=%s\nbank_per_worker=%s\nstart_bank=%s\nbank_file=%s\ndof=%s\n' \
+        "${WORKERS}" "${BANKS_PER_WORKER_VALUE}" "${START_BANK_VALUE}" "${BANK_DIR}" "${DOF_VALUE}"
+    printf 'background_accumulation=%s\nbackground_update=%s\nzerolag_update_seconds=%s\n' \
+        "${BG_ACCUM}" "${BG_UPDATE}" "${ZEROLAG_UPDATE}"
+    printf 'cohfar_accumbackground_snapshot_interval_seconds=%s\ncohfar_assignfar_refresh_interval_seconds=%s\n' \
+        "${MULTI_SNAPSHOT}" "${ASSIGN_REFRESH}"
+    printf 'finalsink_fapupdater_interval_seconds=%s\nfinalsink_fapupdater_collect_walltime=%s\n' \
+        "${FAP_REFRESH}" "${FAP_COLLECT}"
+    printf 'tail_log_FAR=%s\nSNR_series_logFAR_threshold=%s\n' "${TAIL_VALUE}" "${SNR_VALUE}"
+} >> "${RUN_ROOT}/scripts/crashcar.env"
 
-Run id:
-  ${RUN_ID}
-
-Start command:
-  cd ${SOURCE_ROOT_VALUE}
-  bash scripts/crashcar.sh
-
-Controller command used inside this staged run:
-  ROOT=${SOURCE_ROOT_VALUE} CRASHCAR_CONFIG_FILE=${RUN_ROOT}/scripts/crashcar.env bash ${CONTROLLER_SCRIPT}
-
-Controller type:
-  ${CONTROLLER_NAME}
-
-Config snapshot:
-  ${RUN_ROOT}/scripts/crashcar.env
-EOF
-
-printf 'crashcar: staged run root %s\n' "${RUN_ROOT}"
+chmod +x "${RUN_ROOT}/scripts/"*.sh "${RUN_ROOT}/scripts/"*.py
+chmod 0444 "${RUN_ROOT}/scripts/crashcar.user.env" "${RUN_ROOT}/scripts/crashcar.env"
+printf 'crashcar: staged role %s run root %s\n' "${ROLE}" "${RUN_ROOT}"
 printf 'crashcar: config snapshot %s\n' "${RUN_ROOT}/scripts/crashcar.env"
-
-if [ "${crashcar_dry_run:-${CRASHCAR_DRY_RUN:-0}}" = "1" ]; then
-    printf 'crashcar: dry run requested; not starting controller or submitting Slurm\n'
-    printf 'crashcar: controller command would be:\n'
-    printf '  ROOT=%q CRASHCAR_CONFIG_FILE=%q bash %q\n' \
-        "${SOURCE_ROOT_VALUE}" \
-        "${RUN_ROOT}/scripts/crashcar.env" \
-        "${CONTROLLER_SCRIPT}"
+if [ "${crashcar_dry_run:-0}" = 1 ]; then
+    printf 'crashcar: dry run requested; Slurm was not submitted\n'
     exit 0
 fi
-
-ROOT="${SOURCE_ROOT_VALUE}" \
-    CRASHCAR_SOURCE_CONFIG_FILE="${CONFIG_FILE}" \
-    CRASHCAR_CONFIG_FILE="${RUN_ROOT}/scripts/crashcar.env" \
-    bash "${CONTROLLER_SCRIPT}"
+ROOT="${SOURCE_ROOT_VALUE}" CRASHCAR_SOURCE_CONFIG_FILE="${CONFIG_FILE}" \
+CRASHCAR_CONFIG_FILE="${RUN_ROOT}/scripts/crashcar.env" \
+bash "${RUN_ROOT}/scripts/crashcar_controller.sh"

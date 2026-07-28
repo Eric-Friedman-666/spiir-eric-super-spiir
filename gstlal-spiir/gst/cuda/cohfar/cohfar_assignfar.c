@@ -44,7 +44,6 @@
 #include <cohfar/cohfar_assignfar.h>
 #include <ifo_set.h>
 #include <postcohtable.h>
-#include <time.h>
 #define DEFAULT_STATS_NAME "stats.xml.gz"
 /* required minimal background events */
 #define MIN_BACKGROUND_NEVENT 1000000
@@ -86,19 +85,7 @@ enum property {
     PROP_IFOS,
     PROP_REFRESH_INTERVAL,
     PROP_SILENT_TIME,
-    PROP_INPUT_FNAME,
-    PROP_ASSIGN_MULTI_FAR,
-    PROP_SINGLE_ENABLED,
-    PROP_SINGLE_DOF,
-    PROP_SINGLE_DETAIL_OUTPUT_FNAME,
-    PROP_SINGLE_TEMPLATE_SHAPE_MAP_FNAME,
-    PROP_SINGLE_LOG10_FAR_THRESHOLD,
-    PROP_SINGLE_TAIL_LOG10_FAR,
-    PROP_SINGLE_LIVETIME_STEP,
-    PROP_SINGLE_STREAM_ID,
-    PROP_SINGLE_STREAM_COUNT,
-    PROP_SINGLE_STREAM_BANK_ID,
-    PROP_SINGLE_WORKER_BANK_IDS
+    PROP_INPUT_FNAME
 };
 
 static void cohfar_assignfar_set_property(GObject *object,
@@ -122,80 +109,6 @@ static float
     if (stats->livetime <= 0) return 0;
     return BOUND(FLT_MIN, gen_fap_from_feature(snr, chisq, stats)
                             * stats->nevent / (stats->livetime * hist_trials));
-}
-
-static double _gps_to_seconds(const LIGOTimeGPS *gps) {
-    if (!gps) return NAN;
-    return (double)gps->gpsSeconds + 1.0e-9 * (double)gps->gpsNanoSeconds;
-}
-
-static float _best_positive_multi_far(const PostcohInspiralTable *table) {
-    float best = 0.0f;
-    const float fars[3] = { table->far_2h, table->far_1d, table->far_1w };
-    for (int i = 0; i < 3; ++i) {
-        if (isfinite(fars[i]) && fars[i] > 0.0f &&
-            (best <= 0.0f || fars[i] < best)) {
-            best = fars[i];
-        }
-    }
-    return best;
-}
-
-G_LOCK_DEFINE_STATIC(assignfar_latency_file);
-static FILE *assignfar_latency_file = NULL;
-static gboolean assignfar_latency_checked = FALSE;
-
-static FILE *_open_assignfar_latency_file(void) {
-    if (assignfar_latency_checked) return assignfar_latency_file;
-
-    assignfar_latency_checked = TRUE;
-    const char *path = g_getenv("COHFAR_ASSIGNFAR_LATENCY_CSV");
-    if (!path || !path[0]) return NULL;
-
-    assignfar_latency_file = fopen(path, "a");
-    if (!assignfar_latency_file) {
-        g_warning("cohfar_assignfar: failed to open latency CSV %s", path);
-        return NULL;
-    }
-
-    if (fseek(assignfar_latency_file, 0, SEEK_END) == 0 &&
-        ftell(assignfar_latency_file) == 0) {
-        fprintf(assignfar_latency_file,
-                "event_id,bankid,tmplt_idx,end_time,end_time_ns,"
-                "is_background,cohsnr,cmbchisq,far_2h,far_1d,far_1w,"
-                "far_multi_min_positive,livetime_2h,livetime_1d,livetime_1w,"
-                "nevent_2h,nevent_1d,nevent_1w,buf_pts_gps,feature_gps,"
-                "assignment_unix\n");
-        fflush(assignfar_latency_file);
-    }
-
-    return assignfar_latency_file;
-}
-
-static void _write_assignfar_latency_row(const PostcohInspiralTable *table,
-                                         GstClockTime t_cur) {
-    G_LOCK(assignfar_latency_file);
-    FILE *file = _open_assignfar_latency_file();
-    if (file) {
-        const double assignment_unix = (double)g_get_real_time() / 1000000.0;
-        const double buf_pts_gps =
-          GST_CLOCK_TIME_IS_VALID(t_cur) ? (double)t_cur / (double)GST_SECOND
-                                         : NAN;
-        fprintf(file,
-                "%ld,%d,%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-                "%d,%d,%d,%d,%d,%d,%.9f,%.9f,%.9f\n",
-                table->event_id, table->bankid, table->tmplt_idx,
-                table->end_time.gpsSeconds, table->end_time.gpsNanoSeconds,
-                table->is_background, table->cohsnr, table->cmbchisq,
-                table->far_2h, table->far_1d, table->far_1w,
-                _best_positive_multi_far(table),
-                table->livetime_2h, table->livetime_1d, table->livetime_1w,
-                table->nevent_2h, table->nevent_1d, table->nevent_1w,
-                buf_pts_gps, _gps_to_seconds(&table->end_time),
-                assignment_unix);
-        fflush(file);
-    }
-    G_UNLOCK(assignfar_latency_file);
 }
 
 static void _update_fars(PostcohInspiralTable *table,
@@ -369,7 +282,6 @@ static GstFlowReturn cohfar_assignfar_transform_multi(
         PostcohInspiralTable *table_end =
           (PostcohInspiralTable *)(mapInfo.data + mapInfo.size);
         for (; table < table_end; table++) {
-            gboolean assigned_far = FALSE;
             if (table->is_background == FLAG_EMPTY) continue;
             if (!ifo_set__try_parse(table->ifos, &enabled_ifos)) {
                 fprintf(stderr,
@@ -389,11 +301,9 @@ static GstFlowReturn cohfar_assignfar_transform_multi(
             if (!ifo_set__is_empty(enabled_ifos)
                 && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
                 _update_fars(table, element);
-                assigned_far = TRUE;
             }
 
             _set_background_stats(table, element);
-            if (assigned_far) _write_assignfar_latency_row(table, t_cur);
         }
         gst_buffer_unmap(buf, &mapInfo);
     }
@@ -422,11 +332,9 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *base,
         return GST_FLOW_OK;
     }
 
-    /* Preserve the old serial order exactly: multi first, then single. */
-    if (element->assign_multi_far) {
-        result = cohfar_assignfar_transform_multi(element, buf);
-        if (result != GST_FLOW_OK) return result;
-    }
+    /* Preserve the normal order: mature multi/coherent FAR, then single. */
+    result = cohfar_assignfar_transform_multi(element, buf);
+    if (result != GST_FLOW_OK) return result;
     return crashcar_singlefar_engine_transform_ip(&element->single, buf);
 }
 
@@ -506,84 +414,6 @@ static void cohfar_assignfar_set_property(GObject *object,
         element->refresh_interval = g_value_get_int(value);
         break;
 
-    case PROP_ASSIGN_MULTI_FAR:
-        element->assign_multi_far = g_value_get_boolean(value);
-        break;
-
-    case PROP_SINGLE_ENABLED:
-        element->single.enabled = g_value_get_boolean(value);
-        break;
-
-    case PROP_SINGLE_DOF:
-        element->single.dof = g_value_get_double(value);
-        break;
-
-    case PROP_SINGLE_DETAIL_OUTPUT_FNAME:
-        g_free(element->single.detail_output_fname);
-        element->single.detail_output_fname = g_value_dup_string(value);
-        break;
-
-    case PROP_SINGLE_TEMPLATE_SHAPE_MAP_FNAME:
-        g_free(element->single.template_shape_map_fname);
-        element->single.template_shape_map_fname = g_value_dup_string(value);
-        if (element->single.template_shape_map) {
-            g_hash_table_remove_all(element->single.template_shape_map);
-        }
-        element->single.template_shape_map_loaded = FALSE;
-        break;
-
-    case PROP_SINGLE_LOG10_FAR_THRESHOLD:
-        element->single.log10_far_threshold = g_value_get_double(value);
-        break;
-
-    case PROP_SINGLE_TAIL_LOG10_FAR:
-        element->single.tail_log10_far = g_value_get_double(value);
-        break;
-
-    case PROP_SINGLE_LIVETIME_STEP:
-        element->single.livetime_step = g_value_get_double(value);
-        break;
-
-    case PROP_SINGLE_STREAM_ID:
-        if (element->single.graph_binding_locked) {
-            GST_ERROR_OBJECT(element,
-                             "ignored immutable graph property stream-id");
-            break;
-        }
-        element->single.stream_id = g_value_get_int(value);
-        break;
-
-    case PROP_SINGLE_STREAM_COUNT:
-        if (element->single.graph_binding_locked) {
-            GST_ERROR_OBJECT(element,
-                             "ignored immutable graph property stream-count");
-            break;
-        }
-        element->single.stream_count = g_value_get_int(value);
-        break;
-
-    case PROP_SINGLE_STREAM_BANK_ID:
-        if (element->single.graph_binding_locked) {
-            GST_ERROR_OBJECT(element,
-                             "ignored immutable graph property stream-bank-id");
-            break;
-        }
-        element->single.stream_bank_id = g_value_get_int(value);
-        break;
-
-    case PROP_SINGLE_WORKER_BANK_IDS:
-        if (element->single.graph_binding_locked) {
-            GST_ERROR_OBJECT(element,
-                             "ignored immutable graph property worker-bank-ids");
-            break;
-        }
-        g_free(element->single.worker_bank_ids);
-        element->single.worker_bank_ids = g_value_dup_string(value);
-        if (element->single.worker_bank_id_values) {
-            g_array_set_size(element->single.worker_bank_id_values, 0);
-        }
-        break;
-
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec); break;
     }
 
@@ -624,42 +454,6 @@ static void cohfar_assignfar_get_property(GObject *object,
 
     case PROP_REFRESH_INTERVAL:
         g_value_set_int(value, element->refresh_interval);
-        break;
-    case PROP_ASSIGN_MULTI_FAR:
-        g_value_set_boolean(value, element->assign_multi_far);
-        break;
-    case PROP_SINGLE_ENABLED:
-        g_value_set_boolean(value, element->single.enabled);
-        break;
-    case PROP_SINGLE_DOF:
-        g_value_set_double(value, element->single.dof);
-        break;
-    case PROP_SINGLE_DETAIL_OUTPUT_FNAME:
-        g_value_set_string(value, element->single.detail_output_fname);
-        break;
-    case PROP_SINGLE_TEMPLATE_SHAPE_MAP_FNAME:
-        g_value_set_string(value, element->single.template_shape_map_fname);
-        break;
-    case PROP_SINGLE_LOG10_FAR_THRESHOLD:
-        g_value_set_double(value, element->single.log10_far_threshold);
-        break;
-    case PROP_SINGLE_TAIL_LOG10_FAR:
-        g_value_set_double(value, element->single.tail_log10_far);
-        break;
-    case PROP_SINGLE_LIVETIME_STEP:
-        g_value_set_double(value, element->single.livetime_step);
-        break;
-    case PROP_SINGLE_STREAM_ID:
-        g_value_set_int(value, element->single.stream_id);
-        break;
-    case PROP_SINGLE_STREAM_COUNT:
-        g_value_set_int(value, element->single.stream_count);
-        break;
-    case PROP_SINGLE_STREAM_BANK_ID:
-        g_value_set_int(value, element->single.stream_bank_id);
-        break;
-    case PROP_SINGLE_WORKER_BANK_IDS:
-        g_value_set_string(value, element->single.worker_bank_ids);
         break;
     default: G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec); break;
     }
@@ -725,97 +519,6 @@ static void cohfar_assignfar_class_init(CohfarAssignfarClass *klass) {
                        0, G_MAXINT, G_MAXINT,
                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
-    g_object_class_install_property(
-      gobject_class, PROP_ASSIGN_MULTI_FAR,
-      g_param_spec_boolean(
-        "assign-multi-far", "assign multi FAR",
-        "run the normal multi/coherent FAR assignment before the single engine",
-        TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_ENABLED,
-      g_param_spec_boolean(
-        "single-enabled", "single enabled",
-        "enable the internal crashcar single-detector engine", FALSE,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_DOF,
-      g_param_spec_double(
-        "dof", "effective degrees of freedom",
-        "legacy single metadata only; runtime dof is derived from bankid",
-        1.0e-12, G_MAXDOUBLE, 120.0,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_DETAIL_OUTPUT_FNAME,
-      g_param_spec_string(
-        "detail-output-fname", "detail output filename",
-        "CSV file for significant crashcar single-trigger details", NULL,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_TEMPLATE_SHAPE_MAP_FNAME,
-      g_param_spec_string(
-        "template-shape-map-fname", "template shape map filename",
-        "canonical CSV with ifo_id,bankid,tmplt_idx,a_eff,dof,ifo,source_class",
-        NULL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_LOG10_FAR_THRESHOLD,
-      g_param_spec_double(
-        "log10-far-threshold", "single log10 FAR threshold",
-        "write detailed single rows when log10(FAR) is at or below this value",
-        -G_MAXDOUBLE, G_MAXDOUBLE, -4.0,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_TAIL_LOG10_FAR,
-      g_param_spec_double(
-        "tail-log10-far", "single tail log10 FAR anchor",
-        "negative log10 FAR anchor for the single-detector tail fit",
-        -G_MAXDOUBLE, -DBL_MIN, -2.0,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_LIVETIME_STEP,
-      g_param_spec_double(
-        "livetime-step", "single livetime step",
-        "default single livetime increment for FLAG_EMPTY rows",
-        0.0, G_MAXDOUBLE, 1.0,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_STREAM_ID,
-      g_param_spec_int(
-        "stream-id", "single stream id",
-        "zero-based Postcoh stream ordinal in this worker",
-        0, CRASHCAR_SINGLE_BANK_COUNT - 1, 0,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_STREAM_COUNT,
-      g_param_spec_int(
-        "stream-count", "single stream count",
-        "exact number of Postcoh bank streams in this worker",
-        1, CRASHCAR_SINGLE_BANK_COUNT, 1,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_STREAM_BANK_ID,
-      g_param_spec_int(
-        "stream-bank-id", "single stream bank id",
-        "bank id derived from this Postcoh graph stream",
-        0, CRASHCAR_SINGLE_BANK_COUNT - 1, 0,
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-      gobject_class, PROP_SINGLE_WORKER_BANK_IDS,
-      g_param_spec_string(
-        "worker-bank-ids", "single worker bank ids",
-        "canonical graph-ordered bank id roster", "0",
-        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
     GstElementClass *gst_element_class = GST_ELEMENT_CLASS(klass);
 
     gst_element_class_set_metadata(
@@ -863,6 +566,5 @@ static void cohfar_assignfar_init(CohfarAssignfar *element) {
     element->t_roll_start     = GST_CLOCK_TIME_NONE;
     element->pass_silent_time = FALSE;
     element->ninput           = -1;
-    element->assign_multi_far = TRUE;
     crashcar_singlefar_engine_init(&element->single, GST_ELEMENT(element));
 }

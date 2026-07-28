@@ -157,6 +157,31 @@ def _empirical_points(ranks, livetime):
     return xs, log_fars
 
 
+def nearest_background_far(ranks, livetime, rank, r_tail=None):
+    """Return the FAR stored at the background LLR nearest to ``rank``.
+
+    At an exact midpoint the lower LLR is retained, which is the conservative
+    (larger-FAR) choice for the monotone empirical background curve.
+    """
+    ranks = list(ranks)
+    if not ranks or not _finite_positive(livetime) or not _finite(rank):
+        raise ValueError("support, detector livetime and rank are required")
+    if any(not _finite(value) for value in ranks):
+        raise ValueError("support ranks must be finite")
+    xs, _log_fars = _empirical_points(ranks, livetime)
+    stop = len(xs)
+    if r_tail is not None:
+        stop = xs.index(float(r_tail)) + 1
+    nearest = min(
+        range(stop),
+        key=lambda index: (abs(xs[index] - float(rank)), xs[index]),
+    )
+    far = calculated_far(ranks, livetime, xs[nearest])
+    if not _finite_positive(far):
+        raise ValueError("invalid nearest-background FAR")
+    return far
+
+
 def tail_model(ranks, livetime):
     ranks = list(ranks)
     if not ranks or not _finite_positive(livetime):
@@ -208,7 +233,8 @@ def evaluate_far(ranks, livetime, rank):
     })
     if rank <= model["r_tail"]:
         result.update({
-            "assigned_far": direct,
+            "assigned_far": nearest_background_far(
+                ranks, livetime, rank, model["r_tail"]),
             "status": "assigned_direct",
         })
         return result

@@ -583,8 +583,10 @@ def parse_command_line():
     crashcar_enable = os.environ.get("CRASHCAR_ENABLE", "0")
     if crashcar_enable not in ("0", "1"):
         raise ValueError("CRASHCAR_ENABLE must be exactly 0 or 1")
-    multi_background_frozen = (
-        os.environ.get("CRASHCAR_MULTI_BACKGROUND_FROZEN", "0") == "1")
+    crashcar_role = os.environ.get("CRASHCAR_ROLE", "")
+    if crashcar_role not in ("", "A", "B"):
+        raise ValueError("CRASHCAR_ROLE must be A or B")
+    read_only_background = crashcar_role == "B"
     expected_postcoh_schema_mode = {
         "0": "legacy-a107",
         "1": "crashcar-a109",
@@ -610,17 +612,17 @@ def parse_command_line():
             "must provide at least finalsink-output-prefix or finalsink-output-name"
         )
 
-    if (not multi_background_frozen and
+    if (not read_only_background and
             options.cohfar_accumbackground_output_prefix is None and
             options.cohfar_accumbackground_output_name is None):
         raise ValueError(
             "must provide at least cohfar-accumbackground-output-prefix or cohfar-accumbackground-output-name"
         )
-    if (multi_background_frozen and
+    if (read_only_background and
             (options.cohfar_accumbackground_output_prefix is not None or
              options.cohfar_accumbackground_output_name is not None)):
         raise ValueError(
-            "frozen crashcar assignment must not instantiate multi background accumulation"
+            "role B must not instantiate multi background accumulation"
         )
 
     required_options = ["job_tag", "code_version", "mode"]
@@ -734,13 +736,13 @@ def parse_command_line():
         for i_ifo_combo in ifo_combos:
             os.makedirs(f"{i_ifo_combo}_skymap", exist_ok=True)
 
-    if (not multi_background_frozen and
+    if (not read_only_background and
             options.finalsink_fapupdater_output_fname is None):
         options.finalsink_fapupdater_output_fname = options.cohfar_assignfar_input_fname
-    if (multi_background_frozen and
+    if (read_only_background and
             options.finalsink_fapupdater_output_fname is not None):
         raise ValueError(
-            "frozen crashcar assignment must not configure a multi background updater output"
+            "role B must not configure a multi background updater output"
         )
 
     return options, filenames, process_params, iir_banks, detectors
@@ -998,7 +1000,13 @@ def write_dump_dot_file(pipeline, filepath, verbose=False):
 
 def set_state_or_raise(pipeline, state, state_string):
     logger.info(f"Setting pipeline to '{state_string}' ...")
-    if pipeline.set_state(state) != Gst.StateChangeReturn.SUCCESS:
+    result = pipeline.set_state(state)
+    if result == Gst.StateChangeReturn.ASYNC:
+        result, current, _pending = pipeline.get_state(120 * Gst.SECOND)
+        if current != state:
+            result = Gst.StateChangeReturn.FAILURE
+    if result not in (Gst.StateChangeReturn.SUCCESS,
+                       Gst.StateChangeReturn.NO_PREROLL):
         msg = pipeline.get_bus().poll(Gst.MessageType.ERROR, 0)
         if msg is not None:
             logger.error(msg.parse_error())

@@ -178,8 +178,7 @@ def _compile_harness(source_text, *, current):
         for name in METHODS
         if name in method_by_name
     ]
-    expected = METHODS if current else METHODS[:2]
-    assert tuple(node.name for node in selected) == expected
+    assert tuple(node.name for node in selected) == METHODS
     body.append(ast.ClassDef(
         name="FinalSink",
         bases=[],
