@@ -29,10 +29,15 @@ def test_role_runs_share_one_group_root():
     text = LAUNCHER.read_text(encoding="utf-8")
     assert 'CONFIG_FILE=${DEFAULT_CONFIG}' in text
     assert '[ "$#" -eq 0 ]' in text
-    assert "unset crashcar_role background_run_root" in text
-    assert 'ROLE=${crashcar_role:-}' in text
-    assert 'BACKGROUND_ROOT=${background_run_root:-}' in text
+    assert "unset run_type crashcar_role background_run_root" in text
+    assert 'ROLE=${run_type:-}' in text
+    assert 'GROUP_ROOT=$(readlink -m -- "${SAVE_DIR}/${RUN_ID_VALUE}")' in text
+    assert 'RUN_ROOT=${GROUP_ROOT}/${ROLE}' in text
+    assert 'BACKGROUND_ROOT=${GROUP_ROOT}/A' in text
     assert "ROLE_OVERRIDE" not in text
     assert "BACKGROUND_OVERRIDE" not in text
-    assert '"${SAVE_DIR}/${RUN_ID_VALUE}/${RUN_TIMESTAMP_VALUE}/A"' in text
-    assert '"$(dirname "${BACKGROUND_ROOT}")/B"' in text
+    for duplicate in (
+            "injection_data_file", "injection_detector_response_file",
+            "injection_segment_xml", "injection_start_gps",
+            "injection_duration_hour", "injection_duration_seconds"):
+        assert duplicate not in text

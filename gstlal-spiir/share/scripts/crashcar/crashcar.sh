@@ -32,27 +32,22 @@ CONFIG_FILE=${DEFAULT_CONFIG}
 [ "$#" -eq 0 ] || die "edit scripts/crashcar.env, then run bash scripts/crashcar.sh"
 require_file config "${CONFIG_FILE}"
 CONFIG_FILE=$(readlink -f -- "${CONFIG_FILE}")
-unset crashcar_role background_run_root
+unset run_type crashcar_role background_run_root
 set -a
 # shellcheck source=/dev/null
 source "${CONFIG_FILE}"
 set +a
 
-ROLE=${crashcar_role:-}
+ROLE=${run_type:-}
 ROLE=${ROLE^^}
-case "${ROLE}" in A|B) ;; *) die "crashcar_role must be A or B" ;; esac
+case "${ROLE}" in A|B) ;; *) die "run_type must be A or B" ;; esac
 SOURCE_ROOT_VALUE=${root:-${ROOT:-${SOURCE_ROOT_DEFAULT}}}
 SAVE_DIR=${save_dir:-${SAVE_DIR:-"${SOURCE_ROOT_VALUE}/runs"}}
 RUN_ID_VALUE=${run_id:-${RUN_ID:-crashcar}}
-RUN_TIMESTAMP_VALUE=${run_timestamp:-${RUN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}}
+[[ "${RUN_ID_VALUE}" =~ ^[A-Za-z0-9._-]+$ ]] || die "run_id contains invalid characters"
 SOURCE_ROOT_VALUE=$(readlink -f -- "${SOURCE_ROOT_VALUE}")
-RUN_ROOT_VALUE=${run_root:-${RUN_ROOT:-}}
-RUN_ROOT=${RUN_ROOT_VALUE:-}
-if [ -n "${RUN_ROOT}" ]; then
-    RUN_ROOT=$(readlink -m -- "${RUN_ROOT}")
-elif [ "${ROLE}" = A ]; then
-    RUN_ROOT=$(readlink -m -- "${SAVE_DIR}/${RUN_ID_VALUE}/${RUN_TIMESTAMP_VALUE}/A")
-fi
+GROUP_ROOT=$(readlink -m -- "${SAVE_DIR}/${RUN_ID_VALUE}")
+RUN_ROOT=${GROUP_ROOT}/${ROLE}
 
 WORKERS=${worker_number:-${worker_count:-2}}
 BANKS_PER_WORKER_VALUE=${bank_per_worker:-${banks_per_worker:-8}}
@@ -74,33 +69,22 @@ done
 [[ "${START_BANK_VALUE}" =~ ^[0-9]+$ ]] || die "start_bank must be non-negative"
 [ -n "${BANK_DIR}" ] || die "bank_file is required"
 
+ROLE_DATA=${data_file:-}
+ROLE_DETRSP=${detector_response_file:-}
+ROLE_SEGMENT=${segment_xml:-}
+ROLE_START=${start_gps:-}
+ROLE_DURATION=$(duration_seconds "${duration_seconds:-${duration:-}}" "${duration_hour:-}" run)
+ROLE_INJECTION=
 BACKGROUND_ROOT=
-if [ "${ROLE}" = A ]; then
-    ROLE_DATA=${data_file:-}
-    ROLE_DETRSP=${detector_response_file:-}
-    ROLE_SEGMENT=${segment_xml:-}
-    ROLE_START=${start_gps:-}
-    ROLE_DURATION=$(duration_seconds "${duration_seconds:-${duration:-}}" "${duration_hour:-}" A)
-    ROLE_INJECTION=
-else
-    ROLE_DATA=${injection_data_file:-}
-    ROLE_DETRSP=${injection_detector_response_file:-}
-    ROLE_SEGMENT=${injection_segment_xml:-}
-    ROLE_START=${injection_start_gps:-}
-    ROLE_DURATION=$(duration_seconds "${injection_duration_seconds:-}" "${injection_duration_hour:-}" B)
+if [ "${ROLE}" = B ]; then
     ROLE_INJECTION=${injection_file:-}
     SNR_VALUE=90
-    BACKGROUND_ROOT=${background_run_root:-}
-    [[ "${BACKGROUND_ROOT}" = /* ]] || die "B requires an absolute background_run_root"
-    [ -d "${BACKGROUND_ROOT}" ] || die "background_run_root does not exist: ${BACKGROUND_ROOT}"
+    BACKGROUND_ROOT=${GROUP_ROOT}/A
+    [ -d "${BACKGROUND_ROOT}" ] || die "run_type B requires ${BACKGROUND_ROOT}"
     BACKGROUND_ROOT=$(readlink -f -- "${BACKGROUND_ROOT}")
-    if [ -z "${RUN_ROOT}" ]; then
-        RUN_ROOT=$(readlink -m -- "$(dirname "${BACKGROUND_ROOT}")/B")
-    fi
-    [ "${BACKGROUND_ROOT}" != "${RUN_ROOT}" ] || die "B cannot read its own run root"
     A_CONFIG=${BACKGROUND_ROOT}/scripts/crashcar.env
     require_file A_config "${A_CONFIG}"
-    [ "$(env_last "${A_CONFIG}" crashcar_role)" = A ] || die "background_run_root is not an A run"
+    [ "$(env_last "${A_CONFIG}" run_type)" = A ] || die "${BACKGROUND_ROOT} is not a run_type A run"
     A_ROOT=$(readlink -f -- "$(env_last "${A_CONFIG}" run_root)")
     [ "${A_ROOT}" = "${BACKGROUND_ROOT}" ] || die "A config/run root mismatch"
     [ "$(env_last "${A_CONFIG}" worker_number)" = "${WORKERS}" ] || die "B worker_number differs from A"
@@ -124,15 +108,16 @@ done
 cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.user.env"
 awk -F= '
 BEGIN {
- split("root run_root run_id slurm_job_name crashcar_role background_run_root data_file detector_response_file segment_xml start_gps duration duration_seconds duration_hour worker_number bank_per_worker start_bank bank_file dof background_accumulation background_accumulation_seconds background_update background_update_trigger_seconds zerolag_update_seconds cohfar_accumbackground_snapshot_interval_seconds cohfar_assignfar_refresh_interval_seconds finalsink_fapupdater_interval_seconds finalsink_fapupdater_collect_walltime tail_log_FAR SNR_series_logFAR_threshold injection_file",a," ");
+ split("root run_root run_id run_type slurm_job_name crashcar_role background_run_root data_file detector_response_file segment_xml start_gps duration duration_seconds duration_hour worker_number bank_per_worker start_bank bank_file dof background_accumulation background_accumulation_seconds background_update background_update_trigger_seconds zerolag_update_seconds cohfar_accumbackground_snapshot_interval_seconds cohfar_assignfar_refresh_interval_seconds finalsink_fapupdater_interval_seconds finalsink_fapupdater_collect_walltime tail_log_FAR SNR_series_logFAR_threshold injection_file",a," ");
  for(i in a) drop[a[i]]=1
 }
 /^[A-Za-z_][A-Za-z0-9_]*=/ && drop[$1] {next} {print}
 ' "${RUN_ROOT}/scripts/crashcar.user.env" > "${RUN_ROOT}/scripts/crashcar.env"
 {
     printf '\n# Effective immutable values generated by crashcar.sh.\n'
-    printf 'root=%s\nrun_root=%s\nrun_id=%s_%s\nslurm_job_name=crashcar_%s\n' \
-        "${SOURCE_ROOT_VALUE}" "${RUN_ROOT}" "${RUN_ID_VALUE}" "${ROLE}" "${ROLE}"
+    printf 'run_id=%s\nrun_type=%s\n' "${RUN_ID_VALUE}" "${ROLE}"
+    printf 'root=%s\nrun_root=%s\nslurm_job_name=crashcar_%s\n' \
+        "${SOURCE_ROOT_VALUE}" "${RUN_ROOT}" "${ROLE}"
     printf 'crashcar_role=%s\nbackground_run_root=%s\n' "${ROLE}" "${BACKGROUND_ROOT}"
     printf 'data_file=%s\ndetector_response_file=%s\nsegment_xml=%s\n' \
         "${ROLE_DATA}" "${ROLE_DETRSP}" "${ROLE_SEGMENT}"
