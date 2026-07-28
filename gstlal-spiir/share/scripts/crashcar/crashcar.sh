@@ -4,8 +4,6 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SOURCE_ROOT_DEFAULT=$(cd "${SCRIPT_DIR}/../../../.." && pwd)
 DEFAULT_CONFIG=${CRASHCAR_CONFIG_FILE:-"${SCRIPT_DIR}/crashcar.env"}
-ROLE_OVERRIDE=${crashcar_role:-}
-BACKGROUND_OVERRIDE=${background_run_root:-}
 
 die() { printf 'crashcar: %s\n' "$*" >&2; exit 2; }
 require_file() { [ -f "$2" ] || die "missing $1: $2"; }
@@ -30,16 +28,17 @@ copy_helper() {
     cp "${SCRIPT_DIR}/$1" "${RUN_ROOT}/scripts/$1"
 }
 
-CONFIG_FILE=${1:-${DEFAULT_CONFIG}}
-[ "$#" -le 1 ] || die "usage: bash scripts/crashcar.sh [path/to/crashcar.env]"
+CONFIG_FILE=${DEFAULT_CONFIG}
+[ "$#" -eq 0 ] || die "edit scripts/crashcar.env, then run bash scripts/crashcar.sh"
 require_file config "${CONFIG_FILE}"
 CONFIG_FILE=$(readlink -f -- "${CONFIG_FILE}")
+unset crashcar_role background_run_root
 set -a
 # shellcheck source=/dev/null
 source "${CONFIG_FILE}"
 set +a
 
-ROLE=${ROLE_OVERRIDE:-${crashcar_role:-}}
+ROLE=${crashcar_role:-}
 ROLE=${ROLE^^}
 case "${ROLE}" in A|B) ;; *) die "crashcar_role must be A or B" ;; esac
 SOURCE_ROOT_VALUE=${root:-${ROOT:-${SOURCE_ROOT_DEFAULT}}}
@@ -91,7 +90,7 @@ else
     ROLE_DURATION=$(duration_seconds "${injection_duration_seconds:-}" "${injection_duration_hour:-}" B)
     ROLE_INJECTION=${injection_file:-}
     SNR_VALUE=90
-    BACKGROUND_ROOT=${BACKGROUND_OVERRIDE:-${background_run_root:-}}
+    BACKGROUND_ROOT=${background_run_root:-}
     [[ "${BACKGROUND_ROOT}" = /* ]] || die "B requires an absolute background_run_root"
     [ -d "${BACKGROUND_ROOT}" ] || die "background_run_root does not exist: ${BACKGROUND_ROOT}"
     BACKGROUND_ROOT=$(readlink -f -- "${BACKGROUND_ROOT}")
