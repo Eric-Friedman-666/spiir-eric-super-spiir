@@ -31,6 +31,8 @@ def test_role_runs_share_one_group_root():
     assert '[ "$#" -eq 0 ]' in text
     assert "unset run_type crashcar_role background_run_root" in text
     assert 'ROLE=${run_type:-}' in text
+    assert 'SAVE_DIR=${SOURCE_ROOT_VALUE}/runs' in text
+    assert 'SAVE_DIR=${save_dir' not in text
     assert 'GROUP_ROOT=$(readlink -m -- "${SAVE_DIR}/${RUN_ID_VALUE}")' in text
     assert 'RUN_ROOT=${GROUP_ROOT}/${ROLE}' in text
     assert 'BACKGROUND_ROOT=${GROUP_ROOT}/A' in text

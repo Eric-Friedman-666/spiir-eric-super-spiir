@@ -42,10 +42,10 @@ ROLE=${run_type:-}
 ROLE=${ROLE^^}
 case "${ROLE}" in A|B) ;; *) die "run_type must be A or B" ;; esac
 SOURCE_ROOT_VALUE=${root:-${ROOT:-${SOURCE_ROOT_DEFAULT}}}
-SAVE_DIR=${save_dir:-${SAVE_DIR:-"${SOURCE_ROOT_VALUE}/runs"}}
 RUN_ID_VALUE=${run_id:-${RUN_ID:-crashcar}}
 [[ "${RUN_ID_VALUE}" =~ ^[A-Za-z0-9._-]+$ ]] || die "run_id contains invalid characters"
 SOURCE_ROOT_VALUE=$(readlink -f -- "${SOURCE_ROOT_VALUE}")
+SAVE_DIR=${SOURCE_ROOT_VALUE}/runs
 GROUP_ROOT=$(readlink -m -- "${SAVE_DIR}/${RUN_ID_VALUE}")
 RUN_ROOT=${GROUP_ROOT}/${ROLE}
 
@@ -108,7 +108,7 @@ done
 cp "${CONFIG_FILE}" "${RUN_ROOT}/scripts/crashcar.user.env"
 awk -F= '
 BEGIN {
- split("root run_root run_id run_type slurm_job_name crashcar_role background_run_root data_file detector_response_file segment_xml start_gps duration duration_seconds duration_hour worker_number bank_per_worker start_bank bank_file dof background_accumulation background_accumulation_seconds background_update background_update_trigger_seconds zerolag_update_seconds cohfar_accumbackground_snapshot_interval_seconds cohfar_assignfar_refresh_interval_seconds finalsink_fapupdater_interval_seconds finalsink_fapupdater_collect_walltime tail_log_FAR SNR_series_logFAR_threshold injection_file",a," ");
+ split("root save_dir run_root run_id run_type slurm_job_name crashcar_role background_run_root data_file detector_response_file segment_xml start_gps duration duration_seconds duration_hour worker_number bank_per_worker start_bank bank_file dof background_accumulation background_accumulation_seconds background_update background_update_trigger_seconds zerolag_update_seconds cohfar_accumbackground_snapshot_interval_seconds cohfar_assignfar_refresh_interval_seconds finalsink_fapupdater_interval_seconds finalsink_fapupdater_collect_walltime tail_log_FAR SNR_series_logFAR_threshold injection_file",a," ");
  for(i in a) drop[a[i]]=1
 }
 /^[A-Za-z_][A-Za-z0-9_]*=/ && drop[$1] {next} {print}
