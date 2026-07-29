@@ -77,6 +77,8 @@ static double livetime(int ifo, gint64 start, gint64 end) {
         Span span = g_array_index(state.segments[ifo], Span, i); gint64 a = MAX(start, span.start), b = MIN(end, span.end);
         if (a < b) total += b - a;
     } return (double)total / NS; }
+static gboolean single_livetime_is_valid(double seconds) {
+    return isfinite(seconds) && seconds > (double)state.window / (5.0 * NS); }
 static gboolean normal_log(double x, double mean, double variance, double *out) {
     if (!isfinite(x) || !isfinite(mean) || !(variance > 0.0) || !isfinite(variance)) return FALSE;
     double delta = x - mean, scaled = delta * delta / variance;
@@ -103,7 +105,7 @@ static gboolean build_curve(int ifo, gint64 start, gint64 end, Background *bg) {
     for (guint i = 0; i < state.support[ifo]->len; ++i) {
         Point point = g_array_index(state.support[ifo], Point, i); if (point.gps >= start && point.gps < end) g_array_append_val(curve, point); }
     bg->livetime[ifo] = livetime(ifo, start, end);
-    if (!curve->len || !(bg->livetime[ifo] > 0.0)) { g_array_unref(curve); return FALSE; }
+    if (!curve->len || !single_livetime_is_valid(bg->livetime[ifo])) { g_array_unref(curve); return FALSE; }
     g_array_sort(curve, point_cmp); guint tail = 0; double best = G_MAXDOUBLE;
     for (guint i = 0; i < curve->len;) {
         guint next = i + 1; while (next < curve->len && g_array_index(curve, Point, next).llr == g_array_index(curve, Point, i).llr) ++next;
@@ -173,8 +175,9 @@ static gboolean read_background(Background *bg) {
     gboolean ok = strstr(data, "\"schema_version\":4") && strstr(data, "\"background_kind\":\"no_injection\"") && strstr(data, binding) && bg->version && bg->tail < 0.0 && isfinite(bg->tail) && parse_gps(after(data, "\"window_start_gps\":"), &bg->start) && parse_gps(after(data, "\"window_end_gps\":"), &bg->end) && bg->start < bg->end;
     for (int ifo = 0; ok && ifo < 2; ++ifo) {
         char key[32]; g_snprintf(key, sizeof(key), "\"%s\":{\"livetime\":", ifo ? "L1" : "H1");
-        p = after(data, key); gint64 live_ns = 0; ok = parse_gps(p, &live_ns) && live_ns > 0;
-        bg->livetime[ifo] = (double)live_ns / NS; p = after(p, "\"r_tail\":\""); bg->r_tail[ifo] = p ? g_ascii_strtod(p, NULL) : NAN;
+        p = after(data, key); gint64 live_ns = 0; ok = parse_gps(p, &live_ns);
+        bg->livetime[ifo] = (double)live_ns / NS; ok = ok && single_livetime_is_valid(bg->livetime[ifo]);
+        p = after(p, "\"r_tail\":\""); bg->r_tail[ifo] = p ? g_ascii_strtod(p, NULL) : NAN;
         p = after(p, "\"slope\":\""); bg->slope[ifo] = p ? g_ascii_strtod(p, NULL) : NAN;
         p = after(p, "\"far_llr_points\":["); const char *limit = p ? strchr(p, ']') : NULL;
         bg->points[ifo] = g_array_new(FALSE, FALSE, sizeof(Point));

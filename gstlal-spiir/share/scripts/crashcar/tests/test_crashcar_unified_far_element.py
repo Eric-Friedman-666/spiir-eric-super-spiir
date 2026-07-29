@@ -75,3 +75,10 @@ def test_unified_properties_keep_multi_and_single_authorities_independent():
     assert "write_background(&next)" in engine
     assert "read_background(&next)" in engine
     assert "if (!state.producer) refresh(group_gps);" in engine
+
+
+def test_single_background_livetime_gate_is_shared_by_producer_and_consumer():
+    engine = source("gst/cuda/cohfar/crashcar_singlefar.c")
+
+    assert "seconds > (double)state.window / (5.0 * NS)" in engine
+    assert engine.count("single_livetime_is_valid(") == 3
