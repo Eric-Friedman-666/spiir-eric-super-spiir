@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""One-click entry point for crashcar 2x2 plots.
+"""One-click entry point for crashcar A/B 2x2 plots.
 
 Run from /fred/oz016/qliang/Eric_bless_SPIIR, for example:
 
-    python3 crashcar_plot.py --run_id crashcar_noinj_24h_2node_diag_r23
+    python3 crashcar_plot.py --run_id=20260728_1400
+
+The equivalent forms ``--run_id VALUE`` and ``--run_id = VALUE`` are also
+accepted.  Successful runs finish by printing every generated 2x2 figure as
+an absolute path.
 
 The wrapper resolves an exact run_id from immutable run-local env snapshots
-below smoke_runs/ or runs/.  Injection workflow parent IDs resolve to their
-B2 live-readonly consumer, whose existing provenance identifies the B1
-background producer.  Identical run_root values are deduplicated, while zero
-or multiple distinct roots fail explicitly; no newest-run fallback is used.
-The public interface intentionally exposes only --run_id/--run-id plus the
-backward-compatible --run-root selector.  Inputs and the output directory are
-inferred from run-local evidence.
+below smoke_runs/ or runs/.  A role-A/role-B group is plotted with the same
+implementation twice, producing one background/zerolag 2x2 and one SNR-series
+2x2 for each role.  Role B reads background data from its explicitly recorded
+background_run_root while its zerolag, Coinc, and SNR-series inputs remain in
+the B run.  No newest-run fallback is used.  The public interface intentionally
+exposes only --run_id/--run-id plus the backward-compatible --run-root selector.
+Inputs and the output directory are inferred from run-local evidence.
 Plot construction remains in gstlal-spiir/bin/crashcar_plot.py.
 """
 
@@ -37,6 +41,26 @@ def clean_run_id(value: str) -> str:
     return cleaned
 
 
+def normalize_cli_argv(argv: list[str]) -> list[str]:
+    """Accept an optional standalone equals token after the run-id option."""
+    normalized = list(argv)
+    for option in ("--run_id", "--run-id"):
+        try:
+            index = normalized.index(option)
+        except ValueError:
+            continue
+        if index + 1 >= len(normalized):
+            continue
+        value = normalized[index + 1]
+        if value == "=":
+            if index + 2 >= len(normalized):
+                raise SystemExit(f"{option} requires a run_id after '='")
+            normalized[index + 1:index + 3] = [normalized[index + 2]]
+        elif value.startswith("="):
+            normalized[index + 1] = value[1:]
+    return normalized
+
+
 def read_env(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if not path.exists():
@@ -50,8 +74,23 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def exact_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
-    """Resolve one run root from exact run_id values in run env snapshots."""
+def canonical_run_type(run_root: Path, values: dict[str, str] | None = None) -> str:
+    values = values or {}
+    for key in ("run_type", "crashcar_role"):
+        run_type = values.get(key, "").strip().upper()
+        if run_type in {"A", "B"}:
+            return run_type
+    if run_root.name in {"A", "B"}:
+        return run_root.name
+    if run_root.name == "B1_noinj_producer":
+        return "A"
+    if run_root.name == "B2_injection_consumer":
+        return "B"
+    return ""
+
+
+def exact_run_roots(root: Path, run_id: str) -> list[dict]:
+    """Resolve all role roots matching one exact run_id."""
     search_roots = tuple(
         candidate.resolve()
         for candidate in (root / "smoke_runs", root / "runs")
@@ -76,6 +115,7 @@ def exact_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
             candidates.update(search_root.glob(pattern))
 
     roots: dict[Path, list[Path]] = {}
+    root_types: dict[Path, set[str]] = {}
     invalid: list[str] = []
     for env_path in sorted(candidates):
         values = read_env(env_path)
@@ -103,12 +143,19 @@ def exact_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
             continue
 
         if not resolved.is_dir() or not (resolved / "run").is_dir():
-            consumer_root = resolved / "B2_injection_consumer"
-            if (
-                is_truthy(values.get("injection_mode", ""))
-                and consumer_root.is_dir()
-                and (consumer_root / "run").is_dir()
-            ):
+            consumer_roots = (
+                resolved / "B",
+                resolved / "B2_injection_consumer",
+            )
+            consumer_root = next(
+                (
+                    candidate
+                    for candidate in consumer_roots
+                    if candidate.is_dir() and (candidate / "run").is_dir()
+                ),
+                None,
+            )
+            if consumer_root is not None:
                 resolved = consumer_root.resolve(strict=True)
             else:
                 invalid.append(
@@ -116,6 +163,9 @@ def exact_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
                 )
                 continue
         roots.setdefault(resolved, []).append(env_path.resolve())
+        run_type = canonical_run_type(resolved, values)
+        if run_type:
+            root_types.setdefault(resolved, set()).add(run_type)
 
     if invalid:
         raise SystemExit(
@@ -127,7 +177,30 @@ def exact_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
         raise SystemExit(
             f"No env snapshot below [{searched}] has exact run_id={run_id!r}"
         )
-    if len(roots) != 1:
+    records: list[dict] = []
+    seen_types: dict[str, Path] = {}
+    for run_root, sources in roots.items():
+        types = root_types.get(run_root, set())
+        if len(types) > 1:
+            raise SystemExit(
+                f"Exact run_id={run_id!r} has conflicting A/B role records for "
+                f"{run_root}: {sorted(types)}"
+            )
+        run_type = next(iter(types), canonical_run_type(run_root))
+        if run_type and run_type in seen_types and seen_types[run_type] != run_root:
+            raise SystemExit(
+                f"Exact run_id={run_id!r} resolves role {run_type} to multiple "
+                f"run roots: {seen_types[run_type]} and {run_root}"
+            )
+        if run_type:
+            seen_types[run_type] = run_root
+        records.append({
+            "run_type": run_type,
+            "run_root": run_root,
+            "matched_env_files": sorted(set(sources)),
+        })
+
+    if len(records) > 1 and any(not record["run_type"] for record in records):
         details = []
         for run_root, sources in sorted(roots.items(), key=lambda item: str(item[0])):
             details.append(
@@ -136,11 +209,68 @@ def exact_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
             )
         raise SystemExit(
             f"Exact run_id={run_id!r} resolves to multiple distinct run roots; "
-            "pass --run-root explicitly only after choosing the intended run:\n"
+            "the roots are not an unambiguous A/B pair:\n"
             + "\n".join(details)
         )
-    run_root, sources = next(iter(roots.items()))
-    return run_root, sorted(set(sources))
+    return sorted(
+        records,
+        key=lambda record: ({"A": 0, "B": 1}.get(record["run_type"], 2),
+                            str(record["run_root"])),
+    )
+
+
+def exact_run_root(root: Path, run_id: str) -> tuple[Path, list[Path]]:
+    """Backward-compatible resolver for callers that require one run root."""
+    records = exact_run_roots(root, run_id)
+    if len(records) != 1:
+        raise SystemExit(
+            f"Exact run_id={run_id!r} contains A/B role roots; use "
+            "exact_run_roots() or the command-line entry point"
+        )
+    record = records[0]
+    return record["run_root"], record["matched_env_files"]
+
+
+def explicit_run_roots(path: Path) -> list[dict]:
+    """Resolve one legacy run root or the A/B roots below one group."""
+    resolved = path.resolve(strict=True)
+    if (resolved / "run").is_dir():
+        group = resolved.parent if resolved.name in {"A", "B"} else None
+    else:
+        group = resolved
+
+    candidates: list[Path] = []
+    if group is not None:
+        candidates = [
+            child.resolve(strict=True)
+            for child in (group / "A", group / "B")
+            if child.is_dir() and (child / "run").is_dir()
+        ]
+    if not candidates and (resolved / "run").is_dir():
+        candidates = [resolved]
+    if not candidates:
+        raise SystemExit(
+            f"Explicit path is neither a run root nor an A/B group: {resolved}"
+        )
+
+    records = []
+    for run_root in candidates:
+        values, _ = merged_run_env(run_root)
+        records.append({
+            "run_type": canonical_run_type(run_root, values),
+            "run_root": run_root,
+            "matched_env_files": [],
+        })
+    return records
+
+
+def shared_output_dir(records: list[dict]) -> Path:
+    """Keep all four A/B figures together below the shared group root."""
+    parents = {record["run_root"].parent for record in records}
+    run_types = {record["run_type"] for record in records}
+    if len(parents) == 1 and run_types and run_types <= {"A", "B"}:
+        return next(iter(parents)) / "figures"
+    return records[0]["run_root"] / "figures"
 
 
 def run_env_sources(run_root: Path) -> list[Path]:
@@ -284,11 +414,12 @@ def normalize_worker_id(value: str) -> str:
 def infer_run_role(run_root: Path) -> dict:
     values, origins = merged_run_env(run_root)
     injection_mode = is_truthy(values.get("injection_mode", ""))
+    run_type = canonical_run_type(run_root, values)
     role = values.get("crashcar_internal_live_background_role", "").strip().lower()
     if role not in {"producer", "consumer"}:
-        if injection_mode or run_root.name == "B2_injection_consumer":
+        if run_type == "B" or injection_mode:
             role = "consumer"
-        elif run_root.name == "B1_noinj_producer":
+        elif run_type == "A":
             role = "producer"
         else:
             role = "no-injection"
@@ -297,6 +428,7 @@ def infer_run_role(run_root: Path) -> dict:
     producer_source: str | None = None
     if role == "consumer":
         for key in (
+            "background_run_root",
             "crashcar_internal_live_background_root",
             "live_background_root",
             "noninj_stats_loc",
@@ -323,6 +455,7 @@ def infer_run_role(run_root: Path) -> dict:
             )
 
     return {
+        "run_type": run_type,
         "role": role,
         "injection_mode": injection_mode,
         "single_background_mode": values.get("single_background_mode", ""),
@@ -406,45 +539,29 @@ def print_plot_payload(prefix: str, payload: dict) -> None:
     if payload.get("raw_stdout"):
         print(payload["raw_stdout"])
         return
-    print(f"{prefix}_first_2x2={payload.get('first', '')}")
-    print(f"{prefix}_second_2x2={payload.get('second', '')}")
+    key = f"{prefix}_" if prefix else ""
+    print(f"{key}first_2x2={payload.get('first', '')}")
+    print(f"{key}second_2x2={payload.get('second', '')}")
+    print(f"{key}background_2x2={payload.get('first', '')}")
+    print(f"{key}snr_series_2x2={payload.get('second', '')}")
     if payload.get("meta"):
-        print(f"{prefix}_metadata={payload['meta']}")
+        print(f"{key}metadata={payload['meta']}")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    selector = parser.add_mutually_exclusive_group(required=True)
-    selector.add_argument(
-        "--run_id", "--run-id", dest="run_id",
-        help="Exact run_id found below ROOT/smoke_runs or ROOT/runs.",
-    )
-    selector.add_argument(
-        "--run-root", type=Path,
-        help="Explicit run root containing run/; retained for advanced use.",
-    )
-    args = parser.parse_args()
-
-    root = Path(__file__).resolve().parent
-    matched_env_files: list[Path] = []
-    if args.run_id is not None:
-        run_id = clean_run_id(args.run_id)
-        run_root, matched_env_files = exact_run_root(root, run_id)
-        resolution_method = "exact_env_run_id_deduplicated"
-    else:
-        run_root = args.run_root.resolve(strict=True)
-        if not (run_root / "run").is_dir():
-            raise SystemExit(f"Explicit run root has no run/ directory: {run_root}")
-        values, _ = merged_run_env(run_root)
-        run_id = values.get("run_id", "").strip() or run_root.name
-        resolution_method = "explicit_run_root"
-
-    impl = root / "gstlal-spiir" / "bin" / "crashcar_plot.py"
-    if not impl.exists():
-        raise SystemExit(f"Plot implementation not found: {impl}")
-    output_dir = run_root / "figures"
-
+def plot_record(
+    *,
+    root: Path,
+    impl: Path,
+    record: dict,
+    records: list[dict],
+    run_id: str,
+    requested_run_id: str | None,
+    resolution_method: str,
+    output_dir: Path,
+) -> dict:
+    run_root = record["run_root"]
     role_info = infer_run_role(run_root)
+    run_type = record["run_type"] or role_info["run_type"]
     plot_mode = "injection" if role_info["role"] == "consumer" else "no-injection"
     extra_args: list[str] = []
 
@@ -490,34 +607,47 @@ def main() -> int:
     if role_info["role"] == "consumer":
         extra_args.extend(["--background-producer-root", str(producer_root)])
 
-    bg_seconds = infer_background_seconds(root, run_root, 10800.0)
-    snr_series_threshold = infer_float_env(
-        root, run_root, "SNR_series_logFAR_threshold", -4.0
-    )
-    tail_boundary = infer_float_env(root, run_root, "tail_log_FAR", -2.0)
+    role_roots = {
+        item["run_type"] or "run": str(item["run_root"])
+        for item in records
+    }
+    if run_type == "B" and "A" in role_roots:
+        if producer_root != Path(role_roots["A"]):
+            raise SystemExit(
+                f"Role B background_run_root {producer_root} does not match "
+                f"the resolved role A root {role_roots['A']}"
+            )
 
     payload = run_plot_impl(
         root=root,
         impl=impl,
         run_root=run_root,
         output_dir=output_dir,
-        run_label=f"crashcar_{run_id}_{plot_mode}",
+        run_label=(
+            f"crashcar_{run_id}_{run_type}_{plot_mode}"
+            if run_type else f"crashcar_{run_id}_{plot_mode}"
+        ),
         panel_a_worker="000",
-        background_seconds=bg_seconds,
-        snr_series_threshold=snr_series_threshold,
-        tail_boundary=tail_boundary,
+        background_seconds=infer_background_seconds(root, run_root, 10800.0),
+        snr_series_threshold=infer_float_env(
+            root, run_root, "SNR_series_logFAR_threshold", -4.0
+        ),
+        tail_boundary=infer_float_env(root, run_root, "tail_log_FAR", -2.0),
         extra_args=extra_args,
     )
     if payload.get("raw_stdout"):
-        print(payload["raw_stdout"])
-        return 0
+        return payload
 
     resolution = {
         "method": resolution_method,
-        "requested_run_id": args.run_id,
+        "requested_run_id": requested_run_id,
         "resolved_run_id": run_id,
+        "resolved_run_type": run_type,
         "resolved_run_root": str(run_root),
-        "matched_run_id_env_files": [str(path) for path in matched_env_files],
+        "resolved_run_roots": role_roots,
+        "matched_run_id_env_files": [
+            str(path) for path in record["matched_env_files"]
+        ],
         "context_env_files": role_info["env_files"],
         "role": role_info["role"],
         "injection_mode": role_info["injection_mode"],
@@ -541,13 +671,69 @@ def main() -> int:
     }
     if payload.get("meta"):
         attach_resolution_metadata(Path(payload["meta"]), resolution)
+    return payload
 
-    print(f"run_root={run_root}")
-    print(f"plot_mode={plot_mode}")
-    print(f"first_2x2={payload.get('first', '')}")
-    print(f"second_2x2={payload.get('second', '')}")
-    if payload.get("meta"):
-        print(f"metadata={payload['meta']}")
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    selector = parser.add_mutually_exclusive_group(required=True)
+    selector.add_argument(
+        "--run_id", "--run-id", dest="run_id",
+        help="Exact run_id found below ROOT/smoke_runs or ROOT/runs.",
+    )
+    selector.add_argument(
+        "--run-root", type=Path,
+        help="Explicit A/B group or role root; retained for advanced use.",
+    )
+    cli_argv = sys.argv[1:] if argv is None else argv
+    args = parser.parse_args(normalize_cli_argv(cli_argv))
+
+    root = Path(__file__).resolve().parent
+    if args.run_id is not None:
+        run_id = clean_run_id(args.run_id)
+        records = exact_run_roots(root, run_id)
+        resolution_method = "exact_env_run_id_ab_group"
+    else:
+        records = explicit_run_roots(args.run_root)
+        values, _ = merged_run_env(records[0]["run_root"])
+        run_id = values.get("run_id", "").strip()
+        if not run_id:
+            group = records[0]["run_root"].parent
+            run_id = group.name if records[0]["run_type"] else records[0]["run_root"].name
+        resolution_method = "explicit_run_root_or_ab_group"
+
+    impl = root / "gstlal-spiir" / "bin" / "crashcar_plot.py"
+    if not impl.exists():
+        raise SystemExit(f"Plot implementation not found: {impl}")
+    output_dir = shared_output_dir(records)
+
+    print(f"run_id={run_id}")
+    print(f"output_dir={output_dir}")
+    generated_paths: list[Path] = []
+    for record in records:
+        prefix = record["run_type"]
+        payload = plot_record(
+            root=root,
+            impl=impl,
+            record=record,
+            records=records,
+            run_id=run_id,
+            requested_run_id=args.run_id,
+            resolution_method=resolution_method,
+            output_dir=output_dir,
+        )
+        root_key = f"{prefix}_run_root" if prefix else "run_root"
+        print(f"{root_key}={record['run_root']}")
+        print_plot_payload(prefix, payload)
+        if not payload.get("raw_stdout"):
+            generated_paths.extend(
+                Path(payload[key]).expanduser().resolve()
+                for key in ("first", "second")
+                if payload.get(key)
+            )
+    print(f"generated_2x2_count={len(generated_paths)}")
+    for path in generated_paths:
+        print(f"generated_2x2={path}")
     return 0
 
 

@@ -73,6 +73,100 @@ def test_top_wrapper_infers_nondefault_one_worker_geometry(tmp_path):
     ) == 4
 
 
+@pytest.mark.parametrize(
+    ("argv", "expected"),
+    [
+        (["--run_id", "=", "20260729_1500"],
+         ["--run_id", "20260729_1500"]),
+        (["--run-id", "=20260729_1500"],
+         ["--run-id", "20260729_1500"]),
+        (["--run_id=20260729_1500"], ["--run_id=20260729_1500"]),
+    ],
+)
+def test_top_wrapper_normalizes_run_id_equals_forms(argv, expected):
+    assert top_plot.normalize_cli_argv(argv) == expected
+
+
+def test_top_wrapper_plots_a_and_b_with_role_correct_sources(
+    tmp_path, monkeypatch, capsys
+):
+    run_id = "20260728_1400"
+    group = tmp_path / "runs" / run_id
+    roots = {role: group / role for role in ("A", "B")}
+    for role, run_root in roots.items():
+        (run_root / "run").mkdir(parents=True)
+        (run_root / "scripts").mkdir()
+        background_root = roots["A"] if role == "B" else ""
+        (run_root / "scripts" / "crashcar.env").write_text(
+            f"run_id={run_id}\n"
+            f"run_type={role}\n"
+            f"crashcar_role={role}\n"
+            f"run_root={run_root}\n"
+            f"background_run_root={background_root}\n"
+            "worker_number=2\n"
+            "bank_per_worker=8\n"
+            "start_bank=0\n"
+            "background_accumulation=10800\n"
+            "tail_log_FAR=-2\n"
+            "SNR_series_logFAR_threshold=-1\n"
+        )
+
+    impl = tmp_path / "gstlal-spiir" / "bin" / "crashcar_plot.py"
+    impl.parent.mkdir(parents=True)
+    impl.write_text("# test implementation placeholder\n")
+    monkeypatch.setattr(top_plot, "__file__", str(tmp_path / "crashcar_plot.py"))
+
+    calls = []
+
+    def fake_run_plot_impl(**kwargs):
+        calls.append(kwargs)
+        label = kwargs["run_label"]
+        return {
+            "first": f"{label}_background.png",
+            "second": f"{label}_snr.png",
+        }
+
+    monkeypatch.setattr(top_plot, "run_plot_impl", fake_run_plot_impl)
+    monkeypatch.setattr(
+        top_plot.sys, "argv", ["crashcar_plot.py", "--run_id", "=", run_id]
+    )
+
+    assert top_plot.main() == 0
+    assert [call["run_root"] for call in calls] == [roots["A"], roots["B"]]
+    assert {call["output_dir"] for call in calls} == {group / "figures"}
+    assert calls[0]["run_label"].endswith("_A_no-injection")
+    assert calls[1]["run_label"].endswith("_B_injection")
+    assert "--background-producer-root" not in calls[0]["extra_args"]
+    producer_index = calls[1]["extra_args"].index("--background-producer-root")
+    assert calls[1]["extra_args"][producer_index + 1] == str(roots["A"])
+
+    output = capsys.readouterr().out
+    for key in (
+        "A_background_2x2=",
+        "A_snr_series_2x2=",
+        "B_background_2x2=",
+        "B_snr_series_2x2=",
+    ):
+        assert key in output
+    assert "generated_2x2_count=4" in output
+    generated = [
+        line.split("=", 1)[1]
+        for line in output.splitlines()
+        if line.startswith("generated_2x2=")
+    ]
+    assert len(generated) == 4
+    assert all(Path(path).is_absolute() for path in generated)
+
+
+def test_top_wrapper_explicit_role_root_discovers_ab_sibling(tmp_path):
+    group = tmp_path / "group"
+    for role in ("A", "B"):
+        (group / role / "run").mkdir(parents=True)
+    records = top_plot.explicit_run_roots(group / "A")
+    assert [record["run_type"] for record in records] == ["A", "B"]
+    assert [record["run_root"] for record in records] == [group / "A", group / "B"]
+
+
 def test_plain_xml_gz_bank_uses_c_layout_and_records_sha(tmp_path):
     bank = write_bank(tmp_path / "banks")
     result = plot.load_pinned_bank_autocorrelation(
