@@ -418,6 +418,32 @@ def test_schema4_accepts_authoritative_finite_negative_tail_boundary(
     )
 
 
+def test_authoritative_panel_a_tail_boundary_tracks_live_background(tmp_path):
+    path = tmp_path / "single_background.json"
+    doc = schema4_background_doc()
+    doc["tail_log10_far"] = -1.0
+    panel = load_schema4(path, doc)
+    boundary, source = plot.resolve_panel_a_tail_boundary(panel, None)
+    fit = plot.panel_a_segmented_fit(
+        [point for point in panel["points"] if point["ifo"] == "H1"],
+        boundary,
+        panel["tail_fit_by_ifo"]["H1"],
+    )
+    assert boundary == pytest.approx(-1.0)
+    assert source == "authoritative_schema4_background.tail_log10_far"
+    assert fit["tail_boundary_log10_far"] == pytest.approx(-1.0)
+    assert fit["tail_line_y"][0] == pytest.approx(-1.0)
+
+
+def test_authoritative_panel_a_rejects_conflicting_tail_override(tmp_path):
+    path = tmp_path / "single_background.json"
+    doc = schema4_background_doc()
+    doc["tail_log10_far"] = -1.0
+    panel = load_schema4(path, doc)
+    with pytest.raises(ValueError, match="conflicts with authoritative"):
+        plot.resolve_panel_a_tail_boundary(panel, -2.0)
+
+
 @pytest.mark.parametrize(
     "case, message",
     [

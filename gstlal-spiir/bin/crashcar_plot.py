@@ -130,11 +130,6 @@ features_from_feature_csv_row = _CRASHCAR_PLOT_SUPPORT.features_from_feature_csv
 rank_feature = _CRASHCAR_PLOT_SUPPORT.rank_feature
 CRASHCAR_NUMERIC = _CRASHCAR_PLOT_SUPPORT.crashcar_numeric
 TAIL_BOUNDARY_LOG10_FAR = math.log10(CRASHCAR_NUMERIC.TAIL_FAR)
-if not math.isclose(TAIL_BOUNDARY_LOG10_FAR, -2.0, rel_tol=0.0, abs_tol=1.0e-12):
-    raise ImportError(
-        "crashcar numeric contract requires TAIL_FAR=1e-2 "
-        f"but loaded {CRASHCAR_NUMERIC.TAIL_FAR!r} from {_CRASHCAR_NUMERIC_PATH}"
-    )
 
 def as_float(value, default=float("nan")) -> float:
     try:
@@ -1731,6 +1726,7 @@ def plot_first_2x2(
     output: Path,
     title: str,
     tail_boundary: float,
+    tail_boundary_source: str,
     far_point_view: str = "fixed",
 ) -> dict:
     zerolag_rows = payload["zerolag"].get("rows", [])
@@ -1979,7 +1975,7 @@ def plot_first_2x2(
         "worker000_panel_a_segmented_fit": panel_a_fit_summary,
         "worker000_panel_a_fit_display": "tail_fit_same_color_lines_with_cross_tail_points",
         "worker000_panel_a_tail_boundary_log10_far": tail_boundary,
-        "worker000_panel_a_tail_boundary_source": "shared_crashcar_numeric.TAIL_FAR",
+        "worker000_panel_a_tail_boundary_source": tail_boundary_source,
         "worker000_panel_a_source_kind": panel_a_source_kind,
         "worker000_panel_a_min_direct_far_by_ifo": panel_a.get("min_direct_far_by_ifo", {}),
         "worker000_panel_a_floor_far_by_ifo": panel_a.get("floor_far_by_ifo", {}),
@@ -3387,6 +3383,43 @@ def load_requested_panel_a_source(
     return detail
 
 
+def resolve_panel_a_tail_boundary(
+    panel_a: dict,
+    requested_boundary: float | None,
+) -> tuple[float, str]:
+    """Choose Panel-A's boundary without overriding authoritative background."""
+    if panel_a.get("authoritative"):
+        boundary = as_float(
+            panel_a.get("schema4_authority", {}).get("tail_log10_far")
+        )
+        if not math.isfinite(boundary) or boundary >= 0.0:
+            raise ValueError(
+                "authoritative schema4 tail_log10_far must be finite and negative"
+            )
+        if (
+            requested_boundary is not None
+            and not math.isclose(
+                float(requested_boundary), boundary,
+                rel_tol=0.0,
+                abs_tol=1.0e-12,
+            )
+        ):
+            raise ValueError(
+                "--tail-boundary-log10-far conflicts with authoritative "
+                "single_background.json tail_log10_far"
+            )
+        return boundary, "authoritative_schema4_background.tail_log10_far"
+
+    boundary = (
+        TAIL_BOUNDARY_LOG10_FAR
+        if requested_boundary is None
+        else float(requested_boundary)
+    )
+    if not math.isfinite(boundary) or boundary >= 0.0:
+        raise ValueError("tail boundary must be finite and negative")
+    return boundary, "diagnostic_cli_or_shared_crashcar_numeric.TAIL_FAR"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-root", required=True, type=Path, help="Run root containing run/, controller/, artifacts/.")
@@ -3411,7 +3444,15 @@ def main() -> None:
     )
     parser.add_argument("--snr-series-logfar-threshold", type=float, default=-4.0, help="Threshold used to decide whether a selected historical FAR event is expected to have retained SNR series.")
     parser.add_argument("--background-accumulation-seconds", type=float, default=10800.0, help="BG accumulation window used for panel (a) H/L online fractions.")
-    parser.add_argument("--tail-boundary-log10-far", type=float, default=TAIL_BOUNDARY_LOG10_FAR, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--tail-boundary-log10-far",
+        type=float,
+        default=None,
+        help=(
+            "Diagnostic Panel-A tail boundary. Authoritative schema4 backgrounds "
+            "always use their stored tail_log10_far; a conflicting override fails."
+        ),
+    )
     parser.add_argument("--max-panel-a-points", type=int, default=0, help="0 means plot all authoritative BG support points (or all explicitly selected diagnostic detail points).")
     parser.add_argument("--panel-a-bg-policy", choices=("latest", "all"), default="latest", help="Policy used only for explicitly selected diagnostic detail; schema4 authority already identifies one BG.")
     parser.add_argument("--background-json", type=Path, default=None, help="Authoritative single_background.json for Panel (a); defaults to the selected worker's normal run output.")
@@ -3427,7 +3468,7 @@ def main() -> None:
         help="Use the fixed publication view or plot every finite assigned-FAR point with SNR>=4 in panels (b)-(d).",
     )
     args = parser.parse_args()
-    if (
+    if args.tail_boundary_log10_far is not None and (
         not math.isfinite(args.tail_boundary_log10_far)
         or args.tail_boundary_log10_far >= 0.0
     ):
@@ -3481,6 +3522,9 @@ def main() -> None:
         ifo_id_map=ifo_id_map,
         panel_a_bg_policy=args.panel_a_bg_policy,
     )
+    tail_boundary, tail_boundary_source = resolve_panel_a_tail_boundary(
+        panel_a, args.tail_boundary_log10_far
+    )
     if background_producer_root is not None:
         panel_a = dict(panel_a)
         panel_a["source_kind"] = "live_no_injection_single_background"
@@ -3506,7 +3550,8 @@ def main() -> None:
         first_payload,
         first_plot,
         label,
-        args.tail_boundary_log10_far,
+        tail_boundary,
+        tail_boundary_source,
         far_point_view=args.far_point_view,
     )
     second = plot_second_2x2(
@@ -3540,8 +3585,8 @@ def main() -> None:
             "coherent_far_priority": coherent_far_bases,
             "snr_series_logfar_threshold": args.snr_series_logfar_threshold,
             "background_accumulation_seconds": args.background_accumulation_seconds,
-            "tail_boundary_log10_far": args.tail_boundary_log10_far,
-            "tail_boundary_source": "shared_crashcar_numeric.TAIL_FAR",
+            "tail_boundary_log10_far": tail_boundary,
+            "tail_boundary_source": tail_boundary_source,
             "max_panel_a_points": args.max_panel_a_points,
             "panel_a_bg_policy": args.panel_a_bg_policy,
             "background_json": (
