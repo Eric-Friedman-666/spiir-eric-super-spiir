@@ -1272,7 +1272,8 @@ static int cuda_postcoh_select_foreground(CudaPostcoh *postcoh,
              * */
             int peak_cur = peak_pos[ipeak];
             // FIXME: consider a different threshold for 3-detector
-            if (sqrt(pklist->cohsnr[peak_cur])
+            if (ifo_set__count(coh_ifos) == 1
+                || sqrt(pklist->cohsnr[peak_cur])
                 > 1.414 + pklist->snglsnr[ifo_id][peak_cur]) {
                 cluster_peak_pos[final_peaks++] = peak_cur;
             } else
@@ -1376,8 +1377,6 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
      * and cmbchisq = single chisq */
     /* only output multi-detector events, cohsnr, cmbchisq only make sense when
      * there are multiple ifos are not in a gap */
-    if (ifo_set__count(coh_ifos) < 2) { return write_entries; }
-
     for (int pivotal_ifo = 0; pivotal_ifo < nifo; pivotal_ifo++) {
         if (!ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
                                           pivotal_ifo)) {
@@ -1468,6 +1467,11 @@ static int cuda_postcoh_write_table_to_buf(CudaPostcoh *postcoh,
             output->ra       = phi * RAD2DEG;
             output->dec      = (M_PI_2 - theta) * RAD2DEG;
             output->event_id = postcoh->cur_event_id++;
+            if (ifo_set__count(coh_ifos) >= 2) {
+                long multi_event_id = postcoh->cur_multi_event_id++;
+                if (strstr(output->ifos, "H1") && strstr(output->ifos, "L1"))
+                    output->event_id = multi_event_id;
+            }
             if (postcoh->output_skymap
                 && state->snglsnr_max[pivotal_ifo] > postcoh->output_skymap
                 && skymap_peakcur[pivotal_ifo] == peak_cur) {
@@ -1589,12 +1593,8 @@ static GstFlowReturn cuda_postcoh_new_buffer_and_push(CudaPostcoh *postcoh,
     int skymap_peakcur[MAX_NIFO];
 
     /* NOTE: explicitly add one more entry to indicate the participating IFOs */
-    if (ifo_set__count(coh_ifos) >= 2) {
-        left_entries =
-          cuda_postcoh_select_foreground(postcoh, coh_ifos, skymap_peakcur) + 1;
-    } else if (ifo_set__count(coh_ifos) == 1) {
-        left_entries = 1;
-    }
+    left_entries =
+      cuda_postcoh_select_foreground(postcoh, coh_ifos, skymap_peakcur) + 1;
 
     gsize out_size = sizeof(PostcohInspiralTable) * left_entries;
 
@@ -1882,9 +1882,8 @@ static void cuda_postcoh_process(CudaPostcoh *postcoh,
             data    = collectlist->data;
             int enabled_ifo_id = state->enabled_ifo_ids[i];
 
-            if (ifo_set__count(coh_ifos) >= 2
-                && ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
-                                                enabled_ifo_id)) {
+            if (ifo_set__renumbered_contains(coh_ifos, state->enabled_ifos,
+                                             enabled_ifo_id)) {
                 if (state->peak_list[enabled_ifo_id]->npeak[0] > 0) {
                     cohsnr_and_chisq(
                       state, ifo_set__renumber(coh_ifos, state->enabled_ifos),
@@ -1943,7 +1942,6 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
     g_mutex_unlock(&postcoh->prop_lock);
 
     CUDA_CHECK(cudaSetDevice(postcoh->device_id));
-    GstElement *element = GST_ELEMENT(postcoh);
     GstClockTime t_latest_start;
     GstFlowReturn res;
     guint64 offset_latest_start = 0;
@@ -1951,14 +1949,6 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
     gboolean has_common_size    = FALSE;
 
     GST_DEBUG_OBJECT(postcoh, "collected");
-    /* Assure that we have enough sink pads. */
-    if (element->numsinkpads < 2) {
-        GST_ERROR_OBJECT(
-          postcoh, "not enough sink pads, 2 required but only %d are present",
-          element->numsinkpads < 2);
-        return GST_FLOW_ERROR;
-    }
-
     if (!postcoh->set_starttime) {
         /* get the latest timestamp */
         if (!cuda_postcoh_get_latest_start_time(pads, &t_latest_start,
@@ -2189,6 +2179,7 @@ static void cuda_postcoh_init(CudaPostcoh *postcoh) {
     postcoh->device_id        = POSTCOH_PARAMS_NOT_INIT;
     postcoh->process_id       = 0;
     postcoh->cur_event_id     = 0;
+    postcoh->cur_multi_event_id = 0;
     postcoh->t_roll_start     = GST_CLOCK_TIME_NONE;
     postcoh->refresh_interval = 0;
 }

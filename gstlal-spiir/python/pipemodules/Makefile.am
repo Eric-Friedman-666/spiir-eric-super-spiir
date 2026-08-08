@@ -13,6 +13,7 @@ pipemodules_PYTHON = \
 	homomorphic.py \
 	snglrate_datasource.py \
 	postcoh_finalsink.py \
+	singlefar.py \
 	spiirparts.py \
 	pipe_macro.py \
 	stats.py \

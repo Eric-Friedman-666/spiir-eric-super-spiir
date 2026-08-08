@@ -519,7 +519,7 @@ def parse_command_line():
             "must use --track-psd if no reference psd is given, you can use both simultaneously"
         )
 
-    if options.blind_injections and options.injections:
+    if options.blind_injections and getattr(options, "injections", None):
         raise ValueError(
             "must use only one of --blind-injections or --injections")
 
@@ -528,7 +528,9 @@ def parse_command_line():
             "must provide at least finalsink-output-prefix or finalsink-output-name"
         )
 
-    if options.cohfar_accumbackground_output_prefix is None and options.cohfar_accumbackground_output_name is None:
+    if (os.getenv("CRASHCAR_ROLE") != "B" and not
+            (options.cohfar_accumbackground_output_prefix or
+             options.cohfar_accumbackground_output_name)):
         raise ValueError(
             "must provide at least cohfar-accumbackground-output-prefix or cohfar-accumbackground-output-name"
         )
@@ -637,7 +639,7 @@ def parse_command_line():
         for i_ifo_combo in ifo_combos:
             os.makedirs(f"{i_ifo_combo}_skymap", exist_ok=True)
 
-    if options.finalsink_fapupdater_output_fname is None:
+    if (os.getenv("CRASHCAR_ROLE") != "B" and options.finalsink_fapupdater_output_fname is None):
         options.finalsink_fapupdater_output_fname = options.cohfar_assignfar_input_fname
 
     return options, filenames, process_params, iir_banks, detectors

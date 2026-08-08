@@ -124,6 +124,7 @@ struct _CudaPostcoh {
     /* book-keeping */
     long process_id;
     long cur_event_id;
+    long cur_multi_event_id;
     cudaStream_t stream;
     GstClockTime t_roll_start;
     int refresh_interval;

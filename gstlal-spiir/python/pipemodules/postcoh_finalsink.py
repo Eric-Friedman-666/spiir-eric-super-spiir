@@ -61,6 +61,7 @@ from gstlal import bottle
 from gstlal_spiir.pipemodules.postcohtable import postcoh_table_def
 from gstlal_spiir.pipemodules.postcohtable import postcohtable
 from gstlal_spiir.pipemodules import pipe_macro
+from gstlal_spiir.pipemodules import singlefar
 
 lsctables.LIGOTimeGPS = LIGOTimeGPS
 
@@ -489,6 +490,8 @@ class FinalSink(object):
         # initialize
         #
         self.lock = threading.Lock()
+        self.singlefar = singlefar.SingleFar() if os.getenv("CRASHCAR_ENABLE") == "1" else None
+        self.snr_series_logfar_threshold = float(os.getenv("SNR_series_logFAR_threshold", "-4"))
         self.pipeline = pipeline
         self.is_first_event = True
         self.channel_dict = channel_dict
@@ -564,6 +567,8 @@ class FinalSink(object):
         self.last_buffer_timestamp = None
 
         # background updater
+        if os.getenv("CRASHCAR_ROLE") == "B":
+            calcfap_interval = snapshot_interval = None
         self.fapupdater = FAPUpdater(
             path=path,
             input_prefix_list=cohfar_accumbackground_output_prefix,
@@ -651,6 +656,8 @@ class FinalSink(object):
                 #   but its not really an event
                 heartbeat = newevents[0]
                 newevents = newevents[1:]
+            if self.singlefar:
+                self.singlefar.process(newevents)
             self.cluster_and_process_significant_triggers(
                 buf_timestamp, buf.duration, newevents)
 
@@ -717,9 +724,16 @@ class FinalSink(object):
         while ((self.cluster_window > 0) and (self.cluster_boundary)
                and (max_cluster_boundary > self.cluster_boundary)):
             if self.try_get_cluster_candidate():
-                self.__set_far(self.candidate.postcoh_inspiral)
+                row = self.candidate.postcoh_inspiral
+                owner = singlefar.OWNER.get(row.ifos)
+                single_far = row.far_sngl[owner] if owner in (0, 1) else None
+                self.__set_far(row)
+                if single_far is not None:
+                    row.far_sngl[owner] = single_far
+                    if single_far > 0 and np.log10(single_far) <= self.snr_series_logfar_threshold:
+                        self.__do_gracedb_alert(self.candidate, 0, single_far)
                 if self.gracedb_far_threshold and self.__pass_test(
-                        self.candidate.postcoh_inspiral):
+                        row):
                     self.__do_gracedb_alert(self.candidate,
                                             self.gracedb_upload_attempts)
 
@@ -1008,15 +1022,16 @@ class FinalSink(object):
         else:
             logger.info(f"gracedb upload of '{filename}' failed completely")
 
-    def __do_gracedb_alert(self, trigger, gracedb_upload_attempts=3):
+    def __do_gracedb_alert(self, trigger, gracedb_upload_attempts=3,
+                           final_far=None):
 
         postcoh_inspiral = trigger.postcoh_inspiral
 
-        if self.__need_trigger_control(postcoh_inspiral):
+        if final_far is None and self.__need_trigger_control(postcoh_inspiral):
             return
 
         # TODO: Remove conditional bool here and in __init__ after tests
-        if self.append_psd_to_coincs_doc:
+        if self.append_psd_to_coincs_doc and final_far is None:
             psds = {
                 ifo: self.get_current_lal_psd_frequency_series(ifo)
                 for ifo in re.findall("..", postcoh_inspiral.ifos)
@@ -1024,7 +1039,8 @@ class FinalSink(object):
         else:
             psds = None
 
-        self.coincs_document.assemble_ligolw_xmldoc(trigger, psds)
+        self.coincs_document.assemble_ligolw_xmldoc(
+            trigger, psds, final_far=final_far)
         filename = "%s_%s_%d_%d.xml" % (
             postcoh_inspiral.ifos, postcoh_inspiral.end_time,
             postcoh_inspiral.bankid, postcoh_inspiral.tmplt_idx)
@@ -1034,7 +1050,7 @@ class FinalSink(object):
                                     filename,
                                     trap_signals=None)
 
-        if self.gracedb_client is not None:
+        if final_far is None and self.gracedb_client is not None:
             # Construct message and send to gracedb.
             # We go through the intermediate step of first writing the xmldoc
             # into a string buffer incase there is some safety in doing so in
@@ -1209,7 +1225,7 @@ class CoincsDocFromPostcoh(object):
     def close(self):
         self.xmldoc.unlink()
 
-    def assemble_ligolw_xmldoc(self, trigger, psds=None):
+    def assemble_ligolw_xmldoc(self, trigger, psds=None, final_far=None):
         postcoh_inspiral = trigger.postcoh_inspiral
         self.assemble_snglinspiral_table(postcoh_inspiral)
         coinc_def_table = lsctables.CoincDefTable.get_table(self.xmldoc)
@@ -1231,7 +1247,8 @@ class CoincsDocFromPostcoh(object):
         row.instruments = ','.join(re.findall(
             '..',
             postcoh_inspiral.ifos))  #FIXME: for more complex detector names
-        row.nevents = 2
+        row.nevents = (2 if final_far is None else
+                       len(re.findall("..", postcoh_inspiral.ifos)))
         row.process_id = self.process.process_id
         row.coinc_def_id = 3
         row.time_slide_id = 6
@@ -1253,7 +1270,8 @@ class CoincsDocFromPostcoh(object):
                 for ifo in re.findall("..", postcoh_inspiral.ifos)
             ]))
         row.end_time_ns = postcoh_inspiral.end_time_ns
-        row.combined_far = postcoh_inspiral.far
+        row.combined_far = (postcoh_inspiral.far if final_far is None
+                            else final_far)
         #FIXME: for more complex detector names
         row.ifos = ','.join(re.findall('..', postcoh_inspiral.ifos))
         coinc_inspiral_table.append(row)

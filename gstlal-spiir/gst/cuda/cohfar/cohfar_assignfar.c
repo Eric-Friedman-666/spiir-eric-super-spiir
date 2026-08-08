@@ -117,6 +117,23 @@ static void _update_fars(PostcohInspiralTable *table,
     TriggerStatsXML *stats_1d = element->bgstats_1d;
     TriggerStatsXML *stats_2h = element->bgstats_2h;
 
+#define COPY_STATS(suffix, stats, index)                                      \
+    table->livetime_##suffix = (stats)->multistats[index]->livetime;          \
+    table->nevent_##suffix   = (stats)->multistats[index]->nevent
+    COPY_STATS(1w, stats_1w, cmb_stats_idx);
+    COPY_STATS(1d, stats_1d, cmb_stats_idx);
+    COPY_STATS(2h, stats_2h, cmb_stats_idx);
+    for (int ifo_id = 0, stats_idx = 0; ifo_id < MAX_NIFO; ++ifo_id) {
+        if (ifo_set__contains(element->enabled_ifos, ifo_id)) {
+            COPY_STATS(1w_sngl[ifo_id], stats_1w, stats_idx);
+            COPY_STATS(1d_sngl[ifo_id], stats_1d, stats_idx);
+            COPY_STATS(2h_sngl[ifo_id], stats_2h, stats_idx);
+            ++stats_idx;
+        }
+    }
+    if (stats_1w->multistats[cmb_stats_idx]->nevent <= MIN_BACKGROUND_NEVENT)
+        return;
+
     double max_rank = 0;
     max_rank        = MAX(trigger_stats_get_val_from_map(
                      table->cohsnr, table->cmbchisq,
@@ -153,7 +170,7 @@ static void _update_fars(PostcohInspiralTable *table,
             stats_idx++;
         }
     }
-
+#undef COPY_STATS
     GST_DEBUG_OBJECT(
       element, "The long-scale FAR %f, mid-scale FAR %f, short-scale FAR %f",
       table->far_1w, table->far_1d, table->far_2h);
@@ -235,7 +252,6 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
         }
     }
 
-    TriggerStats *cur_stats;
     if (element->pass_silent_time) {
         ifo_set_type enabled_ifos;
         GstMapInfo mapInfo;
@@ -258,12 +274,7 @@ static GstFlowReturn cohfar_assignfar_transform_ip(GstBaseTransform *trans,
                 fprintf(stderr, "enabled_ifos not found, cohfar_assignfar\n");
                 exit(0);
             }
-            int num_stats = trigger_stats_num_stats(element->enabled_ifos);
-            cur_stats     = element->bgstats_1w->multistats[num_stats - 1];
-            if (!ifo_set__is_empty(enabled_ifos)
-                && cur_stats->nevent > MIN_BACKGROUND_NEVENT) {
-                _update_fars(table, element);
-            }
+            _update_fars(table, element);
         }
         gst_buffer_unmap(buf, &mapInfo);
     }

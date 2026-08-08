@@ -20,6 +20,8 @@ class PostcohInspiralTable(table.Table):
                 ("end_time_ns", "int_4s"),
                 ("is_background", "int_4s"),
                 ("livetime", "int_4s"),
+                *((kind + "_" + window, "int_4s") for kind in ("livetime", "nevent")
+                  for window in ("1w", "1d", "2h")),
                 ("ifos", "lstring"),
                 ("pivotal_ifo", "lstring"),
                 ("tmplt_idx", "int_4s"),
@@ -53,22 +55,21 @@ class PostcohInspiralTable(table.Table):
                 ("rank", "real_8"),
             ],
             list(("deff_" + name, "real_8") for name in pipe_macro.IFO_MAP),
-            list(
-                ("far_sngl_" + name, "real_4") for name in pipe_macro.IFO_MAP),
-            list(("far_2h_sngl_" + name, "real_4")
+            list((prefix + name, "real_4")
+                 for prefix in ("far_sngl_", "far_2h_sngl_",
+                                "far_1d_sngl_", "far_1w_sngl_")
                  for name in pipe_macro.IFO_MAP),
-            list(("far_1d_sngl_" + name, "real_4")
+            list((kind + "_" + window + "_sngl_" + name, "int_4s")
+                 for kind in ("livetime", "nevent")
+                 for window in ("1w", "1d", "2h")
                  for name in pipe_macro.IFO_MAP),
-            list(("far_1w_sngl_" + name, "real_4")
+            list((prefix + name, "real_4")
+                 for prefix in ("snglsnr_", "coaphase_", "chisq_")
                  for name in pipe_macro.IFO_MAP),
-            list(("snglsnr_" + name, "real_4") for name in pipe_macro.IFO_MAP),
-            list(
-                ("coaphase_" + name, "real_4") for name in pipe_macro.IFO_MAP),
-            list(("chisq_" + name, "real_4") for name in pipe_macro.IFO_MAP),
-            list(("end_time_sngl_" + name, "int_4s")
+            list((prefix + name, "int_4s")
+                 for prefix in ("end_time_sngl_", "end_time_ns_sngl_")
                  for name in pipe_macro.IFO_MAP),
-            list(("end_time_ns_sngl_" + name, "int_4s")
-                 for name in pipe_macro.IFO_MAP),
+            [("H1_LLR", "real_8"), ("L1_LLR", "real_8")],
         ))
     constraints = "PRIMARY KEY (event_id)"
     next_id = 0

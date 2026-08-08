@@ -63,6 +63,10 @@ class PostcohInspiral(_postcohtable.PostcohInspiral):
         return self._end_time_sngl[:, 1]
 
     def __getattribute__(self, name):
+        try:
+            return super(PostcohInspiral, self).__getattribute__(name)
+        except AttributeError:
+            pass
         found_ifo = None
         for ifo_id, ifo in enumerate(pipe_macro.IFO_MAP):
             if name.endswith(ifo):
