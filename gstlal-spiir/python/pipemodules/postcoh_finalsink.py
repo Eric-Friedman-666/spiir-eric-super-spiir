@@ -485,12 +485,16 @@ class FinalSink(object):
                  negative_latency=0,
                  append_psd_to_coincs_doc=True,
                  expected_buffers_per_timestamp=None,
+                 singlefar_shapes=None,
+                 singlefar_segments=None,
                  verbose=False):
         #
         # initialize
         #
         self.lock = threading.Lock()
-        self.singlefar = singlefar.SingleFar() if os.getenv("CRASHCAR_ENABLE") == "1" else None
+        self.singlefar = (singlefar.SingleFar(singlefar_shapes,
+                                              singlefar_segments)
+                          if os.getenv("CRASHCAR_ENABLE") == "1" else None)
         self.snr_series_logfar_threshold = float(os.getenv("SNR_series_logFAR_threshold", "-4"))
         self.pipeline = pipeline
         self.is_first_event = True

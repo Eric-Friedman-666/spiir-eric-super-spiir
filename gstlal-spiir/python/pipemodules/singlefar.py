@@ -35,7 +35,7 @@ def _llr(rho, chisq, shape, dof):
             - LOG_64 - noise + rho2 / 2.0)
 
 class SingleFar:
-    def __init__(self):
+    def __init__(self, shapes=None, segments=None):
         self.producer = os.environ["CRASHCAR_ROLE"] == "A"
         self.path = os.environ["CRASHCAR_SINGLE_BACKGROUND_JSON"]
         names = ("RUN_NAMESPACE SOURCE_MANIFEST RUNTIME_MANIFEST CONFIG "
@@ -51,15 +51,19 @@ class SingleFar:
         self.last_publish = self.last_refresh = 0
         self.detail = open(os.environ["CRASHCAR_DETAIL_OUTPUT_FNAME"], "w", buffering=1)
         self.detail.write("event_id,bankid,tmplt_idx,end_time,end_time_ns,ifo_id,snglsnr,chisq,llr,far_assigned_exact,feature_gps,background_version\n")
-        with open(os.environ["CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME"]) as source:
-            next(source)
-            values = (float.fromhex(line.split(",", 4)[3]) for line in source)
-            self.shapes = np.fromiter(values, float, count=768000).reshape(2, 384, 1000)
+        if shapes is None:
+            with open(os.environ["CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME"]) as source:
+                next(source)
+                values = (float.fromhex(line.split(",", 4)[3]) for line in source)
+                shapes = np.fromiter(values, float, count=768000).reshape(2, 384, 1000)
+        self.shapes = shapes
         if self.producer:
-            with open(os.environ["CRASHCAR_SEGMENT_LIVETIME_JSON"]) as source:
-                data = json.load(source)
-            self.segments = [[(_gps(span["start"]), _gps(span["end"])) for span in
-                              data["targets"][ifo]["intervals"]] for ifo in ("H1", "L1")]
+            if segments is None:
+                with open(os.environ["CRASHCAR_SEGMENT_LIVETIME_JSON"]) as source:
+                    data = json.load(source)
+                segments = [[(_gps(span["start"]), _gps(span["end"])) for span in
+                             data["targets"][ifo]["intervals"]] for ifo in ("H1", "L1")]
+            self.segments = segments
 
     def process(self, events):
         ordered = sorted(events, key=lambda event: _gps(event.postcoh_inspiral.end))
