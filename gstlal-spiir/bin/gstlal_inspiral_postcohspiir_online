@@ -58,7 +58,10 @@
 # =============================================================================
 #
 
+import csv
+import gzip
 import hashlib
+import io
 import json
 import logging
 import os
@@ -70,6 +73,7 @@ from pathlib import Path
 import signal
 import socket
 import time
+import xml.etree.ElementTree as ET
 
 import numpy as np
 
@@ -177,6 +181,60 @@ def crashcar_file_sha(filename):
     return digest.hexdigest()
 
 
+def crashcar_segment_file(options, write_dir):
+    start, end = int(options.gps_start_time), int(options.gps_end_time)
+    parent = Path(options.cuda_postcoh_detrsp_fname).resolve().parent
+    pattern = re.compile(r"H1L1V1_SEGMENTS_([0-9]+)_([0-9]+)\.xml(?:\.gz)?$")
+    candidates = []
+    for directory in (parent / "000", parent):
+        for path in directory.glob("H1L1V1_SEGMENTS_*.xml*"):
+            match = pattern.match(path.name)
+            if match and int(match.group(1)) <= start and sum(map(int, match.groups())) >= end:
+                candidates.append((int(match.group(2)), path))
+    if not candidates:
+        return None
+    source_path = min(candidates, key=lambda item: item[0])[1]
+    opener = gzip.open if source_path.suffix == ".gz" else open
+    with opener(source_path, "rt") as source:
+        root = ET.parse(source).getroot()
+    tables = {}
+    for table in root.findall("Table"):
+        columns = [column.get("Name").rsplit(":", 1)[-1]
+                   for column in table.findall("Column")]
+        stream = table.find("Stream")
+        rows = csv.reader(io.StringIO(stream.text or ""), delimiter=stream.get("Delimiter", ","))
+        tables[table.get("Name")] = [dict(zip(columns, values)) for values in rows
+                                      if any(value.strip() for value in values[:len(columns)])]
+    definitions = {row["segment_def_id"]: (row["ifos"], row["name"])
+                   for row in tables["segment_definer:table"]}
+    bounds = start * 1000000000, end * 1000000000
+    targets = {ifo: [] for ifo in ("H1", "L1")}
+    for row in tables["segment:table"]:
+        ifo, name = definitions[row["segment_def_id"]]
+        if ifo not in targets or name != "postcohprocessed":
+            continue
+        begin = max(bounds[0], int(row["start_time"]) * 1000000000 + int(row["start_time_ns"]))
+        stop = min(bounds[1], int(row["end_time"]) * 1000000000 + int(row["end_time_ns"]))
+        if begin < stop:
+            targets[ifo].append((begin, stop))
+    gps = lambda value: {"seconds": value // 1000000000, "nanoseconds": value % 1000000000}
+    payload = {"source_xml_sha256": crashcar_file_sha(source_path), "targets": {}}
+    for ifo, spans in targets.items():
+        merged = []
+        for begin, stop in sorted(spans):
+            if merged and begin <= merged[-1][1]:
+                merged[-1] = merged[-1][0], max(stop, merged[-1][1])
+            else:
+                merged.append((begin, stop))
+        payload["targets"][ifo] = {"intervals": [
+            {"start": gps(begin), "end": gps(stop)} for begin, stop in merged]}
+    path = os.path.join(os.path.abspath(write_dir), "single_background_segments.json")
+    with open(path + ".tmp", "w") as output:
+        json.dump(payload, output, sort_keys=True, separators=(",", ":"))
+    os.replace(path + ".tmp", path)
+    return path
+
+
 def configure_crashcar(options, iir_banks):
     output = options.finalsink_output_prefix or options.finalsink_output_name
     worker_dir = os.path.dirname(os.path.abspath(output))
@@ -245,6 +303,13 @@ def configure_crashcar(options, iir_banks):
                 os.environ.setdefault("CRASHCAR_SEGMENT_XML_SHA256",
                                       json.load(source_file)["source_xml_sha256"])
             break
+    else:
+        segment_file = write_dir and crashcar_segment_file(options, write_dir)
+        if segment_file:
+            os.environ["CRASHCAR_SEGMENT_LIVETIME_JSON"] = segment_file
+            os.environ["CRASHCAR_SEGMENT_CANONICAL_SHA256"] = crashcar_file_sha(segment_file)
+            with open(segment_file) as source_file:
+                os.environ["CRASHCAR_SEGMENT_XML_SHA256"] = json.load(source_file)["source_xml_sha256"]
 
 
 def crashcar_inputs(options, iir_banks):
