@@ -59,12 +59,20 @@ class SingleFar:
                 shapes = np.fromiter(values, float, count=768000).reshape(2, 384, 1000)
         self.shapes = shapes
         if self.producer:
-            self.segments = [[], []]
+            segment_file = os.getenv("CRASHCAR_SEGMENT_LIVETIME_JSON")
+            if segment_file:
+                with open(segment_file) as source:
+                    data = json.load(source)
+                self.segments = [[(_gps(span["start"]), _gps(span["end"])) for span in
+                                  data["targets"][ifo]["intervals"]] for ifo in ("H1", "L1")]
+            else:
+                self.segments = [[], []]
+            self.observe_segments = not segment_file
         if self.read_path and self.producer:
             self._refresh(self.start)
 
     def observe(self, heartbeat, timestamp, duration):
-        if not self.producer or heartbeat is None:
+        if not self.producer or not self.observe_segments or heartbeat is None:
             return
         begin, end = _gps(timestamp), _gps(timestamp) + int(duration)
         participating = heartbeat.postcoh_inspiral.ifos

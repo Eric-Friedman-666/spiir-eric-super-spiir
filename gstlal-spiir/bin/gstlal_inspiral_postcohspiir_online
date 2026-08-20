@@ -234,6 +234,17 @@ def configure_crashcar(options, iir_banks):
         os.makedirs(write_dir, exist_ok=True)
         os.environ["CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON"] = os.path.join(
             os.path.abspath(write_dir), "single_background.json")
+    for directory in (read_dir, write_dir):
+        segment_file = directory and os.path.join(
+            os.path.abspath(directory), "single_background_segments.json")
+        if segment_file and os.path.isfile(segment_file):
+            os.environ["CRASHCAR_SEGMENT_LIVETIME_JSON"] = segment_file
+            os.environ.setdefault("CRASHCAR_SEGMENT_CANONICAL_SHA256",
+                                  crashcar_file_sha(segment_file))
+            with open(segment_file) as source_file:
+                os.environ.setdefault("CRASHCAR_SEGMENT_XML_SHA256",
+                                      json.load(source_file)["source_xml_sha256"])
+            break
 
 
 def crashcar_inputs(options, iir_banks):
