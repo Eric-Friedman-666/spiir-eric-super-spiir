@@ -486,15 +486,12 @@ class FinalSink(object):
                  append_psd_to_coincs_doc=True,
                  expected_buffers_per_timestamp=None,
                  singlefar_shapes=None,
-                 singlefar_segments=None,
                  verbose=False):
         #
         # initialize
         #
         self.lock = threading.Lock()
-        self.singlefar = (singlefar.SingleFar(singlefar_shapes,
-                                              singlefar_segments)
-                          if os.getenv("CRASHCAR_ENABLE") == "1" else None)
+        self.singlefar = singlefar.SingleFar(singlefar_shapes)
         self.snr_series_logfar_threshold = float(os.getenv("SNR_series_logFAR_threshold", "-4"))
         self.pipeline = pipeline
         self.is_first_event = True
@@ -661,6 +658,7 @@ class FinalSink(object):
                 heartbeat = newevents[0]
                 newevents = newevents[1:]
             if self.singlefar:
+                self.singlefar.observe(heartbeat, buf_timestamp, buf.duration)
                 self.singlefar.process(newevents)
             self.cluster_and_process_significant_triggers(
                 buf_timestamp, buf.duration, newevents)

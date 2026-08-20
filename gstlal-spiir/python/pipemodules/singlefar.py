@@ -35,9 +35,10 @@ def _llr(rho, chisq, shape, dof):
             - LOG_64 - noise + rho2 / 2.0)
 
 class SingleFar:
-    def __init__(self, shapes=None, segments=None):
-        self.producer = os.environ["CRASHCAR_ROLE"] == "A"
-        self.path = os.environ["CRASHCAR_SINGLE_BACKGROUND_JSON"]
+    def __init__(self, shapes=None):
+        self.read_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_READ_JSON")
+        self.write_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON")
+        self.producer = bool(self.write_path)
         names = ("RUN_NAMESPACE SOURCE_MANIFEST RUNTIME_MANIFEST CONFIG "
                  "SEGMENT_XML SEGMENT_CANONICAL TEMPLATE_SHAPE_MAP").split()
         self.provenance = {name.lower() + "_sha256": os.getenv(
@@ -58,19 +59,30 @@ class SingleFar:
                 shapes = np.fromiter(values, float, count=768000).reshape(2, 384, 1000)
         self.shapes = shapes
         if self.producer:
-            if segments is None:
-                with open(os.environ["CRASHCAR_SEGMENT_LIVETIME_JSON"]) as source:
-                    data = json.load(source)
-                segments = [[(_gps(span["start"]), _gps(span["end"])) for span in
-                             data["targets"][ifo]["intervals"]] for ifo in ("H1", "L1")]
-            self.segments = segments
+            self.segments = [[], []]
+        if self.read_path and self.producer:
+            self._refresh(self.start)
+
+    def observe(self, heartbeat, timestamp, duration):
+        if not self.producer or heartbeat is None:
+            return
+        begin, end = _gps(timestamp), _gps(timestamp) + int(duration)
+        participating = heartbeat.postcoh_inspiral.ifos
+        for ifo, name in enumerate(("H1", "L1")):
+            if name not in participating:
+                continue
+            spans = self.segments[ifo]
+            if spans and begin <= spans[-1][1]:
+                spans[-1] = (spans[-1][0], max(end, spans[-1][1]))
+            else:
+                spans.append((begin, end))
 
     def process(self, events):
         ordered = sorted(events, key=lambda event: _gps(event.postcoh_inspiral.end))
         for event_gps, group in groupby(ordered, key=lambda event: _gps(event.postcoh_inspiral.end)):
             if self.producer and self.pending and event_gps > self.pending["available"]:
                 self.active, self.pending = self.pending, None
-            if not self.producer:
+            if not self.producer and self.read_path:
                 self._refresh(event_gps)
             for event in group:
                 row = event.postcoh_inspiral
@@ -205,15 +217,15 @@ class SingleFar:
                     {"gps": _gps_json(int(point["gps"])), "llr": float(point["llr"]).hex(),
                      "far": float(point["far"]).hex(), "count": int(point["count"])}
                     for point in background["curve"][ifo]]}
-        with open(self.path + ".tmp", "w") as output:
+        with open(self.write_path + ".tmp", "w") as output:
             output.write(json.dumps(document, separators=(",", ":")) + "\n")
-        os.replace(self.path + ".tmp", self.path)
+        os.replace(self.write_path + ".tmp", self.write_path)
 
     def _refresh(self, gps):
         if self.last_refresh and gps - self.last_refresh < self.update:
             return
         try:
-            with open(self.path) as source:
+            with open(self.read_path) as source:
                 candidate = _load_background(json.load(source))
             if not self.active or candidate["version"] > self.active["version"]:
                 self.active = candidate
@@ -222,7 +234,7 @@ class SingleFar:
         self.last_refresh = gps
 
     def _bucket_path(self, start):
-        return "%s.hist.%d" % (self.path, start // NS)
+        return "%s.hist.%d" % (self.write_path, start // NS)
 
 def _gps_json(value): return {"seconds": value // NS, "nanoseconds": value % NS}
 

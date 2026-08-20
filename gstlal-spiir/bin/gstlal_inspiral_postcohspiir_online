@@ -177,30 +177,20 @@ def crashcar_file_sha(filename):
     return digest.hexdigest()
 
 
-def apply_crashcar_options(options):
-    option_env = {
-        "crashcar_enable": "CRASHCAR_ENABLE",
-        "crashcar_role": "CRASHCAR_ROLE",
-        "crashcar_background_run_root": "CRASHCAR_BACKGROUND_RUN_ROOT",
-        "single_background_window": "BACKGROUND_ACCUMULATION_SECONDS",
-        "single_background_refresh": "BACKGROUND_UPDATE_TRIGGER_SECONDS",
-        "single_tail_log_far": "TAIL_LOG_FAR",
-        "snr_series_logfar_threshold": "SNR_series_logFAR_threshold",
-    }
-    for option, env_name in option_env.items():
-        value = getattr(options, option)
-        if value is not None:
-            os.environ[env_name] = str(value)
-
-
 def configure_crashcar(options, iir_banks):
-    apply_crashcar_options(options)
-    if os.getenv("CRASHCAR_ENABLE") != "1":
-        return
-
-    role = os.getenv("CRASHCAR_ROLE")
-    if role not in ("A", "B"):
-        raise ValueError("--crashcar-role must be A or B when crashcar is enabled")
+    output = options.finalsink_output_prefix or options.finalsink_output_name
+    worker_dir = os.path.dirname(os.path.abspath(output))
+    read_dir = options.single_background_read_dir
+    write_dir = options.single_background_write_dir
+    if not read_dir and not write_dir:
+        write_dir = worker_dir
+    role = "A" if write_dir else "B"
+    os.environ["CRASHCAR_ENABLE"] = "1"
+    os.environ["CRASHCAR_ROLE"] = role
+    os.environ.setdefault("BACKGROUND_ACCUMULATION_SECONDS", "10800")
+    os.environ.setdefault("BACKGROUND_UPDATE_TRIGGER_SECONDS", "3600")
+    os.environ.setdefault("TAIL_LOG_FAR", "-1.0")
+    os.environ.setdefault("SNR_series_logFAR_threshold", "-4")
     worker = int(os.getenv("CRASHCAR_WORKER_ID",
                            os.getenv("SLURM_ARRAY_TASK_ID", "0")))
     os.environ.setdefault("CRASHCAR_WORKER_ID", str(worker))
@@ -218,8 +208,6 @@ def configure_crashcar(options, iir_banks):
                           ",".join(map(str, bank_ids)))
     os.environ.setdefault("DATA_START_TIME", str(options.gps_start_time))
 
-    output = options.finalsink_output_prefix or options.finalsink_output_name
-    worker_dir = os.path.dirname(os.path.abspath(output))
     files = (__file__, postcoh_finalsink.__file__,
              postcoh_finalsink.singlefar.__file__)
     source = [(os.path.basename(path), crashcar_file_sha(path)) for path in files]
@@ -239,62 +227,42 @@ def configure_crashcar(options, iir_banks):
     os.environ.setdefault("CRASHCAR_CONFIG_SHA256", crashcar_sha(config))
     os.environ.setdefault("CRASHCAR_DETAIL_OUTPUT_FNAME", os.path.join(
         worker_dir, "crashcar_singlefar_detail_worker%03d.csv" % worker))
-    if role == "A":
-        os.environ.setdefault("CRASHCAR_SINGLE_BACKGROUND_JSON",
-                              os.path.join(worker_dir, "single_background.json"))
-    elif "CRASHCAR_SINGLE_BACKGROUND_JSON" not in os.environ:
-        root = os.environ.get("CRASHCAR_BACKGROUND_RUN_ROOT")
-        if not root:
-            raise ValueError("role B requires --crashcar-background-run-root")
-        job = "%03d" % worker
-        candidates = (os.path.join(root, "run", job, "single_background.json"),
-                      os.path.join(root, job, "single_background.json"))
-        os.environ["CRASHCAR_SINGLE_BACKGROUND_JSON"] = next(
-            (path for path in candidates if os.path.isfile(path)), candidates[0])
+    if read_dir:
+        os.environ["CRASHCAR_SINGLE_BACKGROUND_READ_JSON"] = os.path.join(
+            os.path.abspath(read_dir), "single_background.json")
+    if write_dir:
+        os.makedirs(write_dir, exist_ok=True)
+        os.environ["CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON"] = os.path.join(
+            os.path.abspath(write_dir), "single_background.json")
 
 
 def crashcar_inputs(options, iir_banks):
-    if os.getenv("CRASHCAR_ENABLE") != "1":
-        return None, None
+    shapes = np.zeros((2, 384, 1000))
+    for bank_set in iir_banks:
+        for ifo, ifo_id in (("H1", 0), ("L1", 1)):
+            filename = bank_set[ifo][0]
+            bank_id = spiir_utils.get_bankid_from_bankname(filename)
+            document = ligolw_utils.load_filename(
+                filename, contenthandler=LIGOLWContentHandler)
+            root = next(node for node in document.getElementsByTagName(
+                ligolw.LIGO_LW.tagName) if getattr(node, "Name", None)
+                == "gstlal_iir_bank_Bank")
+            real = ligolw_array.get_array(
+                root, "autocorrelation_bank_real").array
+            imag = ligolw_array.get_array(
+                root, "autocorrelation_bank_imag").array
+            if real.shape == (1000, 351):
+                real = np.ascontiguousarray(real.T)
+                imag = np.ascontiguousarray(imag.T)
+            if real.shape != (351, 1000):
+                raise ValueError("unexpected autocorrelation bank shape")
+            magnitude = np.sqrt(np.sum(real * real + imag * imag, axis=0))
+            shapes[ifo_id, bank_id] = magnitude * magnitude
+            document.unlink()
+    os.environ["CRASHCAR_TEMPLATE_SHAPE_MAP_SHA256"] = hashlib.sha256(
+        shapes.tobytes()).hexdigest()
 
-    shapes = None
-    if "CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME" not in os.environ:
-        shapes = np.zeros((2, 384, 1000))
-        for bank_set in iir_banks:
-            for ifo, ifo_id in (("H1", 0), ("L1", 1)):
-                filename = bank_set[ifo][0]
-                bank_id = spiir_utils.get_bankid_from_bankname(filename)
-                document = ligolw_utils.load_filename(
-                    filename, contenthandler=LIGOLWContentHandler)
-                root = next(node for node in document.getElementsByTagName(
-                    ligolw.LIGO_LW.tagName) if getattr(node, "Name", None)
-                    == "gstlal_iir_bank_Bank")
-                real = ligolw_array.get_array(
-                    root, "autocorrelation_bank_real").array
-                imag = ligolw_array.get_array(
-                    root, "autocorrelation_bank_imag").array
-                if real.shape == (1000, 351):
-                    real = np.ascontiguousarray(real.T)
-                    imag = np.ascontiguousarray(imag.T)
-                if real.shape != (351, 1000):
-                    raise ValueError("unexpected autocorrelation bank shape")
-                magnitude = np.sqrt(np.sum(
-                    real * real + imag * imag, axis=0))
-                shapes[ifo_id, bank_id] = magnitude * magnitude
-                document.unlink()
-        os.environ.setdefault("CRASHCAR_TEMPLATE_SHAPE_MAP_SHA256",
-                              hashlib.sha256(shapes.tobytes()).hexdigest())
-
-    segments = None
-    if (os.getenv("CRASHCAR_ROLE") == "A"
-            and "CRASHCAR_SEGMENT_LIVETIME_JSON" not in os.environ):
-        start = round(float(options.gps_start_time) * 1000000000)
-        end = round(float(options.gps_end_time) * 1000000000)
-        segments = [[(start, end)], [(start, end)]]
-        segment_sha = crashcar_sha(segments)
-        os.environ.setdefault("CRASHCAR_SEGMENT_XML_SHA256", segment_sha)
-        os.environ.setdefault("CRASHCAR_SEGMENT_CANONICAL_SHA256", segment_sha)
-    return shapes, segments
+    return shapes
 
 
 #
@@ -640,23 +608,10 @@ def parse_command_line():
     #parser.add_option("--num-k10-gpu", metavar = "num-k10-gpu", type = "int", default = 4, help = "Number of GPUs to process postcoh.")
     parser.add_option("--code-version",
                       help="set the code version for the pipeline (required).")
-    parser.add_option("--crashcar-enable", type="choice", choices=("0", "1"),
-                      metavar="0|1", default=None,
-                      help="enable crashcar single-detector FAR assignment")
-    parser.add_option("--crashcar-role", type="choice", choices=("A", "B"),
-                      metavar="A|B", default=None,
-                      help="A produces backgrounds; B reads them without writing")
-    parser.add_option("--crashcar-background-run-root", metavar="PATH", default=None,
-                      help="role B no-injection producer run root")
-    parser.add_option("--single-background-window", type="int", metavar="SECONDS",
-                      default=None, help="single-detector background window")
-    parser.add_option("--single-background-refresh", type="int", metavar="SECONDS",
-                      default=None, help="single-detector background refresh cadence")
-    parser.add_option("--single-tail-log-far", type="float", metavar="LOG10_FAR",
-                      default=None, help="single-detector tail-fit boundary")
-    parser.add_option("--snr-series-logfar-threshold", type="float",
-                      metavar="LOG10_FAR", default=None,
-                      help="log10 FAR threshold for writing SNR series")
+    parser.add_option("--single-background-read-dir", metavar="PATH", default=None,
+                      help="directory containing single_background.json to read")
+    parser.add_option("--single-background-write-dir", metavar="PATH", default=None,
+                      help="directory in which to write single_background.json")
     parser.add_option("--mode",
                       default="Online",
                       metavar="Online|Offline",
@@ -668,7 +623,8 @@ def parse_command_line():
         " set the online data option for online data service to be activated.")
 
     options, filenames = parser.parse_args()
-    apply_crashcar_options(options)
+    os.environ["CRASHCAR_ROLE"] = ("A" if options.single_background_write_dir
+                                    or not options.single_background_read_dir else "B")
 
     if options.reference_psd is None and not options.track_psd:
         raise ValueError(
@@ -824,7 +780,7 @@ set_rlimit()
 #
 
 options, filenames, process_params, iir_banks, detectors = parse_command_line()
-singlefar_shapes, singlefar_segments = crashcar_inputs(options, iir_banks)
+singlefar_shapes = crashcar_inputs(options, iir_banks)
 
 if not options.check_time_stamps:
     pipeparts.mkchecktimestamps = lambda pipeline, src, *args: src
@@ -1028,7 +984,6 @@ finalsink = postcoh_finalsink.FinalSink(
     append_psd_to_coincs_doc=not options.skip_psd_upload,
     expected_buffers_per_timestamp=len(postcohsrcs),
     singlefar_shapes=singlefar_shapes,
-    singlefar_segments=singlefar_segments,
     verbose=options.verbose)
 
 logger.info(" output document initialized")
