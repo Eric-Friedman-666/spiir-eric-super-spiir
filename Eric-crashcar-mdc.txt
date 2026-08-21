@@ -1,5 +1,10 @@
 Eric-crashcar-mdc: OzSTAR quick start
 
+Download the branch:
+
+git clone --branch Eric-crashcar-mdc --single-branch git@git.ligo.org:lscsoft/spiir.git spiir-eric-crashcar-mdc
+cd spiir-eric-crashcar-mdc/gstlal-spiir/share/scripts/OzStar
+
 Use a separate copy of gstlal-spiir/share/scripts/OzStar as the working
 directory for each A or B run, and run all commands from that directory.
 
