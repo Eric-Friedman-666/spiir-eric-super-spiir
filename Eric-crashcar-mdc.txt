@@ -1,0 +1,45 @@
+Eric-crashcar-mdc: OzSTAR quick start
+
+Use a separate copy of gstlal-spiir/share/scripts/OzStar as the working
+directory for each A or B run, and run all commands from that directory.
+
+First edit the normal SPIIR inputs in pipeline.sh, including the GPS interval,
+frame cache, detector-response map, PSD, bank directory, and injection XML when
+running an MDC injection.
+
+Role A: no-injection background producer
+
+Set:
+
+noninj_stats_loc=`pwd`
+inj_stats_loc=`pwd`
+
+Keep both of these command lines enabled:
+
+CMD="${CMD} --single-background-read-dir ${noninj_stats_loc}/${jobno}"
+CMD="${CMD} --single-background-write-dir ${inj_stats_loc}/${jobno}"
+
+Then submit:
+
+sbatch submit.sh
+
+Role B: injection consumer
+
+Wait until Role A has published valid single and multi backgrounds, and keep
+Role A running.  Set noninj_stats_loc to the absolute root directory of that
+live Role A output.  Do not include the worker directory (000, 001, and so on),
+because pipeline.sh appends ${jobno} automatically.
+
+Keep the read line enabled and comment out the write line:
+
+CMD="${CMD} --single-background-read-dir ${noninj_stats_loc}/${jobno}"
+# CMD="${CMD} --single-background-write-dir ${inj_stats_loc}/${jobno}"
+
+Configure the standard normal-SPIIR MDC injection inputs, then submit:
+
+sbatch submit.sh
+
+The zerolag outputs are written under each worker directory, for example:
+
+000/000_zerolag*.xml.gz
+001/001_zerolag*.xml.gz
