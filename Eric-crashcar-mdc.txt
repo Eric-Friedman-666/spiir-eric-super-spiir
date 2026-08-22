@@ -38,6 +38,10 @@ Role A running.  Set noninj_stats_loc to the absolute root directory of that
 live Role A output.  Do not include the worker directory (000, 001, and so on),
 because pipeline.sh appends ${jobno} automatically.
 
+Role B reads the latest complete valid single and multi background files
+produced by the corresponding Role A worker.  It does not use a copied or
+frozen background and does not write background files itself.
+
 Keep the read line enabled and comment out the write line:
 
 CMD="${CMD} --single-background-read-dir ${noninj_stats_loc}/${jobno}"
