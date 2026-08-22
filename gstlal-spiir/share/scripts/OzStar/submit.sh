@@ -5,7 +5,7 @@
 #SBATCH --mem=14g
 #SBATCH --cpus-per-task=4
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-24
+#SBATCH --array=0-1
 #SBATCH --requeue
 #SBATCH -o logs/pipe_%A_%a.out # File to which STDOUT will be written
 #SBATCH -e logs/pipe_%A_%a.err # File to which STDERR will be written

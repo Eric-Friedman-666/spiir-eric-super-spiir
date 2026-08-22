@@ -245,7 +245,7 @@ def configure_crashcar(options, iir_banks):
     role = "A" if write_dir else "B"
     os.environ["CRASHCAR_ENABLE"] = "1"
     os.environ["CRASHCAR_ROLE"] = role
-    os.environ.setdefault("BACKGROUND_ACCUMULATION_SECONDS", "10800")
+    os.environ.setdefault("BACKGROUND_ACCUMULATION_SECONDS", "86400")
     os.environ.setdefault("BACKGROUND_UPDATE_TRIGGER_SECONDS", "3600")
     os.environ.setdefault("TAIL_LOG_FAR", "-1.0")
     os.environ.setdefault("SNR_series_logFAR_threshold", "-4")

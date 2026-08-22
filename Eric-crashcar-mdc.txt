@@ -12,6 +12,9 @@ First edit the normal SPIIR inputs in pipeline.sh, including the GPS interval,
 frame cache, detector-response map, PSD, bank directory, and injection XML when
 running an MDC injection.
 
+For the current test, submit.sh uses two workers and the single-detector
+background accumulation window is one day; adjust both values for production.
+
 Role A: no-injection background producer
 
 Set:
