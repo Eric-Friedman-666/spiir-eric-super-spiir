@@ -35,7 +35,8 @@ def _llr(rho, chisq, shape, dof):
             - LOG_64 - noise + rho2 / 2.0)
 
 class SingleFar:
-    def __init__(self, shapes=None):
+    def __init__(self, shapes=None, far_factor=1.0):
+        self.far_factor = far_factor
         self.read_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_READ_JSON")
         self.write_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON")
         self.producer = bool(self.write_path)
@@ -111,7 +112,7 @@ class SingleFar:
                     single_gps = int(row.end_time_sngl[ifo]) * NS + int(row.end_time_ns_sngl[ifo])
                     assigned = 0.0
                     if owner == ifo and self.active:
-                        assigned = self._assign(self.active, ifo, llr)
+                        assigned = self._assign(self.active, ifo, llr) * self.far_factor
                         row.far_sngl[ifo] = np.float32(assigned)
                     values = (row.event_id, row.bankid, row.tmplt_idx, row.end_time_sngl[ifo],
                               row.end_time_ns_sngl[ifo], ifo, row.snglsnr[ifo], row.chisq[ifo], llr,

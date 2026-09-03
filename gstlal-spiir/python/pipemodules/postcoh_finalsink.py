@@ -491,7 +491,7 @@ class FinalSink(object):
         # initialize
         #
         self.lock = threading.Lock()
-        self.singlefar = singlefar.SingleFar(singlefar_shapes)
+        self.singlefar = singlefar.SingleFar(singlefar_shapes, far_factor)
         self.snr_series_logfar_threshold = float(os.getenv("SNR_series_logFAR_threshold", "-4"))
         self.pipeline = pipeline
         self.is_first_event = True
