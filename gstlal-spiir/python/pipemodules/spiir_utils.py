@@ -17,6 +17,7 @@
 
 import os
 import re
+import numpy as np
 from ligo.lw import ligolw, lsctables, array, param, utils
 
 
@@ -67,7 +68,8 @@ def parse_iirbank_string(bank_string):
 
 def get_maxrate_from_xml(filename,
                          contenthandler=DefaultContentHandler,
-                         verbose=False):
+                         verbose=False,
+                         singlefar_shape=None):
     xmldoc = utils.load_filename(filename,
                                  contenthandler=contenthandler,
                                  verbose=verbose)
@@ -82,7 +84,18 @@ def get_maxrate_from_xml(filename,
             int(float(r))
             for r in param.get_pyvalue(root, 'sample_rate').split(',')
         ]
+        if singlefar_shape is not None:
+            real = array.get_array(root, "autocorrelation_bank_real").array
+            imag = array.get_array(root, "autocorrelation_bank_imag").array
+            if real.shape == (1000, 351):
+                real = np.ascontiguousarray(real.T)
+                imag = np.ascontiguousarray(imag.T)
+            if real.shape != (351, 1000):
+                raise ValueError("unexpected autocorrelation bank shape")
+            magnitude = np.sqrt(np.sum(real * real + imag * imag, axis=0))
+            singlefar_shape[:] = magnitude * magnitude
 
+    xmldoc.unlink()
     return max(sample_rates)
 
 

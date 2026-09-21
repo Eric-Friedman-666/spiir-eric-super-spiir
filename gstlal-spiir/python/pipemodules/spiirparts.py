@@ -547,7 +547,8 @@ def mkPostcohSPIIROnline(pipeline,
                          resample_sinc_filter_mode=0,
                          resample_sinc_filter_interpolation=1,
                          feature_signal_removal_bg=False,
-                         feature_signal_removal_bg_threshold=8.5):
+                         feature_signal_removal_bg_threshold=8.5,
+                         singlefar_shapes=None):
     #
     # check for recognized value of chisq_type
     #
@@ -591,8 +592,12 @@ def mkPostcohSPIIROnline(pipeline,
                 for instrument_from_bank, bank_list in bank_dict.items()
         ]:
             if instrument_from_bank == instrument:
+                shape = None
+                if singlefar_shapes is not None and instrument in ("H1", "L1"):
+                    shape = singlefar_shapes[("H1", "L1").index(instrument),
+                        spiir_utils.get_bankid_from_bankname(bank_list[0])]
                 sngl_max_rate = max(
-                    spiir_utils.get_maxrate_from_xml(bank_list[0]),
+                    spiir_utils.get_maxrate_from_xml(bank_list[0], singlefar_shape=shape),
                     sngl_max_rate)
 
         max_instru_rates[instrument] = sngl_max_rate
