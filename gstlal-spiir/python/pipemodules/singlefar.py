@@ -35,15 +35,11 @@ def _llr(rho, chisq, shape, dof):
             - LOG_64 - noise + rho2 / 2.0)
 
 class SingleFar:
-    def __init__(self, shapes=None, far_factor=1.0):
+    def __init__(self, shapes, far_factor=1.0):
         self.far_factor = far_factor
         self.read_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_READ_JSON")
         self.write_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON")
         self.producer = bool(self.write_path)
-        names = ("RUN_NAMESPACE SOURCE_MANIFEST RUNTIME_MANIFEST CONFIG "
-                 "SEGMENT_XML SEGMENT_CANONICAL TEMPLATE_SHAPE_MAP").split()
-        self.provenance = {name.lower() + "_sha256": os.getenv(
-            "CRASHCAR_" + name + "_SHA256", "") for name in names}
         self.start, self.window, self.update = (round(float(os.environ[name]) * NS) for name in
                                                 ("DATA_START_TIME", "BACKGROUND_ACCUMULATION_SECONDS", "BACKGROUND_UPDATE_TRIGGER_SECONDS"))
         self.tail = float(os.environ["TAIL_LOG_FAR"])
@@ -53,11 +49,6 @@ class SingleFar:
         self.last_publish = self.last_refresh = 0
         self.detail = open(os.environ["CRASHCAR_DETAIL_OUTPUT_FNAME"], "w", buffering=1)
         self.detail.write("event_id,bankid,tmplt_idx,end_time,end_time_ns,ifo_id,snglsnr,chisq,llr,far_assigned_exact,feature_gps,background_version\n")
-        if shapes is None:
-            with open(os.environ["CRASHCAR_TEMPLATE_SHAPE_MAP_FNAME"]) as source:
-                next(source)
-                values = (float.fromhex(line.split(",", 4)[3]) for line in source)
-                shapes = np.fromiter(values, float, count=768000).reshape(2, 384, 1000)
         self.shapes = shapes
         if self.producer:
             segment_file = os.getenv("CRASHCAR_SEGMENT_LIVETIME_JSON")
@@ -211,7 +202,7 @@ class SingleFar:
             "window_end_gps": _gps_json(background["end"]),
             "window_duration": _gps_json(self.window), "update_period": _gps_json(self.update),
             "far_floor_count": 1, "tail_log10_far": self.tail, "backgrounds": {}}
-        document.update(self.provenance, worker_id=int(os.getenv("CRASHCAR_WORKER_ID", "0")),
+        document.update(worker_id=int(os.getenv("CRASHCAR_WORKER_ID", "0")),
                         worker_count=int(os.getenv("CRASHCAR_WORKER_COUNT", "1")),
                         worker_bank_ids=list(map(int, os.getenv(
                             "CRASHCAR_WORKER_BANK_IDS_EXPECTED", "0").split(","))))

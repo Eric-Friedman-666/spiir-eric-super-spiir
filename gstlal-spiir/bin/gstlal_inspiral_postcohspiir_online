@@ -60,7 +60,6 @@
 
 import csv
 import gzip
-import hashlib
 import io
 import json
 import logging
@@ -168,19 +167,6 @@ def now():
     return XLALUTCToGPS(time.gmtime())
 
 
-def crashcar_sha(value):
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(payload).hexdigest()
-
-
-def crashcar_file_sha(filename):
-    digest = hashlib.sha256()
-    with open(filename, "rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def crashcar_segment_file(options, write_dir):
     start, end = int(options.gps_start_time), int(options.gps_end_time)
     parent = Path(options.cuda_postcoh_detrsp_fname).resolve().parent
@@ -218,7 +204,7 @@ def crashcar_segment_file(options, write_dir):
         if begin < stop:
             targets[ifo].append((begin, stop))
     gps = lambda value: {"seconds": value // 1000000000, "nanoseconds": value % 1000000000}
-    payload = {"source_xml_sha256": crashcar_file_sha(source_path), "targets": {}}
+    payload = {"targets": {}}
     for ifo, spans in targets.items():
         merged = []
         for begin, stop in sorted(spans):
@@ -243,7 +229,6 @@ def configure_crashcar(options, iir_banks):
     if not read_dir and not write_dir:
         write_dir = worker_dir
     role = "A" if write_dir else "B"
-    os.environ["CRASHCAR_ENABLE"] = "1"
     os.environ["CRASHCAR_ROLE"] = role
     os.environ.setdefault("BACKGROUND_ACCUMULATION_SECONDS", "86400")
     os.environ.setdefault("BACKGROUND_UPDATE_TRIGGER_SECONDS", "3600")
@@ -266,23 +251,6 @@ def configure_crashcar(options, iir_banks):
                           ",".join(map(str, bank_ids)))
     os.environ.setdefault("DATA_START_TIME", str(options.gps_start_time))
 
-    files = (__file__, postcoh_finalsink.__file__,
-             postcoh_finalsink.singlefar.__file__)
-    source = [(os.path.basename(path), crashcar_file_sha(path)) for path in files]
-    config = {
-        "role": role, "worker": worker, "banks": bank_ids,
-        "start": options.gps_start_time, "end": options.gps_end_time,
-        "window": os.getenv("BACKGROUND_ACCUMULATION_SECONDS"),
-        "refresh": os.getenv("BACKGROUND_UPDATE_TRIGGER_SECONDS"),
-        "tail": os.getenv("TAIL_LOG_FAR"),
-    }
-    os.environ.setdefault("CRASHCAR_RUN_NAMESPACE_SHA256",
-                          crashcar_sha(os.path.abspath(worker_dir)))
-    os.environ.setdefault("CRASHCAR_SOURCE_MANIFEST_SHA256",
-                          crashcar_sha([options.code_version, source]))
-    os.environ.setdefault("CRASHCAR_RUNTIME_MANIFEST_SHA256",
-                          crashcar_sha([sys.version, np.__version__, source]))
-    os.environ.setdefault("CRASHCAR_CONFIG_SHA256", crashcar_sha(config))
     os.environ.setdefault("CRASHCAR_DETAIL_OUTPUT_FNAME", os.path.join(
         worker_dir, "crashcar_singlefar_detail_worker%03d.csv" % worker))
     if read_dir:
@@ -297,19 +265,11 @@ def configure_crashcar(options, iir_banks):
             os.path.abspath(directory), "single_background_segments.json")
         if segment_file and os.path.isfile(segment_file):
             os.environ["CRASHCAR_SEGMENT_LIVETIME_JSON"] = segment_file
-            os.environ.setdefault("CRASHCAR_SEGMENT_CANONICAL_SHA256",
-                                  crashcar_file_sha(segment_file))
-            with open(segment_file) as source_file:
-                os.environ.setdefault("CRASHCAR_SEGMENT_XML_SHA256",
-                                      json.load(source_file)["source_xml_sha256"])
             break
     else:
         segment_file = write_dir and crashcar_segment_file(options, write_dir)
         if segment_file:
             os.environ["CRASHCAR_SEGMENT_LIVETIME_JSON"] = segment_file
-            os.environ["CRASHCAR_SEGMENT_CANONICAL_SHA256"] = crashcar_file_sha(segment_file)
-            with open(segment_file) as source_file:
-                os.environ["CRASHCAR_SEGMENT_XML_SHA256"] = json.load(source_file)["source_xml_sha256"]
 
 
 def crashcar_inputs(options, iir_banks):
@@ -335,9 +295,6 @@ def crashcar_inputs(options, iir_banks):
             magnitude = np.sqrt(np.sum(real * real + imag * imag, axis=0))
             shapes[ifo_id, bank_id] = magnitude * magnitude
             document.unlink()
-    os.environ["CRASHCAR_TEMPLATE_SHAPE_MAP_SHA256"] = hashlib.sha256(
-        shapes.tobytes()).hexdigest()
-
     return shapes
 
 
