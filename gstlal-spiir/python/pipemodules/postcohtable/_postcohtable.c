@@ -236,15 +236,6 @@ static void __del_postcohinspiral__(PyObject *self) {
     Py_TYPE(self)->tp_free(self);
 }
 
-#define INT_MEMBER(name, member)                                              \
-    { name, T_INT, offsetof(PostcohInspiralWrapper, postcohtable.member), 0, name }
-#define BG_MEMBERS(kind, window)                                              \
-    INT_MEMBER(#kind "_" #window, kind##_##window),                          \
-    INT_MEMBER(#kind "_" #window "_sngl_H1", kind##_##window##_sngl[0]),    \
-    INT_MEMBER(#kind "_" #window "_sngl_L1", kind##_##window##_sngl[1]),    \
-    INT_MEMBER(#kind "_" #window "_sngl_V1", kind##_##window##_sngl[2]),    \
-    INT_MEMBER(#kind "_" #window "_sngl_K1", kind##_##window##_sngl[3])
-
 static PyMemberDef members_postcohinspiral[] = {
     { "ifos", T_OBJECT_EX, offsetof(PostcohInspiralWrapper, ifos), READONLY,
       "ifos" },
@@ -265,12 +256,6 @@ static PyMemberDef members_postcohinspiral[] = {
       "is_background" },
     { "livetime", T_INT,
       offsetof(PostcohInspiralWrapper, postcohtable.livetime), 0, "livetime" },
-    BG_MEMBERS(livetime, 1w),
-    BG_MEMBERS(livetime, 1d),
-    BG_MEMBERS(livetime, 2h),
-    BG_MEMBERS(nevent, 1w),
-    BG_MEMBERS(nevent, 1d),
-    BG_MEMBERS(nevent, 2h),
     { "tmplt_idx", T_INT,
       offsetof(PostcohInspiralWrapper, postcohtable.tmplt_idx), 0,
       "tmplt_idx" },
@@ -360,9 +345,6 @@ static PyMemberDef members_postcohinspiral[] = {
       "deff" },
     { NULL },
 };
-
-#undef BG_MEMBERS
-#undef INT_MEMBER
 
 static PyTypeObject postcoh_inspiral_wrapper_type = {
     // clang-format off
