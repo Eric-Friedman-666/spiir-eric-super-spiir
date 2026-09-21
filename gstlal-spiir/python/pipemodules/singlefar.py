@@ -180,9 +180,8 @@ class SingleFar:
             denominator = sum((dx * dx for dx, unused in offsets), 0.0)
             slope = numerator / denominator if denominator else math.nan
             if len(values) - tail < 2 or not slope < 0: return None
-            results.append((curve, live, int(counts.sum()), float(values[tail]), float(slope),
-                            len(values) - tail))
-        keys = "curve livetime support r_tail slope fit_count".split()
+            results.append((curve, live, int(counts.sum()), float(values[tail]), float(slope)))
+        keys = "curve livetime support r_tail slope".split()
         return {"start": start, "end": end, "tail": self.tail,
                 **dict(zip(keys, map(list, zip(*results))))}
 
@@ -197,11 +196,10 @@ class SingleFar:
     def _write(self, background):
         document = {
             "schema_version": 4, "background_kind": "no_injection", "accepted_version": background["version"],
-            "epoch_gps": _gps_json(background["end"]),
             "window_start_gps": _gps_json(background["start"]),
             "window_end_gps": _gps_json(background["end"]),
             "window_duration": _gps_json(self.window), "update_period": _gps_json(self.update),
-            "far_floor_count": 1, "tail_log10_far": self.tail, "backgrounds": {}}
+            "tail_log10_far": self.tail, "backgrounds": {}}
         document.update(worker_id=int(os.getenv("CRASHCAR_WORKER_ID", "0")),
                         worker_count=int(os.getenv("CRASHCAR_WORKER_COUNT", "1")),
                         worker_bank_ids=list(map(int, os.getenv(
@@ -210,9 +208,8 @@ class SingleFar:
             document["backgrounds"][name] = {
                 "livetime": _gps_json(round(background["livetime"][ifo] * NS)),
                 "support_count": background["support"][ifo],
-                "tail_fit": {"method": "anchored_ols_all_unique_ranks_ge_r_tail", "r_tail":
-                             background["r_tail"][ifo].hex(), "slope": background["slope"][ifo].hex(),
-                             "fit_unique_rank_count": background["fit_count"][ifo]},
+                "tail_fit": {"r_tail": background["r_tail"][ifo].hex(),
+                             "slope": background["slope"][ifo].hex()},
                 "far_llr_points": [
                     {"gps": _gps_json(int(point["gps"])), "llr": float(point["llr"]).hex(),
                      "far": float(point["far"]).hex(), "count": int(point["count"])}
