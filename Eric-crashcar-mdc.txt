@@ -6,7 +6,7 @@ git clone --branch Eric-crashcar-mdc --single-branch git@git.ligo.org:lscsoft/sp
 cd spiir-eric-crashcar-mdc/gstlal-spiir/share/scripts/OzStar
 
 Use a separate copy of gstlal-spiir/share/scripts/OzStar as the working
-directory for each A or B run, and run all commands from that directory.
+directory for each run, and run all commands from that directory.
 
 First edit the normal SPIIR inputs in pipeline.sh, including the GPS interval,
 frame cache, detector-response map, PSD, bank directory, and injection XML when
@@ -15,39 +15,31 @@ running an MDC injection.
 For the current test, submit.sh uses two workers and the single-detector
 background accumulation window is one day; adjust both values for production.
 
-Role A: no-injection background producer
+Background input and output
 
-Set:
+To read and write this run's background, set:
 
 noninj_stats_loc=`pwd`
 inj_stats_loc=`pwd`
 
-Keep both of these command lines enabled:
+Keep both command lines enabled:
 
 CMD="${CMD} --single-background-read-dir ${noninj_stats_loc}/${jobno}"
 CMD="${CMD} --single-background-write-dir ${inj_stats_loc}/${jobno}"
 
-Then submit:
+To use another run's background, change noninj_stats_loc to that run's
+absolute output root. Keep inj_stats_loc at this run's own working directory.
+pipeline.sh appends the matching worker directory (000, 001, and so on).
 
-sbatch submit.sh
+Every run follows the same pipeline and accumulates its own background.
+FAR uses the configured input directory and refreshes independently of local
+background publication. For MDC, use a continuing no-injection run as that
+input source and keep this run's output directory separate. Select the correct
+worker/bank configuration and wait for complete input backgrounds before launch.
 
-Role B: injection consumer
-
-Wait until Role A has published valid single and multi backgrounds, and keep
-Role A running.  Set noninj_stats_loc to the absolute root directory of that
-live Role A output.  Do not include the worker directory (000, 001, and so on),
-because pipeline.sh appends ${jobno} automatically.
-
-Role B reads the latest complete valid single and multi background files
-produced by the corresponding Role A worker.  It does not use a copied or
-frozen background and does not write background files itself.
-
-Keep the read line enabled and comment out the write line:
-
-CMD="${CMD} --single-background-read-dir ${noninj_stats_loc}/${jobno}"
-# CMD="${CMD} --single-background-write-dir ${inj_stats_loc}/${jobno}"
-
-Configure the standard normal-SPIIR MDC injection inputs, then submit:
+The two single-background options default to the worker output directory when
+omitted; specifying only a read directory still writes locally. Configure the
+standard normal-SPIIR inputs, including injection XML where needed, then submit:
 
 sbatch submit.sh
 
