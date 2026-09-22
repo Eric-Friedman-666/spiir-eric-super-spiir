@@ -95,7 +95,6 @@ def get_maxrate_from_xml(filename,
             magnitude = np.sqrt(np.sum(real * real + imag * imag, axis=0))
             singlefar_shape[:] = magnitude * magnitude
 
-    xmldoc.unlink()
     return max(sample_rates)
 
 

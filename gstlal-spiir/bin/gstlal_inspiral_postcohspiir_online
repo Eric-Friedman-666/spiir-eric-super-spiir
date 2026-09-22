@@ -555,8 +555,7 @@ def parse_command_line():
             "must provide at least finalsink-output-prefix or finalsink-output-name"
         )
 
-    if not (options.cohfar_accumbackground_output_prefix or
-            options.cohfar_accumbackground_output_name):
+    if options.cohfar_accumbackground_output_prefix is None and options.cohfar_accumbackground_output_name is None:
         raise ValueError(
             "must provide at least cohfar-accumbackground-output-prefix or cohfar-accumbackground-output-name"
         )

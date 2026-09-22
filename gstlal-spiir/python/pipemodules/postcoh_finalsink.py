@@ -726,13 +726,13 @@ class FinalSink(object):
                 row = self.candidate.postcoh_inspiral
                 owner = singlefar.OWNER.get(row.ifos)
                 single_far = row.far_sngl[owner] if owner in (0, 1) else None
-                self.__set_far(row)
+                self.__set_far(self.candidate.postcoh_inspiral)
                 if single_far is not None:
                     row.far_sngl[owner] = single_far
                     if single_far > 0 and np.log10(single_far) <= self.snr_series_logfar_threshold:
                         self.__do_gracedb_alert(self.candidate, 0, single_far)
                 if self.gracedb_far_threshold and self.__pass_test(
-                        row):
+                        self.candidate.postcoh_inspiral):
                     self.__do_gracedb_alert(self.candidate,
                                             self.gracedb_upload_attempts)
 
