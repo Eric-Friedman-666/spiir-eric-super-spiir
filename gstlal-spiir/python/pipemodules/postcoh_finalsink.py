@@ -568,8 +568,6 @@ class FinalSink(object):
         self.last_buffer_timestamp = None
 
         # background updater
-        if os.getenv("CRASHCAR_ROLE") == "B":
-            calcfap_interval = snapshot_interval = None
         self.fapupdater = FAPUpdater(
             path=path,
             input_prefix_list=cohfar_accumbackground_output_prefix,
@@ -657,9 +655,8 @@ class FinalSink(object):
                 #   but its not really an event
                 heartbeat = newevents[0]
                 newevents = newevents[1:]
-            if self.singlefar:
-                self.singlefar.observe(heartbeat, buf_timestamp, buf.duration)
-                self.singlefar.process(newevents)
+            self.singlefar.observe(heartbeat, buf_timestamp, buf.duration)
+            self.singlefar.process(newevents)
             self.cluster_and_process_significant_triggers(
                 buf_timestamp, buf.duration, newevents)
 

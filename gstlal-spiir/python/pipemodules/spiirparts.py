@@ -25,7 +25,6 @@
 #
 
 import logging
-import os
 
 ### The following snippet is a modified version of examples in GstLAL: A software framework for gravitational wave discovery
 import gi
@@ -779,18 +778,17 @@ def mkPostcohSPIIROnline(pipeline,
             postcoh = pipeparts.mkprogressreport(
                 pipeline, postcoh, "progress_xml_dump_bank_stream%d" % i_dict)
 
-        if os.getenv("CRASHCAR_ROLE") != "B":
-            postcoh = pipemodules.mkcohfar_accumbackground(
-                pipeline,
-                postcoh,
-                ifos=ifos,
-                hist_trials=cuda_postcoh_hist_trials,
-                output_prefix=(None if cohfar_accumbackground_output_prefix is None
-                               else cohfar_accumbackground_output_prefix[i_dict]),
-                output_name=(cohfar_accumbackground_output_name[i_dict]
-                             if cohfar_accumbackground_output_prefix is None else None),
-                snapshot_interval=cohfar_accumbackground_snapshot_interval,
-            )
+        postcoh = pipemodules.mkcohfar_accumbackground(
+            pipeline,
+            postcoh,
+            ifos=ifos,
+            hist_trials=cuda_postcoh_hist_trials,
+            output_prefix=(None if cohfar_accumbackground_output_prefix is None
+                           else cohfar_accumbackground_output_prefix[i_dict]),
+            output_name=(cohfar_accumbackground_output_name[i_dict]
+                         if cohfar_accumbackground_output_prefix is None else None),
+            snapshot_interval=cohfar_accumbackground_snapshot_interval,
+        )
         postcoh = pipemodules.mkcohfar_assignfar(
             pipeline,
             postcoh,

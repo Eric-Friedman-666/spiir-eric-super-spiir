@@ -37,26 +37,25 @@ def _llr(rho, chisq, shape, dof):
 class SingleFar:
     def __init__(self, shapes, far_factor=1.0):
         self.far_factor = far_factor
-        self.read_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_READ_JSON")
         self.write_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON")
-        self.producer = bool(self.write_path)
+        self.read_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_READ_JSON") or self.write_path
         self.start, self.window, self.update = (round(float(os.environ[name]) * NS) for name in
                                                 ("DATA_START_TIME", "BACKGROUND_ACCUMULATION_SECONDS", "BACKGROUND_UPDATE_TRIGGER_SECONDS"))
         self.tail = float(os.environ["TAIL_LOG_FAR"])
         self.bucket, self.bucket_start = self.update, self.start
         self.support = [[array("q"), array("d")] for unused in range(2)]
-        self.active = self.pending = None
-        self.last_publish = self.last_refresh = 0
+        self.active = None
+        self.last_publish = self.last_refresh = self.written_at = self.version = 0
         self.detail = open(os.environ["CRASHCAR_DETAIL_OUTPUT_FNAME"], "w", buffering=1)
         self.detail.write("event_id,bankid,tmplt_idx,end_time,end_time_ns,ifo_id,snglsnr,chisq,llr,far_assigned_exact,feature_gps,background_version\n")
         self.shapes = shapes
-        if self.producer:
-            self.segments = [[], []]
-        if self.read_path and self.producer:
-            self._refresh(self.start)
+        self.segments = [[], []]
+        self._refresh(self.start)
+        if self.read_path == self.write_path and self.active:
+            self.version = self.active["version"]
 
     def observe(self, heartbeat, timestamp, duration):
-        if not self.producer or heartbeat is None:
+        if heartbeat is None:
             return
         begin, end = _gps(timestamp), _gps(timestamp) + int(duration)
         participating = heartbeat.postcoh_inspiral.ifos
@@ -72,10 +71,7 @@ class SingleFar:
     def process(self, events):
         ordered = sorted(events, key=lambda event: _gps(event.postcoh_inspiral.end))
         for event_gps, group in groupby(ordered, key=lambda event: _gps(event.postcoh_inspiral.end)):
-            if self.producer and self.pending and event_gps > self.pending["available"]:
-                self.active, self.pending = self.pending, None
-            if not self.producer and self.read_path:
-                self._refresh(event_gps)
+            self._refresh(event_gps)
             for event in group:
                 row = event.postcoh_inspiral
                 owner = OWNER.get(row.ifos, 3)
@@ -101,11 +97,9 @@ class SingleFar:
                               row.end_time_ns_sngl[ifo], ifo, row.snglsnr[ifo], row.chisq[ifo], llr,
                               assigned, single_gps / NS, (self.active or {}).get("version", 0))
                     self.detail.write(",".join(map(str, values)) + "\n")
-                    if self.producer:
-                        self.support[ifo][0].append(single_gps)
-                        self.support[ifo][1].append(llr)
-            if self.producer:
-                self._advance(event_gps)
+                    self.support[ifo][0].append(single_gps)
+                    self.support[ifo][1].append(llr)
+            self._advance(event_gps)
 
     def _advance(self, gps):
         while gps >= self.bucket_start + self.bucket:
@@ -120,10 +114,12 @@ class SingleFar:
         self.last_publish = boundary
         background = self._background(boundary - self.window, boundary)
         if background is None: return
-        version = max((self.active or {}).get("version", 0), (self.pending or {}).get("version", 0)) + 1
-        background.update(version=version, available=gps)
+        self.version += 1
+        background["version"] = self.version
         self._write(background)
-        self.pending = background
+        self.written_at = gps
+        if self.read_path == self.write_path:
+            self.last_refresh = 0
 
     def _flush(self, end):
         packed = []
@@ -187,15 +183,11 @@ class SingleFar:
 
     def _write(self, background):
         document = {
-            "schema_version": 4, "background_kind": "no_injection", "accepted_version": background["version"],
+            "schema_version": 4, "accepted_version": background["version"],
             "window_start_gps": _gps_json(background["start"]),
             "window_end_gps": _gps_json(background["end"]),
             "window_duration": _gps_json(self.window), "update_period": _gps_json(self.update),
             "tail_log10_far": self.tail, "backgrounds": {}}
-        document.update(worker_id=int(os.getenv("CRASHCAR_WORKER_ID", "0")),
-                        worker_count=int(os.getenv("CRASHCAR_WORKER_COUNT", "1")),
-                        worker_bank_ids=list(map(int, os.getenv(
-                            "CRASHCAR_WORKER_BANK_IDS_EXPECTED", "0").split(","))))
         for ifo, name in enumerate(("H1", "L1")):
             document["backgrounds"][name] = {
                 "livetime": _gps_json(round(background["livetime"][ifo] * NS)),
@@ -211,11 +203,14 @@ class SingleFar:
         os.replace(self.write_path + ".tmp", self.write_path)
 
     def _refresh(self, gps):
-        if self.last_refresh and gps - self.last_refresh < self.update:
+        if (self.last_refresh and gps - self.last_refresh < self.update
+                or self.read_path == self.write_path and gps <= self.written_at):
             return
         try:
             with open(self.read_path) as source:
                 candidate = _load_background(json.load(source))
+            if self.read_path == self.write_path and candidate["end"] > gps:
+                return
             if not self.active or candidate["version"] > self.active["version"]:
                 self.active = candidate
         except (OSError, ValueError, KeyError, TypeError):
@@ -228,28 +223,15 @@ class SingleFar:
 def _gps_json(value): return {"seconds": value // NS, "nanoseconds": value % NS}
 
 def _load_background(document):
-    banks = list(map(int, os.getenv("CRASHCAR_WORKER_BANK_IDS_EXPECTED", "0").split(",")))
-    if (document["schema_version"] != 4 or document["background_kind"] != "no_injection"
-            or document["worker_id"] != int(os.getenv("CRASHCAR_WORKER_ID", "0"))
-            or document["worker_count"] != int(os.getenv("CRASHCAR_WORKER_COUNT", "1"))
-            or document["worker_bank_ids"] != banks or document["accepted_version"] < 1
-            or not document["tail_log10_far"] < 0):
-        raise ValueError("incompatible single background")
     def load_one(name):
         source = document["backgrounds"][name]
         curve = np.array([(_gps(point["gps"]), float.fromhex(point["llr"]),
                            float.fromhex(point["far"]), point["count"])
                           for point in source["far_llr_points"]], dtype=POINT)
         r_tail, slope = (float.fromhex(source["tail_fit"][key]) for key in ("r_tail", "slope"))
-        valid = (len(curve) and np.all(curve["count"]) and np.all(curve["far"] > 0)
-                 and np.isfinite(curve["llr"]).all() and np.isfinite(curve["far"]).all()
-                 and int(curve["count"].sum()) == source["support_count"] and slope < 0
-                 and np.isfinite(r_tail) and np.isfinite(slope) and _gps(source["livetime"])
-                 > round(float(os.environ["BACKGROUND_ACCUMULATION_SECONDS"]) * NS) / 5)
-        if not valid:
-            raise ValueError("invalid single background")
         return curve, r_tail, slope
     values = [load_one(name) for name in ("H1", "L1")]
     return {"version": document["accepted_version"], "tail": document["tail_log10_far"],
+            "end": _gps(document["window_end_gps"]),
             "curve": [value[0] for value in values], "r_tail": [value[1] for value in values],
             "slope": [value[2] for value in values]}

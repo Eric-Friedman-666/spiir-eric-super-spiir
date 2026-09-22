@@ -161,39 +161,25 @@ def now():
     return XLALUTCToGPS(time.gmtime())
 
 
-def configure_crashcar(options, iir_banks):
+def configure_crashcar(options):
     output = options.finalsink_output_prefix or options.finalsink_output_name
     worker_dir = os.path.dirname(os.path.abspath(output))
-    read_dir = options.single_background_read_dir
-    write_dir = options.single_background_write_dir or (None if read_dir else worker_dir)
+    write_dir = options.single_background_write_dir or worker_dir
+    read_dir = options.single_background_read_dir or write_dir
     os.environ.setdefault("BACKGROUND_ACCUMULATION_SECONDS", "86400")
     os.environ.setdefault("BACKGROUND_UPDATE_TRIGGER_SECONDS", "3600")
     os.environ.setdefault("TAIL_LOG_FAR", "-1.0")
     worker = int(os.getenv("CRASHCAR_WORKER_ID",
                            os.getenv("SLURM_ARRAY_TASK_ID", "0")))
-    os.environ.setdefault("CRASHCAR_WORKER_ID", str(worker))
-    os.environ.setdefault("CRASHCAR_WORKER_COUNT",
-                          os.getenv("SLURM_ARRAY_TASK_COUNT", "1"))
-    bank_ids = []
-    for bank_set in iir_banks:
-        matches = {spiir_utils.get_bankid_from_bankname(filename)
-                   for files in bank_set.values() for filename in files}
-        if len(matches) != 1:
-            raise ValueError("cannot derive one crashcar bank ID from --iir-bank")
-        bank_ids.extend(matches)
-    os.environ.setdefault("CRASHCAR_WORKER_BANK_IDS_EXPECTED",
-                          ",".join(map(str, bank_ids)))
     os.environ.setdefault("DATA_START_TIME", str(options.gps_start_time))
 
     os.environ.setdefault("CRASHCAR_DETAIL_OUTPUT_FNAME", os.path.join(
         worker_dir, "crashcar_singlefar_detail_worker%03d.csv" % worker))
-    if read_dir:
-        os.environ["CRASHCAR_SINGLE_BACKGROUND_READ_JSON"] = os.path.join(
-            os.path.abspath(read_dir), "single_background.json")
-    if write_dir:
-        os.makedirs(write_dir, exist_ok=True)
-        os.environ["CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON"] = os.path.join(
-            os.path.abspath(write_dir), "single_background.json")
+    os.makedirs(write_dir, exist_ok=True)
+    os.environ["CRASHCAR_SINGLE_BACKGROUND_READ_JSON"] = os.path.join(
+        os.path.realpath(read_dir), "single_background.json")
+    os.environ["CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON"] = os.path.join(
+        os.path.realpath(write_dir), "single_background.json")
 
 
 #
@@ -554,8 +540,6 @@ def parse_command_line():
         " set the online data option for online data service to be activated.")
 
     options, filenames = parser.parse_args()
-    os.environ["CRASHCAR_ROLE"] = ("A" if options.single_background_write_dir
-                                    or not options.single_background_read_dir else "B")
 
     if options.reference_psd is None and not options.track_psd:
         raise ValueError(
@@ -571,9 +555,8 @@ def parse_command_line():
             "must provide at least finalsink-output-prefix or finalsink-output-name"
         )
 
-    if (os.getenv("CRASHCAR_ROLE") != "B" and not
-            (options.cohfar_accumbackground_output_prefix or
-             options.cohfar_accumbackground_output_name)):
+    if not (options.cohfar_accumbackground_output_prefix or
+            options.cohfar_accumbackground_output_name):
         raise ValueError(
             "must provide at least cohfar-accumbackground-output-prefix or cohfar-accumbackground-output-name"
         )
@@ -622,7 +605,7 @@ def parse_command_line():
         spiir_utils.parse_iirbank_string(iirbank)
         for iirbank in options.iir_bank
     ]
-    configure_crashcar(options, iir_banks)
+    configure_crashcar(options)
 
     # FIXME: should also check for read permissions
     required_files = []
@@ -683,7 +666,7 @@ def parse_command_line():
         for i_ifo_combo in ifo_combos:
             os.makedirs(f"{i_ifo_combo}_skymap", exist_ok=True)
 
-    if (os.getenv("CRASHCAR_ROLE") != "B" and options.finalsink_fapupdater_output_fname is None):
+    if options.finalsink_fapupdater_output_fname is None:
         options.finalsink_fapupdater_output_fname = options.cohfar_assignfar_input_fname
 
     return options, filenames, process_params, iir_banks, detectors
