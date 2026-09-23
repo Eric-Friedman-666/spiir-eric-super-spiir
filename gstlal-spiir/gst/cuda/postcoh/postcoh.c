@@ -1942,6 +1942,7 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
     g_mutex_unlock(&postcoh->prop_lock);
 
     CUDA_CHECK(cudaSetDevice(postcoh->device_id));
+    GstElement *element = GST_ELEMENT(postcoh);
     GstClockTime t_latest_start;
     GstFlowReturn res;
     guint64 offset_latest_start = 0;
@@ -1949,6 +1950,14 @@ static GstFlowReturn collected(GstCollectPads *pads, gpointer user_data) {
     gboolean has_common_size    = FALSE;
 
     GST_DEBUG_OBJECT(postcoh, "collected");
+    /* Assure that we have enough sink pads. */
+    if (element->numsinkpads < 1) {
+        GST_ERROR_OBJECT(
+          postcoh, "not enough sink pads, 1 required but only %d are present",
+          element->numsinkpads);
+        return GST_FLOW_ERROR;
+    }
+
     if (!postcoh->set_starttime) {
         /* get the latest timestamp */
         if (!cuda_postcoh_get_latest_start_time(pads, &t_latest_start,
