@@ -486,12 +486,13 @@ class FinalSink(object):
                  append_psd_to_coincs_doc=True,
                  expected_buffers_per_timestamp=None,
                  singlefar_shapes=None,
+                 singlefar_dof=None,
                  verbose=False):
         #
         # initialize
         #
         self.lock = threading.Lock()
-        self.singlefar = singlefar.SingleFar(singlefar_shapes, far_factor)
+        self.singlefar = singlefar.SingleFar(singlefar_shapes, singlefar_dof, far_factor)
         self.snr_series_logfar_threshold = float(os.getenv("SNR_series_logFAR_threshold", "-4"))
         self.pipeline = pipeline
         self.is_first_event = True

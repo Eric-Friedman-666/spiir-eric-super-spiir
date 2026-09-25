@@ -387,6 +387,8 @@ def parse_command_line():
         help=
         "at least two detectors have fars less than this single far veto threshold. "
     )
+    parser.add_option("--singlefar-dof", type="float",
+                      help="fixed effective degrees of freedom for all single-detector LLRs in this run")
     parser.add_option(
         "--finalsink-chisq-ratio-thresh",
         type="float",
@@ -560,7 +562,7 @@ def parse_command_line():
             "must provide at least cohfar-accumbackground-output-prefix or cohfar-accumbackground-output-name"
         )
 
-    required_options = ["job_tag", "code_version", "mode"]
+    required_options = ["job_tag", "code_version", "mode", "singlefar_dof"]
 
     missing_options = []
 
@@ -898,6 +900,7 @@ finalsink = postcoh_finalsink.FinalSink(
     append_psd_to_coincs_doc=not options.skip_psd_upload,
     expected_buffers_per_timestamp=len(postcohsrcs),
     singlefar_shapes=singlefar_shapes,
+    singlefar_dof=options.singlefar_dof,
     verbose=options.verbose)
 
 logger.info(" output document initialized")

@@ -35,7 +35,8 @@ def _llr(rho, chisq, shape, dof):
             - LOG_64 - noise + rho2 / 2.0)
 
 class SingleFar:
-    def __init__(self, shapes, far_factor=1.0):
+    def __init__(self, shapes, dof, far_factor=1.0):
+        self.dof = float(dof)
         self.far_factor = far_factor
         self.write_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_WRITE_JSON")
         self.read_path = os.getenv("CRASHCAR_SINGLE_BACKGROUND_READ_JSON") or self.write_path
@@ -83,8 +84,7 @@ class SingleFar:
                         continue
                     llr = _llr(
                         float(row.snglsnr[ifo]), float(row.chisq[ifo]),
-                        self.shapes[ifo, row.bankid, row.tmplt_idx],
-                        120.0 if row.bankid < 100 else 600.0)
+                        self.shapes[ifo, row.bankid, row.tmplt_idx], self.dof)
                     setattr(row, ("H1_LLR", "L1_LLR")[ifo], llr)
                     if llr == 0.0:
                         continue

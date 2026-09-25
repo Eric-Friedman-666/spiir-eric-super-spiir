@@ -12,6 +12,14 @@ First edit the normal SPIIR inputs in pipeline.sh, including the GPS interval,
 frame cache, detector-response map, PSD, bank directory, and injection XML when
 running an MDC injection.
 
+Set singlefar_dof in pipeline.sh to your effective degrees of freedom for this
+run, or set SINGLEFAR_DOF in submit.sh. The required --singlefar-dof option
+passes that value unchanged to all single-detector LLR calculations, including
+their signal and noise terms. It stays fixed throughout the run and does not
+depend on bank ID or source class. Template quantities use their existing path.
+When reading another run's single background, use the same effective DOF that
+was used to calculate that background's LLR values.
+
 For the current test, submit.sh uses two workers and the single-detector
 background accumulation window is one day; adjust both values for production.
 
