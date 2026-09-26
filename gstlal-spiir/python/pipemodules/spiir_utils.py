@@ -90,8 +90,6 @@ def get_maxrate_from_xml(filename,
             if real.shape == (1000, 351):
                 real = np.ascontiguousarray(real.T)
                 imag = np.ascontiguousarray(imag.T)
-            if real.shape != (351, 1000):
-                raise ValueError("unexpected autocorrelation bank shape")
             magnitude = np.sqrt(np.sum(real * real + imag * imag, axis=0))
             singlefar_shape[:] = magnitude * magnitude
 
